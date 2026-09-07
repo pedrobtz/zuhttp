@@ -15,4 +15,6 @@ OBJECTS = init.o \
           zu_request.o \
           zu_framing.o \
           zu_response.o \
+          zu_uri.o \
+          zu_redirect.o \
           vendor/picohttpparser/picohttpparser.o
