@@ -235,6 +235,16 @@ static zu_code from_uriparser(zu_uri *out, const UriUriA *u)
     if (strcmp(out->scheme, "http") && strcmp(out->scheme, "https")) goto bad;
     out->is_https = (strcmp(out->scheme, "https") == 0);
 
+    /* RFC 3986 §3.2.2 allows IP-literal = IPv6address / IPvFuture, so
+     * "http://[v7.xyz]/" and "http://[veee.0;;;;***UU:]/" are both valid URIs
+     * and uriparser accepts them. zuhttp cannot connect to an IPvFuture —
+     * there is nothing to resolve — and accepting one would put sub-delims
+     * like ';' and '*' into the host that then reaches getaddrinfo() and the
+     * Host header. Reject it here rather than downstream.
+     *
+     * Found by the S18 proxy fuzz target. */
+    if (u->hostData.ipFuture.first != NULL) goto bad;
+
     if (!(out->host = rng_dup_lower(&u->hostText))) goto nomem;
     is_ipv6 = (u->hostData.ip6 != NULL) || (strchr(out->host, ':') != NULL);
     if (!host_ok(out->host, is_ipv6)) goto bad;

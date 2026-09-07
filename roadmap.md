@@ -39,7 +39,7 @@ graph TD
     S7["S7 · OpenSSL engine + trust"]
     S8["S8 · Schannel<br/>GATE R-2"]
     S9["S9 · macOS engine + trust"]
-    S10["S10 · Proxy + CONNECT"]
+    S10["S10 · Proxy + CONNECT<br/>PARTIAL — C core done"]
 
     S11["S11 · R API surface"]
     S12["S12 · Conditions + redaction"]
@@ -50,7 +50,7 @@ graph TD
     S16["S16 · Pool + fork/session safety<br/>PARTIAL — C core done"]
     S17["S17 · Streaming sinks"]
 
-    S18["S18 · Fuzzing + sanitizers + CI<br/>PARTIAL — 6/7 targets"]
+    S18["S18 · Fuzzing + sanitizers + CI<br/>PARTIAL — 7/7 targets"]
     S19["S19 · CRAN packaging"]
     S20["S20 · Documentation"]
     S21["S21 · Security review → 1.0"]
@@ -292,12 +292,34 @@ Implements the S0-validated design: portable engine + `SecTrustEvaluateWithError
 
 Environment parsing including the lowercase-only `http_proxy` rule (§20.1); `NO_PROXY` matching on label boundaries (§20.2); absolute-form requests; CONNECT tunnelling parsed with full §18 strictness; Basic proxy auth with the §20.4 leakage rules.
 
+`zu_proxy.{h,c}`. The environment is read through a seam rather than by
+calling `getenv()` directly, so the §20.1 and §20.2 rules are tested against a
+table — mutating the real environment is not thread-safe, leaks between tests,
+and cannot express "unset" reliably on Windows.
+
 **Exit criteria**
 
-- [ ] `NO_PROXY` matches `api.example.com` for `example.com` but not `notexample.com`.
-- [ ] `Proxy-Authorization` provably never reaches an origin, including across a redirect.
-- [ ] Proxy URL credentials stripped from every observable URL.
-- [ ] A non-2xx CONNECT surfaces the proxy's status and body.
+- [x] `NO_PROXY` matches `api.example.com` for `example.com` but not
+      `notexample.com`. Also: `*`, leading dots, ports (`example.com:8080`),
+      bracketed IPv6 with a port, case-insensitivity, and IP literals matching
+      exactly rather than by suffix — without which `1.2.3.4` would bypass the
+      proxy for the unrelated host `10.1.2.3.4`.
+- [x] Proxy URL credentials are moved out of the URL at parse time and
+      percent-decoded, so `p%40ss` authenticates as `p@ss` rather than being
+      sent literally.
+- [x] A non-2xx CONNECT surfaces the proxy's status; 407 is a distinct
+      `zu_proxy_auth_error`. CONNECT responses are parsed with full §18
+      strictness — a proxy is not exempt, and a lenient parse there is a
+      tunnel built on a lie.
+- [x] `Proxy-Authorization` is generated only inside
+      `zu_proxy_connect_request()`, i.e. only on the connection to the proxy.
+      **The "provably never reaches an origin, including across a redirect"
+      half needs the request engine (S11+) to be provable end-to-end**; at
+      this layer there is no code path that could add it to an origin request.
+- [x] `http_proxy` is honoured but `HTTP_PROXY` is ignored (httpoxy, §20.1).
+
+**Blocked:** absolute-form and CONNECT are built and unit-tested, but nothing
+drives them over a real socket yet — that is the request engine.
 
 ---
 
@@ -432,15 +454,14 @@ Rtools, where libFuzzer does not exist).
 
 **Exit criteria**
 
-- [x] Six of seven targets build and run without R: response, chunked,
-      headers, uri, redirect, inflate. **Proxy env parsing is the seventh and
-      is blocked on S10** — the code does not exist yet.
+- [x] All seven targets build and run without R: response, chunked, headers,
+      uri, redirect, inflate, proxy. (The seventh landed with S10.)
 - [x] Warnings-as-errors green on all platforms (already enforced by
       `c-core.yaml`; the fuzz targets add no project-owned code).
 - [ ] 24 h per target with zero crashes and zero sanitizer reports. **Partial:**
-      45 s per target locally under ASan+UBSan — ~49M executions total, zero
-      findings. The `soak` job in `fuzz.yaml` is scheduled weekly at 4 h per
-      target; 24 h is a pre-1.0 run, not a per-push one.
+      45 s per target locally under ASan+UBSan — ~54M executions across seven
+      targets, zero findings. The `soak` job in `fuzz.yaml` is scheduled
+      weekly at 4 h per target; 24 h is a pre-1.0 run, not a per-push one.
 
 **Found by this stage, not by review**
 
@@ -457,6 +478,14 @@ included — the real invariant is *provenance*), and testing that an origin
 string does not contain the userinfo as a substring (libFuzzer found
 `http://h@oocd.com:/` in seconds: userinfo `h` occurs inside `http://`). The
 correct check is that an origin string contains no `@` at all.
+
+The proxy target then found a second real bug: `zu_uri_parse` accepted
+**IPvFuture** literals. RFC 3986 §3.2.2 has
+`IP-literal = IPv6address / IPvFuture`, so `http://[v7.xyz]/` and
+`http://[veee.0;;;;***UU:]/` are valid URIs and uriparser is right to accept
+them — but zuhttp cannot connect to an IPvFuture, and accepting one put `;`,
+`*` and `:` into the host string that then reaches `getaddrinfo()` and the
+Host header. Now rejected in the §8.2 policy layer.
 
 ### S19 · CRAN packaging
 

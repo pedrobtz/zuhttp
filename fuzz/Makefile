@@ -23,12 +23,13 @@ CORE := $(SRC)/zu_alloc.c $(SRC)/zu_buffer.c $(SRC)/zu_error.c \
         $(SRC)/zu_time.c $(SRC)/zu_stream.c $(SRC)/zu_headers.c \
         $(SRC)/zu_request.c $(SRC)/zu_framing.c $(SRC)/zu_response.c \
         $(SRC)/zu_uri.c $(SRC)/zu_redirect.c $(SRC)/zu_inflate.c \
+        $(SRC)/zu_proxy.c \
         $(VENDOR)/picohttpparser.c \
         $(URIDIR)/UriParse.c $(URIDIR)/UriParseBase.c $(URIDIR)/UriResolve.c \
         $(URIDIR)/UriRecompose.c $(URIDIR)/UriCommon.c $(URIDIR)/UriMemory.c \
         $(URIDIR)/UriIp4.c $(URIDIR)/UriIp4Base.c
 
-TARGETS := response chunked headers uri redirect inflate
+TARGETS := response chunked headers uri redirect inflate proxy
 
 # --- libFuzzer -------------------------------------------------------------
 FUZZ_CC     ?= clang
@@ -60,14 +61,16 @@ replay: $(addprefix replay_,$(TARGETS))
 replay_%: fuzz_%.c replay_main.c $(CORE)
 	$(CC) $(BASE) $(REPLAY_FLAGS) -o $@ $< replay_main.c $(CORE) -lz
 
-# Replay every seed. An empty corpus directory must not silently pass, so the
-# file count is checked.
+# Replay every seed. Two things this must get right:
+#   - an empty corpus directory must not silently pass, so the count is checked;
+#   - a soak-grown corpus is tens of thousands of files, which overflows argv,
+#     so paths go through xargs rather than a shell glob.
 replay-run: replay
 	@for t in $(TARGETS); do \
-	  n=$$(ls -1 $(CORPUS)/$$t 2>/dev/null | wc -l | tr -d ' '); \
+	  n=$$(find $(CORPUS)/$$t -type f 2>/dev/null | wc -l | tr -d ' '); \
 	  if [ "$$n" = "0" ]; then echo "no corpus for $$t" >&2; exit 1; fi; \
 	  echo "=== $$t ($$n seeds) ==="; \
-	  ./replay_$$t $(CORPUS)/$$t/* || exit 1; \
+	  find $(CORPUS)/$$t -type f -print0 | xargs -0 -n 500 ./replay_$$t || exit 1; \
 	done
 
 replay-asan: REPLAY_FLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer
@@ -79,4 +82,8 @@ clean-bin:
 clean: clean-bin
 	rm -f crash-* leak-* timeout-*
 
-.PHONY: fuzz fuzz-run replay replay-run replay-asan clean clean-bin
+# Restore the curated seeds, discarding anything a local fuzz run added.
+reseed:
+	./seed-corpus.sh
+
+.PHONY: fuzz fuzz-run replay replay-run replay-asan clean clean-bin reseed

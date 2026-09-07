@@ -29,6 +29,7 @@ OBJECTS = init.o \
           zu_net.o \
           zu_fork.o \
           zu_pool.o \
+          zu_proxy.o \
           vendor/uriparser/UriParse.o \
           vendor/uriparser/UriParseBase.o \
           vendor/uriparser/UriResolve.o \

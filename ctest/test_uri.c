@@ -134,6 +134,20 @@ void suite_uri(void) {
     ZU_CHECK_EQ_INT(zu_uri_same_origin(&u, &base), 1);
     zu_uri_free(&u); zu_uri_free(&base);
 
+    ZU_CASE("an IPvFuture literal is rejected (found by the S18 fuzzer)");
+    /* RFC 3986 §3.2.2: IP-literal = IPv6address / IPvFuture, where
+     * IPvFuture = "v" 1*HEXDIG "." 1*( unreserved / sub-delims / ":" ).
+     * These are valid URIs and uriparser accepts them, but zuhttp cannot
+     * connect to one, and accepting it puts ';' '*' and ':' into the host
+     * that then reaches getaddrinfo() and the Host header. */
+    ZU_CHECK_EQ_INT(P(&u, "http://[v7.xyz]/"), ZU_ERR_URL);
+    ZU_CHECK_EQ_INT(P(&u, "http://[veee.0;;;;***UU;;;;;;;;;;;;;:]/"), ZU_ERR_URL);
+    ZU_CHECK_EQ_INT(P(&u, "http://[vF.a:b:c]/"), ZU_ERR_URL);
+    /* ...while a real IPv6 literal still works. */
+    ZU_CHECK_EQ_INT(P(&u, "http://[::1]/"), ZU_OK);
+    ZU_CHECK(streq(u.host, "::1"));
+    zu_uri_free(&u);
+
     ZU_CASE("an empty DNS label is rejected");
     ZU_CHECK_EQ_INT(P(&u, "https://example.com../x"), ZU_ERR_URL);
     ZU_CHECK_EQ_INT(P(&u, "https://.example.com/x"), ZU_ERR_URL);

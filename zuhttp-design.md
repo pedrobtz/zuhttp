@@ -416,6 +416,7 @@ what a grammar accepts but an HTTP client must not:
 | `http://h:65536/` | valid (`port = DIGIT*`) | **rejected** — would truncate to 0 in `uint16_t` |
 | `http://h:0443/` | valid | accepted, port `443` (numeric compare, per RFC 6454) |
 | `https://example.com../` | valid | **rejected** — empty DNS label |
+| `http://[v7.xyz]/` | valid (IPvFuture, §3.2.2) | **rejected** — nothing to resolve, and it admits `;` `*` `:` into the host |
 | `https://example.com./` | valid | accepted, root dot stripped so origins compare equal |
 | `ftp://h/`, `file:///`, `mailto:` | valid | **rejected** — not an HTTP request target |
 | embedded `NUL` | n/a | **rejected** — truncates `getaddrinfo()` and the request line differently |
