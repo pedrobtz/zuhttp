@@ -70,6 +70,19 @@ void zu_error_set_backend(zu_error *e, const char *backend, int backend_code);
 /* Stable identifiers. zu_code_class() returns the R condition class from
  * design §34.1, e.g. "zu_tls_certificate_error". Never NULL. */
 const char *zu_code_class(zu_code code);
+
+/* The full §34.1 class chain, most specific first, ending with "zu_error".
+ * "error" and "condition" are appended by the R layer, which is where those
+ * names mean something.
+ *
+ * This exists so the hierarchy has ONE definition. Catching zu_tls_error must
+ * also catch zu_tls_certificate_error, and a parent map maintained separately
+ * in R would drift from k_class[] the first time a code was added.
+ *
+ * Writes at most `max` pointers into `out` and returns how many; 0 for ZU_OK
+ * or an out-of-range code. */
+#define ZU_CLASS_CHAIN_MAX 4
+int zu_code_class_chain(zu_code code, const char **out, int max);
 const char *zu_phase_name(zu_phase phase);
 
 /* Retryability hint (§33.2, §34.2). */

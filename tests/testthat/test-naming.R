@@ -34,12 +34,23 @@ test_that("no export masks an httr2 export (D-2, success criterion 61.13)", {
 })
 
 test_that("response accessors use the zu_resp_ prefix (D-1)", {
+  # The concern D-1 actually names is a BARE response property at top level:
+  # zu_status() should be zu_resp_status(). An earlier version of this test
+  # matched "^zu_.*(url|headers?|...)$", which also flagged zu_redact_url()
+  # and zu_is_secret_header() — neither of which is a response accessor. The
+  # anchored form below tests the rule rather than the spelling.
   exports <- getNamespaceExports("zuhttp")
-  resp_like <- grep("^zu_.*(status|headers?|body|json|text|raw|url|timings)$", exports, value = TRUE)
-  skip_if(length(resp_like) == 0, "no response accessors yet")
+  bare <- grep("^zu_(status|headers?|body|json|text|raw|url|timings)$",
+               exports, value = TRUE)
 
-  expect_true(
-    all(grepl("^zu_resp_", resp_like)),
-    info = paste("should be zu_resp_*:", paste(setdiff(resp_like, grep("^zu_resp_", resp_like, value = TRUE)), collapse = ", "))
+  expect_identical(
+    bare, character(0),
+    info = paste("these read as response accessors and should be zu_resp_*:",
+                 paste(bare, collapse = ", "))
   )
+
+  # And anything that IS a response accessor must use the prefix.
+  resp <- grep("^zu_resp_", exports, value = TRUE)
+  skip_if(length(resp) == 0, "no response accessors yet")
+  expect_true(all(grepl("^zu_resp_[a-z_]+$", resp)))
 })

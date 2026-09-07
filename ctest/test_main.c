@@ -20,6 +20,7 @@ void suite_inflate(void);
 void suite_net(void);
 void suite_pool(void);
 void suite_proxy(void);
+void suite_redact(void);
 
 int main(void) {
     zu_alloc_stats st;
@@ -40,6 +41,7 @@ int main(void) {
     ZU_SUITE(suite_net);
     ZU_SUITE(suite_pool);
     ZU_SUITE(suite_proxy);
+    ZU_SUITE(suite_redact);
 
     zu_alloc_stats_get(&st);
     printf("\n%d checks, %d failures\n", zu_test_checks, zu_test_fails);

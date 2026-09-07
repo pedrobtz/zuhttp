@@ -24,5 +24,15 @@ Authors:
   \item Pedro Baltazar \email{pedrobtz@gmail.com}
 }
 
+Other contributors:
+\itemize{
+  \item Kazuho Oku (picohttpparser, see inst/COPYRIGHTS) [copyright holder]
+  \item Tokuhiro Matsuno (picohttpparser, see inst/COPYRIGHTS) [copyright holder]
+  \item Daisuke Murase (picohttpparser, see inst/COPYRIGHTS) [copyright holder]
+  \item Shigeo Mitsunari (picohttpparser, see inst/COPYRIGHTS) [copyright holder]
+  \item Weijia Song (uriparser, see inst/COPYRIGHTS) [copyright holder]
+  \item Sebastian Pipping (uriparser, see inst/COPYRIGHTS) [copyright holder]
+}
+
 }
 \keyword{internal}

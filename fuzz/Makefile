@@ -23,13 +23,13 @@ CORE := $(SRC)/zu_alloc.c $(SRC)/zu_buffer.c $(SRC)/zu_error.c \
         $(SRC)/zu_time.c $(SRC)/zu_stream.c $(SRC)/zu_headers.c \
         $(SRC)/zu_request.c $(SRC)/zu_framing.c $(SRC)/zu_response.c \
         $(SRC)/zu_uri.c $(SRC)/zu_redirect.c $(SRC)/zu_inflate.c \
-        $(SRC)/zu_proxy.c \
+        $(SRC)/zu_proxy.c $(SRC)/zu_redact.c \
         $(VENDOR)/picohttpparser.c \
         $(URIDIR)/UriParse.c $(URIDIR)/UriParseBase.c $(URIDIR)/UriResolve.c \
         $(URIDIR)/UriRecompose.c $(URIDIR)/UriCommon.c $(URIDIR)/UriMemory.c \
         $(URIDIR)/UriIp4.c $(URIDIR)/UriIp4Base.c
 
-TARGETS := response chunked headers uri redirect inflate proxy
+TARGETS := response chunked headers uri redirect inflate proxy redact
 
 # --- libFuzzer -------------------------------------------------------------
 FUZZ_CC     ?= clang

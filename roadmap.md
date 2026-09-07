@@ -42,7 +42,7 @@ graph TD
     S10["S10 · Proxy + CONNECT<br/>PARTIAL — C core done"]
 
     S11["S11 · R API surface"]
-    S12["S12 · Conditions + redaction"]
+    S12["S12 · Conditions + redaction<br/>PARTIAL — canary incomplete"]
     S13["S13 · Retry, middleware, hooks"]
     S14["S14 · R transports<br/>mock, record/replay"]
 
@@ -50,7 +50,7 @@ graph TD
     S16["S16 · Pool + fork/session safety<br/>PARTIAL — C core done"]
     S17["S17 · Streaming sinks"]
 
-    S18["S18 · Fuzzing + sanitizers + CI<br/>PARTIAL — 7/7 targets"]
+    S18["S18 · Fuzzing + sanitizers + CI<br/>PARTIAL — 8 targets"]
     S19["S19 · CRAN packaging"]
     S20["S20 · Documentation"]
     S21["S21 · Security review → 1.0"]
@@ -346,11 +346,34 @@ Buildable against an R-level transport stub before any C transport exists.
 
 The full §34.1 hierarchy in base R; the §34.2 payload; §34.4 message quality; the §42 redaction filter applied at every egress.
 
+**This is the first R code in the package.** `R/conditions.R`, `R/redact.R`,
+and the first `.Call` entry points in `src/init.c`.
+
+Two things are deliberately in C rather than R, both for the same reason —
+one definition:
+
+- the §34.1 class chain (`zu_code_class_chain`). Catching `zu_tls_error` must
+  also catch `zu_tls_certificate_error`, and a parent map kept separately in R
+  would drift from the C enum the first time a code was added.
+- the §42 redaction policy (`zu_redact.c`). §42 opens by requiring one policy
+  at every egress; a second implementation in R would be a second thing to
+  forget to update.
+
 **Exit criteria**
 
-- [ ] Every class catchable by base `tryCatch()` with no extra package.
-- [ ] The §42.4 canary test finds no credential in verbose output, printed objects, error payloads, hook payloads, or recordings.
-- [ ] A redacted request is still executable (§42.3).
+- [x] Every class catchable by base `tryCatch()` with no extra package —
+      tested by iterating the whole code registry, not a sample.
+- [x] Catching a parent catches its children, and a sibling is not caught.
+- [x] A redacted request is still executable (§42.3): redaction is applied by
+      the formatting layer, and `zu_redact_headers_for_display()` is verified
+      not to mutate its input.
+- [ ] The §42.4 canary test finds no credential in verbose output, printed
+      objects, error payloads, hook payloads, or recordings. **Partial:**
+      conditions, displayed headers, URLs and form bodies are covered.
+      Verbose transport logging, request printing and recordings do not exist
+      yet (S11/S14/§35) and are marked with an explicit `skip()` naming what
+      is missing — an incomplete canary that looks complete is worse than one
+      that says what it does not cover.
 
 ### S13 · Retry, middleware, hooks
 
@@ -454,8 +477,13 @@ Rtools, where libFuzzer does not exist).
 
 **Exit criteria**
 
-- [x] All seven targets build and run without R: response, chunked, headers,
-      uri, redirect, inflate, proxy. (The seventh landed with S10.)
+- [x] All seven §43 targets build and run without R: response, chunked,
+      headers, uri, redirect, inflate, proxy. (The seventh landed with S10.)
+      An eighth was added with S12 for `zu_redact_url`, which deliberately
+      does not use the URI parser — it must work on a URL that failed to
+      parse — and so is a hand-rolled scanner over attacker-controlled bytes.
+      Its assertion is the security property: no userinfo may survive into
+      the output.
 - [x] Warnings-as-errors green on all platforms (already enforced by
       `c-core.yaml`; the fuzz targets add no project-owned code).
 - [ ] 24 h per target with zero crashes and zero sanitizer reports. **Partial:**

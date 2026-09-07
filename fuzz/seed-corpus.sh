@@ -14,7 +14,7 @@ set -eu
 cd "$(dirname "$0")"
 rm -rf corpus
 mkdir -p corpus/response corpus/chunked corpus/headers corpus/uri \
-         corpus/redirect corpus/inflate corpus/proxy
+         corpus/redirect corpus/inflate corpus/proxy corpus/redact
 
 w() { printf '%b' "$2" > "corpus/$1"; }
 
@@ -100,6 +100,18 @@ w proxy/url_socks  "\x01socks5://px:1080"
 w proxy/res_env    "\x02http://px.example:3128\x00internal.example"
 w proxy/res_empty  "\x02\x00"
 printf '\x01http://[veee.0;;;;***UU;;;;;;;;;;;;;:]//;m=' > corpus/proxy/regress-ipvfuture
+
+# --- redact: URLs and form bodies, mostly credential-bearing ---
+w redact/userinfo    "https://user:pw@api.example.com/v1/x"
+w redact/at_in_user  "https://us@er:p@ss@api.example.com/x"
+w redact/param       "https://h/v1?page=2&api_key=SECRET&sort=asc"
+w redact/both        "https://u:p@h:8443/x?sig=S&ok=1"
+w redact/fragment    "https://h/x?access_token=S#frag"
+w redact/unparseable "https://user:pw@h:99999999/][?api_key=S"
+w redact/form        "user=alice&api_key=SECRET&scope=read"
+w redact/semicolons  "https://h/?a=1;sig=X;b=2"
+w redact/bare_at     "@@@"
+w redact/no_scheme   "/just/a/path?api_key=S"
 
 # --- inflate: first byte selects gzip / deflate / encoding-name ---
 python3 - <<'PY'

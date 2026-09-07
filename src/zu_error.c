@@ -59,6 +59,37 @@ static const char *const k_class[ZU_CODE_COUNT] = {
     "zu_wouldblock"
 };
 
+/* Parent of each class in the §34.1 tree, or ZU_CODE_COUNT for a direct child
+ * of zu_error. Kept adjacent to k_class[] so the two are read together. */
+static zu_code class_parent(zu_code code) {
+    switch (code) {
+        case ZU_ERR_TLS_CERT:
+        case ZU_ERR_TLS_HOSTNAME:
+        case ZU_ERR_TLS_HANDSHAKE:
+        case ZU_ERR_TLS_PIN:            return ZU_ERR_TLS;
+        case ZU_ERR_PROXY_AUTH:         return ZU_ERR_PROXY;
+        case ZU_ERR_TOO_MANY_REDIRECTS: return ZU_ERR_REDIRECT;
+        case ZU_ERR_INTERRUPTED:        return ZU_ERR_CANCELLED;
+        default:                        return ZU_CODE_COUNT;
+    }
+}
+
+int zu_code_class_chain(zu_code code, const char **out, int max) {
+    int n = 0;
+    zu_code c = code;
+    if (!out || max <= 0) return 0;
+    if (code <= ZU_OK || code >= ZU_CODE_COUNT) return 0;
+    for (;;) {
+        if (n >= max) return n;
+        out[n++] = k_class[c];
+        c = class_parent(c);
+        if (c == ZU_CODE_COUNT) break;
+    }
+    /* Every §34.1 class inherits zu_error, including the direct children. */
+    if (n < max) out[n++] = "zu_error";
+    return n;
+}
+
 const char *zu_code_class(zu_code code) {
     if (code < 0 || code >= ZU_CODE_COUNT) return "zu_error";
     return k_class[code];

@@ -108,7 +108,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [response, chunked, headers, uri, redirect, inflate, proxy]
+        target: [response, chunked, headers, uri, redirect, inflate, proxy, redact]
     steps:
       - uses: actions/checkout@v6
       - name: Install clang and zlib
