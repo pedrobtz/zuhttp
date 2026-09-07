@@ -31,7 +31,7 @@ graph TD
     S1["S1 · Windows toolchain probe<br/>DONE — R-3 confirmed"]
 
     S2["S2 · Foundations<br/>buffer, error, clock, stream+mock"]
-    S3["S3 · HTTP wire<br/>builder, parser, strict framing"]
+    S3["S3 · HTTP wire<br/>DONE — D-10 decided"]
     S4["S4 · URI + redirects<br/>decides D-11"]
     S5["S5 · Content encoding<br/>zlib, limits"]
 
@@ -180,10 +180,15 @@ Implement against a thin parser interface and build **both** picohttpparser and 
 
 **Exit criteria**
 
-- [ ] Every row of the §18.1 framing table is a passing test.
-- [ ] The full §50.3 malformed corpus is rejected with the correct condition class — no crashes, no hangs, no acceptance.
-- [ ] Both parser options pass identically; LOC and throughput measured and recorded.
-- [ ] **D-10 decided and recorded in the Decision Register.**
+- [x] Every row of the §18.1 framing table is a passing test.
+- [x] Obsolete line folding, malformed status lines, and invalid header names rejected.
+- [x] Chunked decoding with trailers, truncation, malformed chunk sizes, and a bounded decoded total.
+- [x] **D-10 decided and recorded: picohttpparser** (803 LOC, MIT, commit `f4d94b4`).
+- [ ] The full §50.3 malformed corpus — a broader corpus lands with S18 fuzzing.
+
+**Note on how D-10 was settled.** The strictness layer was built *before* the parser was chosen, which changed the terms of the decision: Appendix A.3's case for llhttp rested on ~800–1,200 lines of framing code being an unpaid cost. With `zu_framing.c` written and tested first, that cost was already incurred, and the comparison reduced to 803 vendored LOC versus ~8,000 for a parser whose remaining job is splitting a status line and a header block.
+
+**Standing consequence:** picohttpparser rejects no smuggling attempt on our behalf. `zu_framing.c` is the only thing that does, which makes it the primary S18 fuzz target rather than a secondary one.
 
 ### S4 · URI and redirects
 

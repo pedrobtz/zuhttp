@@ -1,0 +1,19 @@
+zuhttp bundles third-party source. Their copyright holders and licenses are
+recorded here as required by CRAN policy (design §49.2).
+
+--------------------------------------------------------------------------
+picohttpparser
+  Files:      src/vendor/picohttpparser/
+  Upstream:   https://github.com/h2o/picohttpparser
+  Commit:     f4d94b48b31e0abae029ebeafcfd9ca0680ede58
+  Copyright:  (c) 2009-2014 Kazuho Oku, Tokuhiro Matsuno, Daisuke Murase,
+                            Shigeo Mitsunari
+  License:    MIT or Perl (dual); used here under MIT.
+              Full text: src/vendor/picohttpparser/LICENSE
+--------------------------------------------------------------------------
+
+System libraries linked but NOT distributed with this package:
+  OpenSSL   (Linux/Unix TLS)      Apache-2.0 (3.x) / OpenSSL+SSLeay (1.1.1)
+  zlib      (all platforms)       zlib license
+  Schannel, CryptoAPI (Windows)   part of the operating system
+  Security.framework (macOS)      part of the operating system

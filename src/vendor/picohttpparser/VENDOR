@@ -1,0 +1,18 @@
+Component:  picohttpparser
+Upstream:   https://github.com/h2o/picohttpparser
+Commit:     f4d94b48b31e0abae029ebeafcfd9ca0680ede58
+Retrieved:  2026-09-07
+License:    MIT or Perl (dual). zuhttp uses it under MIT.
+Copyright:  Kazuho Oku, Tokuhiro Matsuno, Daisuke Murase, Shigeo Mitsunari
+Files:      picohttpparser.c, picohttpparser.h
+Modified:   no
+
+Design references: §8.1 (parser choice, decision D-10), §48 (vendoring policy).
+
+Update with tools/update-picohttpparser. Do not edit these files by hand: a
+local modification makes every future security update a manual merge (§48).
+
+Note on scope. picohttpparser parses; it makes NO framing decisions. Every
+rule in design §18.1 — Content-Length/Transfer-Encoding conflicts, duplicate
+Content-Length, chunk-size overflow — lives in src/zu_framing.c and is tested
+there. Do not assume this library rejects a smuggling attempt on our behalf.

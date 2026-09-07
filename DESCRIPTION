@@ -1,8 +1,17 @@
 Package: zuhttp
 Title: Minimal HTTP Client Using Native System TLS
 Version: 0.0.0.9000
-Authors@R:
-    person("Pedro", "Baltazar", , "pedrobtz@gmail.com", role = c("aut", "cre"))
+Authors@R: c(
+    person("Pedro", "Baltazar", , "pedrobtz@gmail.com", role = c("aut", "cre")),
+    person("Kazuho", "Oku", role = "cph",
+           comment = "picohttpparser, see inst/COPYRIGHTS"),
+    person("Tokuhiro", "Matsuno", role = "cph",
+           comment = "picohttpparser, see inst/COPYRIGHTS"),
+    person("Daisuke", "Murase", role = "cph",
+           comment = "picohttpparser, see inst/COPYRIGHTS"),
+    person("Shigeo", "Mitsunari", role = "cph",
+           comment = "picohttpparser, see inst/COPYRIGHTS")
+  )
 Description: A small HTTP/1.1 client for HTTP and HTTPS requests that uses
     the operating system's own TLS implementation and certificate trust
     store rather than a bundled cryptography library or certificate

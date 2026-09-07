@@ -13,6 +13,7 @@ void suite_stream(void);
 void suite_headers(void);
 void suite_request(void);
 void suite_framing(void);
+void suite_response(void);
 
 int main(void) {
     zu_alloc_stats st;
@@ -26,6 +27,7 @@ int main(void) {
     ZU_SUITE(suite_headers);
     ZU_SUITE(suite_request);
     ZU_SUITE(suite_framing);
+    ZU_SUITE(suite_response);
 
     zu_alloc_stats_get(&st);
     printf("\n%d checks, %d failures\n", zu_test_checks, zu_test_fails);

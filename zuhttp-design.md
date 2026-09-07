@@ -25,7 +25,7 @@ Firm decisions and open questions were previously indistinguishable in this docu
 | D-7 | Link system zlib; do not vendor miniz | **Accepted** | 21.1 |
 | D-8 | Send `Accept-Encoding: gzip` by default; decode transparently | **Accepted** | 21.2 |
 | D-9 | `zu_resp_raw()` returns decoded bytes | **Accepted** | 21.2, 31.7 |
-| D-10 | HTTP parser: picohttpparser vs llhttp | **Open** | 8.1, A.3 |
+| D-10 | HTTP parser: **picohttpparser** (vendored, commit f4d94b4) | **Accepted** 2026-09-07 | 8.1, A.3 |
 | D-11 | URI: vendor uriparser vs project-owned RFC 3986 parser | **Open** | 8.2 |
 | D-12 | `ca_file`/`ca_data` REPLACE system trust; `ca_extra` adds to it | **Accepted** | 14.2 |
 | D-13 | Certificate pinning supported; no custom OCSP/CRL | **Accepted** | 14.4, 14.5 |
@@ -340,17 +340,21 @@ Every vendored line counts against the size budget in §51 and becomes a fuzz ta
 
 | Component | Role | Est. LOC | Status |
 |---|---|---|---|
-| HTTP parser | response parsing, chunked decoding | 0.7k–10k | **Open** — Appendix A.3 |
+| picohttpparser | response parsing, chunked decoding | **0.8k** (measured) | **Decided** — §8.1 |
 | URI parser | RFC 3986 parse + relative resolution | 0.6k–15k | **Open** — §8.2 |
 | zlib | gzip/deflate | 0 (system) | **Decided** — §21 |
 | TLS engine + trust | see §13 | 4k–6k | **Blocked on spike** — §13 |
 | Project-owned engine | framing, pool, redirects, proxy, R glue | 5k–8k | Estimate |
 
-#### 8.1 HTTP parser
+#### 8.1 HTTP parser — **picohttpparser** (D-10, decided)
 
-The choice between **picohttpparser** and **llhttp** is not settled; Appendix A.3 re-runs it on fair terms. The decision hinges on a point that the original framing missed: picohttpparser makes *no framing decisions*, so every rule in §18 — `Content-Length`/`Transfer-Encoding` conflicts, duplicate `Content-Length`, chunk-size overflow — is code this project writes and must fuzz itself. llhttp enforces those rules already and is continuously exercised by the Node ecosystem.
+**Decision: vendor picohttpparser** (`src/vendor/picohttpparser/`, upstream commit `f4d94b4`, 803 LOC, MIT).
 
-Whichever is chosen:
+Appendix A.3 argued that llhttp was favoured *because* picohttpparser makes no framing decisions, leaving ~800–1,200 lines of security-critical strictness code for this project to write and fuzz. That argument was answered by building the strictness layer first: `src/zu_framing.c` implements every §18.1 rule with a test per row, and `zu_headers` re-validates every field independently of what the parser accepted. The cost A.3 warned about is now incurred, tested, and bounded, which removes its main objection while keeping picohttpparser's size advantage.
+
+The consequence must be stated plainly and kept visible: **picohttpparser rejects no smuggling attempt on our behalf.** Anything §18.1 does not catch, nothing does.
+
+Given that:
 
 - `zuhttp` must not expose the parser type in any public or semi-public interface.
 - A wrapper translates parser output into internal `zu_*` structures.
@@ -537,9 +541,11 @@ zuhttp/
 │   ├── mock/
 │   │   └── stream_mock.c      §50.1 — canned bytes through the real engine
 │   │
-│   └── vendor/                contents depend on D-10 and D-11
-│       ├── <http parser>/
-│       └── <uri parser>/      absent if zu_uri.c is used
+│   ├── Makevars / Makevars.win   explicit OBJECTS: R does not compile
+│   │                             src/ subdirectories automatically
+│   └── vendor/
+│       ├── picohttpparser/    D-10, decided; VENDOR records the commit
+│       └── <uri parser>/      D-11 open; absent if zu_uri.c is used
 │
 ├── inst/
 │   └── COPYRIGHTS             §49.2 — required for vendored code
@@ -3408,7 +3414,7 @@ Questions that the drafting process has already answered are recorded in the Dec
 | ~~2~~ | ~~Does the Rtools mingw-w64 SDK expose `SCH_CREDENTIALS`?~~ **ANSWERED: no.** S1, 2026-09-07. Must be declared locally (§47.4). | — |
 | 2a | **Is a locally declared `SCH_CREDENTIALS` ABI-correct against a real Windows 10+ target?** Until verified, Windows TLS 1.3 is not safe to ship. | S3 |
 | 3 | What is the realistic line count of the Schannel backend, and does it fit the §51.3 budget? | Windows spike, §63.1 |
-| 4 | picohttpparser or llhttp, measured on total LOC including the strictness layer this project would otherwise write? | Appendix A.3, decided against the prototype |
+| ~~4~~ | ~~picohttpparser or llhttp?~~ **ANSWERED: picohttpparser**, 2026-09-07, after the strictness layer was built and tested independently. | — |
 | 5 | Vendor `uriparser` (~15k LOC) or write a ~600-line project-owned RFC 3986 parser? | §8.2, decided against the §51.3 budget |
 
 #### 62.2 Important — answer before 1.0
@@ -3619,11 +3625,19 @@ The LOC gap narrows to roughly 6,000 vendored lines, in exchange for moving the 
 
 The counter-arguments for picohttpparser remain real: 6,000 vendored lines is 6,000 lines against the §51.3 budget; zero-copy parsing genuinely is faster; and llhttp's callback model interacts less cleanly with a poll loop that may deliver partial reads.
 
-#### Decision
+#### Decision: picohttpparser (2026-09-07)
 
-**Open. Resolved by the prototype (§62.1, Q4).** Build against a thin internal parser interface so that both can be implemented and measured on: total auditable LOC, throughput on the §51.2 benchmarks, and pass rate against the §50.3 malformed corpus.
+**Resolved, and on a basis the comparison above did not anticipate.** The strictness layer was built *before* the parser was chosen: `zu_framing.c` implements every §18.1 rule with a test per row, and the header store re-validates every field regardless of what the parser accepted. The 800–1,200 lines this table treats as picohttpparser's hidden cost are written, tested under ASan/UBSan, and will be fuzzed at S18.
 
-The default assumption has changed from "start with picohttpparser" to "llhttp unless the prototype shows it costs materially more than the numbers above suggest" — because the strictness code is the risk, and llhttp is the option where someone else has already been fuzzing it for a decade.
+With that cost already paid and verified, the remaining comparison is 803 vendored LOC against roughly 8,000, for a parser whose only remaining job is splitting a status line and a header block. picohttpparser wins on the §51.3 budget.
+
+What this project gives up, and must keep visible:
+
+- No upstream fuzzing of the framing rules. Ours are the only ones. §43 must treat `zu_framing.c` as the primary target, not a secondary one.
+- h2o's repository is effectively frozen, so no upstream security response should be expected. §46.2's dependency watch applies with full force.
+- The contiguous-header-block requirement stands: `max_header_bytes` bounds both the allocation and the repeated scan.
+
+Revisit only if the framing layer proves harder to keep correct than this decision assumed.
 
 ### A.4 Vendored Mbed TLS
 

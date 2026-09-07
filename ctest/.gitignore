@@ -1,0 +1,4 @@
+zu_ctest
+build/
+*.dSYM/
+*.o
