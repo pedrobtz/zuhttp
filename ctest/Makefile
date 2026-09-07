@@ -63,7 +63,29 @@ asan: VCFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
 asan: clean zu_ctest
 	./zu_ctest
 
-clean:
-	rm -rf zu_ctest zu_ctest.dSYM $(BUILD) *.o
+# --- S7 TLS engine tests -------------------------------------------------
+# A SEPARATE binary: these need a real TLS peer and therefore the network,
+# while zu_ctest must stay deterministic and offline. Run by tls-spike.yaml.
+OPENSSL_CFLAGS := $(shell pkg-config --cflags openssl 2>/dev/null)
+OPENSSL_LIBS   := $(shell pkg-config --libs   openssl 2>/dev/null)
+ifeq ($(strip $(OPENSSL_LIBS)),)
+OPENSSL_PREFIX ?= /opt/homebrew/opt/openssl@3
+OPENSSL_CFLAGS := -I$(OPENSSL_PREFIX)/include
+OPENSSL_LIBS   := -L$(OPENSSL_PREFIX)/lib -lssl -lcrypto
+endif
 
-.PHONY: all run strict asan clean
+TLSSRC := $(SRC)/zu_alloc.c $(SRC)/zu_buffer.c $(SRC)/zu_error.c \
+          $(SRC)/zu_time.c $(SRC)/zu_stream.c $(SRC)/zu_net.c \
+          $(SRC)/zu_tls_openssl.c
+
+zu_tlstest: $(TLSSRC) test_tls.c
+	$(CC) $(CFLAGS) $(OPENSSL_CFLAGS) -o $@ $(TLSSRC) test_tls.c \
+	      $(OPENSSL_LIBS) $(NETLIBS)
+
+tls: zu_tlstest
+	./zu_tlstest
+
+clean:
+	rm -rf zu_ctest zu_tlstest zu_ctest.dSYM zu_tlstest.dSYM $(BUILD) *.o
+
+.PHONY: all run strict asan clean tls

@@ -74,9 +74,19 @@ static zu_ssize mock_write(zu_stream *s, const void *buf, size_t n, zu_deadline 
 
 static void mock_close(zu_stream *s) { ZU_UNUSED(s); }
 
+static void mock_destroy(zu_stream *s);
+
 static const zu_stream_vtable k_mock_vt = {
-    "mock", mock_read, mock_write, mock_close
+    "mock", mock_read, mock_write, mock_close, mock_destroy
 };
+
+static void mock_destroy(zu_stream *s) {
+    mock_impl *m;
+    if (!s) return;
+    m = (mock_impl *)s->impl;
+    if (m) { zu_buf_free(&m->written); zu_free(m->owned); zu_free(m); }
+    zu_free(s);
+}
 
 zu_stream *zu_mock_stream_new(const zu_mock_step *steps, size_t nsteps,
                               size_t max_read, size_t max_write) {
@@ -111,13 +121,7 @@ zu_stream *zu_mock_stream_from_bytes(const void *data, size_t len, size_t max_re
     return s;
 }
 
-void zu_mock_stream_free(zu_stream *s) {
-    mock_impl *m;
-    if (!s) return;
-    m = (mock_impl *)s->impl;
-    if (m) { zu_buf_free(&m->written); zu_free(m->owned); zu_free(m); }
-    zu_free(s);
-}
+void zu_mock_stream_free(zu_stream *s) { mock_destroy(s); }
 
 const zu_buffer *zu_mock_stream_written(const zu_stream *s) {
     if (!s || !s->impl) return NULL;

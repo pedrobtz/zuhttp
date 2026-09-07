@@ -22,6 +22,14 @@ void zu_stream_close(zu_stream *s) {
     if (s && s->vt && s->vt->close) s->vt->close(s);
 }
 
+void zu_stream_free(zu_stream *s) {
+    if (!s) return;
+    if (s->vt && s->vt->destroy) { s->vt->destroy(s); return; }
+    /* A stream with no destroy still gets closed, so a missing hook leaks
+     * memory rather than a file descriptor. */
+    zu_stream_close(s);
+}
+
 const char *zu_stream_name(const zu_stream *s) {
     if (!s || !s->vt || !s->vt->name) return "unknown";
     return s->vt->name;

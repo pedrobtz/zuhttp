@@ -177,7 +177,18 @@ static void net_close(zu_stream *s) {
     }
 }
 
-static const zu_stream_vtable k_net_vt = { "tcp", net_read, net_write, net_close };
+static void net_destroy(zu_stream *s);
+
+static const zu_stream_vtable k_net_vt = {
+    "tcp", net_read, net_write, net_close, net_destroy
+};
+
+static void net_destroy(zu_stream *s) {
+    if (!s) return;
+    net_close(s);
+    zu_free(s->impl);
+    zu_free(s);
+}
 
 static void record_peer(net_impl *m, const struct addrinfo *ai) {
     char host[64];
@@ -282,12 +293,7 @@ zu_code zu_net_connect(zu_stream **out, const char *host, uint16_t port,
     return ZU_OK;
 }
 
-void zu_net_stream_free(zu_stream *s) {
-    if (!s) return;
-    net_close(s);
-    zu_free(s->impl);
-    zu_free(s);
-}
+void zu_net_stream_free(zu_stream *s) { net_destroy(s); }
 
 int zu_net_peer_ip(const zu_stream *s, char *out, size_t cap) {
     const net_impl *m;

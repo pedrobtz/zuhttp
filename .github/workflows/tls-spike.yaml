@@ -140,6 +140,35 @@ jobs:
           fi
 
   # ---------------------------------------------------------------
+  # S7 — the OpenSSL engine against real endpoints.
+  #      Network-dependent by nature, which is why it lives here and not in
+  #      c-core.yaml: that suite must stay deterministic and offline.
+  # ---------------------------------------------------------------
+  tls-engine:
+    runs-on: ${{ matrix.os }}
+    name: S7 TLS engine (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install OpenSSL
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y libssl-dev
+          else
+            brew install openssl@3
+          fi
+
+      - name: Build and run the TLS engine tests
+        working-directory: ctest
+        env:
+          PKG_CONFIG_PATH: /opt/homebrew/opt/openssl@3/lib/pkgconfig:/usr/local/opt/openssl@3/lib/pkgconfig
+        run: make tls
+
+  # ---------------------------------------------------------------
   # S7 preflight — Linux: are the system TLS/zlib dev packages there?
   #      The Linux engine does not exist yet; this checks its premise.
   # ---------------------------------------------------------------

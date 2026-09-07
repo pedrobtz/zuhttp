@@ -20,6 +20,10 @@ typedef struct {
     zu_ssize (*read )(zu_stream *s, void *buf, size_t n, zu_deadline d, zu_error *err);
     zu_ssize (*write)(zu_stream *s, const void *buf, size_t n, zu_deadline d, zu_error *err);
     void     (*close)(zu_stream *s);
+    /* Release the stream and everything it owns, including any wrapped inner
+     * stream. Needed because a wrapper (TLS, proxy tunnel) cannot know how to
+     * free what it wraps. close() ends the connection; destroy() frees. */
+    void     (*destroy)(zu_stream *s);
 } zu_stream_vtable;
 
 struct zu_stream {
@@ -30,6 +34,9 @@ struct zu_stream {
 zu_ssize zu_stream_read (zu_stream *s, void *buf, size_t n, zu_deadline d, zu_error *err);
 zu_ssize zu_stream_write(zu_stream *s, const void *buf, size_t n, zu_deadline d, zu_error *err);
 void     zu_stream_close(zu_stream *s);
+/* Generic release. Use this rather than a backend-specific free whenever the
+ * concrete type is not known — which is the normal case above §9. */
+void     zu_stream_free(zu_stream *s);
 const char *zu_stream_name(const zu_stream *s);
 
 /* Write everything or fail. Loops over partial writes and WOULDBLOCK. */
