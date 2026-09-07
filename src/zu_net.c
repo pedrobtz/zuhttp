@@ -193,6 +193,10 @@ static int net_readable(zu_stream *s, int timeout_ms) {
     p.fd = m->fd;
     p.events = POLLIN;
     p.revents = 0;
+    /* A negative timeout means "block forever" to poll(). This is a liveness
+     * PROBE — blocking is never the right answer, and an unbounded one here
+     * would hang the pool rather than report a stale connection. */
+    if (timeout_ms < 0) timeout_ms = 0;
     do {
         rc = zu_poll(&p, 1, timeout_ms);
     } while (rc < 0 && sock_errno() == ZU_EINTR);

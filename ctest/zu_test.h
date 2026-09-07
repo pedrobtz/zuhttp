@@ -5,13 +5,23 @@
 #define ZU_TEST_H
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>   /* getenv, for ZU_TEST_TRACE */
 
 extern int zu_test_fails;
 extern int zu_test_checks;
 extern const char *zu_test_current;
 
-#define ZU_CASE(name) \
-    do { zu_test_current = name; } while (0)
+/* Setting ZU_TEST_TRACE=1 prints and flushes every case name. Without it a
+ * hang is invisible: the suite name alone narrows the search to a whole file,
+ * which is how a blocking test in suite_net cost two CI rounds to locate. CI
+ * sets it. */
+#define ZU_CASE(name) do {                                   \
+    zu_test_current = name;                                  \
+    if (getenv("ZU_TEST_TRACE")) {                           \
+        printf("  . %s\n", name);                            \
+        fflush(stdout);                                      \
+    }                                                        \
+} while (0)
 
 #define ZU_CHECK(cond) do {                                                   \
     zu_test_checks++;                                                         \
