@@ -4,6 +4,10 @@
 
 PKG_CPPFLAGS = -I. -Ivendor/picohttpparser
 
+# System zlib (decision D-7). Present on every platform R targets; Rtools
+# ships it. Declared in DESCRIPTION SystemRequirements.
+PKG_LIBS = -lz
+
 OBJECTS = init.o \
           zu_alloc.o \
           zu_buffer.o \
@@ -17,4 +21,5 @@ OBJECTS = init.o \
           zu_response.o \
           zu_uri.o \
           zu_redirect.o \
+          zu_inflate.o \
           vendor/picohttpparser/picohttpparser.o

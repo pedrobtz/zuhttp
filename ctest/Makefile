@@ -25,10 +25,12 @@ VCFLAGS := $(BASE) -w
 OWN   := $(SRC)/zu_alloc.c $(SRC)/zu_buffer.c $(SRC)/zu_error.c \
          $(SRC)/zu_time.c $(SRC)/zu_stream.c $(SRC)/zu_mock_stream.c \
          $(SRC)/zu_headers.c $(SRC)/zu_request.c $(SRC)/zu_framing.c \
-         $(SRC)/zu_response.c $(SRC)/zu_uri.c $(SRC)/zu_redirect.c
+         $(SRC)/zu_response.c $(SRC)/zu_uri.c $(SRC)/zu_redirect.c \
+         $(SRC)/zu_inflate.c
 TESTS := test_main.c test_alloc.c test_buffer.c test_error.c test_time.c \
          test_stream.c test_headers.c test_request.c test_framing.c \
-         test_response.c test_redirect.c
+         test_response.c test_redirect.c \
+         test_inflate.c
 VOBJ  := $(BUILD)/picohttpparser.o
 
 all: run
@@ -40,7 +42,7 @@ $(VOBJ): $(VENDOR)/picohttpparser.c | $(BUILD)
 	$(CC) $(VCFLAGS) -c -o $@ $<
 
 zu_ctest: $(OWN) $(TESTS) $(VOBJ)
-	$(CC) $(CFLAGS) -o $@ $(OWN) $(TESTS) $(VOBJ)
+	$(CC) $(CFLAGS) -o $@ $(OWN) $(TESTS) $(VOBJ) -lz
 
 run: zu_ctest
 	./zu_ctest
