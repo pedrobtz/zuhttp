@@ -79,11 +79,26 @@ void suite_alloc(void) {
         zu_alloc_fail_after(-1);
         ZU_CHECK(strcmp(p, "keepme") == 0);   /* realloc failure must not free */
         zu_free(p);
-        ZU_CHECK(zu_alloc(1) != NULL);
+        /* the allocator is usable again once injection is disabled */
+        {
+            void *r = zu_alloc(1);
+            ZU_CHECK(r != NULL);
+            zu_free(r);
+        }
     }
 
     ZU_CASE("zu_free(NULL) is a no-op");
     zu_free(NULL);
 
+    /* Check BEFORE resetting. Resetting first would mask any leak this suite
+     * created — which is exactly how the leak at test_alloc.c:82 survived
+     * local runs and was caught only by valgrind/LSan on Linux. */
+    ZU_CASE("suite leaves nothing allocated");
+    {
+        zu_alloc_stats st;
+        zu_alloc_stats_get(&st);
+        ZU_CHECK_EQ_INT(st.live_blocks, 0);
+        ZU_CHECK_EQ_INT(st.total_allocs, st.total_frees);
+    }
     zu_alloc_stats_reset();
 }
