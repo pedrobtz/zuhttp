@@ -39,16 +39,23 @@ zu_millis zu_now_ms(void) {
         if (tb.denom == 0) mach_timebase_info(&tb);
         return (zu_millis)((mach_absolute_time() * tb.numer / tb.denom) / 1000000ull);
     }
+#  elif defined(CLOCK_MONOTONIC)
+    /* Declared, but clock_gettime() failed at run time. That does not happen
+     * in practice. Wall time is not monotonic and §24.4 would rather not use
+     * it, but it ADVANCES — and a constant would silently disable every
+     * deadline in the library, which is the failure this whole file now
+     * guards against. Advancing and imperfect beats stopped. */
+    return (zu_millis)time(NULL) * 1000;
 #  else
-    /* Deliberately a COMPILE error, not a runtime fallback.
+    /* Deliberately a COMPILE error, and note the condition: this fires only
+     * when there is genuinely no monotonic source, NOT on every non-Apple
+     * platform. An earlier version of this guard sat in the #else of the
+     * __APPLE__ test and broke every Linux build.
      *
-     * This used to `return 0`, with a comment noting that "caller's deadlines
-     * degrade to never". That is not a degradation, it is a total failure of
-     * §24: every timeout in the library stops firing and the first operation
-     * that waits for one hangs forever. It cost six commits to find, because
-     * a constant clock still satisfies "monotonic" and so passed suite_time.
-     *
-     * A platform with no monotonic clock must fail to build, loudly. */
+     * The code this replaced was `return 0`, commented "caller's deadlines
+     * degrade to never". That is not a degradation: every timeout stops
+     * firing and the first operation that waits for one hangs forever. A
+     * platform with no monotonic clock must fail to build, loudly. */
 #    error "no monotonic clock: zuhttp deadlines (design 24) cannot work here"
 #  endif
 }
