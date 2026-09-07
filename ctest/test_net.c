@@ -26,6 +26,7 @@
 #  include <netinet/in.h>
 #  include <arpa/inet.h>
 #  include <unistd.h>
+#  include <poll.h>
    typedef int tsock;
 #  define TCLOSE close
 #  define TINVALID (-1)
@@ -49,6 +50,35 @@ static tsock listen_on(uint16_t *port_out) {
     if (getsockname(ls, (struct sockaddr *)&a, &al) != 0) { TCLOSE(ls); return TINVALID; }
     *port_out = ntohs(a.sin_port);
     return ls;
+}
+
+/* accept() with a bound.
+ *
+ * The listener is a BLOCKING socket, so a bare accept() waits forever when
+ * nothing connects — and ZU_CHECK records a failure and CONTINUES, so a
+ * failed zu_net_connect() above turns the next accept() into an infinite
+ * block. That is exactly how the Linux c-core job hung for an hour: the
+ * assertion failure was printed into a block-buffered stdout that never
+ * flushed, and the suite stopped dead at the accept().
+ *
+ * A test may fail. A test may not hang. */
+static tsock accept_bounded(tsock ls, int timeout_ms) {
+#if defined(ZU_WINDOWS)
+    fd_set rf;
+    struct timeval tv;
+    FD_ZERO(&rf);
+    FD_SET(ls, &rf);
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    if (select(0, &rf, NULL, NULL, &tv) <= 0) return TINVALID;
+#else
+    struct pollfd p;
+    p.fd = ls;
+    p.events = POLLIN;
+    p.revents = 0;
+    if (poll(&p, 1, timeout_ms) <= 0) return TINVALID;
+#endif
+    return accept(ls, NULL, NULL);
 }
 
 /* Tick callback that cancels after N calls, and counts them. */
@@ -79,7 +109,7 @@ void suite_net(void) {
         zu_error_clear(&e);
 
         ZU_CHECK_EQ_INT(zu_net_connect(&s, "127.0.0.1", port, d, &o, &e), ZU_OK);
-        conn = accept(ls, NULL, NULL);
+        conn = accept_bounded(ls, 2000);
         ZU_CHECK(conn != TINVALID);
 
         ZU_CHECK(zu_stream_write_all(s, "PING", 4, d, &e));
@@ -155,7 +185,8 @@ void suite_net(void) {
         ZU_CHECK(ls != TINVALID);
         zu_error_clear(&e);
         ZU_CHECK_EQ_INT(zu_net_connect(&s, "127.0.0.1", port, connd, &o, &e), ZU_OK);
-        conn = accept(ls, NULL, NULL);      /* accept, then stay silent */
+        conn = accept_bounded(ls, 2000);    /* accept, then stay silent */
+        ZU_CHECK(conn != TINVALID);
 
         t0 = zu_now_ms();
         {
@@ -191,7 +222,8 @@ void suite_net(void) {
 
         zu_error_clear(&e);
         ZU_CHECK_EQ_INT(zu_net_connect(&s, "127.0.0.1", port, connd, &to, &e), ZU_OK);
-        conn = accept(ls, NULL, NULL);
+        conn = accept_bounded(ls, 2000);
+        ZU_CHECK(conn != TINVALID);
 
         {
             zu_deadline rd = zu_deadline_in(200);
@@ -222,7 +254,8 @@ void suite_net(void) {
 
         zu_error_clear(&e);
         ZU_CHECK_EQ_INT(zu_net_connect(&s, "127.0.0.1", port, connd, &to, &e), ZU_OK);
-        conn = accept(ls, NULL, NULL);
+        conn = accept_bounded(ls, 2000);
+        ZU_CHECK(conn != TINVALID);
 
         {
             /* A deadline far in the future: only the callback can stop this. */

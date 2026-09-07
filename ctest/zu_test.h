@@ -28,6 +28,7 @@ extern const char *zu_test_current;
     if (!(cond)) {                                                            \
         zu_test_fails++;                                                      \
         printf("  FAIL %s\n       %s:%d: %s\n", zu_test_current, __FILE__, __LINE__, #cond); \
+        fflush(stdout);                                                       \
     }                                                                         \
 } while (0)
 
@@ -38,6 +39,7 @@ extern const char *zu_test_current;
         zu_test_fails++;                                                      \
         printf("  FAIL %s\n       %s:%d: %s == %s  (%lld vs %lld)\n",         \
                zu_test_current, __FILE__, __LINE__, #a, #b, _a, _b);          \
+        fflush(stdout);                                                       \
     }                                                                         \
 } while (0)
 
@@ -47,6 +49,7 @@ extern const char *zu_test_current;
         zu_test_fails++;                                                      \
         printf("  FAIL %s\n       %s:%d: bytes differ from \"%s\"\n",         \
                zu_test_current, __FILE__, __LINE__, (const char *)(str));     \
+        fflush(stdout);                                                       \
     }                                                                         \
 } while (0)
 
