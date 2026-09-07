@@ -1388,6 +1388,14 @@ TLS configuration must be compared by value, not by pointer identity, or two cli
 - global limit,
 - stale-connection detection: a pooled socket that is readable before a request is written has been closed or has unread data, and is discarded.
 
+The last rule needs a liveness probe that the §9 stream interface did not
+originally have, so `readable(timeout_ms)` is part of the vtable: `poll()` for
+`POLLIN` on TCP, `SSL_pending()` before delegating on TLS, scripted on the
+mock. It must never consume a byte — a probe that read would corrupt the next
+response on a connection that turned out to be healthy. A backend that cannot
+answer returns -1, which is treated as "unknown", not as "safe to reuse"; the
+idle timeout remains the backstop for that case.
+
 Initial defaults are conservative.
 
 ```r
@@ -1465,6 +1473,15 @@ Error: zuhttp cannot make HTTPS requests in a forked process on macOS.
 Turning a SIGSEGV into a named condition is the whole mitigation. It does not make forked HTTPS work; it makes the limitation diagnosable. **Until it exists, `zuhttp` has a worse macOS fork failure mode than `curl`** — a crash rather than an error — and §6.1 must say so.
 
 `pthread_atfork()` is not sufficient and is unavailable on Windows; the PID check is the portable mechanism and must run on every pool acquisition and every trust evaluation.
+
+**Implementation note (S16).** The guard is `zu_fork.{h,c}`, deliberately not a
+member of `zu_pool`: the two hazards share one mechanism but only hazard 1 is
+about connections. `zu_pool` calls it on every acquire, every release and in
+`zu_pool_free` (which is what an R finalizer will run); the trust evaluator
+must call it too, and that call site does not exist yet because no macOS trust
+backend does — **hazard 2 remains unmitigated until S9**, and §6.1 must keep
+saying so until then. `zu_fork_message()` holds the single canonical wording
+above so the C error, the R condition and the documentation cannot drift.
 
 #### 26.5 Serialization and session lifetime
 

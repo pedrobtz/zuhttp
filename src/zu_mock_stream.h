@@ -47,4 +47,9 @@ const zu_buffer *zu_mock_stream_written(const zu_stream *s);
  * silently leaving canned input unread. */
 int zu_mock_stream_exhausted(const zu_stream *s);
 
+/* Pin what the §26.2 liveness probe reports, so a pool test can construct a
+ * stale connection without a real peer. `value` is 1, 0 or -1; pass forced=0
+ * to go back to deriving it from the script. */
+void zu_mock_stream_set_readable(zu_stream *s, int forced, int value);
+
 #endif /* ZUHTTP_MOCK_STREAM_H */

@@ -47,7 +47,7 @@ graph TD
     S14["S14 · R transports<br/>mock, record/replay"]
 
     S15["S15 · Cancellation + unwind"]
-    S16["S16 · Pool + fork/session safety"]
+    S16["S16 · Pool + fork/session safety<br/>PARTIAL — C core done"]
     S17["S17 · Streaming sinks"]
 
     S18["S18 · Fuzzing + sanitizers + CI"]
@@ -372,17 +372,39 @@ External-pointer ownership as the invariant, `R_UnwindProtect()` as the enforcem
 
 ### S16 · Connection pool
 
-**Effort:** 2 weeks. **Depends on:** S7.
+**Effort:** 2 weeks. **Depends on:** S7. **Status: C core complete; two criteria blocked.**
 
 Pool key by value (§26.1); policy and stale detection (§26.2); the no-reuse rules (§26.3); **PID guard on every acquisition and in every finalizer** (§26.4); lazy pool re-creation after deserialization (§26.5).
 
+`zu_pool.{h,c}` depends on `zu_stream` only — not on TLS or sockets — so the
+whole pool is tested on the mock stream with no network. §26.2 stale detection
+needed a liveness probe the stream interface did not have, so `readable()` was
+added to the vtable and implemented for TCP (`poll` for `POLLIN`), TLS
+(`SSL_pending` first, then delegate) and the mock (scripted, overridable).
+
+The §26.4 guard lives in `zu_fork.{h,c}` rather than inside the pool, because
+§26.4 has two hazards sharing one mechanism and hazard 2 is in the trust
+evaluator, not the pool.
+
 **Exit criteria**
 
-- [ ] A pooled client used inside `parallel::mclapply()` corrupts nothing and drops inherited connections.
-- [ ] On macOS, HTTPS in a forked child raises `zu_fork_error` with an actionable message — **and does not crash the worker** (R-12). This is a regression test against a SIGSEGV, so it must run in CI on macOS.
-- [ ] A client survives a `saveRDS()`/`readRDS()` round-trip into a fresh session.
-- [ ] Every §26.3 condition provably closes rather than pools.
-- [ ] Two clients with identical config share a pool; two with different TLS config do not.
+- [x] Every §26.3 condition provably closes rather than pools — one enum
+      member per bullet, all seven tested.
+- [x] Two clients with identical config share a pool; two with different TLS
+      config do not. Tested by walking **every** field of the §26.1 key in
+      turn, so a coarse key fails the suite rather than being assumed absent.
+- [x] A real `fork()` drops inherited connections without a graceful close,
+      re-arms the guard, and leaves the parent's connection intact. Verified
+      non-vacuous: breaking the guard makes the test fail.
+- [ ] A pooled client used inside `parallel::mclapply()` corrupts nothing and
+      drops inherited connections. **Blocked on S11** (needs an R client).
+- [ ] On macOS, HTTPS in a forked child raises `zu_fork_error` with an
+      actionable message — **and does not crash the worker** (R-12). **Blocked
+      on S9**: the mechanism and the canonical message exist
+      (`zu_fork_message()`), but there is no macOS trust backend to guard yet.
+      This remains the project's top unmitigated risk.
+- [ ] A client survives a `saveRDS()`/`readRDS()` round-trip into a fresh
+      session (§26.5). **Blocked on S11.**
 
 ### S17 · Streaming sinks
 

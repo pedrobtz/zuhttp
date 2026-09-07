@@ -13,6 +13,8 @@ typedef struct {
     zu_code             fail_code;
     zu_buffer           written;
     void               *owned;      /* script allocated on our behalf, if any */
+    int                 readable_forced;    /* §26.2: pin the liveness probe */
+    int                 readable_value;
 } mock_impl;
 
 static zu_ssize mock_read(zu_stream *s, void *buf, size_t n, zu_deadline d, zu_error *err) {
@@ -76,8 +78,29 @@ static void mock_close(zu_stream *s) { ZU_UNUSED(s); }
 
 static void mock_destroy(zu_stream *s);
 
+/* The mock reports readable when its script still has data to hand over, or
+ * when it is at a scripted EOF/ERROR — the same three cases the TCP probe
+ * cannot distinguish, and for the same reason: all three mean "do not reuse".
+ * zu_mock_set_readable() overrides it so a pool test can pin the answer. */
+static int mock_readable(zu_stream *s, int timeout_ms) {
+    mock_impl *m;
+    ZU_UNUSED(timeout_ms);
+    if (!s || !s->impl) return -1;
+    m = (mock_impl *)s->impl;
+    if (m->readable_forced) return m->readable_value;
+    if (m->failed) return 1;                 /* sticky error: do not reuse */
+    if (m->step >= m->nsteps) return 1;      /* script exhausted == EOF */
+    switch (m->steps[m->step].kind) {
+        case ZU_MOCK_WOULDBLOCK: return 0;   /* nothing waiting: idle and clean */
+        case ZU_MOCK_DATA:                   /* unread bytes: do not reuse */
+        case ZU_MOCK_ERROR:
+        case ZU_MOCK_EOF:
+        default:                 return 1;
+    }
+}
+
 static const zu_stream_vtable k_mock_vt = {
-    "mock", mock_read, mock_write, mock_close, mock_destroy
+    "mock", mock_read, mock_write, mock_close, mock_destroy, mock_readable
 };
 
 static void mock_destroy(zu_stream *s) {
@@ -133,4 +156,12 @@ int zu_mock_stream_exhausted(const zu_stream *s) {
     if (!s || !s->impl) return 0;
     m = (const mock_impl *)s->impl;
     return m->step >= m->nsteps;
+}
+
+void zu_mock_stream_set_readable(zu_stream *s, int forced, int value) {
+    mock_impl *m;
+    if (!s || !s->impl) return;
+    m = (mock_impl *)s->impl;
+    m->readable_forced = forced;
+    m->readable_value  = value;
 }

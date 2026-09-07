@@ -264,8 +264,19 @@ static void tls_close(zu_stream *s) {
 
 static void tls_destroy(zu_stream *s);
 
+/* §26.2 through a TLS wrapper. Buffered plaintext that OpenSSL has already
+ * decrypted would not show up on the socket, so check that first; otherwise
+ * delegate to the transport underneath. */
+static int tls_readable(zu_stream *s, int timeout_ms) {
+    tls_impl *t;
+    if (!s || !s->impl) return -1;
+    t = (tls_impl *)s->impl;
+    if (t->ssl && SSL_pending(t->ssl) > 0) return 1;
+    return zu_stream_readable(t->inner, timeout_ms);
+}
+
 static const zu_stream_vtable k_tls_vt = {
-    "tls", tls_read, tls_write, tls_close, tls_destroy
+    "tls", tls_read, tls_write, tls_close, tls_destroy, tls_readable
 };
 
 static void tls_destroy(zu_stream *s) {

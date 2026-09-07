@@ -24,6 +24,15 @@ typedef struct {
      * stream. Needed because a wrapper (TLS, proxy tunnel) cannot know how to
      * free what it wraps. close() ends the connection; destroy() frees. */
     void     (*destroy)(zu_stream *s);
+    /* Is there data (or an EOF/error) waiting to be read, without blocking
+     * longer than timeout_ms? Returns 1 yes, 0 no, -1 cannot tell.
+     *
+     * This exists for §26.2 stale-connection detection: a pooled socket that
+     * is readable BEFORE a request is written has either been closed by the
+     * peer or is carrying unread bytes from a previous response, and must be
+     * discarded either way. It is a liveness probe, not a read — it must not
+     * consume anything. */
+    int      (*readable)(zu_stream *s, int timeout_ms);
 } zu_stream_vtable;
 
 struct zu_stream {
@@ -38,6 +47,10 @@ void     zu_stream_close(zu_stream *s);
  * concrete type is not known — which is the normal case above §9. */
 void     zu_stream_free(zu_stream *s);
 const char *zu_stream_name(const zu_stream *s);
+
+/* 1 = readable now, 0 = not, -1 = the backend cannot tell (no probe).
+ * Callers must treat -1 as "unknown", never as "fine to reuse". */
+int zu_stream_readable(zu_stream *s, int timeout_ms);
 
 /* Write everything or fail. Loops over partial writes and WOULDBLOCK. */
 int zu_stream_write_all(zu_stream *s, const void *buf, size_t n, zu_deadline d, zu_error *err);

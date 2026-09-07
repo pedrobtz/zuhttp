@@ -179,8 +179,29 @@ static void net_close(zu_stream *s) {
 
 static void net_destroy(zu_stream *s);
 
+/* §26.2 stale detection. POLLIN fires for readable data, a peer FIN, and an
+ * error alike — all three mean "do not reuse", so they need no separation
+ * here. Deliberately does NOT read: consuming a byte would corrupt the next
+ * response if the connection turned out to be fine. */
+static int net_readable(zu_stream *s, int timeout_ms) {
+    net_impl *m;
+    struct pollfd p;
+    int rc;
+    if (!s || !s->impl) return -1;
+    m = (net_impl *)s->impl;
+    if (m->fd == ZU_INVALID_SOCK) return 1;   /* closed counts as "do not reuse" */
+    p.fd = m->fd;
+    p.events = POLLIN;
+    p.revents = 0;
+    do {
+        rc = zu_poll(&p, 1, timeout_ms);
+    } while (rc < 0 && sock_errno() == ZU_EINTR);
+    if (rc < 0) return -1;
+    return rc > 0 ? 1 : 0;
+}
+
 static const zu_stream_vtable k_net_vt = {
-    "tcp", net_read, net_write, net_close, net_destroy
+    "tcp", net_read, net_write, net_close, net_destroy, net_readable
 };
 
 static void net_destroy(zu_stream *s) {

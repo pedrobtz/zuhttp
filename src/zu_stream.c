@@ -30,6 +30,11 @@ void zu_stream_free(zu_stream *s) {
     zu_stream_close(s);
 }
 
+int zu_stream_readable(zu_stream *s, int timeout_ms) {
+    if (!s || !s->vt || !s->vt->readable) return -1;
+    return s->vt->readable(s, timeout_ms);
+}
+
 const char *zu_stream_name(const zu_stream *s) {
     if (!s || !s->vt || !s->vt->name) return "unknown";
     return s->vt->name;
