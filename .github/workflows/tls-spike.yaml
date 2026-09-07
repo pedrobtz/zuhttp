@@ -1,0 +1,163 @@
+# Cross-platform TLS feasibility spikes (zuhttp roadmap Track A).
+#
+# This is deliberately SEPARATE from R-CMD-check.yaml:
+#   - it makes real network connections, which CRAN checks must never do
+#   - it answers architecture gates, not package correctness
+#
+# S0 (macOS) is already GO locally; this keeps it honest on a clean runner.
+# S1 (Windows) is answered HERE — it needs an Rtools toolchain, which is
+# exactly what the R-CMD-check runners provide.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  workflow_dispatch:
+
+name: tls-spike.yaml
+
+permissions: read-all
+
+jobs:
+  # ---------------------------------------------------------------
+  # S0 — macOS: OpenSSL engine + SecTrustEvaluateWithError (Keychain)
+  # ---------------------------------------------------------------
+  macos-s0:
+    runs-on: macos-latest
+    name: S0 macOS (engine + Keychain trust)
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install OpenSSL 3
+        run: brew install openssl@3
+
+      - name: Environment
+        run: |
+          sw_vers
+          clang --version | head -2
+          xcrun --show-sdk-version
+          "$(brew --prefix openssl@3)/bin/openssl" version
+
+      - name: Does Secure Transport know TLS 1.3?  (finding F-1)
+        run: |
+          ST="$(xcrun --show-sdk-path)/System/Library/Frameworks/Security.framework/Headers/SecureTransport.h"
+          echo "Searching for kTLSProtocol13 in $ST"
+          if grep -q 'kTLSProtocol13' "$ST"; then
+            echo "::warning::kTLSProtocol13 FOUND — finding F-1 no longer holds, revisit design 13.2"
+          else
+            echo "kTLSProtocol13 absent — confirms F-1: Secure Transport fallback is TLS 1.2-only"
+          fi
+
+      - name: Run S0 spike matrix
+        working-directory: spike/macos-tls
+        env:
+          PKG_CONFIG_PATH: /opt/homebrew/opt/openssl@3/lib/pkgconfig:/usr/local/opt/openssl@3/lib/pkgconfig
+        run: |
+          make
+          ./run.sh
+
+      - name: Is SecTrust fork-safe?  (finding F-5)
+        working-directory: spike/macos-tls
+        continue-on-error: true
+        run: |
+          make fork_trust_test
+          "$(brew --prefix openssl@3)/bin/openssl" x509 -in tmp/ca.pem -outform DER -out tmp/ca.der
+          echo "A. parent uses Security, then forks (expect: child killed):"
+          ./fork_trust_test tmp/ca.der || true
+          echo
+          echo "B. parent does not, then forks (expect: child survives):"
+          ./fork_trust_test tmp/ca.der --no-parent-eval || true
+
+  # ---------------------------------------------------------------
+  # S1 — Windows: does the Rtools mingw-w64 SDK expose SCH_CREDENTIALS?
+  #      This is the gate that cannot be answered on a Mac.
+  # ---------------------------------------------------------------
+  windows-s1:
+    runs-on: windows-latest
+    name: S1 Windows (Rtools Schannel headers)
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+
+      # Gives us Rtools, i.e. the *exact* toolchain R uses to build packages.
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
+      - name: Toolchain identity
+        working-directory: spike/windows-schannel
+        run: |
+          echo "R CC     : $(R CMD config CC)"
+          echo "R CFLAGS : $(R CMD config CFLAGS)"
+          $(R CMD config CC) --version | head -2
+
+      - name: Probe A — macro-level report (always compiles)
+        working-directory: spike/windows-schannel
+        run: |
+          CC=$(R CMD config CC)
+          $CC -O1 -o probe.exe probe.c -lsecur32 -lcrypt32 -lws2_32
+          ./probe.exe
+
+      - name: Probe B — does SCH_CREDENTIALS exist?  (gate for R-3)
+        working-directory: spike/windows-schannel
+        run: |
+          CC=$(R CMD config CC)
+          if $CC -fsyntax-only probe_struct.c 2> struct_err.txt; then
+            echo "SCH_CREDENTIALS: PRESENT — TLS 1.3 Schannel path is available under Rtools."
+            echo "::notice::S1 verdict: Rtools exposes SCH_CREDENTIALS. Appendix B R-3 can be retired."
+          else
+            echo "SCH_CREDENTIALS: MISSING under the Rtools toolchain."
+            echo "--- compiler output ---"
+            cat struct_err.txt
+            echo "::warning::S1 verdict: Rtools lacks SCH_CREDENTIALS. zuhttp must declare it locally (design 47.4) or ship Windows TLS 1.2-only."
+          fi
+
+  # ---------------------------------------------------------------
+  # S7 preflight — Linux: are the system TLS/zlib dev packages there?
+  #      The Linux engine does not exist yet; this checks its premise.
+  # ---------------------------------------------------------------
+  linux-preflight:
+    runs-on: ubuntu-latest
+    name: S7 preflight Linux (system OpenSSL + zlib)
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install declared SystemRequirements
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev zlib1g-dev
+
+      - name: Versions and default trust paths
+        run: |
+          openssl version -a
+          pkg-config --modversion openssl libssl libcrypto zlib
+          echo "OpenSSL default verify paths:"
+          openssl version -d
+
+      - name: Compile-and-link probe against system OpenSSL and zlib
+        run: |
+          cat > preflight.c <<'EOF'
+          #include <openssl/ssl.h>
+          #include <openssl/x509v3.h>
+          #include <zlib.h>
+          #include <stdio.h>
+          int main(void) {
+              printf("OpenSSL headers : %s\n", OPENSSL_VERSION_TEXT);
+              printf("OpenSSL runtime : %s\n", OpenSSL_version(OPENSSL_VERSION));
+              printf("zlib            : %s\n", zlibVersion());
+              SSL_CTX *c = SSL_CTX_new(TLS_client_method());
+              if (!c) { printf("SSL_CTX_new FAILED\n"); return 1; }
+              /* design 13.5: hostname verification must use the library, never a hand-rolled compare */
+              SSL *s = SSL_new(c);
+              int ok = SSL_set1_host(s, "example.com");
+              printf("SSL_set1_host   : %s\n", ok ? "available" : "FAILED");
+              /* design 21.1: gzip auto-detection via inflateInit2(15+32) */
+              z_stream z; memset(&z, 0, sizeof z);
+              printf("inflateInit2    : %s\n", inflateInit2(&z, 15 + 32) == Z_OK ? "ok (gzip auto-detect)" : "FAILED");
+              inflateEnd(&z); SSL_free(s); SSL_CTX_free(c);
+              return 0;
+          }
+          EOF
+          sed -i '1i #include <string.h>' preflight.c
+          cc -O1 -Wall -o preflight preflight.c $(pkg-config --cflags --libs openssl zlib)
+          ./preflight
