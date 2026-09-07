@@ -40,9 +40,15 @@ extern const char *zu_test_current;
     }                                                                         \
 } while (0)
 
+/* stdout is block-buffered when it is a pipe, so without the flush a hang
+ * shows NOTHING in CI — the suite name that would identify it is still
+ * sitting in the buffer. That cost an hour of stuck jobs before it was
+ * noticed. */
 #define ZU_SUITE(fn) do {            \
     printf("%s\n", #fn);             \
+    fflush(stdout);                  \
     fn();                            \
+    fflush(stdout);                  \
 } while (0)
 
 #endif

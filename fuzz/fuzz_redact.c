@@ -35,10 +35,30 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         if (zu_redact_url(&p, (const char *)exact, size, &out)) {
             const char *s = NULL;
             if (zu_buf_cstr(&out, &s) && s) {
-                /* §42.1: userinfo is removed outright. If the input had an
-                 * authority with an '@' in it, the output's authority must
-                 * not — otherwise a credential survived. */
-                const char *sep = strstr(s, "://");
+                /* §42.1: userinfo is removed outright, so the output's
+                 * authority must contain no '@'.
+                 *
+                 * The authority is located with the SAME anchored-scheme rule
+                 * the redactor uses. Using strstr(s, "://") here was wrong and
+                 * the regress-not-a-url seed proved it: in
+                 * "not a url at all :// with u:p@h" there is no authority at
+                 * all, and that text is correctly left untouched. */
+                size_t i, slen = strlen(s);
+                const char *sep = NULL;
+                if (slen > 0 && ((s[0] >= 'a' && s[0] <= 'z') ||
+                                 (s[0] >= 'A' && s[0] <= 'Z'))) {
+                    for (i = 1; i + 2 < slen; i++) {
+                        char ch = s[i];
+                        if (ch == ':' && s[i + 1] == '/' && s[i + 2] == '/') {
+                            sep = s + i;
+                            break;
+                        }
+                        if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                              (ch >= '0' && ch <= '9') || ch == '+' || ch == '-' ||
+                              ch == '.'))
+                            break;
+                    }
+                }
                 if (sep) {
                     const char *a = sep + 3, *e = a;
                     while (*e && *e != '/' && *e != '?' && *e != '#') e++;

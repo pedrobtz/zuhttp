@@ -34,6 +34,27 @@ test_that("redaction is vectorised and preserves NA", {
   expect_identical(out[[3]], "https://b/?sig=<redacted>")
 })
 
+test_that("arbitrary text is never mangled by redaction", {
+  # The scheme is anchored. Scanning for "://" anywhere treated this as
+  # scheme + authority and deleted " with u:p@" from the middle; silently
+  # removing text from a diagnostic is worse than not redacting it.
+  txt <- "not a url at all :// with u:p@h"
+  expect_identical(zu_redact_url(txt), txt)
+  expect_identical(zu_redact_url("1http://u:p@h/"), "1http://u:p@h/")
+})
+
+test_that("a credential nested in a query value is a documented gap", {
+  old <- getOption("zuhttp.redact_params")
+  on.exit(options(zuhttp.redact_params = old), add = TRUE)
+
+  u <- "https://h/cb?next=http://u:pw@evil.example/"
+  # Not descended into, by design -- see §42.1.
+  expect_match(zu_redact_url(u), "u:pw", fixed = TRUE)
+  # The mitigation is naming the parameter.
+  zu_redact_params("next")
+  expect_false(grepl("u:pw", zu_redact_url(u), fixed = TRUE))
+})
+
 test_that("a URL that does not parse is still redacted", {
   # The malformed URL is exactly the one an error message is about.
   out <- zu_redact_url("https://user:pw@h:99999999/][?api_key=S")

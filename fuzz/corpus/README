@@ -1,7 +1,7 @@
 Curated fuzz seeds (design §43, §50.3).
 
 Regenerate with fuzz/seed-corpus.sh (or `make -C fuzz reseed`). Do not add
-files here by hand — add them to that script, so the corpus stays
+files here by hand -- add them to seed-corpus.py, so the corpus stays
 reproducible and every seed keeps its explanation.
 
 Every file is a real protocol sample, a specific attack the design names
@@ -11,7 +11,7 @@ over-large port, a decompression bomb, an httpoxy-shaped environment), or a
 
 Soak-grown corpora are deliberately NOT committed. Running libFuzzer locally
 writes new coverage units into these directories, which is how it should work
-— but a 45 s run per target grows this to ~29,000 files and tens of MB, and
+-- but a 45 s run per target grows this to ~29,000 files and tens of MB, and
 even `-merge=1` minimisation leaves ~12,000 unexplainable blobs. Run
 `make -C fuzz reseed` before committing. CI keeps its grown corpora as
 artifacts from the `soak` job in .github/workflows/fuzz.yaml.

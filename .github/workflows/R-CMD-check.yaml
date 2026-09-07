@@ -60,3 +60,54 @@ jobs:
         with:
           upload-snapshots: true
           build_args: 'c("--no-manual","--compact-vignettes=gs+qpdf")'
+
+  # A fresh CI checkout has no stray object files, so it cannot see the failure
+  # mode this guards: `R CMD INSTALL .` compiles src/ in place, and
+  # `R CMD build` drops src/*.o but NOT objects in subdirectories, so the
+  # vendored .o files end up in the tarball and --as-cran reports "Object
+  # files/libraries should not be included in a source package".
+  #
+  # This reproduces the maintainer's sequence deliberately: install first, then
+  # build, then assert the tarball is clean.
+  source-package-hygiene:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    name: Source package hygiene (--as-cran)
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          needs: check
+
+      - name: Install in place, so objects are left in src/
+        run: R CMD INSTALL .
+
+      - name: Build and assert no compiled artefacts ship
+        run: |
+          stray=$(find src -name '*.o' | wc -l)
+          echo "stray objects on disk after INSTALL: $stray"
+          if [ "$stray" -eq 0 ]; then
+            echo "::error::the guard is vacuous — INSTALL left no objects to catch"
+            exit 1
+          fi
+          R CMD build .
+          shipped=$(tar tzf zuhttp_*.tar.gz | grep -cE '\.(o|so|dll|a)$' || true)
+          echo "compiled artefacts inside the tarball: $shipped"
+          if [ "$shipped" -ne 0 ]; then
+            echo "::error::compiled artefacts are in the source tarball; see .Rbuildignore"
+            tar tzf zuhttp_*.tar.gz | grep -E '\.(o|so|dll|a)$'
+            exit 1
+          fi
+
+      - name: R CMD check --as-cran
+        run: |
+          R CMD check --as-cran --no-manual zuhttp_*.tar.gz || true
+          # "New submission" and the dev version string are expected; anything
+          # else is not.
+          if grep -E '^(WARNING|ERROR)' zuhttp.Rcheck/00check.log; then exit 1; fi
+          grep -c 'NOTE' zuhttp.Rcheck/00check.log || true

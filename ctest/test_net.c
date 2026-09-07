@@ -13,6 +13,7 @@
 #include "zu_alloc.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>   /* getenv */
 
 #if defined(ZU_WINDOWS)
 #  include <winsock2.h>
@@ -124,12 +125,22 @@ void suite_net(void) {
         ZU_CHECK(s == NULL);
     }
 
-    ZU_CASE("an unresolvable host is zu_dns_error in the dns phase");
-    {
-        zu_deadline d = zu_deadline_in(5000);
-        zu_error_clear(&e);
-        ZU_CHECK_EQ_INT(zu_net_connect(&s, "invalid.invalid.", 80, d, &o, &e), ZU_ERR_DNS);
-        ZU_CHECK_EQ_INT(e.phase, ZU_PHASE_DNS);
+    /* This one needs a RESOLVER, which makes it a network test, and the
+     * c-core suite is meant to be deterministic and offline. Worse, the
+     * deadline cannot bound it: getaddrinfo() is not interruptible (D-30), so
+     * on a host whose resolver blackholes the query this blocks forever
+     * rather than failing. That is exactly what happened — the Linux c-core
+     * jobs sat for an hour on it while macOS and Windows passed.
+     *
+     * Opt in with ZU_TEST_DNS=1; the network-enabled workflow sets it. */
+    if (getenv("ZU_TEST_DNS")) {
+        ZU_CASE("an unresolvable host is zu_dns_error in the dns phase");
+        {
+            zu_deadline d = zu_deadline_in(5000);
+            zu_error_clear(&e);
+            ZU_CHECK_EQ_INT(zu_net_connect(&s, "invalid.invalid.", 80, d, &o, &e), ZU_ERR_DNS);
+            ZU_CHECK_EQ_INT(e.phase, ZU_PHASE_DNS);
+        }
     }
 
     /* §24: a stalled read must end at the deadline rather than blocking. */

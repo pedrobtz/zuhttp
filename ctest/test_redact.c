@@ -117,6 +117,36 @@ void suite_redact(void) {
     ZU_CHECK(strstr(s, "<redacted>") != NULL);
     zu_buf_free(&b);
 
+    ZU_CASE("the scheme is anchored, so arbitrary text is never mangled");
+    /* Scanning for "://" anywhere treated this as scheme + authority and
+     * DELETED " with u:p@" from the middle. Silently removing text from a
+     * diagnostic is worse than not redacting it. */
+    s = red_url(&b, &p, "not a url at all :// with u:p@h");
+    ZU_CHECK(streq(s, "not a url at all :// with u:p@h"));
+    zu_buf_free(&b);
+    s = red_url(&b, &p, "1http://u:p@h/");   /* a scheme cannot start with a digit */
+    ZU_CHECK(streq(s, "1http://u:p@h/"));
+    zu_buf_free(&b);
+
+    ZU_CASE("a credential nested in a query VALUE is a documented gap");
+    /* Anchoring the scheme means a URL inside a query parameter is not
+     * descended into. The mitigation is the parameter list: name the
+     * parameter and its whole value is replaced. Asserted so the behaviour is
+     * visible rather than discovered later. */
+    s = red_url(&b, &p, "https://h/cb?next=http://u:pw@evil.example/");
+    ZU_CHECK(strstr(s, "u:pw") != NULL);          /* not redacted, by design */
+    zu_buf_free(&b);
+    {
+        static const char *const extra_p[] = { "next", NULL };
+        zu_redact_policy q;
+        zu_redact_policy_init(&q);
+        q.extra_params = extra_p;
+        s = red_url(&b, &q, "https://h/cb?next=http://u:pw@evil.example/");
+        ZU_CHECK(strstr(s, "u:pw") == NULL);      /* mitigated by naming it */
+        ZU_CHECK(strstr(s, "<redacted>") != NULL);
+        zu_buf_free(&b);
+    }
+
     ZU_CASE("a bare path or garbage passes through without crashing");
     s = red_url(&b, &p, "/just/a/path?api_key=S");
     ZU_CHECK(streq(s, "/just/a/path?api_key=<redacted>"));

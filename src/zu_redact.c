@@ -84,12 +84,25 @@ int zu_redact_url(const zu_redact_policy *p, const char *url, size_t len,
     if (!url || !out) return 0;
 
     /* Find the authority without parsing: this must work on a URL that FAILED
-     * to parse, because that is precisely the URL an error message is about. */
+     * to parse, because that is precisely the URL an error message is about.
+     *
+     * The scheme is ANCHORED at position 0 and must match RFC 3986
+     * scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ). Scanning for
+     * "://" anywhere was wrong: "not a url at all :// with u:p@h" was treated
+     * as scheme + authority, and the "authority" — which was ordinary text —
+     * had its content deleted. Silently removing text from a diagnostic is
+     * worse than not redacting it. */
     scheme_end = NULL;
-    for (i = 0; i + 2 < len; i++) {
-        if (url[i] == ':' && url[i + 1] == '/' && url[i + 2] == '/') {
-            scheme_end = url + i + 3;
-            break;
+    if (len > 0 && ((url[0] >= 'a' && url[0] <= 'z') || (url[0] >= 'A' && url[0] <= 'Z'))) {
+        for (i = 1; i + 2 < len; i++) {
+            char ch = url[i];
+            if (ch == ':' && url[i + 1] == '/' && url[i + 2] == '/') {
+                scheme_end = url + i + 3;
+                break;
+            }
+            if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                  (ch >= '0' && ch <= '9') || ch == '+' || ch == '-' || ch == '.'))
+                break;   /* not a scheme after all */
         }
     }
 

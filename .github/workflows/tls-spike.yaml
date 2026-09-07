@@ -230,3 +230,22 @@ jobs:
           sed -i '1i #include <string.h>' preflight.c
           cc -O1 -Wall -o preflight preflight.c $(pkg-config --cflags --libs openssl zlib)
           ./preflight
+
+  # The parts of the C core that need a resolver or a peer, kept OUT of
+  # c-core.yaml so that suite stays deterministic and offline.
+  net-online:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ${{ matrix.os }}
+    name: C core, network-dependent (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run the suite with the DNS assertions enabled
+        timeout-minutes: 5
+        working-directory: ctest
+        env:
+          ZU_TEST_DNS: "1"
+        run: make run

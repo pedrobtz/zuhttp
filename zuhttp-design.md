@@ -2906,6 +2906,22 @@ By default:
 
 Redacted values render as `<redacted>`, never as a truncated prefix — a prefix is enough to confirm a guess.
 
+**Two implementation constraints that fall out of "it must work on a URL that
+did not parse":**
+
+- The redactor does not use the URI parser, because the malformed URL is
+  precisely the one an error message is about.
+- The scheme is therefore matched by hand, and must be **anchored** at the
+  start and match RFC 3986 `scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )`.
+  Scanning for `://` anywhere causes ordinary text to be treated as
+  scheme + authority and its content deleted — silently removing text from a
+  diagnostic is worse than not redacting it.
+
+**Known gap:** a credential-bearing URL nested inside a query *value*
+(`?next=http://u:pw@host/`) is not descended into. The mitigation is the
+parameter list — naming `next` replaces the whole value. This is a deliberate
+trade against mangling text, and is tested in both directions.
+
 #### 42.2 Where it applies
 
 | Egress | Redacted |

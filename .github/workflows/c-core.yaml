@@ -62,7 +62,14 @@ jobs:
 
       # -Werror with -Wconversion/-Wsign-conversion/-Wshadow/-Wvla.
       # Design §44: warnings are errors in project-owned code.
+      #
+      # timeout-minutes is deliberate. A test that blocks used to sit for the
+      # job's full default budget while reporting nothing, which is how a DNS
+      # lookup inside the "deterministic and offline" suite went unnoticed
+      # across several commits. The suite runs in well under a minute; if it
+      # has not finished in five, it is hung and the log should say so.
       - name: Build and run (warnings as errors)
+        timeout-minutes: 5
         working-directory: ctest
         run: |
           if [ "${{ runner.os }}" = "Windows" ]; then
@@ -73,6 +80,7 @@ jobs:
 
       - name: ASan + UBSan
         if: runner.os != 'Windows'
+        timeout-minutes: 10
         working-directory: ctest
         run: make asan
 
@@ -102,6 +110,7 @@ jobs:
       - name: Install valgrind
         run: sudo apt-get update && sudo apt-get install -y valgrind
       - name: Run under valgrind
+        timeout-minutes: 20
         working-directory: ctest
         run: |
           make zu_ctest

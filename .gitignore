@@ -10,8 +10,10 @@ src/vendor/**/*.o
 
 # ctest binaries — committed by mistake in 5510a4e, untracked since.
 ctest/zu_ctest
+ctest/zu_ctest_asan
 ctest/zu_tlstest
 ctest/build/
+ctest/build-asan/
 *.dSYM/
 
 # fuzz binaries and artifacts (the corpus IS tracked — it is the regression suite)

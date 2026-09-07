@@ -15,7 +15,11 @@ CC      ?= cc
 SRC     := ../src
 VENDOR  := $(SRC)/vendor/picohttpparser
 URIDIR  := $(SRC)/vendor/uriparser
-BUILD   := build
+# Vendored objects are cached, so the directory is keyed on the build flavour.
+# Without this, `make asan` left ASan-instrumented picohttpparser.o behind and
+# the next plain `make zu_ctest` reused it, failing to link with an obscure
+# "___asan_init not found".
+BUILD   := build$(BUILD_SUFFIX)
 
 INC     := -I$(SRC) -I$(VENDOR) -I$(URIDIR) -I.
 WARN    := -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion \
@@ -72,10 +76,14 @@ strict: CFLAGS += -Werror
 strict: clean zu_ctest
 	./zu_ctest
 
+asan: BUILD_SUFFIX := -asan
 asan: CFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
 asan: VCFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
-asan: clean zu_ctest
-	./zu_ctest
+asan: zu_ctest_asan
+	./zu_ctest_asan
+
+zu_ctest_asan: $(OWN) $(TESTS) $(VOBJ)
+	$(CC) $(CFLAGS) -o $@ $(OWN) $(TESTS) $(VOBJ) -lz $(NETLIBS)
 
 # --- S7 TLS engine tests -------------------------------------------------
 # A SEPARATE binary: these need a real TLS peer and therefore the network,
@@ -100,6 +108,6 @@ tls: zu_tlstest
 	./zu_tlstest
 
 clean:
-	rm -rf zu_ctest zu_tlstest zu_ctest.dSYM zu_tlstest.dSYM $(BUILD) *.o
+	rm -rf zu_ctest zu_ctest_asan zu_tlstest *.dSYM build build-asan *.o
 
 .PHONY: all run strict asan clean tls
