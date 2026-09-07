@@ -100,18 +100,43 @@ jobs:
           $CC -O1 -o probe.exe probe.c -lsecur32 -lcrypt32 -lws2_32
           ./probe.exe
 
-      - name: Probe B — does SCH_CREDENTIALS exist?  (gate for R-3)
+      - name: Probe B — does SCH_CREDENTIALS exist at the default target?
         working-directory: spike/windows-schannel
         run: |
           CC=$(R CMD config CC)
           if $CC -fsyntax-only probe_struct.c 2> struct_err.txt; then
-            echo "SCH_CREDENTIALS: PRESENT — TLS 1.3 Schannel path is available under Rtools."
-            echo "::notice::S1 verdict: Rtools exposes SCH_CREDENTIALS. Appendix B R-3 can be retired."
+            echo "SCH_CREDENTIALS: PRESENT at the toolchain's default _WIN32_WINNT."
           else
-            echo "SCH_CREDENTIALS: MISSING under the Rtools toolchain."
+            echo "SCH_CREDENTIALS: MISSING at the toolchain's default _WIN32_WINNT."
+            echo "--- compiler output (first 5 lines) ---"
+            head -5 struct_err.txt
+          fi
+
+      # mingw-w64 gates the TLS 1.3 Schannel declarations behind
+      # _WIN32_WINNT >= 0x0A00. Rtools defaults to 0x0601 (Windows 7), so
+      # "missing" may mean "not requested" rather than "not shipped".
+      # This is the probe that actually decides R-3.
+      - name: Probe C — retry with _WIN32_WINNT=0x0A00  (gate for R-3)
+        working-directory: spike/windows-schannel
+        run: |
+          CC=$(R CMD config CC)
+          echo "Retrying with -D_WIN32_WINNT=0x0A00 -DNTDDI_VERSION=0x0A000000"
+          if $CC -fsyntax-only -D_WIN32_WINNT=0x0A00 -DNTDDI_VERSION=0x0A000000 \
+                 probe_struct.c 2> struct_err_win10.txt; then
+            echo
+            echo "SCH_CREDENTIALS: PRESENT once the target is raised to Windows 10."
+            echo "::notice::S1 verdict: Rtools DOES ship the TLS 1.3 Schannel declarations; they are gated behind _WIN32_WINNT>=0x0A00. Fix is a compile flag, not local struct declarations. R-3 downgraded."
+            $CC -O1 -D_WIN32_WINNT=0x0A00 -DNTDDI_VERSION=0x0A000000 \
+                -o probe_win10.exe probe.c -lsecur32 -lcrypt32 -lws2_32
+            echo
+            echo "--- full report at _WIN32_WINNT=0x0A00 ---"
+            ./probe_win10.exe
+          else
+            echo
+            echo "SCH_CREDENTIALS: STILL MISSING even at _WIN32_WINNT=0x0A00."
             echo "--- compiler output ---"
-            cat struct_err.txt
-            echo "::warning::S1 verdict: Rtools lacks SCH_CREDENTIALS. zuhttp must declare it locally (design 47.4) or ship Windows TLS 1.2-only."
+            cat struct_err_win10.txt
+            echo "::warning::S1 verdict: Rtools genuinely lacks SCH_CREDENTIALS. zuhttp must declare it locally (design 47.4) or ship Windows TLS 1.2-only. R-3 confirmed."
           fi
 
   # ---------------------------------------------------------------
