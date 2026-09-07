@@ -2952,6 +2952,20 @@ Sanitizers:
 - UBSan.
 - MSan where feasible.
 
+Each harness must build **two** ways from one source file: against libFuzzer,
+and against a plain driver that feeds corpus files in. The second needs no
+special toolchain, which is what lets the checked-in corpus act as a
+regression suite on every platform — including Windows under Rtools, where
+libFuzzer does not exist. A crash found once anywhere then becomes a seed that
+can never come back anywhere.
+
+**Only curated seeds belong in the repository.** A 45-second run per target
+grew the corpus to ~29,000 files, and `-merge=1` minimisation still left
+11,914 files and 47 MB. Every committed seed should be a real protocol sample,
+a specific attack this document names, or a regression input for a bug that
+was actually found — something a reviewer can read. Soak-grown corpora belong
+in CI artifacts.
+
 CI should periodically fuzz using corpus seeds.
 
 ### 44. Static Analysis

@@ -1,0 +1,126 @@
+# Fuzzing (design §43, roadmap S18).
+#
+# Two jobs, deliberately different in cost:
+#
+#   replay  — every platform, every push. Runs the SAME harnesses against the
+#             checked-in corpus with no libFuzzer, so a crash found once on
+#             one platform can never come back on another. Cheap and total.
+#   smoke   — Linux only, short. Real libFuzzer + ASan + UBSan, to catch a
+#             regression that the corpus does not yet cover.
+#
+# The 24 h-per-target exit criterion in S18 is the `soak` job, which is
+# scheduled rather than per-push because it costs hours.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  schedule:
+    - cron: '17 3 * * 0'      # Sundays, for the soak
+  workflow_dispatch:
+    inputs:
+      soak_seconds:
+        description: 'Seconds per target for the soak job'
+        default: '900'
+
+name: fuzz.yaml
+
+permissions: read-all
+
+jobs:
+  # The corpus as a cross-platform regression suite. No clang required, so
+  # this also runs under Rtools on Windows.
+  replay:
+    runs-on: ${{ matrix.os }}
+    name: Corpus replay (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: r-lib/actions/setup-r@v2
+        if: runner.os == 'Windows'
+        with:
+          r-version: release
+
+      - name: Install zlib headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev
+
+      - name: Replay every seed
+        working-directory: fuzz
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            make replay-run CC="$(R CMD config CC)"
+          else
+            make replay-run
+          fi
+
+      # The corpus is only a regression suite if the bugs it encodes would
+      # actually be caught. ASan is what makes an overread a failure rather
+      # than a silent pass.
+      - name: Replay under ASan + UBSan
+        if: runner.os != 'Windows'
+        working-directory: fuzz
+        run: make replay-asan
+
+  smoke:
+    runs-on: ubuntu-latest
+    name: libFuzzer smoke (60s per target)
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install clang and zlib
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+      - name: Build and run
+        working-directory: fuzz
+        run: make fuzz-run SECS=60 FUZZ_CC=clang
+      - name: Upload any crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: fuzz/crash-*
+          if-no-files-found: ignore
+
+  soak:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    name: libFuzzer soak
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [response, chunked, headers, uri, redirect, inflate]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install clang and zlib
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+      - name: Soak ${{ matrix.target }}
+        working-directory: fuzz
+        run: |
+          SECS="${{ github.event.inputs.soak_seconds || 14400 }}"
+          make fuzz_${{ matrix.target }} FUZZ_CC=clang
+          mkdir -p corpus/${{ matrix.target }}
+          ./fuzz_${{ matrix.target }} corpus/${{ matrix.target }} \
+            -max_total_time="$SECS" -print_final_stats=1 \
+            -artifact_prefix=./crash-${{ matrix.target }}-
+      - name: Upload any crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-crashes-${{ matrix.target }}
+          path: fuzz/crash-*
+          if-no-files-found: ignore
+      # A soak that finds new coverage should keep it.
+      - name: Upload the grown corpus
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: corpus-${{ matrix.target }}
+          path: fuzz/corpus/${{ matrix.target }}
+          if-no-files-found: ignore

@@ -50,7 +50,7 @@ graph TD
     S16["S16 · Pool + fork/session safety<br/>PARTIAL — C core done"]
     S17["S17 · Streaming sinks"]
 
-    S18["S18 · Fuzzing + sanitizers + CI"]
+    S18["S18 · Fuzzing + sanitizers + CI<br/>PARTIAL — 6/7 targets"]
     S19["S19 · CRAN packaging"]
     S20["S20 · Documentation"]
     S21["S21 · Security review → 1.0"]
@@ -425,11 +425,38 @@ Memory/file/discard/connection/callback sinks; atomic file writes via temp-and-r
 
 libFuzzer harnesses for the parser wrapper, chunked decoder, header normalisation, URI handling, redirect resolution, proxy env parsing, and decompression limits; ASan/UBSan/MSan builds; `-Wall -Wextra -Wpedantic` and MSVC `/W4` as errors for project-owned code; corpus shared with §50.3.
 
+Each harness builds **two** ways from the same source: with libFuzzer (finds
+bugs, needs clang) and with a plain corpus-replay driver (needs nothing, so
+the checked-in corpus is a regression suite on every platform including
+Rtools, where libFuzzer does not exist).
+
 **Exit criteria**
 
-- [ ] All seven targets build and run without R.
-- [ ] 24 h per target with zero crashes and zero sanitizer reports.
-- [ ] Warnings-as-errors green on all platforms.
+- [x] Six of seven targets build and run without R: response, chunked,
+      headers, uri, redirect, inflate. **Proxy env parsing is the seventh and
+      is blocked on S10** — the code does not exist yet.
+- [x] Warnings-as-errors green on all platforms (already enforced by
+      `c-core.yaml`; the fuzz targets add no project-owned code).
+- [ ] 24 h per target with zero crashes and zero sanitizer reports. **Partial:**
+      45 s per target locally under ASan+UBSan — ~49M executions total, zero
+      findings. The `soak` job in `fuzz.yaml` is scheduled weekly at 4 h per
+      target; 24 h is a pre-1.0 run, not a per-push one.
+
+**Found by this stage, not by review**
+
+`zu_inflate` enforced the §21.4 caps by checking *after* appending a 16 KB
+inflate chunk, so a 1 MB `max_decompressed_bytes` delivered 1 MB + 16 KB. The
+figure a caller sized memory from was therefore not a bound. Fixed by bounding
+the zlib output window to the remaining allowance and never delivering past
+the cap; `out_total <= cap` is now exact, and there are three regression tests.
+
+Two harness assertions were themselves wrong and worth recording, because both
+are easy to repeat: asserting a resolved `Location` has no userinfo at all
+(an absolute Location legitimately replaces the whole authority, credentials
+included — the real invariant is *provenance*), and testing that an origin
+string does not contain the userinfo as a substring (libFuzzer found
+`http://h@oocd.com:/` in seconds: userinfo `h` occurs inside `http://`). The
+correct check is that an origin string contains no `@` at all.
 
 ### S19 · CRAN packaging
 

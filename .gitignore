@@ -14,6 +14,19 @@ ctest/zu_tlstest
 ctest/build/
 *.dSYM/
 
+# fuzz binaries and artifacts (the corpus IS tracked — it is the regression suite)
+fuzz/fuzz_response
+fuzz/fuzz_chunked
+fuzz/fuzz_headers
+fuzz/fuzz_uri
+fuzz/fuzz_redirect
+fuzz/fuzz_inflate
+fuzz/replay_*
+!fuzz/replay_main.c
+fuzz/crash-*
+fuzz/leak-*
+fuzz/timeout-*
+
 # spike binaries
 spike/**/tmp/
 spike/macos-tls/tls_spike

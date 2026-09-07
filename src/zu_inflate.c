@@ -74,6 +74,63 @@ static zu_code start_deflate(zu_inflate *z) {
     return ZU_OK;
 }
 
+static zu_code check_limits(zu_inflate *z, zu_error *err);
+
+/* How many more output bytes the §21.4 caps still permit. UINT64_MAX means
+ * unlimited. Both caps are consulted, because either can be the binding one. */
+static uint64_t remaining_allowance(const zu_inflate *z) {
+    uint64_t room = UINT64_MAX;
+    if (z->max_out) {
+        uint64_t left = (z->out_total >= z->max_out) ? 0 : z->max_out - z->out_total;
+        if (left < room) room = left;
+    }
+    /* The ratio only becomes meaningful once enough input has been seen, and
+     * the multiplication is guarded so a large in_total cannot wrap. */
+    if (z->max_ratio && z->in_total >= 32
+        && z->in_total <= UINT64_MAX / (uint64_t)z->max_ratio) {
+        uint64_t cap  = z->in_total * (uint64_t)z->max_ratio;
+        uint64_t left = (z->out_total >= cap) ? 0 : cap - z->out_total;
+        if (left < room) room = left;
+    }
+    return room;
+}
+
+/* §21.4: bound what zlib may PRODUCE, rather than noticing afterwards that it
+ * produced too much. Before this the caps overshot by up to one 16 KB chunk,
+ * so a caller sizing memory from max_decompressed_bytes got max + 16 KB.
+ *
+ * One byte of headroom is deliberate: it is how the loop tells "the body is
+ * larger than the cap" from "the body is exactly the cap". A body of exactly
+ * max_out produces nothing extra here and ends with Z_STREAM_END, which must
+ * still succeed. */
+static uInt out_window(const zu_inflate *z, size_t chunk_size) {
+    uint64_t room = remaining_allowance(z);
+    if (room >= (uint64_t)chunk_size) return (uInt)chunk_size;
+    return (uInt)(room + 1);
+}
+
+/* Append at most the remaining allowance; report a limit error if the stream
+ * wanted to produce more. This is what makes out_total <= the cap a hard
+ * invariant — out_window() alone does not, because of its one-byte headroom.
+ * The two are complementary: the window stops zlib doing the work (overshoot
+ * 16 KB -> 1 byte), and this stops the last byte reaching the caller. */
+static zu_code deliver(zu_inflate *z, const unsigned char *chunk, size_t produced,
+                       zu_buffer *out, zu_error *err) {
+    uint64_t allow = remaining_allowance(z);
+    if ((uint64_t)produced > allow) {
+        if (allow && !zu_buf_append(out, chunk, (size_t)allow)) return ZU_ERR_NOMEM;
+        z->out_total += allow;
+        (void)check_limits(z, err);
+        if (err && err->code != ZU_ERR_BODY_LIMIT)
+            zu_error_set(err, ZU_ERR_BODY_LIMIT, ZU_PHASE_DECODE,
+                         "decompressed body exceeds the configured limit");
+        return ZU_ERR_BODY_LIMIT;
+    }
+    if (produced && !zu_buf_append(out, chunk, produced)) return ZU_ERR_NOMEM;
+    z->out_total += produced;
+    return check_limits(z, err);
+}
+
 static zu_code check_limits(zu_inflate *z, zu_error *err) {
     if (z->max_out && z->out_total > z->max_out) {
         zu_error_set(err, ZU_ERR_BODY_LIMIT, ZU_PHASE_DECODE,
@@ -132,7 +189,7 @@ zu_code zu_inflate_run(zu_inflate *z, const void *in, size_t in_len,
         for (;;) {
             int ret;
             s->next_out = chunk;
-            s->avail_out = (uInt)sizeof chunk;
+            s->avail_out = out_window(z, sizeof chunk);
             ret = inflate(s, Z_NO_FLUSH);
             if (ret != Z_OK && ret != Z_STREAM_END && ret != Z_BUF_ERROR) {
                 zu_error_set(err, ZU_ERR_BODY_DECODE, ZU_PHASE_DECODE,
@@ -140,11 +197,10 @@ zu_code zu_inflate_run(zu_inflate *z, const void *in, size_t in_len,
                 return ZU_ERR_BODY_DECODE;
             }
             {
-                size_t produced = sizeof chunk - s->avail_out;
+                size_t produced = (size_t)(s->next_out - chunk);
                 if (produced) {
-                    if (!zu_buf_append(out, chunk, produced)) return ZU_ERR_NOMEM;
-                    z->out_total += produced;
-                    if (check_limits(z, err) != ZU_OK) return ZU_ERR_BODY_LIMIT;
+                    zu_code lrc = deliver(z, chunk, produced, out, err);
+                    if (lrc != ZU_OK) return lrc;
                 }
                 if (ret == Z_STREAM_END) { z->finished = 1; return ZU_OK; }
                 if (s->avail_in == 0 || produced == 0) break;
@@ -161,7 +217,7 @@ zu_code zu_inflate_run(zu_inflate *z, const void *in, size_t in_len,
         int ret;
         size_t produced;
         s->next_out = chunk;
-        s->avail_out = (uInt)sizeof chunk;
+        s->avail_out = out_window(z, sizeof chunk);
         ret = inflate(s, Z_NO_FLUSH);
 
         if (ret != Z_OK && ret != Z_STREAM_END && ret != Z_BUF_ERROR) {
@@ -170,11 +226,10 @@ zu_code zu_inflate_run(zu_inflate *z, const void *in, size_t in_len,
             return ZU_ERR_BODY_DECODE;
         }
 
-        produced = sizeof chunk - s->avail_out;
+        produced = (size_t)(s->next_out - chunk);
         if (produced) {
-            if (!zu_buf_append(out, chunk, produced)) return ZU_ERR_NOMEM;
-            z->out_total += produced;
-            if (check_limits(z, err) != ZU_OK) return ZU_ERR_BODY_LIMIT;
+            zu_code lrc = deliver(z, chunk, produced, out, err);
+            if (lrc != ZU_OK) return lrc;
         }
 
         if (ret == Z_STREAM_END) { z->finished = 1; return ZU_OK; }

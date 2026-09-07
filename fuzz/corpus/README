@@ -1,0 +1,15 @@
+Curated fuzz seeds (design §50.3).
+
+Every file here is hand-written and explainable: a real protocol sample, or a
+specific attack the design names — CL/TE conflict, duplicate Content-Length,
+obs-fold, CRLF injection, an over-large port, a decompression bomb — or a
+regression input for a bug that was actually found.
+
+Soak-grown corpora are deliberately NOT committed. A 45-second run per target
+grew this to ~29,000 files and 47 MB, and even after `-merge=1` minimisation it
+was 11,914 files and 47 MB of unexplainable blobs. Those belong in CI
+artifacts, which is what the `soak` job in .github/workflows/fuzz.yaml
+uploads. What lives in git is the part a reviewer can read.
+
+Naming: `seedNN` for the enumerated cases, otherwise a name saying what the
+input is. `regress-*` marks an input that once crashed something.

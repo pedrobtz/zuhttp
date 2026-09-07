@@ -1,6 +1,7 @@
 #include "zu_test.h"
 #include "zu_inflate.h"
 #include "zu_alloc.h"
+#include "zu_buffer.h"
 #include <string.h>
 #include <zlib.h>
 
@@ -21,6 +22,27 @@ static size_t compress_with(int windowBits, const void *src, size_t n,
     if (deflate(&s, Z_FINISH) != Z_STREAM_END) { deflateEnd(&s); return 0; }
     deflateEnd(&s);
     return dcap - s.avail_out;
+}
+
+/* A highly compressible payload of `n` zero bytes, gzipped into a zu_buffer.
+ * The compression ratio is what makes it a bomb: 4 MB of zeros is ~4 KB. */
+static int make_gzip_of_zeros(zu_buffer *out, size_t n) {
+    unsigned char *zeros;
+    unsigned char *comp;
+    size_t clen;
+    int ok = 0;
+    if (!zu_buf_init(out, 256, 64 * 1024 * 1024)) return 0;
+    zeros = (unsigned char *)zu_alloc(n);
+    comp  = (unsigned char *)zu_alloc(n / 2 + 1024);
+    if (zeros && comp) {
+        memset(zeros, 0, n);
+        clen = compress_with(15 + 16, zeros, n, comp, n / 2 + 1024, 9);
+        if (clen) ok = zu_buf_append(out, comp, clen);
+    }
+    zu_free(zeros);
+    zu_free(comp);
+    if (!ok) zu_buf_free(out);
+    return ok;
 }
 
 void suite_inflate(void) {
@@ -181,6 +203,58 @@ void suite_inflate(void) {
         ZU_CHECK_EQ_INT(zu_inflate_run(&z, comp, clen, &out, &e), ZU_OK);
         ZU_CHECK_EQ_INT(out.len, sizeof zeros);
         zu_inflate_free(&z); zu_buf_free(&out);
+    }
+
+    /* Found by the S18 fuzz target, not by review: the caps were checked
+     * AFTER a 16 KB inflate chunk was appended, so a 1 MB limit delivered
+     * 1 MB + 16 KB. A caller sizing memory from max_decompressed_bytes was
+     * therefore given a figure that was not a bound (§21.4). */
+    ZU_CASE("a bomb is stopped AT the cap, not one chunk past it");
+    {
+        zu_buffer src, out;
+        zu_inflate z;
+        zu_error e;
+        const uint64_t cap = 64 * 1024;   /* smaller than one 16 KB chunk x 4 */
+        ZU_CHECK(make_gzip_of_zeros(&src, 4 * 1024 * 1024));
+        ZU_CHECK(zu_buf_init(&out, 256, 16 * 1024 * 1024));
+        ZU_CHECK_EQ_INT(zu_inflate_init(&z, ZU_ENC_GZIP, cap, 0), ZU_OK);
+        ZU_CHECK_EQ_INT(zu_inflate_run(&z, src.data, src.len, &out, &e), ZU_ERR_BODY_LIMIT);
+        /* Exactly the cap. Not "close to", not "the cap plus a chunk". */
+        ZU_CHECK_EQ_INT((long long)z.out_total, (long long)cap);
+        ZU_CHECK_EQ_INT((long long)out.len, (long long)cap);
+        zu_buf_free(&out); zu_buf_free(&src); zu_inflate_free(&z);
+    }
+
+    ZU_CASE("a body of exactly the cap is ACCEPTED, not rejected");
+    {
+        zu_buffer src, out;
+        zu_inflate z;
+        zu_error e;
+        const size_t n = 50000;
+        ZU_CHECK(make_gzip_of_zeros(&src, n));
+        ZU_CHECK(zu_buf_init(&out, 256, 1024 * 1024));
+        /* The off-by-one that the one-byte output headroom exists to avoid:
+         * bounding the window at the cap would make this look like an
+         * overflow, because zlib needs one more call to report Z_STREAM_END. */
+        ZU_CHECK_EQ_INT(zu_inflate_init(&z, ZU_ENC_GZIP, n, 0), ZU_OK);
+        ZU_CHECK_EQ_INT(zu_inflate_run(&z, src.data, src.len, &out, &e), ZU_OK);
+        ZU_CHECK_EQ_INT((long long)out.len, (long long)n);
+        zu_buf_free(&out); zu_buf_free(&src); zu_inflate_free(&z);
+    }
+
+    ZU_CASE("the ratio cap also bounds output exactly");
+    {
+        zu_buffer src, out;
+        zu_inflate z;
+        zu_error e;
+        ZU_CHECK(make_gzip_of_zeros(&src, 4 * 1024 * 1024));
+        ZU_CHECK(zu_buf_init(&out, 256, 16 * 1024 * 1024));
+        ZU_CHECK_EQ_INT(zu_inflate_init(&z, ZU_ENC_GZIP, 0, 10), ZU_OK);
+        ZU_CHECK_EQ_INT(zu_inflate_run(&z, src.data, src.len, &out, &e), ZU_ERR_BODY_LIMIT);
+        /* out_total may never exceed in_total * max_ratio. */
+        ZU_CHECK(z.out_total <= z.in_total * 10);
+        ZU_CHECK_EQ_INT((long long)out.len, (long long)z.out_total);
+        zu_buf_free(&out); zu_buf_free(&src); zu_inflate_free(&z);
     }
 
     ZU_CASE("no leaks across the suite");
