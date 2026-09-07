@@ -3257,6 +3257,24 @@ These are the numbers the §63 prototype is judged against:
 | Source tarball | ≤ 2 MB | > 5 MB |
 | Cold compile time, one core | ≤ 90 s | > 180 s |
 
+**Measured 2026-09-07, after S7 and D-11** (code lines, excluding blank and
+comment-only lines; the LOC rows only — the runtime rows need the §63
+prototype, which does not exist yet):
+
+| Metric | Measured | Target | Status |
+|---|---|---|---|
+| Project-owned C | 2,601 | ≤ 8,000 | 33% of budget |
+| Vendored: picohttpparser | 598 | — | |
+| Vendored: uriparser subset | 3,869 | — | |
+| **Total C** | **7,068** | ≤ 25,000 | 28% of budget |
+
+Counting raw lines instead — which is what a reviewer actually reads, license
+headers and doxygen included — gives 11,459, still under the *code-line*
+budget. The two vendored components together are 63% of the total C, which is
+the number to watch: it is the code this project does not own but must still
+security-track (§46.2, §48). Both remaining backends (Schannel S8, macOS S9)
+add project-owned lines only.
+
 Exceeding an abort threshold is not a bug to be fixed later; it is a signal that the architecture is not delivering the advantage the project exists to provide, and it should trigger the reconsideration in Appendix B.
 
 The goal is not to beat libcurl everywhere, but to avoid regressions caused by architecture — and to be honest, in public, when a number is worse.
