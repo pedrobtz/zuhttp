@@ -80,6 +80,24 @@ jobs:
             make strict
           fi
 
+      # TEMPORARY diagnostic. suite_net blocks inside zu_net_connect on Linux
+      # only, and reasoning from the source has produced three wrong guesses.
+      # strace names the syscall; this step comes out once the cause is fixed.
+      - name: Diagnose the suite_net block (strace)
+        if: runner.os == 'Linux' && failure()
+        timeout-minutes: 4
+        working-directory: ctest
+        env:
+          ZU_TEST_TRACE: "1"
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq strace
+          make zu_ctest
+          timeout 90 strace -f -tt -o /tmp/st.log ./zu_ctest || true
+          echo "=== last 60 syscalls before the block ==="
+          tail -60 /tmp/st.log
+          echo "=== every socket/connect/accept/poll in the trace ==="
+          grep -nE 'socket\(|bind\(|listen\(|connect\(|accept|poll\(|getsockname|getaddrinfo|recvfrom|setsockopt' /tmp/st.log | tail -50
+
       - name: ASan + UBSan
         if: runner.os != 'Windows'
         timeout-minutes: 10
