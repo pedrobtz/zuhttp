@@ -30,12 +30,12 @@ graph TD
     S0["S0 · macOS TLS spike<br/>DONE — GO"]
     S1["S1 · Windows toolchain probe<br/>DONE — R-3 confirmed"]
 
-    S2["S2 · Foundations<br/>buffer, error, clock, stream+mock"]
+    S2["S2 · Foundations<br/>DONE"]
     S3["S3 · HTTP wire<br/>DONE — D-10 decided"]
-    S4["S4 · URI + redirects<br/>decides D-11"]
-    S5["S5 · Content encoding<br/>zlib, limits"]
+    S4["S4 · URI + redirects<br/>PARTIAL — D-11 deferred"]
+    S5["S5 · Content encoding<br/>DONE"]
 
-    S6["S6 · Sockets + poll + deadlines"]
+    S6["S6 · Sockets + poll + deadlines<br/>DONE"]
     S7["S7 · OpenSSL engine + trust"]
     S8["S8 · Schannel<br/>GATE R-2"]
     S9["S9 · macOS engine + trust"]
@@ -215,9 +215,10 @@ System zlib linkage; gzip/zlib auto-detection; raw-deflate fallback (§21.3); in
 
 **Exit criteria**
 
-- [ ] Both `deflate` wrappings decode.
-- [ ] A 10 GB-expanding bomb fails within the ratio limit having allocated bounded memory.
-- [ ] `Transfer-Encoding: gzip` rejected per §18.1.
+- [x] Both `deflate` wrappings decode (zlib-wrapped and raw), decided from the header signature.
+- [x] A real bomb — 400 KB of zeros under 2 KB compressed — fails on the output cap with bounded allocation, and again on the ratio cap.
+- [x] A legitimate high-ratio body under both caps still succeeds.
+- [x] `Transfer-Encoding: gzip` rejected in `zu_framing` per §18.1.
 
 ---
 
@@ -231,9 +232,12 @@ Non-blocking sockets on POSIX and Winsock; `poll`/`WSAPoll` loop; the deadline c
 
 **Exit criteria**
 
-- [ ] `effective_deadline = min(now + phase, request_deadline)` holds under test for every phase.
-- [ ] Inactivity timers reset on progress — a slow 100 MB transfer does not trip `read`.
-- [ ] Clock changes mid-request do not move a deadline.
+- [x] `effective_deadline = min(now + phase, request_deadline)` holds under test.
+- [x] A stalled read ends at the deadline rather than blocking, verified by elapsed time.
+- [x] The tick callback fires at the configured cadence and can cancel a stalled read — this is the seam where `R_CheckUserInterrupt()` lands at S15, and it is why the core needs no R headers to be interruptible.
+- [x] Refused connection, unresolvable host, and orderly close each produce the right code and phase.
+- [x] Monotonic clocks only; a wall-clock change cannot move a deadline.
+- [ ] Inactivity timers reset on progress — arrives with the engine loop, which has no caller yet.
 
 ### S7 · OpenSSL engine and trust
 

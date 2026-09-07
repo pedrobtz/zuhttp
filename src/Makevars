@@ -22,4 +22,5 @@ OBJECTS = init.o \
           zu_uri.o \
           zu_redirect.o \
           zu_inflate.o \
+          zu_net.o \
           vendor/picohttpparser/picohttpparser.o
