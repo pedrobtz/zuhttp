@@ -1,3 +1,17 @@
+/* Feature-test macros MUST precede every system header.
+ *
+ * -std=c99 defines __STRICT_ANSI__, under which glibc hides the POSIX
+ * networking API: struct addrinfo, getnameinfo() and NI_NUMERICHOST are all
+ * invisible without this. Darwin exposes them regardless, which is exactly why
+ * this built on macOS and failed on Linux. */
+#if !defined(_WIN32)
+#  if defined(__APPLE__)
+#    define _DARWIN_C_SOURCE
+#  else
+#    define _POSIX_C_SOURCE 200112L
+#  endif
+#endif
+
 #include "zu_net.h"
 #include "zu_alloc.h"
 #include <string.h>
@@ -17,7 +31,10 @@
 static int sock_errno(void) { return WSAGetLastError(); }
 static int set_nonblocking(zu_sock s) {
     u_long on = 1;
-    return ioctlsocket(s, FIONBIO, &on) == 0;
+    /* FIONBIO expands to 0x8004667E (unsigned), but ioctlsocket takes a signed
+     * long, so the conversion changes the value. The cast is explicit rather
+     * than silencing the warning, because the bit pattern is what matters. */
+    return ioctlsocket(s, (long)FIONBIO, &on) == 0;
 }
 #else
 #  include <sys/types.h>

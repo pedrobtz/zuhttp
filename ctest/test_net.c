@@ -1,3 +1,13 @@
+/* Same feature-test requirement as zu_net.c: glibc hides the POSIX socket
+ * API under -std=c99 without it. Must precede every system header. */
+#if !defined(_WIN32)
+#  if defined(__APPLE__)
+#    define _DARWIN_C_SOURCE
+#  else
+#    define _POSIX_C_SOURCE 200112L
+#  endif
+#endif
+
 #include "zu_test.h"
 #include "zu_net.h"
 #include "zu_alloc.h"
