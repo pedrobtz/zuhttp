@@ -10,16 +10,22 @@ void suite_buffer(void);
 void suite_error(void);
 void suite_time(void);
 void suite_stream(void);
+void suite_headers(void);
+void suite_request(void);
+void suite_framing(void);
 
 int main(void) {
     zu_alloc_stats st;
 
-    printf("zuhttp C core tests (S2 foundations)\n\n");
+    printf("zuhttp C core tests (S2 foundations + S3 wire)\n\n");
     ZU_SUITE(suite_alloc);
     ZU_SUITE(suite_error);
     ZU_SUITE(suite_buffer);
     ZU_SUITE(suite_time);
     ZU_SUITE(suite_stream);
+    ZU_SUITE(suite_headers);
+    ZU_SUITE(suite_request);
+    ZU_SUITE(suite_framing);
 
     zu_alloc_stats_get(&st);
     printf("\n%d checks, %d failures\n", zu_test_checks, zu_test_fails);

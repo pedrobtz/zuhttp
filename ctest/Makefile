@@ -9,8 +9,10 @@ SRC     := ../src
 CFLAGS  += -std=c99 -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion \
            -Wstrict-prototypes -Wold-style-definition -Wvla -O1 -g -I$(SRC) -I.
 CORE    := $(SRC)/zu_alloc.c $(SRC)/zu_buffer.c $(SRC)/zu_error.c \
-           $(SRC)/zu_time.c $(SRC)/zu_stream.c $(SRC)/zu_mock_stream.c
-TESTS   := test_main.c test_alloc.c test_buffer.c test_error.c test_time.c test_stream.c
+           $(SRC)/zu_time.c $(SRC)/zu_stream.c $(SRC)/zu_mock_stream.c \
+           $(SRC)/zu_headers.c $(SRC)/zu_request.c $(SRC)/zu_framing.c
+TESTS   := test_main.c test_alloc.c test_buffer.c test_error.c test_time.c \
+           test_stream.c test_headers.c test_request.c test_framing.c
 
 all: run
 
