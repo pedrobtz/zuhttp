@@ -4,6 +4,33 @@
 void suite_time(void);
 
 void suite_time(void) {
+    /* A clock stuck at a constant satisfies "monotonic" — non-decreasing is
+     * true of a constant — so the monotonicity checks below cannot catch the
+     * failure that actually happened: CLOCK_MONOTONIC compiled away on Linux
+     * and zu_now_ms() returned 0 forever, so no deadline ever expired.
+     *
+     * These two assertions are what would have caught it on the first run. */
+    ZU_CASE("the clock is not stuck at a constant");
+    {
+        zu_millis first = zu_now_ms();
+        zu_millis now = first;
+        long spins = 0;
+        /* CLOCK_MONOTONIC is time since boot, so 0 means the stub, not a
+         * machine that booted under a millisecond ago. */
+        ZU_CHECK(first != 0);
+        while (now == first && spins < 200000000L) { now = zu_now_ms(); spins++; }
+        ZU_CHECK(now != first);
+    }
+
+    ZU_CASE("a short deadline actually expires");
+    {
+        zu_deadline d = zu_deadline_in(5);
+        long spins = 0;
+        while (!zu_deadline_expired(d) && spins < 200000000L) spins++;
+        /* If this fails, every timeout in the library is inoperative. */
+        ZU_CHECK(zu_deadline_expired(d));
+    }
+
     ZU_CASE("the clock advances monotonically");
     {
         zu_millis a = zu_now_ms(), b;

@@ -1,3 +1,18 @@
+/* glibc hides CLOCK_MONOTONIC behind __USE_POSIX199309, which -std=c99 does
+ * NOT set: -std=c99 defines __STRICT_ANSI__, which suppresses the default
+ * feature set. Without this macro the monotonic branch below compiles away on
+ * Linux and every deadline in the library silently stops working.
+ *
+ * Same defect as the getaddrinfo one fixed in 2230b11 for zu_net.c; that fix
+ * did not reach this file. MUST precede every system header. */
+#if !defined(_WIN32)
+#  if defined(__APPLE__)
+#    define _DARWIN_C_SOURCE
+#  else
+#    define _POSIX_C_SOURCE 200112L
+#  endif
+#endif
+
 #include "zu_time.h"
 
 /* Platform shims are confined to this file (§10, §28). */
@@ -25,7 +40,16 @@ zu_millis zu_now_ms(void) {
         return (zu_millis)((mach_absolute_time() * tb.numer / tb.denom) / 1000000ull);
     }
 #  else
-    return 0;   /* no monotonic source: caller's deadlines degrade to never */
+    /* Deliberately a COMPILE error, not a runtime fallback.
+     *
+     * This used to `return 0`, with a comment noting that "caller's deadlines
+     * degrade to never". That is not a degradation, it is a total failure of
+     * §24: every timeout in the library stops firing and the first operation
+     * that waits for one hangs forever. It cost six commits to find, because
+     * a constant clock still satisfies "monotonic" and so passed suite_time.
+     *
+     * A platform with no monotonic clock must fail to build, loudly. */
+#    error "no monotonic clock: zuhttp deadlines (design 24) cannot work here"
 #  endif
 }
 #endif
