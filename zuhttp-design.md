@@ -26,7 +26,7 @@ Firm decisions and open questions were previously indistinguishable in this docu
 | D-8 | Send `Accept-Encoding: gzip` by default; decode transparently | **Accepted** | 21.2 |
 | D-9 | `zu_resp_raw()` returns decoded bytes | **Accepted** | 21.2, 31.7 |
 | D-10 | HTTP parser: **picohttpparser** (vendored, commit f4d94b4) | **Accepted** 2026-09-07 | 8.1, A.3 |
-| D-11 | URI: vendor uriparser vs project-owned RFC 3986 parser | **Open** | 8.2 |
+| D-11 | URI: vendor a SUBSET of uriparser (parse/resolve/recompose only) | **Accepted** | 8.2 |
 | D-12 | `ca_file`/`ca_data` REPLACE system trust; `ca_extra` adds to it | **Accepted** | 14.2 |
 | D-13 | Certificate pinning supported; no custom OCSP/CRL | **Accepted** | 14.4, 14.5 |
 | D-31 | Revocation checking **off by default**, opt-in via `zu_tls(revocation=)` | **Accepted** — S0 F-4 | 14.5 |
@@ -74,7 +74,7 @@ The project is deliberately **not** a reimplementation of libcurl. Its competiti
 The intended architecture combines a small amount of `zuhttp` C code with a few focused dependencies:
 
 - **HTTP/1.1 response parsing** — parser choice open between picohttpparser and llhttp; see Appendix A.3.
-- **URI parsing** — vendored `uriparser`, or a project-owned RFC 3986 parser; see §8.2.
+- **URI parsing** — a vendored subset of `uriparser` (parse/resolve/recompose), wrapped by a zuhttp policy layer; see §8.2.
 - **zlib** (system, not vendored) for gzip/deflate response decompression; see §21.
 - **TLS**, split into a protocol engine and a trust evaluator; see §13.
 
@@ -288,7 +288,7 @@ This must be stated plainly rather than left for the reader to infer:
        +-------------------+------------------+
        |                                      |
    URI handling                           HTTP parser
-   (§8.2, open)                          (§8.1, open)
+   (§8.2, decided)                       (§8.1, decided)
        |                                      |
        +-------------------+------------------+
                            |
@@ -341,7 +341,7 @@ Every vendored line counts against the size budget in §51 and becomes a fuzz ta
 | Component | Role | Est. LOC | Status |
 |---|---|---|---|
 | picohttpparser | response parsing, chunked decoding | **0.8k** (measured) | **Decided** — §8.1 |
-| URI parser | RFC 3986 parse + relative resolution | 0.6k–15k | **Open** — §8.2 |
+| URI parser | RFC 3986 parse + relative resolution | 3.9k | **Decided** — uriparser subset, §8.2 |
 | zlib | gzip/deflate | 0 (system) | **Decided** — §21 |
 | TLS engine + trust | see §13 | 4k–6k | **Blocked on spike** — §13 |
 | Project-owned engine | framing, pool, redirects, proxy, R glue | 5k–8k | Estimate |
@@ -364,29 +364,94 @@ If picohttpparser is chosen, note two properties that shape the buffering design
 
 #### 8.2 URI parser
 
+**Decided (D-11): vendor a SUBSET of `uriparser` 0.9.8.** The parse / resolve /
+recompose closure only — eight `.c` files, ~3.9k code lines — plus a zuhttp
+policy layer in `zu_uri.c`. See `src/vendor/uriparser/VENDOR` for the file list
+and `tools/update-uriparser` for the refresh procedure.
+
 What a client actually needs from RFC 3986 is narrow:
 
 - absolute URI parsing,
 - relative-reference resolution for `Location` (RFC 3986 §5),
 - IPv6 literal handling,
-- scheme/host/port/path/query decomposition,
-- percent-encoding normalization for the paths and queries this library constructs.
+- scheme/host/port/path/query decomposition.
 
-**vendoring `uriparser` costs roughly 15k LOC — more than the entire rest of the HTTP core.** It is BSD-3-Clause and well tested, but it is a general-purpose library with a text-range API that this project would wrap anyway, and once vendored it must be fuzzed and security-tracked as project surface (§43, §48). A project-owned parser covering the five bullets above is on the order of 600 lines.
+The earlier estimate in this section — "vendoring `uriparser` costs roughly 15k
+LOC, more than the entire rest of the HTTP core" — was measuring the whole
+distribution, including its test suite and command-line tool. The library
+sources are 7.9k lines, and the closure this project needs is **~3.9k code
+lines (7.0k including license headers and doxygen)**. That is still six times a
+project-owned parser's estimated ~600 lines, so the trade is real; it is just
+much narrower than recorded.
+
+Three things settled it:
+
+1. **The excluded modules are where the bugs were.** Six of uriparser's eight
+   historical CVEs are in files the subset does not vendor:
+   `UriQuery.c` (CVE-2024-34402, CVE-2024-34403, CVE-2018-19198,
+   CVE-2018-19199) and `UriNormalize.c` (CVE-2021-46141, CVE-2021-46142).
+   Two are in retained files (CVE-2018-19200 in `UriCommon.c`, CVE-2018-20721
+   in `UriParse.c`). This is structural rather than lucky: the excluded modules
+   *build* strings — allocating, sizing and concatenating — while the retained
+   ones mostly *scan* a caller-owned buffer and record ranges into it.
+   Allocation arithmetic is where the overflow bugs live.
+
+2. **It integrates with our allocator.** `UriMemoryManager` routes every
+   parser allocation through `zu_alloc`, so the OOM injection of §50.1 and the
+   leak accounting in `zu_alloc_stats` cover the parser rather than stopping at
+   its edge. Measured: 226 allocations over the resolve path, and **0 of 400
+   OOM injection points leaked**, under ASan and UBSan.
+
+3. **A hand-written parser would need the same policy layer anyway.** RFC 3986
+   is a grammar, not a client policy, and the security-relevant decisions are
+   in the policy layer either way (see below). Writing our own would have
+   bought ~3.3k fewer vendored lines at the cost of owning the grammar, which
+   is the part with a 17-year public bug record to learn from.
+
+**The policy layer is where the security decisions live.** `zu_uri.c` rejects
+what a grammar accepts but an HTTP client must not:
+
+| Input | RFC 3986 | zuhttp |
+|---|---|---|
+| `http://h:65536/` | valid (`port = DIGIT*`) | **rejected** — would truncate to 0 in `uint16_t` |
+| `http://h:0443/` | valid | accepted, port `443` (numeric compare, per RFC 6454) |
+| `https://example.com../` | valid | **rejected** — empty DNS label |
+| `https://example.com./` | valid | accepted, root dot stripped so origins compare equal |
+| `ftp://h/`, `file:///`, `mailto:` | valid | **rejected** — not an HTTP request target |
+| embedded `NUL` | n/a | **rejected** — truncates `getaddrinfo()` and the request line differently |
+| fragment | valid | dropped; never sent (RFC 7230 §5.3) |
+
+uriparser is correspondingly *stricter* than a browser where that helps: a
+space, tab, newline or backslash in the authority is a syntax error, and
+`https://good.com@evil.com/` yields `host = evil.com`, `userinfo = good.com` —
+the origin-confusion case that governs whether credentials survive a redirect
+(§19.2).
+
+**Percent-encoding in a supplied path is preserved verbatim, not normalised.**
+This reverses the fifth bullet of the original list. Rewriting a request target
+can change what the origin server resolves; neither curl nor httr2 normalises
+it either. Normalisation applies only to query strings *this library*
+constructs, below. Dropping that requirement is also what lets `UriNormalize.c`
+stay out of the subset.
 
 Neither option provides IDN/punycode; non-ASCII hostnames are rejected outright (§4).
 
-This is a genuine trade — correctness insurance versus the size budget — and the prototype should implement against a thin internal interface so the decision can be deferred and measured:
+The flat struct remains the boundary, so the parser stays replaceable:
 
 ```c
 typedef struct {
-    char    *scheme;
-    char    *host;
-    char    *path_query;
-    uint16_t port;
+    char    *scheme;      /* lowercased */
+    char    *host;        /* lowercased; IPv6 literals without brackets */
+    char    *path_query;  /* origin-form target, always starting "/" */
+    char    *userinfo;    /* credentials, moved out of the URL (§20.4) */
+    uint16_t port;        /* explicit or scheme default */
     int      is_https;
+    int      port_explicit;
 } zu_uri;
 ```
+
+Nothing above `zu_uri.h` sees a uriparser type; `src/zu_uriparser.h` is the
+only file that includes `<uriparser/Uri.h>`.
 
 **Query encoding must be specified, not inherited.** `zu_query()` builds `application/x-www-form-urlencoded` pairs: space encodes as `%20` (not `+`), and every character outside RFC 3986 `unreserved` is percent-encoded. Values are encoded from UTF-8 bytes. Callers who need different semantics build the query string themselves.
 
@@ -521,7 +586,7 @@ zuhttp/
 │   ├── zu_proxy.c
 │   ├── zu_pool.c          §26, incl. PID guard
 │   ├── zu_timeout.c
-│   ├── zu_uri.c           §8.2, if project-owned
+│   ├── zu_uri.c           §8.2, policy layer over the uriparser subset
 │   ├── zu_error.c
 │   ├── zu_buffer.c
 │   │
@@ -545,7 +610,7 @@ zuhttp/
 │   │                             src/ subdirectories automatically
 │   └── vendor/
 │       ├── picohttpparser/    D-10, decided; VENDOR records the commit
-│       └── <uri parser>/      D-11 open; absent if zu_uri.c is used
+│       └── uriparser/        D-11: parse/resolve/recompose subset only
 │
 ├── inst/
 │   └── COPYRIGHTS             §49.2 — required for vendored code
@@ -1043,7 +1108,29 @@ These are chain-wide, not per-hop — otherwise a redirect chain multiplies ever
 
 **Redirect response bodies must never reach the caller's sink.** A `zu_get(url, file = "out.bin")` that follows two redirects must write only the final 200 body to `out.bin`. Intermediate bodies are read to completion (so the connection stays poolable) into a discard sink, subject to a small cap; a redirect response with a body larger than `max_redirect_body` closes the connection instead of draining it.
 
-Relative `Location` values are resolved against the *current* request URL per RFC 3986 §5 (§8.2).
+#### 19.6 Resolving the `Location` header
+
+Relative `Location` values are resolved against the *current* request URL per
+RFC 3986 §5 — that is, against the URL of the request that produced this
+response, not against the original one. `zu_uri_resolve()` implements it
+(§8.2).
+
+Three rules that are not obvious from RFC 3986 alone:
+
+- **Strict mode.** Resolution uses RFC 3986 §5.2.2 strict semantics, so an
+  absolute `Location` with the same scheme as the base is *not* folded into the
+  base. The non-strict variant exists only for legacy parsers.
+- **A `Location` is a byte range, not a C string.** It points into the response
+  buffer and is not NUL-terminated, so the parser is called with an explicit
+  end pointer. Anything that scans for a terminator here reads other headers.
+- **Resolution must not carry credentials.** The base is rebuilt as text
+  *without* its userinfo before resolution, so the result never inherits
+  credentials through the round-trip. Whether the redirect target may keep them
+  is §19.2's decision, and §19.2 works on the struct.
+
+The result is re-validated by the full §8.2 policy layer: a `Location` of
+`ftp://…`, `//host:65536/`, or one containing a NUL is a `zu_url_error`, not a
+followed redirect.
 
 ### 20. Proxy Support
 
@@ -2475,6 +2562,7 @@ zu_error  (inherits: error, condition)
 │   ├── zu_tls_handshake_error
 │   └── zu_tls_pin_error
 ├── zu_http_parse_error
+├── zu_url_error                  (the URL itself does not parse or is unusable)
 ├── zu_proxy_error
 │   └── zu_proxy_auth_error
 ├── zu_redirect_error
@@ -3045,7 +3133,7 @@ Current candidates and their licenses:
 |---|---|---|
 | picohttpparser | MIT | if chosen (A.3) |
 | llhttp | MIT | if chosen (A.3) |
-| uriparser | BSD-3-Clause | if chosen (§8.2) |
+| uriparser (subset) | BSD-3-Clause | yes — §8.2, inst/COPYRIGHTS |
 | zlib | zlib license | **no** — system-linked |
 | miniz | MIT | only under `--with-bundled-zlib` |
 
@@ -3415,7 +3503,7 @@ Questions that the drafting process has already answered are recorded in the Dec
 | 2a | **Is a locally declared `SCH_CREDENTIALS` ABI-correct against a real Windows 10+ target?** Until verified, Windows TLS 1.3 is not safe to ship. | S3 |
 | 3 | What is the realistic line count of the Schannel backend, and does it fit the §51.3 budget? | Windows spike, §63.1 |
 | ~~4~~ | ~~picohttpparser or llhttp?~~ **ANSWERED: picohttpparser**, 2026-09-07, after the strictness layer was built and tested independently. | — |
-| 5 | Vendor `uriparser` (~15k LOC) or write a ~600-line project-owned RFC 3986 parser? | §8.2, decided against the §51.3 budget |
+| ~~5~~ | ~~Vendor `uriparser` (~15k LOC) or write a ~600-line parser?~~ **ANSWERED: a 3.9k-line subset**, 2026-09-07. The 15k figure measured the whole distribution; six of eight historical CVEs are in the excluded files (§8.2). | — |
 
 #### 62.2 Important — answer before 1.0
 
@@ -3467,13 +3555,13 @@ zu_get()
  |
 C request builder
  |
-URI handling (either D-11 option)
+URI handling (§8.2 subset + policy layer)
  |
 TCP
  |
 TLS engine + trust evaluator (§13.1)
  |
-HTTP parser (either D-10 option)
+HTTP parser (picohttpparser, D-10)
  |
 memory body
  |
@@ -3482,9 +3570,18 @@ R raw vector
 
 Capabilities: GET only, HTTPS, certificate verification, one redirect, `Content-Length`, chunked decoding, total timeout, Ctrl-C, memory response.
 
-#### 63.3 Build both open options
+#### 63.3 Build both open options — DONE
 
-D-10 (parser) and D-11 (URI) are open, and the prototype is where they are decided. Implement the slice against thin internal interfaces so that both alternatives can be swapped in, and measure each on total auditable LOC, throughput, and pass rate against the §50.3 malformed corpus. Deciding these by argument rather than measurement is how the size budget gets blown.
+D-10 (parser) and D-11 (URI) are both decided: picohttpparser, and a
+parse/resolve/recompose subset of uriparser. Both were settled the way this
+section prescribes — build the decision-independent part first, then measure.
+For D-10 that meant writing `zu_framing.c` before choosing a parser, which
+removed the main objection to picohttpparser (that it makes no framing
+decisions — it does not, and framing is ours regardless). For D-11 it meant
+writing `zu_uri.h` and `zu_redirect.c` against the flat struct first, so only
+§19.6 was ever blocked, and then deriving the vendor subset by linking rather
+than by argument. The LOC figure that had been carried in §8.2 for two drafts
+(15k) turned out to be measuring the wrong thing by a factor of four.
 
 #### 63.4 Measure, then decide
 

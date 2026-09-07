@@ -1,10 +1,13 @@
-/* zuhttp — URI representation (design §8.2).
+/* zuhttp — URI representation and parsing (design §8.2).
  *
- * This is the INTERFACE only. Decision D-11 (vendor uriparser vs. write a
- * project-owned RFC 3986 parser) chooses who populates it. Everything above
- * this header — redirects, the pool key, proxy matching — depends on the
- * struct and not on the parser, so D-11 can be decided by measurement without
- * rewriting its callers (§8.2).
+ * D-11 is RESOLVED: a partial vendor of uriparser 0.9.8 supplies RFC 3986
+ * parsing, relative resolution and recomposition. See
+ * src/vendor/uriparser/VENDOR for which files are vendored and why the rest
+ * (six of uriparser's eight historical CVEs) is excluded.
+ *
+ * The flat struct below is still the boundary: everything above this header —
+ * redirects, the pool key, proxy matching — depends on the struct and never on
+ * uriparser types, so the parser stays replaceable.
  */
 #ifndef ZUHTTP_URI_H
 #define ZUHTTP_URI_H
@@ -24,6 +27,23 @@ typedef struct {
 
 void zu_uri_init(zu_uri *u);
 void zu_uri_free(zu_uri *u);
+
+/* Parse an absolute URI. The input is a BYTE RANGE, not a C string: a
+ * Location header is a range into the response buffer and may not be
+ * NUL-terminated. `last` points one past the final byte.
+ *
+ * On ZU_OK the struct is fully normalised (§8.2): scheme and host lowercased,
+ * port resolved to a number, userinfo moved out of the URL (§20.4),
+ * path_query in origin form and never empty.
+ *
+ * Returns ZU_ERR_URL for anything unusable, ZU_ERR_NOMEM on allocation
+ * failure. `out` is left zeroed on failure — never partially populated. */
+zu_code zu_uri_parse(zu_uri *out, const char *first, const char *last);
+
+/* Resolve a possibly-relative reference against `base` (§19.6) — the
+ * Location-header case. An absolute `ref` ignores `base` entirely. */
+zu_code zu_uri_resolve(zu_uri *out, const zu_uri *base,
+                       const char *ref, const char *ref_last);
 
 /* Deep copy; returns 1 on success. */
 int zu_uri_copy(zu_uri *dst, const zu_uri *src);

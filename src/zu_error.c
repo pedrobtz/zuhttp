@@ -43,6 +43,7 @@ static const char *const k_class[ZU_CODE_COUNT] = {
     "zu_tls_handshake_error",
     "zu_tls_pin_error",
     "zu_http_parse_error",
+    "zu_url_error",
     "zu_proxy_error",
     "zu_proxy_auth_error",
     "zu_redirect_error",
@@ -91,6 +92,7 @@ int zu_code_retryable(zu_code code) {
         case ZU_ERR_TLS_HANDSHAKE:
         case ZU_ERR_TLS_PIN:
         case ZU_ERR_PARSE:
+        case ZU_ERR_URL:
         case ZU_ERR_CANCELLED:
         case ZU_ERR_INTERRUPTED:
         case ZU_ERR_FORK:

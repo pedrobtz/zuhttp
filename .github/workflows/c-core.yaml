@@ -64,6 +64,21 @@ jobs:
         working-directory: ctest
         run: make asan
 
+      # zuhttp vendors only part of uriparser (design §8.2). Calling into an
+      # excluded module is otherwise a bare "undefined symbol" at link time;
+      # this says what actually went wrong. The excluded set is a security
+      # argument — six of eight historical CVEs live there — so widening it
+      # is a decision, not a build fix.
+      - name: No calls into non-vendored uriparser modules
+        if: runner.os == 'Linux'
+        run: |
+          if grep -rnE 'uriNormalizeSyntax|uriMakeOwner|uriComposeQuery|uriEscape|uriUnescape|uriEqualsUri|uriRemoveBaseUri|uriUriStringToFilename|uriFilenameToUriString|uriDissectQuery' \
+                 src --include='zu_*.c' --include='zu_*.h'; then
+            echo "::error::the above call a uriparser module zuhttp does not vendor (src/vendor/uriparser/VENDOR)"
+            exit 1
+          fi
+          echo "ok: no calls into excluded uriparser modules"
+
   # A leak or a wild write here is a release blocker (§45), so run the same
   # suite under valgrind where it is cheap to do so.
   valgrind:

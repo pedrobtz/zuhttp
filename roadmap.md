@@ -2,7 +2,7 @@
 
 **Companion to:** [zuhttp-design.md](zuhttp-design.md)
 **Status:** Draft
-**Last updated:** 2026-09-07 · **S0 complete (GO)**
+**Last updated:** 2026-09-07 · **S0–S7 complete; D-10 and D-11 both decided**
 **Total estimate:** 41–48 person-weeks (§64 of the design doc, plus spikes)
 
 ---
@@ -32,7 +32,7 @@ graph TD
 
     S2["S2 · Foundations<br/>DONE"]
     S3["S3 · HTTP wire<br/>DONE — D-10 decided"]
-    S4["S4 · URI + redirects<br/>PARTIAL — D-11 deferred"]
+    S4["S4 · URI + redirects<br/>DONE"]
     S5["S5 · Content encoding<br/>DONE"]
 
     S6["S6 · Sockets + poll + deadlines<br/>DONE"]
@@ -156,7 +156,7 @@ Build ~200 lines that:
 
 ## Track B — Engine (no network, no R)
 
-The whole track is testable through the mock stream. It needs no TLS backend, no sockets, and no R session. This is where the parser and URI decisions (D-10, D-11) get made by measurement rather than argument.
+The whole track is testable through the mock stream. It needs no TLS backend, no sockets, and no R session. This is where the parser and URI decisions (D-10, D-11) got made by measurement rather than argument — both are now settled.
 
 ### S2 · Foundations
 
@@ -196,16 +196,26 @@ Implement against a thin parser interface and build **both** picohttpparser and 
 
 RFC 3986 parsing and relative resolution; IPv6 literals; query encoding (§8.2); redirect method/body rewriting (§19.1); cross-origin header stripping (§19.2); downgrade policy (§19.3); chain-wide limits (§19.4); sink isolation (§19.5).
 
-Implement both D-11 options — vendored `uriparser` and a project-owned parser — behind the internal `zu_uri` interface.
+**D-11 resolved: a parse/resolve/recompose SUBSET of uriparser 0.9.8** (8 `.c`
+files, ~3.9k code lines), behind the flat `zu_uri` struct, with the client
+policy layer in `zu_uri.c`. The subset was derived by linking, not by reading
+includes; `tools/update-uriparser` re-derives it on every refresh and fails if
+upstream adds a dependency edge. Six of uriparser's eight historical CVEs are
+in files the subset excludes — see `src/vendor/uriparser/VENDOR`.
 
 **Exit criteria**
 
-- [ ] Passes an RFC 3986 §5 reference resolution test vector set.
-- [ ] Every row of the §19.1 rewrite table is a passing test.
-- [ ] Credentials verifiably stripped on scheme, host, **and port** change.
-- [ ] Redirect bodies never reach the sink.
-- [ ] Non-ASCII hostnames rejected with a clear error (D-14).
-- [ ] **D-11 decided**, with both options' LOC recorded against the §51.3 budget.
+- [x] Passes an RFC 3986 §5 reference resolution test vector set (§5.4.1 normal
+      examples and the §5.4.2 abnormal `..`-above-root cases).
+- [x] Every row of the §19.1 rewrite table is a passing test.
+- [x] Credentials verifiably stripped on scheme, host, **and port** change.
+- [x] Redirect bodies never reach the sink.
+- [x] Non-ASCII hostnames rejected with a clear error (D-14).
+- [x] **D-11 decided**, with the real LOC recorded against the §51.3 budget
+      (3.9k, not the 15k the design had carried for two drafts).
+- [x] Parser allocates through `zu_alloc`: 0 of 400 OOM injection points leak.
+- [x] Port 65536 rejected rather than truncated; empty DNS labels rejected;
+      embedded NUL rejected; input parsed as a byte range, not a C string.
 
 ### S5 · Content encoding
 

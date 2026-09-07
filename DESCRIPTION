@@ -10,7 +10,11 @@ Authors@R: c(
     person("Daisuke", "Murase", role = "cph",
            comment = "picohttpparser, see inst/COPYRIGHTS"),
     person("Shigeo", "Mitsunari", role = "cph",
-           comment = "picohttpparser, see inst/COPYRIGHTS")
+           comment = "picohttpparser, see inst/COPYRIGHTS"),
+    person("Weijia", "Song", role = "cph",
+           comment = "uriparser, see inst/COPYRIGHTS"),
+    person("Sebastian", "Pipping", role = "cph",
+           comment = "uriparser, see inst/COPYRIGHTS")
   )
 Description: A small HTTP/1.1 client for HTTP and HTTPS requests that uses
     the operating system's own TLS implementation and certificate trust

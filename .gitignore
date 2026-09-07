@@ -1,1 +1,21 @@
 .Rproj.user
+
+# R package build artifacts
+*.tar.gz
+*.Rcheck/
+src/*.o
+src/*.so
+src/*.dll
+src/vendor/**/*.o
+
+# ctest binaries — committed by mistake in 5510a4e, untracked since.
+ctest/zu_ctest
+ctest/zu_tlstest
+ctest/build/
+*.dSYM/
+
+# spike binaries
+spike/**/tmp/
+spike/macos-tls/tls_spike
+spike/macos-tls/fork_trust_test
+spike/windows-schannel/*.exe

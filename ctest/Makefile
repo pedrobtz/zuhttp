@@ -6,15 +6,18 @@
 #
 # Project-owned code is compiled with warnings as errors under `make strict`.
 # Vendored code is compiled separately with warnings off, per §44 ("vendored
-# code may use separate warning policy") — picohttpparser is deliberately
-# unmodified (§48), so its warnings are not ours to fix.
+# code may use separate warning policy") — picohttpparser and the uriparser
+# subset are deliberately unmodified (§48), so their warnings are not ours to
+# fix. (For the record the uriparser subset emits 10 -Wsign-conversion
+# warnings and nothing else under our full warning set.)
 
 CC      ?= cc
 SRC     := ../src
 VENDOR  := $(SRC)/vendor/picohttpparser
+URIDIR  := $(SRC)/vendor/uriparser
 BUILD   := build
 
-INC     := -I$(SRC) -I$(VENDOR) -I.
+INC     := -I$(SRC) -I$(VENDOR) -I$(URIDIR) -I.
 WARN    := -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion \
            -Wstrict-prototypes -Wold-style-definition -Wvla
 BASE    := -std=c99 -O1 -g $(INC)
@@ -27,7 +30,11 @@ NETLIBS :=
 endif
 
 CFLAGS  += $(BASE) $(WARN)
-VCFLAGS := $(BASE) -w
+# See src/vendor/uriparser/VENDOR: both flags are required. zu_uriparser.h sets
+# them too, so our own TUs stay correct even if this line is lost.
+URIFLAGS := -DURI_NO_UNICODE -DURI_STATIC_BUILD
+CFLAGS  += $(URIFLAGS)
+VCFLAGS := $(BASE) $(URIFLAGS) -w
 
 OWN   := $(SRC)/zu_alloc.c $(SRC)/zu_buffer.c $(SRC)/zu_error.c \
          $(SRC)/zu_time.c $(SRC)/zu_stream.c $(SRC)/zu_mock_stream.c \
@@ -36,16 +43,21 @@ OWN   := $(SRC)/zu_alloc.c $(SRC)/zu_buffer.c $(SRC)/zu_error.c \
          $(SRC)/zu_inflate.c $(SRC)/zu_net.c
 TESTS := test_main.c test_alloc.c test_buffer.c test_error.c test_time.c \
          test_stream.c test_headers.c test_request.c test_framing.c \
-         test_response.c test_redirect.c \
+         test_response.c test_redirect.c test_uri.c \
          test_inflate.c test_net.c
-VOBJ  := $(BUILD)/picohttpparser.o
+URISRC := UriParse.c UriParseBase.c UriResolve.c UriRecompose.c \
+          UriCommon.c UriMemory.c UriIp4.c UriIp4Base.c
+VOBJ  := $(BUILD)/picohttpparser.o $(patsubst %.c,$(BUILD)/%.o,$(URISRC))
 
 all: run
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
-$(VOBJ): $(VENDOR)/picohttpparser.c | $(BUILD)
+$(BUILD)/picohttpparser.o: $(VENDOR)/picohttpparser.c | $(BUILD)
+	$(CC) $(VCFLAGS) -c -o $@ $<
+
+$(BUILD)/%.o: $(URIDIR)/%.c | $(BUILD)
 	$(CC) $(VCFLAGS) -c -o $@ $<
 
 zu_ctest: $(OWN) $(TESTS) $(VOBJ)

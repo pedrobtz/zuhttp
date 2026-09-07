@@ -25,6 +25,7 @@ typedef enum {
     ZU_ERR_TLS_HANDSHAKE,
     ZU_ERR_TLS_PIN,
     ZU_ERR_PARSE,
+    ZU_ERR_URL,           /* §8.2: the URL itself does not parse or is unusable */
     ZU_ERR_PROXY,
     ZU_ERR_PROXY_AUTH,
     ZU_ERR_REDIRECT,

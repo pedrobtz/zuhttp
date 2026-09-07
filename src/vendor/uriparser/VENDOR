@@ -1,0 +1,97 @@
+Component:  uriparser (PARTIAL — see "Subset" below)
+Upstream:   https://github.com/uriparser/uriparser
+Version:    uriparser-0.9.8 (release tarball)
+Retrieved:  2026-09-07
+License:    BSD-3-Clause. Full text: LICENSE
+Copyright:  Weijia Song, Sebastian Pipping
+Modified:   no (UriConfig.h is zuhttp-authored; upstream generates it)
+
+Design references: §8.2 (URI parsing, decision D-11), §48 (vendoring policy).
+
+Update with tools/update-uriparser. Do not edit the upstream files by hand: a
+local modification makes every future security update a manual merge (§48).
+
+--------------------------------------------------------------------------
+Subset
+--------------------------------------------------------------------------
+
+This is NOT all of uriparser. zuhttp vendors the parse / resolve / recompose
+closure only, which is the minimum that satisfies src/zu_uri.h:
+
+    UriParse.c  UriParseBase.c      parse a URI reference
+    UriResolve.c                    resolve a relative ref against a base (§19.5)
+    UriRecompose.c                  serialise back to text
+    UriCommon.c  UriMemory.c        shared helpers, memory manager
+    UriIp4.c  UriIp4Base.c          IPv4 literal parsing (required by UriParse.c)
+
+The closure was determined by linking, not by reading includes: build the four
+files the design needs and add exactly what the linker reports missing, until
+it links. tools/update-uriparser re-derives it and fails if it changes.
+
+DELIBERATELY EXCLUDED, and why it matters:
+
+    UriNormalize.c  UriNormalizeBase.c   uriNormalizeSyntax*, uriMakeOwner*
+    UriQuery.c                           uriComposeQuery*, query dicts
+    UriEscape.c                          uriEscape*, uriUnescape*
+    UriCompare.c  UriShorten.c  UriFile.c
+
+Six of the eight CVEs in uriparser's history are in that excluded set:
+
+    CVE-2024-34402, CVE-2024-34403      ComposeQuery*      UriQuery.c
+    CVE-2018-19198, CVE-2018-19199      ComposeQuery*      UriQuery.c
+    CVE-2021-46141, CVE-2021-46142      NormalizeSyntax*   UriNormalize.c
+
+    CVE-2018-19200                      ResetUri*          UriCommon.c   KEPT
+    CVE-2018-20721                      Parse*Ex* (IPv6)   UriParse.c    KEPT
+
+That is not luck. The excluded modules BUILD strings — they allocate, size and
+concatenate — while the retained ones mostly SCAN a caller-owned buffer and
+record ranges into it. Allocation arithmetic is where the overflow bugs were.
+
+zuhttp does not need any excluded function. Case normalisation happens in
+zu_uri.c against our own flat struct, and we deliberately do NOT normalise
+percent-encoding in the path: rewriting a request target can change what the
+origin server resolves, and neither curl nor httr2 does it either.
+
+Uri.h still DECLARES the excluded functions. Calling one is a link error, not
+a compile error. ctest links statically on all three CI platforms, so it is
+caught at build time; tools/update-uriparser also greps for them.
+
+--------------------------------------------------------------------------
+Required build flags
+--------------------------------------------------------------------------
+
+    -DURI_NO_UNICODE      ANSI only. Drops the wchar_t half of every source
+                          file (each one #includes itself twice) and with it
+                          the <wchar.h> dependency. Halves the object code.
+    -DURI_STATIC_BUILD    Only consulted under _MSC_VER; harmless elsewhere.
+                          R builds Windows packages with mingw-w64, where
+                          URI_PUBLIC is empty regardless, but set it anyway so
+                          an MSVC build cannot pick up __declspec(dllimport).
+
+src/zu_uriparser.h sets both before including <uriparser/Uri.h>, so zuhttp's
+own translation units are correct even if a build file forgets the flags.
+
+--------------------------------------------------------------------------
+Behaviour notes that cost time to discover
+--------------------------------------------------------------------------
+
+1. uriParseSingleUriExMmA() REJECTS a NULL afterLast with URI_ERROR_NULL,
+   even though Uri.h documents "can be NULL (to use first + strlen(first))"
+   on the Ex functions. That convenience is implemented only in the non-Mm
+   wrapper uriParseSingleUriEx(), which fills afterLast in before delegating.
+   zuhttp always passes an explicit end pointer, which is what we want anyway:
+   a Location header is a byte range, not a C string.
+
+2. uriCompleteMemoryManager(m, backend) needs TWO DISTINCT structs. It stores
+   `backend` in m->userData and installs decorating functions that call
+   through it, so passing one struct as both arguments makes uriDecorateMalloc
+   recurse into itself until the stack dies. zuhttp does not call it: zu_alloc
+   already size-headers its blocks, so we fill all five slots directly and use
+   the library's uriEmulateReallocarray for the fifth.
+
+3. The parser is RFC 3986, not WHATWG URL. It accepts things an HTTP client
+   must still reject — a port of 65536, a host of "example.com..". zu_uri.c
+   applies that validation layer; see its header comment for the full list.
+   It is correspondingly stricter than a browser in useful ways: a backslash,
+   a space, a tab or a newline in the authority is a syntax error.

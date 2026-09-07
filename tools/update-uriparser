@@ -1,0 +1,80 @@
+#!/bin/sh
+# Refresh the vendored uriparser SUBSET (design §48, decision D-11).
+#
+#   tools/update-uriparser [version]        e.g. tools/update-uriparser 0.9.9
+#
+# zuhttp vendors a subset, so this script does more than copy files: it
+# re-derives the subset by LINKING and fails if it changed. A new upstream
+# release that adds a dependency edge must be noticed here, not in CI on
+# another platform three commits later.
+set -eu
+VER=${1:-0.9.8}
+DEST=src/vendor/uriparser
+URL="https://github.com/uriparser/uriparser/releases/download/uriparser-$VER/uriparser-$VER.tar.gz"
+
+[ -d "$DEST" ] || { echo "run from the package root" >&2; exit 1; }
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+echo "fetching uriparser $VER"
+curl -sSL "$URL" -o "$TMP/u.tar.gz"
+tar xzf "$TMP/u.tar.gz" -C "$TMP"
+SRC="$TMP/uriparser-$VER"
+[ -d "$SRC" ] || { echo "unexpected tarball layout" >&2; exit 1; }
+
+# The subset. Keep in sync with VENDOR and with ctest/Makefile's URISRC.
+CFILES="UriParse.c UriParseBase.c UriResolve.c UriRecompose.c \
+        UriCommon.c UriMemory.c UriIp4.c UriIp4Base.c"
+HFILES="UriCommon.h UriMemory.h UriParseBase.h UriIp4Base.h"
+PUBH="Uri.h UriBase.h UriDefsConfig.h UriDefsAnsi.h UriIp4.h"
+
+for f in $CFILES $HFILES; do cp "$SRC/src/$f" "$DEST/$f"; done
+for f in $PUBH; do cp "$SRC/include/uriparser/$f" "$DEST/uriparser/$f"; done
+cp "$SRC/COPYING" "$DEST/LICENSE"
+# UriConfig.h is zuhttp-authored on purpose; upstream generates it. Not copied.
+
+sed -i.bak "s|^Version:.*|Version:    uriparser-$VER (release tarball)|;\
+s|^Retrieved:.*|Retrieved:  $(date -u +%Y-%m-%d)|" "$DEST/VENDOR"
+rm -f "$DEST/VENDOR.bak"
+
+# --- verify the subset is still closed under linking -----------------------
+echo "verifying the link closure"
+cat > "$TMP/closure.c" <<'CEOF'
+#include <uriparser/Uri.h>
+int main(void) {
+    UriUriA base, rel, abs; const char *eo; int len;
+    const char *b = "https://example.com/a/b?q";
+    const char *r = "../c";
+    if (uriParseSingleUriExA(&base, b, b + 25, &eo) != URI_SUCCESS) return 1;
+    if (uriParseSingleUriExA(&rel, r, r + 4, &eo) != URI_SUCCESS) return 1;
+    if (uriAddBaseUriExA(&abs, &rel, &base, URI_RESOLVE_STRICTLY) != URI_SUCCESS) return 1;
+    if (uriToStringCharsRequiredA(&abs, &len) != URI_SUCCESS) return 1;
+    uriFreeUriMembersA(&abs); uriFreeUriMembersA(&rel); uriFreeUriMembersA(&base);
+    return 0;
+}
+CEOF
+OBJ=""
+for f in $CFILES; do OBJ="$OBJ $DEST/$f"; done
+# shellcheck disable=SC2086
+if ! ${CC:-cc} -std=c99 -DURI_NO_UNICODE -DURI_STATIC_BUILD \
+        -I"$DEST" -o "$TMP/closure" "$TMP/closure.c" $OBJ 2> "$TMP/link.err"; then
+    echo "SUBSET IS NO LONGER CLOSED — upstream added a dependency:" >&2
+    grep -oE '"_?uri[A-Za-z0-9_]+"|undefined reference to .[A-Za-z0-9_]+' "$TMP/link.err" \
+        | sort -u >&2 || cat "$TMP/link.err" >&2
+    echo >&2
+    echo "Add the file that defines it to CFILES here, to VENDOR, and to" >&2
+    echo "ctest/Makefile URISRC. Then re-read VENDOR's CVE table: the" >&2
+    echo "excluded set is a security argument, not just a size one." >&2
+    exit 1
+fi
+"$TMP/closure" || { echo "closure binary failed at runtime" >&2; exit 1; }
+
+# --- our code must not call anything from the excluded modules --------------
+EXCLUDED='uriNormalizeSyntax|uriMakeOwner|uriComposeQuery|uriEscape|uriUnescape|uriEqualsUri|uriRemoveBaseUri|uriUriStringToFilename|uriFilenameToUriString|uriDissectQuery'
+if grep -rnE "$EXCLUDED" src --include='zu_*.c' --include='zu_*.h' >&2; then
+    echo "the above call into a uriparser module zuhttp does not vendor" >&2
+    exit 1
+fi
+
+echo "done. Subset is closed. Now run: (cd ctest && make strict && make asan)"

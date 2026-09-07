@@ -1,7 +1,7 @@
 /* zuhttp — redirect policy (design §19).
  *
  * Depends on the zu_uri STRUCT, not on a URI parser, so all of this is
- * settled independently of D-11. Only relative-Location resolution (§19.5)
+ * settled independently of D-11. Only relative-Location resolution (§19.6)
  * needs the parser, and it lives elsewhere.
  */
 #ifndef ZUHTTP_REDIRECT_H
