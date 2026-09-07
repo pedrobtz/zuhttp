@@ -27,10 +27,22 @@ name: fuzz.yaml
 
 permissions: read-all
 
+# Superseded runs are cancelled: with several pushes in a row the only
+# answer that matters is the newest one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# A push to `develop` while PR #1 is open fires BOTH `push` and
+# `pull_request`, which ran every job twice and saturated the queue. Same-repo
+# PRs are already covered by the push run, so their jobs are skipped; a PR
+# from a fork still runs, because a fork produces no push event here.
+
 jobs:
   # The corpus as a cross-platform regression suite. No clang required, so
   # this also runs under Rtools on Windows.
   replay:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ${{ matrix.os }}
     name: Corpus replay (${{ matrix.os }})
     strategy:
@@ -70,6 +82,7 @@ jobs:
         run: make replay-asan
 
   smoke:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     name: libFuzzer smoke (60s per target)
     steps:

@@ -18,11 +18,23 @@ name: tls-spike.yaml
 
 permissions: read-all
 
+# Superseded runs are cancelled: with several pushes in a row the only
+# answer that matters is the newest one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# A push to `develop` while PR #1 is open fires BOTH `push` and
+# `pull_request`, which ran every job twice and saturated the queue. Same-repo
+# PRs are already covered by the push run, so their jobs are skipped; a PR
+# from a fork still runs, because a fork produces no push event here.
+
 jobs:
   # ---------------------------------------------------------------
   # S0 — macOS: OpenSSL engine + SecTrustEvaluateWithError (Keychain)
   # ---------------------------------------------------------------
   macos-s0:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: macos-latest
     name: S0 macOS (engine + Keychain trust)
     steps:
@@ -73,6 +85,7 @@ jobs:
   #      This is the gate that cannot be answered on a Mac.
   # ---------------------------------------------------------------
   windows-s1:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: windows-latest
     name: S1 Windows (Rtools Schannel headers)
     defaults:
@@ -145,6 +158,7 @@ jobs:
   #      c-core.yaml: that suite must stay deterministic and offline.
   # ---------------------------------------------------------------
   tls-engine:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ${{ matrix.os }}
     name: S7 TLS engine (${{ matrix.os }})
     strategy:
@@ -173,6 +187,7 @@ jobs:
   #      The Linux engine does not exist yet; this checks its premise.
   # ---------------------------------------------------------------
   linux-preflight:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     name: S7 preflight Linux (system OpenSSL + zlib)
     steps:
