@@ -5,3 +5,4 @@
 ^spike$
 ^fuzz$
 ^\.github$
+^ctest$

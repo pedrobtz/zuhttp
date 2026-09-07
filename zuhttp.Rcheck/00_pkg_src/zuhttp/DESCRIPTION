@@ -1,0 +1,28 @@
+Package: zuhttp
+Title: Minimal HTTP Client Using Native System TLS
+Version: 0.0.0.9000
+Authors@R: 
+    person("Pedro", "Baltazar", , "pedrobtz@gmail.com", role = c("aut", "cre"))
+Description: A small HTTP/1.1 client for HTTP and HTTPS requests that uses
+    the operating system's own TLS implementation and certificate trust
+    store rather than a bundled cryptography library or certificate
+    bundle. Provides structured timeouts, reliable cancellation from R,
+    connection reuse, streaming request and response bodies, structured
+    error conditions, and a pluggable transport layer for testing.
+    Intended as a focused alternative to full multi-protocol clients for
+    packages whose only requirement is reliable HTTPS.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Depends: R (>= 3.5)
+Suggests: jsonlite, testthat (>= 3.0.0)
+SystemRequirements: OpenSSL >= 1.1.1 (Linux and other Unix only; macOS
+        and Windows use system TLS), zlib
+URL: https://github.com/pedrobtz/zuhttp
+BugReports: https://github.com/pedrobtz/zuhttp/issues
+Config/testthat/edition: 3
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 8.0.0
+NeedsCompilation: yes
+Packaged: 2026-09-07 19:53:32 UTC; pbtz
+Author: Pedro Baltazar [aut, cre]
+Maintainer: Pedro Baltazar <pedrobtz@gmail.com>
