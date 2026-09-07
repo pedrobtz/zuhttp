@@ -1,6 +1,6 @@
 # zuhttp Design Document
 
-**Status:** Draft — macOS TLS spike complete (GO); Windows unvalidated  
+**Status:** Draft — macOS spike GO (S0); Windows headers probed (S1, R-3 confirmed)  
 **Target:** R package / CRAN-compatible source package  
 **Primary implementation language:** C  
 **Primary protocol scope:** HTTP/1.1 over HTTP and HTTPS  
@@ -698,7 +698,7 @@ Requirements: SNI, hostname verification, chain validation, TLS 1.2+, TLS 1.3 wh
 Two specific hazards:
 
 - TLS 1.3 requires `SCH_CREDENTIALS` (Windows 10 1809+); the older `SCHANNEL_CRED` path caps at TLS 1.2.
-- **mingw-w64's SDK headers have historically lagged on these structures.** The build may need to declare `SCH_CREDENTIALS` and related types itself, guarded by version checks. This must be verified against the actual Rtools toolchain early — see §62 and Appendix B, R-3.
+- **Measured (S1, 2026-09-07):** Rtools' mingw-w64 11.0 `schannel.h` does **not** declare `SCH_CREDENTIALS` or `TLS_PARAMETERS`, and raising the target to `_WIN32_WINNT=0x0A00` does not help — it is an incomplete header, not a version gate. See [spike/windows-schannel/FINDINGS.md](spike/windows-schannel/FINDINGS.md).
 
 #### 13.5 Unix/Linux
 
@@ -2953,9 +2953,28 @@ zuhttp: could not find OpenSSL headers (openssl/ssl.h).
 
 A matching `cleanup` script removes generated files. If autoconf is used, `configure.ac` ships in the tarball and the generated `configure` is committed.
 
-#### 47.4 Windows toolchain risk
+#### 47.4 Windows toolchain: TLS 1.3 structures are missing from Rtools
 
-The Schannel headers required for TLS 1.3 (`SCH_CREDENTIALS`) may be missing or outdated in the mingw-w64 SDK that Rtools ships. **This must be verified against the actual Rtools toolchain in the first week of the Windows spike**, not discovered during the first CRAN submission. If they are absent, the structures are declared locally behind a version guard, which is ugly but tractable. See Appendix B, R-3.
+**Measured, not assumed.** The S1 probe (`spike/windows-schannel/`, run on GitHub Actions with the compiler from `R CMD config CC`) found:
+
+| Symbol | Kind | Present under Rtools mingw-w64 11.0 |
+|---|---|---|
+| `SCH_CREDENTIALS_VERSION`, `SCH_USE_STRONG_CRYPTO`, `SP_PROT_TLS1_3_CLIENT` | macros | **yes** |
+| `SCH_CREDENTIALS`, `TLS_PARAMETERS` | **typedefs** | **no** |
+| `SCHANNEL_CRED_VERSION`, `SP_PROT_TLS1_2_CLIENT`, `UNISP_NAME_A` | TLS 1.2 path | yes |
+| `CERT_CHAIN_POLICY_SSL`, `CERT_STORE_PROV_MEMORY` | chain validation | yes |
+
+`InitSecurityInterfaceA()` returns non-NULL and `CertOpenStore(CERT_STORE_PROV_MEMORY, ...)` succeeds, so SSPI and CryptoAPI genuinely link and run — the Windows plan in §13.4 and §14.3 is otherwise sound.
+
+The split result is the important part. **It is not a version gate**: `-D_WIN32_WINNT=0x0A00 -DNTDDI_VERSION=0x0A000000` does not make the typedefs appear. mingw-w64 11.0's `schannel.h` was partially updated for TLS 1.3 — the manifest constants landed, the structure definitions did not.
+
+Options, in preference order:
+
+1. **Declare `SCH_CREDENTIALS` and `TLS_PARAMETERS` locally**, guarded so they compile away if a future Rtools ships them. Roughly 30 lines, and because the constants already exist there is no constant table to keep in sync. **Requires ABI verification against a real Windows 10+ target before it can be trusted** — a wrong structure layout passed to `AcquireCredentialsHandle` is a memory-safety bug, not a compile error.
+2. **Ship Windows TLS 1.2-only for v1.** Safe, cheap, and leaves Windows one protocol version behind the other platforms.
+3. Require a newer mingw-w64 than Rtools ships — not viable, since CRAN builds with Rtools.
+
+Take option 1, falling back to option 2 if the ABI cannot be verified confidently. Either way this is bounded work on the TLS 1.3 path only; nothing else about the Windows backend is blocked.
 
 `src/Makevars.win` handles Windows; `configure` plus `src/Makevars.in` handles Unix.
 
@@ -3386,7 +3405,8 @@ Questions that the drafting process has already answered are recorded in the Dec
 |---|---|---|
 | ~~1~~ | ~~Can the §13.1 engine/trust split work on macOS from a synchronous poll loop?~~ **ANSWERED: yes.** S0, 2026-09-07. | — |
 | 1a | **Which portable TLS engine on macOS is viable for CRAN binary builds?** S0 used Homebrew OpenSSL; CRAN needs a static engine from the recipes toolchain or an alternative. Now the top macOS unknown. | S4 |
-| 2 | Does the Rtools mingw-w64 SDK expose `SCH_CREDENTIALS` and the TLS 1.3 Schannel path, or must they be declared locally? | Windows toolchain probe, §47.4 |
+| ~~2~~ | ~~Does the Rtools mingw-w64 SDK expose `SCH_CREDENTIALS`?~~ **ANSWERED: no.** S1, 2026-09-07. Must be declared locally (§47.4). | — |
+| 2a | **Is a locally declared `SCH_CREDENTIALS` ABI-correct against a real Windows 10+ target?** Until verified, Windows TLS 1.3 is not safe to ship. | S3 |
 | 3 | What is the realistic line count of the Schannel backend, and does it fit the §51.3 budget? | Windows spike, §63.1 |
 | 4 | picohttpparser or llhttp, measured on total LOC including the strictness layer this project would otherwise write? | Appendix A.3, decided against the prototype |
 | 5 | Vendor `uriparser` (~15k LOC) or write a ~600-line project-owned RFC 3986 parser? | §8.2, decided against the §51.3 budget |
@@ -3643,7 +3663,7 @@ Ordered by expected impact. Each risk has an owner-facing mitigation and an expl
 | **R-12** | **macOS forked HTTPS crashes.** Security.framework's `trustd` XPC connection does not survive `fork()`; a child calling it after the parent segfaults (S0 F-5). `mclapply` + HTTPS is a very common R pattern. | **High** | **High** | PID guard on the trust evaluator raising a named condition instead of dying (§26.4); document `PSOCK`/`multisession` as the supported path | Cannot reliably detect the forked state before the crash → macOS HTTPS must be documented as unsupported under forked parallelism |
 | **R-13** | **No CRAN-viable macOS TLS engine.** S0 linked Homebrew OpenSSL; CRAN macOS binaries need a static engine from the recipes toolchain or an alternative (§62.1). | Medium | High | Resolve during S4 before committing to the macOS backend | No acceptable engine → fall back to TLS 1.2-only Secure Transport, or drop macOS |
 | **R-2** | **Schannel overrun.** 1,500–2,500 lines of security-critical code, low-confidence estimate (§13.4, §64). | High | High | Time-box the spike; measure LOC against §51.3 early | Schannel backend exceeds 3,500 LOC or 8 weeks → reconsider a portable engine + `CertGetCertificateChain` trust on Windows too |
-| **R-3** | **Rtools header gaps.** mingw-w64 SDK may lack `SCH_CREDENTIALS`, blocking TLS 1.3 (§47.4). | Medium | Medium | Probe in week 1; declare structs locally behind version guards | Cannot link at all on Rtools → Windows TLS 1.2 only for v1, documented |
+| **R-3** | **CONFIRMED 2026-09-07 (S1).** Rtools mingw-w64 11.0 lacks the `SCH_CREDENTIALS` / `TLS_PARAMETERS` typedefs; not a version gate (§47.4). Blocks TLS 1.3 on Windows only. | **Certain** | Medium | Declare the two structures locally behind a feature guard; the constants already exist. **ABI must be verified on a real Win10+ target** — a wrong layout into `AcquireCredentialsHandle` is a memory-safety bug, not a compile error | ABI cannot be verified confidently → ship Windows TLS 1.2-only for v1, documented |
 | **R-4** | **Size budget blown.** Vendored dependencies plus three backends exceed the auditability claim that justifies the project (§51.3). | Medium | High | Hard thresholds in §51.3; parser and URI decisions made against them | > 40k total LOC or > 12k project-owned → the "small and auditable" positioning is false; revise §1 and §6 publicly or stop |
 | **R-5** | **Security defect in own TLS glue or framing.** A memory-safety or verification bug in code with no upstream to inherit fixes from. | Medium | **Very high** | §43 fuzzing, §44 static analysis, §45 external review, strict §18.1 | A verification-bypass class bug found post-release → mandatory external audit before any further release |
 | **R-6** | **Bus factor.** Single maintainer for a security-critical package that other packages depend on (§46.3). | High | High | Recruit a second maintainer with CRAN rights before 1.0; document the risk in README | No second maintainer at 1.0 → ship 1.0 labelled experimental, or do not encourage dependents |

@@ -28,7 +28,7 @@ Three rules govern the whole plan:
 ```mermaid
 graph TD
     S0["S0 · macOS TLS spike<br/>DONE — GO"]
-    S1["S1 · Windows toolchain probe<br/>GATE R-3"]
+    S1["S1 · Windows toolchain probe<br/>DONE — R-3 confirmed"]
 
     S2["S2 · Foundations<br/>buffer, error, clock, stream+mock"]
     S3["S3 · HTTP wire<br/>builder, parser, strict framing"]
@@ -136,18 +136,21 @@ Build ~200 lines that:
 
 **New work created:** S16 must guard the trust evaluator, not just the pool. S9 must resolve which portable engine is CRAN-viable on macOS (R-13) — the spike used Homebrew OpenSSL, which is not a shippable answer.
 
-### S1 · Windows toolchain probe — **GATE**
+### S1 · Windows toolchain probe — ✅ **COMPLETE 2026-09-07 · R-3 CONFIRMED**
 
-**Retires:** Appendix B R-3.
-**Effort:** 2 days.
-
-Determine whether the mingw-w64 SDK shipped with current Rtools exposes `SCH_CREDENTIALS` and the TLS 1.3 Schannel path, or whether the structures must be declared locally behind version guards.
+**Outcome:** Appendix B R-3 confirmed, not retired.
+**Actual effort:** ran on CI; no Windows machine needed.
+**Artifacts:** [`spike/windows-schannel/`](spike/windows-schannel/) — [FINDINGS.md](spike/windows-schannel/FINDINGS.md), job `windows-s1` in `tls-spike.yaml`.
 
 **Exit criteria**
 
-- [ ] A trivial program using `SCH_CREDENTIALS` compiles and links under Rtools, or the exact set of missing declarations is documented.
-- [ ] The TLS 1.2 fallback path is confirmed to compile regardless.
-- [ ] Decision recorded: does Windows get TLS 1.3 in v1?
+- [x] Exact set of missing declarations documented: `SCH_CREDENTIALS` and `TLS_PARAMETERS` typedefs absent; the TLS 1.3 *macros* are present.
+- [x] TLS 1.2 fallback path confirmed to compile; SSPI and CryptoAPI confirmed to link and run.
+- [x] Decision recorded — see below.
+
+**Verdict.** Rtools' mingw-w64 11.0 `schannel.h` is incomplete for TLS 1.3. This is **not** a version gate: `-D_WIN32_WINNT=0x0A00` does not make the typedefs appear. Because the constants already exist, only two structures need declaring locally (~30 lines).
+
+**New work created (S8):** declare `SCH_CREDENTIALS` and `TLS_PARAMETERS` behind a feature guard, **and verify their ABI on a real Windows 10+ target** — a wrong layout passed to `AcquireCredentialsHandle` is a memory-safety bug, not a compile error. If the ABI cannot be verified confidently, ship Windows TLS 1.2-only for v1 (new open question §62.1 Q2a).
 
 ---
 
@@ -476,6 +479,6 @@ That last item is the honest test of the whole project. `zuhttp` exists on the p
 ## Immediate next actions
 
 1. ~~**Run S0.**~~ ✅ Done — verdict GO. See [spike/macos-tls/FINDINGS.md](spike/macos-tls/FINDINGS.md).
-2. **Run S1.** Two days. Now the only unanswered gate, and it sits on the longest critical path (Windows).
+2. ~~**Run S1.**~~ ✅ Done on CI — R-3 confirmed. See [spike/windows-schannel/FINDINGS.md](spike/windows-schannel/FINDINGS.md).
 3. **Start S2.** It depends on neither spike and unblocks both Track B and Track C.
 4. ~~**Fix `DESCRIPTION`**~~ ✅ Done.
