@@ -674,6 +674,59 @@ static SEXP build_response(void *data) {
     return out;
 }
 
+/* --- §39 build information -----------------------------------------------
+ *
+ * §14.5 is the reason this is not a nicety: "whatever the three platforms do,
+ * zu_info() must report the effective revocation policy, because this is
+ * exactly the kind of silent asymmetry that produces 'it works on my machine'
+ * bug reports." The same goes for which store decided to trust a certificate
+ * — §13.1 splits the TLS engine from the trust evaluator precisely because
+ * they can differ, and "which store" is a question users genuinely ask.
+ *
+ * Reported from C rather than assembled in R, so it describes the build that
+ * is actually loaded rather than what the R layer believes was configured.
+ */
+static SEXP C_zu_build_info(void) {
+    static const char *nm[] = {
+        "tls_backend", "trust", "tls_available", "revocation_default",
+        "compression", "ipv6", "http", NULL
+    };
+    const char *backend = zu_tls_backend_name();
+    const char *trust;
+    SEXP out, names;
+    int i, n = 0;
+
+    while (nm[n]) n++;
+
+    /* §13.1: the engine and the store are different questions, and on macOS
+     * they are answered by different frameworks. */
+    if (strcmp(backend, "securetransport") == 0)   trust = "macOS Keychain (SecTrust)";
+    else if (strcmp(backend, "schannel") == 0)     trust = "Windows Certificate Store";
+    else if (strcmp(backend, "openssl") == 0)      trust = "OpenSSL system defaults";
+    else                                           trust = "none";
+
+    out   = PROTECT(Rf_allocVector(VECSXP, n));
+    names = PROTECT(Rf_allocVector(STRSXP, n));
+
+    SET_VECTOR_ELT(out, 0, Rf_mkString(backend));
+    SET_VECTOR_ELT(out, 1, Rf_mkString(trust));
+    SET_VECTOR_ELT(out, 2, Rf_ScalarLogical(zu_tls_available()));
+    /* §14.5 / D-31: off by default on every platform, measured in S0 (F-4). */
+    SET_VECTOR_ELT(out, 3, Rf_ScalarLogical(FALSE));
+    SET_VECTOR_ELT(out, 4, Rf_mkString("gzip, deflate"));
+    /* §3.1: getaddrinfo is called with AF_UNSPEC, so both families are tried
+     * in whatever order the resolver returns. Whether a route exists is a
+     * property of the machine, not of this build — reporting "yes" here means
+     * "not disabled", which is the honest claim. */
+    SET_VECTOR_ELT(out, 5, Rf_ScalarLogical(TRUE));
+    SET_VECTOR_ELT(out, 6, Rf_mkString("HTTP/1.1"));
+
+    for (i = 0; i < n; i++) SET_STRING_ELT(names, i, Rf_mkChar(nm[i]));
+    Rf_setAttrib(out, R_NamesSymbol, names);
+    UNPROTECT(2);
+    return out;
+}
+
 static SEXP C_zu_tls_backend(void) {
     return Rf_mkString(zu_tls_backend_name());
 }
@@ -694,6 +747,7 @@ static const R_CallMethodDef call_methods[] = {
     {"C_zu_pool_stats",        (DL_FUNC) &C_zu_pool_stats,        1},
     {"C_zu_pool_clear",        (DL_FUNC) &C_zu_pool_clear,        1},
     {"C_zu_tls_backend",       (DL_FUNC) &C_zu_tls_backend,       0},
+    {"C_zu_build_info",        (DL_FUNC) &C_zu_build_info,        0},
     {NULL, NULL, 0}
 };
 

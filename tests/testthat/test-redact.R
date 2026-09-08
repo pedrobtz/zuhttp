@@ -269,6 +269,20 @@ test_that("the canary does not reach a hook payload (§35.3, §42.4)", {
   expect_no_canary(seen$after, "the after_response hook payload")
 })
 
+test_that("the canary does not reach zu_info() (§39, §42.2)", {
+  # zu_info() exists to be pasted into bug reports, which makes it one of the
+  # likelier places for a credential to escape — and a proxy URL routinely
+  # carries one.
+  saved <- Sys.getenv("http_proxy", unset = NA)
+  on.exit(if (is.na(saved)) Sys.unsetenv("http_proxy") else
+            Sys.setenv(http_proxy = saved), add = TRUE)
+  Sys.setenv(http_proxy = paste0("http://user:", CANARY, "@corp:3128"))
+
+  i <- zu_info()
+  expect_no_canary(i, "zu_info()")
+  expect_false(any(grepl(CANARY, capture.output(print(i)), fixed = TRUE)))
+})
+
 test_that("canary coverage of the remaining egresses is tracked, not assumed", {
   # Recordings joined the canary in S14, hook payloads in S13. Verbose
   # transport logging is a real §42.2 egress that still does not exist at all

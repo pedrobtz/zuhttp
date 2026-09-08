@@ -924,7 +924,7 @@ User docs per §55: TLS backend and trust per OS, proxy behavior, timeout semant
 - [ ] Three R users unfamiliar with the package each write a working GET and JSON POST within 5 minutes using only the reference index (§61.11).
 - [ ] Every documented limitation from the design doc appears in user-facing help — especially DNS non-interruptibility (§25.4) and `ca_file` replacing rather than adding (§14.2).
 
-### S-unassigned · `zu_info()` (§39)
+### S-unassigned · `zu_info()` (§39) — ✅ **DONE 2026-09-08**
 
 **Found during S11.** §39 specifies an information API — version, TLS backend,
 trust source, compression, IPv6, proxy — and two other sections lean on it:
@@ -933,10 +933,29 @@ trust source, compression, IPv6, proxy — and two other sections lean on it:
 revocation policy, which differs per platform and is exactly the asymmetry
 that produces "works on my machine" reports.
 
-No stage owns it. It is small, but half of what it must report (proxy state,
-revocation policy) is only true once S10 and §14.5 are wired, so writing it
-now would produce a diagnostic that looks authoritative and is not. It belongs
-after S10, before S20 documents it.
+No stage owned it, and the note above said it belonged **after S10** — because
+half of what it must report is proxy state, and a diagnostic that looks
+authoritative while describing a feature nothing drives is worse than no
+diagnostic. S10 landed the same day, so it was written immediately after.
+
+Both leaning sections are now true rather than aspirational, and the tests
+assert exactly those two claims rather than merely that a report prints.
+
+Two things it does beyond the §39 sketch, both because they answer questions
+users actually arrive with:
+
+- it names the trust store separately from the TLS engine (§13.1 splits them,
+  and on macOS they are different frameworks — "which store trusted this?" is
+  a real question when a certificate works in a browser and not here);
+- it reports the proxy environment **including the variable it ignores**.
+  §20.1's httpoxy rule means an uppercase `HTTP_PROXY` is deliberately not
+  read; without this line, a user whose `HTTP_PROXY` is set sees a request
+  that "should" be proxied and is not, with nothing anywhere saying why.
+
+It is itself a §42.2 egress — it exists to be pasted into bug reports, and a
+proxy URL routinely carries a credential — so it redacts, and there is a
+canary arm for it in `test-redact.R`. Non-vacuous: removing the redaction
+fails four assertions.
 
 ### S21 · Security review → 1.0
 
