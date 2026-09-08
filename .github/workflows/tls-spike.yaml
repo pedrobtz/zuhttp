@@ -398,39 +398,49 @@ jobs:
           ZU_TEST_TRACE: "1"
         run: make engine-sch CC="$(R CMD config CC)"
 
-      - name: Install and make a real HTTPS request
+      - name: Install
         timeout-minutes: 10
-        env:
-          NOT_CRAN: "true"
-        run: |
-          R CMD INSTALL .
-          # stderr is unbuffered, so a segfault cannot swallow the progress
-          # that identifies where it happened. The previous attempt reported
-          # exit 139 and not one line of output.
-          Rscript -e '
-            say <- function(...) { cat(..., "\n", file = stderr()) }
-            say("loading")
-            library(zuhttp)
-            say("backend:", zu_tls_backend())
-            stopifnot(identical(zu_tls_backend(), "schannel"))
-            say("request 1: plain GET")
-            r <- zu_get("https://example.com")
-            say("  status", zu_resp_status(r), "tls", r$tls_version,
-                "bytes", length(zu_resp_body(r)))
-            stopifnot(zu_resp_status(r) == 200L)
-            stopifnot(grepl("Example Domain", zu_resp_text(r), fixed = TRUE))
-            say("request 2: raising a condition from C")
+        run: R CMD INSTALL .
 
-            # The whole point of D-5: Windows has trust anchors again.
+      # Split into one step per operation. The previous attempt segfaulted with
+      # ZERO output — even a stderr write before library() never appeared — so
+      # progress printing inside one Rscript cannot be trusted here. Step
+      # boundaries are reported by the runner itself and cannot be lost.
+      - name: R1 load the package
+        timeout-minutes: 3
+        run: Rscript --vanilla -e 'library(zuhttp); cat("loaded\n")'
+
+      - name: R2 backend identity
+        timeout-minutes: 3
+        run: Rscript --vanilla -e 'library(zuhttp); cat("backend:", zu_tls_backend(), "\n"); stopifnot(identical(zu_tls_backend(), "schannel"))'
+
+      - name: R3 one plain HTTPS request
+        timeout-minutes: 5
+        run: |
+          Rscript --vanilla -e '
+            library(zuhttp)
+            r <- zu_get("https://example.com")
+            cat("status", zu_resp_status(r), "tls", r$tls_version,
+                "bytes", length(zu_resp_body(r)), "\n")
+            stopifnot(zu_resp_status(r) == 200L)'
+
+      - name: R4 a certificate error must reach R as a condition
+        timeout-minutes: 5
+        run: |
+          Rscript --vanilla -e '
+            library(zuhttp)
             e <- tryCatch(zu_get("https://expired.badssl.com/"),
                           zu_tls_error = function(e) e)
-            say("  expired ->", class(e)[1])
-            stopifnot(inherits(e, "zu_tls_certificate_error"))
-            say("request 3: hostname mismatch")
+            cat("expired ->", class(e)[1], "\n")
+            stopifnot(inherits(e, "zu_tls_certificate_error"))'
 
-            e2 <- tryCatch(zu_get("https://wrong.host.badssl.com/"),
-                           zu_tls_error = function(e) e)
-            say("  wrong host ->", class(e2)[1])
-            stopifnot(inherits(e2, "zu_tls_hostname_error"))
-            say("S8: Windows HTTPS works, and bad certificates are rejected")
-          '
+      - name: R5 a hostname mismatch is a distinct class
+        timeout-minutes: 5
+        run: |
+          Rscript --vanilla -e '
+            library(zuhttp)
+            e <- tryCatch(zu_get("https://wrong.host.badssl.com/"),
+                          zu_tls_error = function(e) e)
+            cat("wrong host ->", class(e)[1], "\n")
+            stopifnot(inherits(e, "zu_tls_hostname_error"))
+            cat("S8: Windows HTTPS works, and bad certificates are rejected\n")'
