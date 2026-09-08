@@ -1260,6 +1260,19 @@ If added later, it should be a high-level request-body encoder, not embedded in 
 
 ### 24. Timeout Model
 
+**Implementation note: `zu_now_ms()` must have no silent fallback.** An early
+version returned 0 when no monotonic source was visible, commented "caller's
+deadlines degrade to never". That is not a degradation but a total failure:
+every timeout stops firing and the first operation that waits for one blocks
+forever. On glibc it was reachable by accident, because `-std=c99` hides
+`CLOCK_MONOTONIC` unless `_POSIX_C_SOURCE` is set before any system header —
+and it survived six commits because a constant clock still satisfies
+"monotonic", so the test suite passed while the Linux CI jobs hung.
+
+A platform with no monotonic clock must now fail to BUILD, the suite asserts
+that the clock *advances* rather than only that it never decreases, and
+`tools/check-feature-macros` guards the whole class in CI.
+
 Structured timeout semantics are a key differentiator, so the semantics must be exact rather than suggestive.
 
 ```r

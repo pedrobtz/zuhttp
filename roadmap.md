@@ -243,10 +243,23 @@ Non-blocking sockets on POSIX and Winsock; `poll`/`WSAPoll` loop; the deadline c
 **Exit criteria**
 
 - [x] `effective_deadline = min(now + phase, request_deadline)` holds under test.
-- [x] A stalled read ends at the deadline rather than blocking, verified by elapsed time.
+- [x] A stalled read ends at the deadline rather than blocking, verified by
+      elapsed time. **This was ticked prematurely.** It held on macOS and
+      Windows; on Linux `zu_now_ms()` returned 0 forever (see below), so no
+      deadline expired and this test hung instead of passing. Re-verified on
+      all three platforms as of 28fe55d.
 - [x] The tick callback fires at the configured cadence and can cancel a stalled read — this is the seam where `R_CheckUserInterrupt()` lands at S15, and it is why the core needs no R headers to be interruptible.
 - [x] Refused connection, unresolvable host, and orderly close each produce the right code and phase.
 - [x] Monotonic clocks only; a wall-clock change cannot move a deadline.
+- [x] **The clock is not merely monotonic but actually advances.** Added after
+      the fact: `src/zu_time.c` lacked the `_POSIX_C_SOURCE` preamble, so
+      `-std=c99` hid `CLOCK_MONOTONIC` on glibc and `zu_now_ms()` fell through
+      to `return 0`. Every timeout in the library was inoperative on Linux.
+      suite_time asserted the clock was *monotonic*, which a constant
+      satisfies, so it passed for six commits while the Linux C jobs hung.
+      The fallback is now a build error, the suite asserts the clock advances
+      and that a short deadline expires, and `tools/check-feature-macros`
+      (run in CI) prevents a third instance of the class.
 - [ ] Inactivity timers reset on progress — arrives with the engine loop, which has no caller yet.
 
 ### S7 · OpenSSL engine and trust
