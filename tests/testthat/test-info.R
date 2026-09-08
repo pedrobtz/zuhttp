@@ -83,3 +83,50 @@ test_that("zu_info() is an egress and redacts like one (§42.2)", {
   expect_false(any(grepl("hunter2-DO-NOT-LEAK", unlist(i), fixed = TRUE)))
   expect_match(out, "corp:3128", fixed = TRUE)   # still useful
 })
+
+# --- §42.2's last egress: verbose logging --------------------------------
+
+test_that("zu_verbose() traces the request lifecycle", {
+  out <- textConnection("trace", "w", local = TRUE)
+  on.exit(try(close(out), silent = TRUE), add = TRUE)
+
+  cli <- zu_client(hooks = zu_verbose(to = out),
+                   transport = zu_mock_transport(function(r)
+                     zu_response(201L, c("Content-Type" = "text/plain"), "hello")))
+  invisible(zu_perform(zu_request("POST", "https://h/things"), client = cli))
+  close(out)
+
+  expect_true(any(grepl("^> POST https://h/things", trace)))
+  expect_true(any(grepl("^< HTTP 201", trace)))
+  expect_true(any(grepl("Content-Type: text/plain", trace, fixed = TRUE)))
+  expect_true(any(grepl("5 bytes", trace, fixed = TRUE)))
+})
+
+test_that("zu_verbose() reports retries, which is what makes them visible", {
+  # §33.4: "a retry that is never surfaced is a latency mystery for whoever
+  # debugs it later" — this is the surface.
+  out <- textConnection("trace2", "w", local = TRUE)
+  on.exit(try(close(out), silent = TRUE), add = TRUE)
+
+  n <- 0L
+  cli <- zu_client(
+    hooks = zu_verbose(to = out),
+    retry = zu_retry(attempts = 3, base = 0.001),
+    transport = zu_mock_transport(function(r) {
+      n <<- n + 1L
+      if (n < 3L) zu_response(503L) else zu_response(200L)
+    }))
+  invisible(zu_get("https://h/x", client = cli))
+  close(out)
+
+  retries <- grep("^\\* retry", trace2, value = TRUE)
+  expect_length(retries, 2L)
+  expect_true(all(grepl("HTTP 503", retries, fixed = TRUE)))
+})
+
+test_that("zu_verbose() writes to stderr by default", {
+  # A trace on stdout would contaminate whatever a script is piping.
+  expect_silent(h <- zu_verbose())
+  expect_s3_class(h, "zu_hooks")
+  expect_setequal(names(h), c("before_request", "after_response", "before_retry"))
+})

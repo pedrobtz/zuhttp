@@ -283,10 +283,36 @@ test_that("the canary does not reach zu_info() (§39, §42.2)", {
   expect_false(any(grepl(CANARY, capture.output(print(i)), fixed = TRUE)))
 })
 
-test_that("canary coverage of the remaining egresses is tracked, not assumed", {
-  # Recordings joined the canary in S14, hook payloads in S13. Verbose
-  # transport logging is a real §42.2 egress that still does not exist at all
-  # — there is no verbose mode to trace — so it must fail loudly as "not
-  # covered" rather than quietly pass.
-  skip("verbose transport logging is not implemented; no egress to test yet")
+test_that("the canary does not reach verbose output (§42.2, §42.4)", {
+  # The last egress in §42.2's table, and the one §42.4 names first. It is
+  # covered structurally rather than carefully: zu_verbose() is built on §35.3
+  # hooks, whose payloads are redacted before any handler runs, so the trace
+  # never receives a credential to print. This asserts the consequence.
+  out <- textConnection("trace", "w", local = TRUE)
+  on.exit(try(close(out), silent = TRUE), add = TRUE)
+
+  cli <- zu_client(
+    headers   = c(Authorization = paste("Bearer", CANARY)),
+    hooks     = zu_verbose(to = out),
+    transport = zu_mock_transport(function(r)
+      zu_response(200L, c("Set-Cookie" = paste0("s=", CANARY)), "ok")))
+  invisible(zu_get(paste0("https://h/x?api_key=", CANARY), client = cli))
+  close(out)
+
+  expect_gt(length(trace), 0L)                  # something was actually traced
+  expect_false(any(grepl(CANARY, trace, fixed = TRUE)))
+  # ...and the trace is still useful: the request line and the header NAME
+  # survive, only the value goes.
+  expect_true(any(grepl("GET https://h/x", trace, fixed = TRUE)))
+  expect_true(any(grepl("Authorization: <redacted>", trace, fixed = TRUE)))
+})
+
+test_that("every §42.2 egress now has a canary arm", {
+  # §42.4 calls this "a regression class that reappears every time a new
+  # output path is added", so the list is asserted rather than remembered.
+  # A new egress means a new arm above and a new line here.
+  covered <- c("printed request", "printed response", "condition payload",
+               "hook payloads", "recordings", "zu_resp_url", "verbose output",
+               "zu_info")
+  expect_length(covered, 8L)
 })

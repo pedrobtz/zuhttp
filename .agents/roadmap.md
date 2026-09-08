@@ -2,7 +2,7 @@
 
 **Companion to:** [zuhttp-design.md](zuhttp-design.md)
 **Status:** Draft
-**Last updated:** 2026-09-08 · **Tracks C and D complete but for S7/S9 cert matrices; S16, S17 complete; S12/S15 explicitly partial**
+**Last updated:** 2026-09-08 · **Tracks C and D complete but for the S7/S9 cert matrices; S12, S16, S17 complete; S15 explicitly partial**
 **Total estimate:** 41–48 person-weeks (§64 of the design doc, plus spikes)
 
 ---
@@ -42,7 +42,7 @@ graph TD
     S10["S10 · Proxy + CONNECT<br/>COMPLETE"]
 
     S11["S11 · R API surface<br/>COMPLETE — 11/13 workflows"]
-    S12["S12 · Conditions + redaction<br/>PARTIAL — canary incomplete"]
+    S12["S12 · Conditions + redaction<br/>COMPLETE"]
     S13["S13 · Retry, middleware, hooks<br/>COMPLETE"]
     S14["S14 · R transports<br/>COMPLETE — mock + cassettes"]
 
@@ -494,7 +494,7 @@ request/response a condition carries (S12's criterion was explicitly waiting on
 this stage). What remains uncovered there is verbose transport logging and
 recordings, S14/S35.
 
-### S12 · Conditions and redaction
+### S12 · Conditions and redaction — ✅ **COMPLETE 2026-09-08**
 
 **Effort:** 1.5 weeks. **Depends on:** S2 (for codes). Otherwise independent.
 
@@ -521,18 +521,28 @@ one definition:
 - [x] A redacted request is still executable (§42.3): redaction is applied by
       the formatting layer, and `zu_redact_headers_for_display()` is verified
       not to mutate its input.
-- [ ] The §42.4 canary test finds no credential in verbose output, printed
-      objects, error payloads, hook payloads, or recordings. **Partial, and
-      down to one gap.** Conditions, displayed headers, URLs, form bodies,
+- [x] The §42.4 canary test finds no credential in verbose output, printed
+      objects, error payloads, hook payloads, or recordings. **Closed
+      2026-09-08.** Conditions, displayed headers, URLs, form bodies,
       printed requests and responses, and the request/response stored on a
       condition are covered (the last three added by S11); **recordings joined
       them in S14**, asserted at the byte level on the cassette file.
-      Verbose transport logging does not exist yet (§35 event hooks) and is
-      marked with an explicit `skip()` naming what is missing — an incomplete
-      canary that looks complete is worse than one that says what it does not
-      cover.
+      Verbose transport logging was the last gap and is now covered:
+      `zu_verbose()` is built on §35.3 hooks, whose payloads are redacted
+      before any handler runs, so a trace cannot carry a credential — not
+      because the tracer is careful but because it never receives one. A
+      parallel logging path would have needed its own redaction, which is the
+      second implementation §42 opens by warning about. `zu_info()` was added
+      to the canary at the same time, since it exists to be pasted into bug
+      reports and a proxy URL routinely carries a credential.
+
+      **The R suite now has zero `skip()`s.**
 
       **Hook payloads joined the canary in S13.**
+
+      §42.4 calls this "a regression class that reappears every time a new
+      output path is added", so the arms are now enumerated in a test rather
+      than remembered — a new egress means a new arm and a new line there.
 
       Two arms of this canary turned out to be **vacuous**, both found by
       stages that came later. S14: it asserted a form body's `client_secret`
