@@ -68,6 +68,14 @@ const char *zu_headers_get_at(const zu_headers *h, const char *name, size_t i);
 const char *zu_headers_get(const zu_headers *h, const char *name); /* first, or NULL */
 int         zu_headers_has(const zu_headers *h, const char *name);
 
+/* Iteration in wire order, for callers that must present every field —
+ * printing, tracing, and the R accessor. Duplicates appear separately,
+ * because §18.3 keeps them addressable rather than joining them.
+ * zu_headers_at() returns 0 when `i` is out of range. */
+size_t zu_headers_total(const zu_headers *h);
+int    zu_headers_at(const zu_headers *h, size_t i,
+                     const char **name, const char **value);
+
 /* ASCII case-insensitive compare, locale-independent. Header names are ASCII
  * by definition, and strcasecmp() is locale-sensitive and not C99. */
 int zu_ascii_casecmp(const char *a, const char *b);

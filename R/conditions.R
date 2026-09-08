@@ -94,3 +94,16 @@ zu_condition <- function(code, message, url = NULL, phase = NULL,
 zu_stop <- function(code, message, ..., call = sys.call(-1)) {
   stop(zu_condition(code, message, ..., call = call))
 }
+
+# Called from C (src/init.c) when a request fails. Building the condition here
+# rather than in C keeps the §34.1 hierarchy in exactly one place.
+zu_stop_from_c <- function(code, message, url, phase, backend, backend_code) {
+  stop(zu_condition(
+    code, message,
+    url          = url,
+    phase        = if (identical(phase, "none")) NULL else phase,
+    backend      = backend,
+    backend_code = if (is.null(backend)) NULL else backend_code,
+    call         = sys.call(-1)
+  ))
+}

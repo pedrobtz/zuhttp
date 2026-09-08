@@ -1,0 +1,78 @@
+#!/bin/sh
+# Locate OpenSSL and generate src/Makevars (design §47.2, roadmap S19).
+#
+# zuhttp's premise is the SYSTEM TLS stack, not a bundled one, so this script
+# only ever looks for what the platform already provides and fails loudly if
+# it is absent — it never downloads or vendors a copy.
+#
+# Note for §13: the walking slice uses OpenSSL on every platform. Schannel
+# (D-5) and the macOS engine (D-4/R-13) replace it at S8 and S9; until then
+# this is the one backend, and DESCRIPTION says so.
+set -eu
+
+: "${R_HOME:=$(R RHOME)}"
+CC=$("${R_HOME}/bin/R" CMD config CC)
+CFLAGS=$("${R_HOME}/bin/R" CMD config CFLAGS)
+
+SSL_CFLAGS=""
+SSL_LIBS=""
+
+if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists openssl 2>/dev/null; then
+    SSL_CFLAGS=$(pkg-config --cflags openssl)
+    SSL_LIBS=$(pkg-config --libs openssl)
+    echo "configure: OpenSSL $(pkg-config --modversion openssl) via pkg-config"
+else
+    # Homebrew and MacPorts do not put openssl on the default search path,
+    # because macOS ships a header-less LibreSSL that must not be picked up.
+    for p in /opt/homebrew/opt/openssl@3 /usr/local/opt/openssl@3 \
+             /opt/local /usr/local /usr; do
+        if [ -f "$p/include/openssl/ssl.h" ]; then
+            SSL_CFLAGS="-I$p/include"
+            SSL_LIBS="-L$p/lib -lssl -lcrypto"
+            echo "configure: OpenSSL headers found under $p"
+            break
+        fi
+    done
+fi
+
+if [ -z "$SSL_LIBS" ]; then
+    cat >&2 <<'MSG'
+configure: could not find OpenSSL.
+
+zuhttp uses the system TLS stack and does not bundle one. Install the
+development package and retry:
+
+  Debian/Ubuntu   apt-get install libssl-dev
+  Fedora/RHEL     dnf install openssl-devel
+  macOS           brew install openssl@3
+  Alpine          apk add openssl-dev
+MSG
+    exit 1
+fi
+
+# Do not trust the flags: prove they compile AND link before writing them out.
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+cat > "$tmp/t.c" <<'CEOF'
+#include <openssl/ssl.h>
+#include <openssl/x509v3.h>
+int main(void) {
+    SSL_CTX *c = SSL_CTX_new(TLS_client_method());
+    SSL *s = c ? SSL_new(c) : 0;
+    /* §13.5: hostname verification must come from the library, never from a
+       hand-rolled comparison, so this symbol is a hard requirement. */
+    if (s) SSL_set1_host(s, "example.com");
+    return c ? 0 : 1;
+}
+CEOF
+# shellcheck disable=SC2086
+if ! $CC $CFLAGS $SSL_CFLAGS -o "$tmp/t" "$tmp/t.c" $SSL_LIBS >/dev/null 2>&1; then
+    echo "configure: found OpenSSL headers but could not link a test program." >&2
+    echo "configure: CFLAGS=$SSL_CFLAGS LIBS=$SSL_LIBS" >&2
+    exit 1
+fi
+echo "configure: OpenSSL links, and SSL_set1_host is available"
+
+sed -e "s|@SSL_CFLAGS@|$SSL_CFLAGS|g" -e "s|@SSL_LIBS@|$SSL_LIBS|g" \
+    src/Makevars.in > src/Makevars
+echo "configure: wrote src/Makevars"

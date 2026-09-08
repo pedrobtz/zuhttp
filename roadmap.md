@@ -98,6 +98,39 @@ Tracks B and D are the two that can absorb a second contributor with no coordina
 
 ---
 
+## The §63.2 vertical slice — ✅ **COMPLETE**
+
+Before Track D proper, the pieces were wired together end to end, because
+everything up to this point had been proven correct **separately** and never
+composed. `src/zu_engine.c` plus `zu_get()` in R:
+
+    URL -> TCP -> TLS (verified) -> request -> response -> framing
+        -> chunked -> gzip -> one redirect -> memory body -> R raw vector
+
+It worked on the first integration, which is the useful result: the interfaces
+the earlier stages were designed against fitted together without rework.
+
+    status=200  bytes=559  tls=TLSv1.3/TLS_AES_256_GCM_SHA384
+    class: zu_tls_certificate_error < zu_tls_error < zu_error < error < condition
+
+**What it also forced:** `./configure` (S19 work, pulled forward because
+nothing could link OpenSSL from the package build), and `zu_headers_at()` /
+`zu_headers_total()` so the R layer can present every field.
+
+**Deliberately not in it:** the pool (one connection per request), proxies,
+retries, streaming sinks, and Ctrl-C. Each has its own stage. Wiring them in
+before the simple path worked would have made the first integration failure
+much harder to read. **Ctrl-C in particular is listed as a §63.2 capability
+and is NOT delivered** — it needs `R_UnwindProtect` (S15), and a bare
+`R_CheckUserInterrupt()` in the tick callback would longjmp past live C
+allocations.
+
+**Also not yet true to the design:** the slice uses OpenSSL on *every*
+platform, including Windows and macOS. D-5 and D-4 call for Schannel and the
+system trust store; those are S8 and S9. DESCRIPTION says so explicitly.
+
+---
+
 ## Track A — Feasibility spikes
 
 These gate the architecture. They are days of work and must happen **first**. Building engine code before S0 answers is not wasted (Track B is TLS-agnostic), but building any TLS code before it is.

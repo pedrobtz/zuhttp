@@ -198,6 +198,16 @@ const char *zu_headers_get(const zu_headers *h, const char *name) {
     return zu_headers_get_at(h, name, 0);
 }
 
+size_t zu_headers_total(const zu_headers *h) { return h ? h->n : 0; }
+
+int zu_headers_at(const zu_headers *h, size_t i,
+                  const char **name, const char **value) {
+    if (!h || i >= h->n) return 0;
+    if (name)  *name  = h->items[i].name;
+    if (value) *value = h->items[i].value;
+    return 1;
+}
+
 int zu_headers_has(const zu_headers *h, const char *name) {
     return zu_headers_get(h, name) != NULL;
 }

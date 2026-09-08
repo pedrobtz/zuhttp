@@ -12,6 +12,7 @@ src/vendor/**/*.o
 ctest/zu_ctest
 ctest/zu_ctest_asan
 ctest/zu_tlstest
+ctest/zu_engtest
 ctest/build/
 ctest/build-asan/
 *.dSYM/
@@ -34,3 +35,5 @@ spike/**/tmp/
 spike/macos-tls/tls_spike
 spike/macos-tls/fork_trust_test
 spike/windows-schannel/*.exe
+src/Makevars
+src/Makevars.win

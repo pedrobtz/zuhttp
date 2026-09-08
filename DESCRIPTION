@@ -31,8 +31,10 @@ Depends:
 Suggests:
     jsonlite,
     testthat (>= 3.0.0)
-SystemRequirements: OpenSSL >= 1.1.1 (Linux and other Unix only; macOS and
-    Windows use system TLS), zlib
+SystemRequirements: OpenSSL >= 1.1.1, zlib. NOTE: the long-term design uses
+    each platform's native TLS stack (Schannel on Windows, the system trust
+    store on macOS); until those backends land the package links OpenSSL on
+    every platform, which is what ./configure looks for.
 URL: https://github.com/pedrobtz/zuhttp
 BugReports: https://github.com/pedrobtz/zuhttp/issues
 Config/testthat/edition: 3

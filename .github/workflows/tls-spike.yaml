@@ -249,3 +249,69 @@ jobs:
         env:
           ZU_TEST_DNS: "1"
         run: make run
+
+  # The §63.2 vertical slice, from R. Network-dependent, so it is here rather
+  # than in R-CMD-check.yaml, which must stay deterministic — the same split
+  # as c-core.yaml vs the net-online job above.
+  slice-r:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ${{ matrix.os }}
+    name: 63.2 slice from R (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install OpenSSL
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y libssl-dev
+          else
+            brew install openssl@3
+          fi
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::testthat, any::curl
+
+      - name: Install and run the slice
+        timeout-minutes: 10
+        env:
+          ZU_TEST_NETWORK: "1"
+          NOT_CRAN: "true"
+          PKG_CONFIG_PATH: /opt/homebrew/opt/openssl@3/lib/pkgconfig:/usr/local/opt/openssl@3/lib/pkgconfig
+        run: |
+          R CMD INSTALL .
+          Rscript -e 'library(testthat); library(zuhttp);
+            r <- test_dir("tests/testthat", reporter="summary", stop_on_failure=TRUE)'
+
+  # The same slice at the C level, without R in the picture at all (§11).
+  slice-c:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ${{ matrix.os }}
+    name: 63.2 slice in C (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install OpenSSL
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y libssl-dev
+          else
+            brew install openssl@3
+          fi
+      - name: Build and run
+        timeout-minutes: 10
+        working-directory: ctest
+        env:
+          PKG_CONFIG_PATH: /opt/homebrew/opt/openssl@3/lib/pkgconfig:/usr/local/opt/openssl@3/lib/pkgconfig
+        run: make engine

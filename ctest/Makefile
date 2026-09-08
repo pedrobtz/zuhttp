@@ -107,7 +107,26 @@ zu_tlstest: $(TLSSRC) test_tls.c
 tls: zu_tlstest
 	./zu_tlstest
 
-clean:
-	rm -rf zu_ctest zu_ctest_asan zu_tlstest *.dSYM build build-asan *.o
+# --- 63.2 vertical slice ------------------------------------------------
+# Also network-dependent, and also a separate binary for the same reason.
+ENGSRC := $(SRC)/zu_alloc.c $(SRC)/zu_buffer.c $(SRC)/zu_error.c \
+          $(SRC)/zu_time.c $(SRC)/zu_stream.c $(SRC)/zu_net.c \
+          $(SRC)/zu_headers.c $(SRC)/zu_request.c $(SRC)/zu_framing.c \
+          $(SRC)/zu_response.c $(SRC)/zu_uri.c $(SRC)/zu_redirect.c \
+          $(SRC)/zu_inflate.c $(SRC)/zu_tls_openssl.c $(SRC)/zu_engine.c \
+          $(VENDOR)/picohttpparser.c \
+          $(URIDIR)/UriParse.c $(URIDIR)/UriParseBase.c $(URIDIR)/UriResolve.c \
+          $(URIDIR)/UriRecompose.c $(URIDIR)/UriCommon.c $(URIDIR)/UriMemory.c \
+          $(URIDIR)/UriIp4.c $(URIDIR)/UriIp4Base.c
 
-.PHONY: all run strict asan clean tls
+zu_engtest: $(ENGSRC) test_engine.c
+	$(CC) $(BASE) $(URIFLAGS) $(OPENSSL_CFLAGS) -o $@ $(ENGSRC) test_engine.c \
+	      $(OPENSSL_LIBS) -lz $(NETLIBS)
+
+engine: zu_engtest
+	./zu_engtest
+
+clean:
+	rm -rf zu_ctest zu_ctest_asan zu_tlstest zu_engtest *.dSYM build build-asan *.o
+
+.PHONY: all run strict asan clean tls engine

@@ -18,6 +18,10 @@
 #include "zu_error.h"
 #include "zu_redact.h"
 #include "zu_buffer.h"
+#include "zu_engine.h"
+#include "zu_headers.h"
+#include "zu_tls.h"
+#include <string.h>
 
 /* Anything a caller could make arbitrarily large is bounded here rather than
  * in the R layer, so the bound cannot be bypassed by a different caller. */
@@ -183,6 +187,107 @@ static SEXP C_zu_is_secret_param(SEXP names, SEXP extra_params) {
     return out;
 }
 
+/* --- §63.2 the vertical slice --------------------------------------------- */
+
+/* Raise the §34.1 condition for a zu_error by calling back into R. Building
+ * the condition in R rather than in C keeps the class hierarchy in one place
+ * (zu_condition()) and keeps this file free of condition construction. */
+static void raise_zu_error(const zu_error *e, const char *url) {
+    /* zuhttp:::zu_stop_from_c(code, message, url, phase, backend, backend_code)
+     *
+     * Six arguments, and R only provides Rf_lang1..Rf_lang6 (function plus
+     * five), so the call is built by hand rather than trimmed to fit. */
+    SEXP fn   = PROTECT(Rf_install("zu_stop_from_c"));
+    SEXP ns   = PROTECT(R_FindNamespace(Rf_mkString("zuhttp")));
+    SEXP args = PROTECT(Rf_allocList(6));
+    SEXP call = PROTECT(Rf_lcons(fn, args));   /* lcons yields a LANGSXP */
+    SEXP p    = args;
+
+    SETCAR(p, Rf_ScalarInteger((int)e->code));                          p = CDR(p);
+    SETCAR(p, Rf_mkString(e->message[0] ? e->message : "request failed")); p = CDR(p);
+    SETCAR(p, url ? Rf_mkString(url) : R_NilValue);                     p = CDR(p);
+    SETCAR(p, Rf_mkString(zu_phase_name(e->phase)));                    p = CDR(p);
+    SETCAR(p, e->backend[0] ? Rf_mkString(e->backend) : R_NilValue);    p = CDR(p);
+    SETCAR(p, Rf_ScalarInteger(e->backend_code));
+
+    Rf_eval(call, ns);           /* zu_stop_from_c() does not return */
+    UNPROTECT(4);
+}
+
+static SEXP headers_to_r(const zu_headers *h) {
+    size_t n = zu_headers_total(h), i;
+    SEXP out = PROTECT(Rf_allocVector(STRSXP, (R_xlen_t)n));
+    SEXP nms = PROTECT(Rf_allocVector(STRSXP, (R_xlen_t)n));
+    for (i = 0; i < n; i++) {
+        const char *name = NULL, *value = NULL;
+        zu_headers_at(h, i, &name, &value);
+        SET_STRING_ELT(nms, (R_xlen_t)i, Rf_mkChar(name ? name : ""));
+        SET_STRING_ELT(out, (R_xlen_t)i, Rf_mkCharCE(value ? value : "", CE_UTF8));
+    }
+    Rf_setAttrib(out, R_NamesSymbol, nms);
+    UNPROTECT(2);
+    return out;
+}
+
+static SEXP C_zu_get(SEXP url, SEXP timeout_ms, SEXP max_redirects,
+                     SEXP verify, SEXP max_body, SEXP user_agent) {
+    zu_get_opts o;
+    zu_result r;
+    zu_error e;
+    zu_code rc;
+    const char *u;
+    SEXP out, nms, body;
+
+    if (!Rf_isString(url) || Rf_length(url) != 1 || STRING_ELT(url, 0) == NA_STRING)
+        Rf_error("url must be a single non-NA string");
+    u = Rf_translateCharUTF8(STRING_ELT(url, 0));
+
+    zu_get_opts_init(&o);
+    o.timeout_ms    = (long)Rf_asInteger(timeout_ms);
+    o.max_redirects = Rf_asInteger(max_redirects);
+    o.verify        = Rf_asLogical(verify) == TRUE;
+    o.max_body      = (uint64_t)Rf_asReal(max_body);
+    if (Rf_isString(user_agent) && Rf_length(user_agent) == 1)
+        o.user_agent = Rf_translateCharUTF8(STRING_ELT(user_agent, 0));
+
+    zu_error_clear(&e);
+    rc = zu_engine_get(&r, u, &o, &e);
+    if (rc != ZU_OK) {
+        /* No C resources are live here: zu_engine_get frees everything it
+         * owns before returning non-OK, which is what makes it safe to raise
+         * an R condition (and longjmp) from this point. */
+        raise_zu_error(&e, u);
+        return R_NilValue;   /* not reached */
+    }
+
+    body = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t)r.body.len));
+    if (r.body.len) memcpy(RAW(body), r.body.data, r.body.len);
+
+    out = PROTECT(Rf_allocVector(VECSXP, 6));
+    nms = PROTECT(Rf_allocVector(STRSXP, 6));
+    SET_VECTOR_ELT(out, 0, Rf_ScalarInteger(r.status));
+    SET_STRING_ELT(nms, 0, Rf_mkChar("status"));
+    SET_VECTOR_ELT(out, 1, headers_to_r(&r.headers));
+    SET_STRING_ELT(nms, 1, Rf_mkChar("headers"));
+    SET_VECTOR_ELT(out, 2, body);
+    SET_STRING_ELT(nms, 2, Rf_mkChar("body"));
+    SET_VECTOR_ELT(out, 3, r.final_url ? Rf_mkString(r.final_url) : R_NilValue);
+    SET_STRING_ELT(nms, 3, Rf_mkChar("url"));
+    SET_VECTOR_ELT(out, 4, r.tls_version ? Rf_mkString(r.tls_version) : R_NilValue);
+    SET_STRING_ELT(nms, 4, Rf_mkChar("tls_version"));
+    SET_VECTOR_ELT(out, 5, Rf_ScalarInteger(r.redirects));
+    SET_STRING_ELT(nms, 5, Rf_mkChar("redirects"));
+    Rf_setAttrib(out, R_NamesSymbol, nms);
+
+    zu_result_free(&r);
+    UNPROTECT(3);
+    return out;
+}
+
+static SEXP C_zu_tls_backend(void) {
+    return Rf_mkString(zu_tls_backend_name());
+}
+
 /* --- registration --------------------------------------------------------- */
 
 static const R_CallMethodDef call_methods[] = {
@@ -193,6 +298,8 @@ static const R_CallMethodDef call_methods[] = {
     {"C_zu_redact_form",       (DL_FUNC) &C_zu_redact_form,       2},
     {"C_zu_is_secret_header",  (DL_FUNC) &C_zu_is_secret_header,  2},
     {"C_zu_is_secret_param",   (DL_FUNC) &C_zu_is_secret_param,   2},
+    {"C_zu_get",               (DL_FUNC) &C_zu_get,               6},
+    {"C_zu_tls_backend",       (DL_FUNC) &C_zu_tls_backend,       0},
     {NULL, NULL, 0}
 };
 
