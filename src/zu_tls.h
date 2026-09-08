@@ -85,6 +85,15 @@ zu_code zu_tls_connect(zu_stream **out, zu_stream *inner, const char *hostname,
 void zu_tls_stream_free(zu_stream *s);
 int  zu_tls_get_info(const zu_stream *s, zu_tls_info *out);
 
+/* IANA name for a TLS cipher-suite code, or NULL if unknown.
+ *
+ * Secure Transport and Schannel report a 16-bit suite code; OpenSSL reports a
+ * name. §35.2 asks for `tls_cipher`, and "0xcca9" is not an answer to the
+ * question a user is asking when they read it — they want to know whether the
+ * connection has forward secrecy and an AEAD mode, which the name says and
+ * the number does not. One table, shared by both numeric backends. */
+const char *zu_tls_cipher_name(unsigned code);
+
 /* Which engine was compiled in, for zu_info() (§39). */
 const char *zu_tls_backend_name(void);
 int         zu_tls_available(void);

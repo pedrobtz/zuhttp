@@ -973,6 +973,35 @@ User docs per §55: TLS backend and trust per OS, proxy behavior, timeout semant
 - [ ] Three R users unfamiliar with the package each write a working GET and JSON POST within 5 minutes using only the reference index (§61.11).
 - [ ] Every documented limitation from the design doc appears in user-facing help — especially DNS non-interruptibility (§25.4) and `ca_file` replacing rather than adding (§14.2).
 
+### S-unassigned · §35.2 `zu_resp_connection()` — ✅ **DONE 2026-09-08**
+
+Found by a question nobody could answer from the package: *what cipher did
+this connection negotiate?* §35.2 specifies a nine-field accessor, and none of
+it existed — `init.c` exposed `tls_version` and stopped, though the C result
+already carried `tls_cipher`.
+
+All nine now: `reused_connection`, `remote_ip`, `tls_protocol`, `tls_cipher`,
+`trust_backend`, `http_version`, `proxy_used`, `retries_performed`,
+`redirect_count`. Reported for the **final** hop — after a redirect chain the
+earlier connections are gone, and describing one of those answers a question
+nobody asked.
+
+Two of them were more than plumbing:
+
+- **`tls_cipher` is a NAME.** Secure Transport and Schannel report a 16-bit
+  suite code, and `"0xcca9"` does not answer the question anyone opens this
+  field to ask — whether the connection has forward secrecy and an AEAD mode.
+  `zu_tls_cipher_name()` maps the suites a modern server actually negotiates,
+  shared by both numeric backends, with the hex as the fallback. Unknown codes
+  return NULL rather than a guess: a plausible-looking wrong answer about
+  which cipher secured a connection is worse than no answer.
+- **`retries_performed` and `redirect_count` are never NULL**, even on a
+  response that never touched a network. "How many attempts?" always has an
+  answer, and a mock that returned NULL would push a guard into every caller.
+
+`remote_ip` through a proxy is the **proxy's** address, which is the honest
+answer: it is who we are connected to, and only the proxy knows the origin's.
+
 ### S-unassigned · §14 TLS configuration reaches R — ✅ **DONE 2026-09-08**
 
 Not owned by a stage either, and it was blocking both S7 and S9. **None of

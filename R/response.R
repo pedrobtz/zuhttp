@@ -79,6 +79,53 @@ zu_resp_url <- function(resp) resp$url
 #' @export
 zu_resp_method <- function(resp) resp$method
 
+#' Connection metadata
+#'
+#' §35.2: what actually happened at the transport layer for this response.
+#' Reported for the **final** hop — after a redirect chain the earlier
+#' connections are gone, and describing one of those would answer a question
+#' nobody asked.
+#'
+#' @param resp A `zu_response`.
+#' @return A named list: `reused_connection`, `remote_ip`, `tls_protocol`,
+#'   `tls_cipher`, `trust_backend`, `http_version`, `proxy_used`,
+#'   `retries_performed` and `redirect_count`.
+#'
+#' @section Why the cipher is named and not numbered:
+#' `tls_cipher` reads `"ECDHE-ECDSA-CHACHA20-POLY1305"`, not `"0xcca9"`. The
+#' question someone opens this list to ask is whether the connection has
+#' forward secrecy and an AEAD mode, and the name answers it while the number
+#' does not. Secure Transport and Schannel both report a numeric suite code;
+#' it is mapped in C so all three backends say the same kind of thing.
+#'
+#' `trust_backend` is separate from the TLS engine because §13.1 splits them —
+#' on macOS the protocol is Secure Transport and the trust decision is
+#' SecTrust, and "which store trusted this?" is a question users genuinely
+#' arrive with.
+#'
+#' @seealso [zu_resp_timings()], [zu_info()] for what the build can do.
+#' @export
+#' @examples
+#' r <- zu_response(200L)
+#' zu_resp_connection(r)
+zu_resp_connection <- function(resp) {
+  v <- resp$http_minor
+  list(
+    reused_connection = isTRUE(resp$reused_connection),
+    remote_ip         = resp$remote_ip,
+    tls_protocol      = resp$tls_version,
+    tls_cipher        = resp$tls_cipher,
+    trust_backend     = resp$trust_backend,
+    http_version      = if (is.null(v) || is.na(v)) NULL else paste0("HTTP/1.", v),
+    proxy_used        = isTRUE(resp$proxy_used),
+    # Filled by the retry layer (§33) and the engine respectively, so a
+    # response that went through neither still answers 1 and 0 rather than
+    # NULL — "how many attempts?" always has an answer.
+    retries_performed = max(0L, (resp$attempts %||% 1L) - 1L),
+    redirect_count    = resp$redirects %||% 0L
+  )
+}
+
 #' @rdname zu_resp
 #' @export
 zu_resp_timings <- function(resp) {

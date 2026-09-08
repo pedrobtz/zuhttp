@@ -9,6 +9,7 @@
 #include "zu_body.h"
 #include "zu_sink.h"
 #include "zu_mock_stream.h"
+#include "zu_tls.h"
 #include "zu_alloc.h"
 #include <string.h>
 #include <stdio.h>
@@ -19,6 +20,8 @@
 #endif
 
 void suite_body(void);
+
+static int streq(const char *a, const char *b) { return a && b && strcmp(a, b) == 0; }
 
 static zu_deadline forever(void) { return zu_deadline_in(60000); }
 
@@ -425,6 +428,23 @@ void suite_body(void) {
         zu_free(page);
     }
 #endif
+
+    /* --- §35.2 cipher-suite names -------------------------------------- */
+
+    ZU_CASE("§35.2: suite codes map to names, unknown ones do not");
+    {
+        /* The three the numeric backends see most, one per family. */
+        ZU_CHECK(streq(zu_tls_cipher_name(0x1303), "TLS_CHACHA20_POLY1305_SHA256"));
+        ZU_CHECK(streq(zu_tls_cipher_name(0xCCA9), "ECDHE-ECDSA-CHACHA20-POLY1305"));
+        ZU_CHECK(streq(zu_tls_cipher_name(0xC02B), "ECDHE-ECDSA-AES128-GCM-SHA256"));
+        ZU_CHECK(streq(zu_tls_cipher_name(0x009C), "AES128-GCM-SHA256"));
+        /* An unknown code must be NULL rather than a wrong name: the caller
+         * falls back to the hex, and a plausible-looking wrong answer about
+         * which cipher secured a connection is worse than no answer. */
+        ZU_CHECK(zu_tls_cipher_name(0x0000) == NULL);
+        ZU_CHECK(zu_tls_cipher_name(0xFFFF) == NULL);
+        ZU_CHECK(zu_tls_cipher_name(0x1399) == NULL);
+    }
 
     ZU_CASE("no leaks across the suite");
     {

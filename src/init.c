@@ -693,8 +693,11 @@ static SEXP build_response(void *data) {
     body = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t)r.body.len));
     if (r.body.len) memcpy(RAW(body), r.body.data, r.body.len);
 
-    out = PROTECT(Rf_allocVector(VECSXP, 6));
-    nms = PROTECT(Rf_allocVector(STRSXP, 6));
+    /* §35.2's connection metadata rides on the response rather than being a
+     * second call, because it describes the connection THIS response came
+     * over — asking again later would answer about a different one. */
+    out = PROTECT(Rf_allocVector(VECSXP, 12));
+    nms = PROTECT(Rf_allocVector(STRSXP, 12));
     SET_VECTOR_ELT(out, 0, Rf_ScalarInteger(r.status));
     SET_STRING_ELT(nms, 0, Rf_mkChar("status"));
     SET_VECTOR_ELT(out, 1, headers_to_r(&r.headers));
@@ -707,6 +710,18 @@ static SEXP build_response(void *data) {
     SET_STRING_ELT(nms, 4, Rf_mkChar("tls_version"));
     SET_VECTOR_ELT(out, 5, Rf_ScalarInteger(r.redirects));
     SET_STRING_ELT(nms, 5, Rf_mkChar("redirects"));
+    SET_VECTOR_ELT(out, 6, r.tls_cipher ? Rf_mkString(r.tls_cipher) : R_NilValue);
+    SET_STRING_ELT(nms, 6, Rf_mkChar("tls_cipher"));
+    SET_VECTOR_ELT(out, 7, r.remote_ip ? Rf_mkString(r.remote_ip) : R_NilValue);
+    SET_STRING_ELT(nms, 7, Rf_mkChar("remote_ip"));
+    SET_VECTOR_ELT(out, 8, r.trust_backend ? Rf_mkString(r.trust_backend) : R_NilValue);
+    SET_STRING_ELT(nms, 8, Rf_mkChar("trust_backend"));
+    SET_VECTOR_ELT(out, 9, Rf_ScalarLogical(r.reused_connection));
+    SET_STRING_ELT(nms, 9, Rf_mkChar("reused_connection"));
+    SET_VECTOR_ELT(out, 10, Rf_ScalarLogical(r.proxy_used));
+    SET_STRING_ELT(nms, 10, Rf_mkChar("proxy_used"));
+    SET_VECTOR_ELT(out, 11, Rf_ScalarInteger(r.http_version));
+    SET_STRING_ELT(nms, 11, Rf_mkChar("http_minor"));
     Rf_setAttrib(out, R_NamesSymbol, nms);
 
     UNPROTECT(3);

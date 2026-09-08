@@ -469,7 +469,15 @@ zu_code zu_tls_connect(zu_stream **out, zu_stream *inner, const char *hostname,
                  proto == kTLSProtocol12 ? "TLSv1.2" :
                  proto == kTLSProtocol11 ? "TLSv1.1" :
                  proto == kTLSProtocol1  ? "TLSv1.0" : "unknown");
-        snprintf(t->cipher, sizeof t->cipher, "0x%04x", (unsigned)cs);
+        {
+            /* §35.2: the NAME, because that is what answers the question a
+             * user reads this field to ask — does this connection have
+             * forward secrecy and an AEAD mode? The hex remains as the
+             * fallback for a suite the table does not know. */
+            const char *nm = zu_tls_cipher_name((unsigned)cs);
+            if (nm) snprintf(t->cipher, sizeof t->cipher, "%s", nm);
+            else    snprintf(t->cipher, sizeof t->cipher, "0x%04x", (unsigned)cs);
+        }
     }
 
     s->vt = &k_st_vt;

@@ -47,6 +47,8 @@ void zu_result_free(zu_result *r) {
     zu_free(r->final_url);
     zu_free(r->tls_version);
     zu_free(r->tls_cipher);
+    zu_free(r->remote_ip);
+    zu_free(r->trust_backend);
     memset(r, 0, sizeof *r);
 }
 
@@ -210,8 +212,10 @@ static void record_tls_info(zu_stream *s, zu_result *res) {
     zu_tls_info info;
     if (!zu_tls_get_info(s, &info)) return;
     zu_free(res->tls_version); zu_free(res->tls_cipher);
-    res->tls_version = dup_str(info.protocol);
-    res->tls_cipher  = dup_str(info.cipher);
+    zu_free(res->trust_backend);
+    res->tls_version   = dup_str(info.protocol);
+    res->tls_cipher    = dup_str(info.cipher);
+    res->trust_backend = dup_str(info.trust_backend);
 }
 
 /* §20.3: open the tunnel. CONNECT is written to the proxy, its response is
@@ -294,6 +298,7 @@ static zu_code open_stream(zu_stream **out, const zu_uri *u,
         zu_pool_key_free(&key);
         if (reused) {
             if (u->is_https) record_tls_info(reused, res);
+            res->reused_connection = 1;   /* §35.2 */
             *out = reused;
             return ZU_OK;
         }
@@ -311,6 +316,20 @@ static zu_code open_stream(zu_stream **out, const zu_uri *u,
     else
         rc = zu_net_connect(&tcp, u->host, u->port, dl, &nopts, err);
     if (rc != ZU_OK) return rc;
+
+    /* §35.2 remote_ip, taken from the TCP stream before TLS wraps it — the
+     * outer stream has no address of its own. Through a proxy this is the
+     * PROXY's address, which is the honest answer: it is who we are talking
+     * to, and the origin's address is something only the proxy knows. */
+    {
+        char ip[64];
+        if (zu_net_peer_ip(tcp, ip, sizeof ip)) {
+            zu_free(res->remote_ip);
+            res->remote_ip = dup_str(ip);
+        }
+    }
+    res->reused_connection = 0;
+    res->proxy_used = via_proxy;
 
     if (!u->is_https) { *out = tcp; return ZU_OK; }
 
@@ -643,6 +662,7 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
         }
 
         out->status = resp.status;
+        out->http_version = resp.minor_version;
         zu_headers_free(&out->headers);
         out->headers = resp.headers;          /* ownership moves */
         zu_headers_init(&resp.headers);

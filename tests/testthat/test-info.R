@@ -130,3 +130,81 @@ test_that("zu_verbose() writes to stderr by default", {
   expect_s3_class(h, "zu_hooks")
   expect_setequal(names(h), c("before_request", "after_response", "before_retry"))
 })
+
+# --- §35.2 connection metadata -------------------------------------------
+
+test_that("zu_resp_connection() answers all nine §35.2 fields", {
+  # Even for a response that never touched a network. "How many attempts?"
+  # and "how many redirects?" always have an answer, so a mock must not make
+  # them NULL and force every caller to guard.
+  c9 <- zu_resp_connection(zu_response(200L))
+  expect_named(c9, c("reused_connection", "remote_ip", "tls_protocol",
+                     "tls_cipher", "trust_backend", "http_version",
+                     "proxy_used", "retries_performed", "redirect_count"))
+  expect_false(c9$reused_connection)
+  expect_false(c9$proxy_used)
+  expect_identical(c9$retries_performed, 0L)
+  expect_identical(c9$redirect_count, 0L)
+})
+
+test_that("retries and redirects are counted, not guessed", {
+  n <- 0L
+  flaky <- zu_mock_transport(function(r) {
+    n <<- n + 1L
+    if (n < 3L) zu_response(503L) else zu_response(200L)
+  })
+  r <- zu_get("https://h/x", retry = zu_retry(3, base = 0.001),
+              client = zu_client(transport = flaky))
+  # Three attempts is two retries. The off-by-one here is the same one §33
+  # warns about for `attempts`, so it is asserted rather than assumed.
+  expect_identical(zu_resp_connection(r)$retries_performed, 2L)
+
+  r2 <- zu_response(200L); r2$redirects <- 3L
+  expect_identical(zu_resp_connection(r2)$redirect_count, 3L)
+})
+
+test_that("connection metadata is real over a live connection", {
+  skip_on_cran()
+  if (!identical(Sys.getenv("ZU_TEST_NETWORK"), "1"))
+    skip("set ZU_TEST_NETWORK=1 to run network tests")
+  skip_if_offline()
+
+  api <- zu_client()
+  r <- zu_get("https://example.com", client = api)
+  cn <- zu_resp_connection(r)
+
+  expect_false(cn$reused_connection)         # first request on a fresh pool
+  expect_match(cn$tls_protocol, "^TLSv1\\.[23]$")
+  expect_identical(cn$http_version, "HTTP/1.1")
+  expect_false(cn$proxy_used)
+  expect_true(nzchar(cn$remote_ip))
+  expect_true(cn$trust_backend %in% c("sectrust", "schannel", "openssl"))
+
+  # §35.2's cipher is a NAME. "0xcca9" does not answer the question anyone
+  # reads this field to ask, which is whether the connection has forward
+  # secrecy and an AEAD mode.
+  expect_true(nzchar(cn$tls_cipher))
+  expect_false(grepl("^0x", cn$tls_cipher))
+  expect_match(cn$tls_cipher, "[A-Z]")
+
+  # And the pool is visible here rather than only in zu_pool_stats().
+  r2 <- zu_get("https://example.com", client = api)
+  expect_true(zu_resp_connection(r2)$reused_connection)
+})
+
+test_that("proxy_used reports the truth", {
+  skip_on_cran()
+  if (.Platform$OS.type != "unix") skip("the helper proxy uses POSIX shell")
+  if (!nzchar(Sys.which("Rscript"))) skip("Rscript not on PATH")
+
+  # A field that always said FALSE would pass every test above.
+  seen <- with_fake_proxy("ok", function(px) {
+    r <- zu_get("http://target.example/x", proxy = px, timeout = 15, check = FALSE)
+    cn <- zu_resp_connection(r)
+    expect_true(cn$proxy_used)
+    # Through a proxy the peer IS the proxy. That is the honest answer: it is
+    # who we are connected to, and only the proxy knows the origin's address.
+    expect_match(cn$remote_ip, "^127\\.0\\.0\\.1$")
+  })
+  skip_if(is.null(seen), "the helper proxy recorded nothing")
+})

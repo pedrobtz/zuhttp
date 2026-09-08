@@ -109,6 +109,15 @@ typedef struct {
     char      *tls_version;      /* NULL for http:// */
     char      *tls_cipher;
     int        redirects;
+
+    /* §35.2 connection metadata. Reported for the FINAL hop: after a redirect
+     * chain the earlier connections are gone, and describing one of those
+     * would answer a question nobody asked. */
+    char      *remote_ip;
+    char      *trust_backend;    /* "sectrust", "schannel", "openssl" */
+    int        http_version;     /* 0 or 1, for HTTP/1.x */
+    int        proxy_used;
+    int        reused_connection;
 } zu_result;
 
 void zu_result_init(zu_result *r);
