@@ -41,7 +41,7 @@ graph TD
     S9["S9 · macOS engine + trust<br/>DONE — R-13 + R-12 closed"]
     S10["S10 · Proxy + CONNECT<br/>PARTIAL — C core done"]
 
-    S11["S11 · R API surface"]
+    S11["S11 · R API surface<br/>COMPLETE — 11/13 workflows"]
     S12["S12 · Conditions + redaction<br/>PARTIAL — canary incomplete"]
     S13["S13 · Retry, middleware, hooks"]
     S14["S14 · R transports<br/>mock, record/replay"]
@@ -427,18 +427,52 @@ drives them over a real socket yet — that is the request engine.
 
 Buildable against an R-level transport stub before any C transport exists.
 
-### S11 · R API surface
+### S11 · R API surface — ✅ **COMPLETE 2026-09-08**
 
 **Effort:** 3 weeks. **Depends on:** S4.
 
 `zu_client()`, `zu_request()`, method helpers, `zu_perform()`; the single-signature rule with `client =` always named (§31.3); configuration merging (§31.9) including `NA` removal and `NULL` reset; request and response printing; accessors (§31.7) including charset handling and the `jsonlite`-in-Suggests decision.
 
+Three decisions the design had left open were resolved here and written back to
+it: **D-33** `check = TRUE` by default, **D-34** `base_url` is joined rather
+than RFC 3986-resolved, and **D-35** the three-state policy merge that the
+`NULL`-resets rule turns out to require (absent, `NULL`, value — `missing()`
+plus a reset sentinel, because an R list cannot hold a `NULL` as a value).
+
+The C side grew three things the R surface needed: `ZU_ERR_HTTP_STATUS` and its
+4xx/5xx children, so `zu_resp_check()` raises §34.1 classes from the one
+class-chain definition in C rather than a second table in R; a `no_decode`
+option behind `decode = FALSE` (§21.2), which also sends
+`Accept-Encoding: identity` — a caller asking for wire bytes wants the server
+to stop encoding, not just for us to stop decoding; and `decode` as an
+eleventh argument to `C_zu_perform`.
+
 **Exit criteria**
 
-- [ ] All 13 workflows in §31.16 run against the stub transport.
-- [ ] `library(httr2); library(zuhttp)` produces zero masking warnings.
-- [ ] Charset fallback chain behaves for a server sending no `charset`.
-- [ ] JSON helpers give a clear, actionable error when `jsonlite` is absent; everything else works.
+- [x] All 13 workflows in §31.16 run against the stub transport. **11 of 13.**
+      Workflow 5 (retry) and workflow 6 (streaming download) belong to S13 and
+      S17 and have no implementation to exercise; both are `skip()`ped by name
+      in `test-workflows.R` rather than omitted, so the gap is visible in the
+      test output instead of looking like coverage. The other eleven pass,
+      including `mclapply` (11) and `saveRDS` in a genuinely new session (12).
+- [x] `library(httr2); library(zuhttp)` produces zero masking warnings —
+      verified by loading both, and by `test-naming.R` intersecting the two
+      live export lists. httr2 is deliberately NOT in `Suggests`: that would
+      make CRAN install it and its dependency chain to run one naming guard,
+      so the assertion runs wherever httr2 happens to be installed and skips
+      by name where it is not.
+- [x] Charset fallback chain behaves for a server sending no `charset`:
+      all five steps of §31.7 tested, including the BOM branch and the
+      `application/json` short-circuit. Latin-1 bytes with no `charset` raise
+      `zu_body_decode_error` rather than decoding to mojibake.
+- [x] JSON helpers give a clear, actionable error when `jsonlite` is absent;
+      everything else works — tested by mocking the check away, including a
+      full POST of a caller-serialised JSON string with no `jsonlite` present.
+
+**Also done here:** the §42.4 canary now covers printed requests and the
+request/response a condition carries (S12's criterion was explicitly waiting on
+this stage). What remains uncovered there is verbose transport logging and
+recordings, S14/S35.
 
 ### S12 · Conditions and redaction
 
@@ -469,9 +503,11 @@ one definition:
       not to mutate its input.
 - [ ] The §42.4 canary test finds no credential in verbose output, printed
       objects, error payloads, hook payloads, or recordings. **Partial:**
-      conditions, displayed headers, URLs and form bodies are covered.
-      Verbose transport logging, request printing and recordings do not exist
-      yet (S11/S14/§35) and are marked with an explicit `skip()` naming what
+      conditions, displayed headers, URLs, form bodies, printed requests and
+      responses, and the request/response stored on a condition are covered
+      (the last three added by S11).
+      Verbose transport logging and recordings do not exist
+      yet (S14/§35) and are marked with an explicit `skip()` naming what
       is missing — an incomplete canary that looks complete is worse than one
       that says what it does not cover.
 

@@ -48,6 +48,9 @@ Firm decisions and open questions were previously indistinguishable in this docu
 | D-28 | Own tests use a `zu_stream` mock, not the R transport mock | **Accepted** | 50.1 |
 | D-29 | Concurrency, if built, integrates with `later`; no bespoke event loop | **Proposed** | 30.2 |
 | D-30 | DNS is not interruptible in v1; documented limitation | **Accepted** | 8.4, 25.4 |
+| D-33 | `check = TRUE` by default: a 4xx/5xx raises; `check = FALSE` returns it | **Accepted** 2026-09-08 — S11 | 31.14 |
+| D-34 | `base_url` is JOINED textually, not resolved per RFC 3986 | **Accepted** 2026-09-08 — S11 | 31.3 |
+| D-35 | Three-state policy merge: absent inherits, `NULL` resets, value overrides | **Accepted** 2026-09-08 — S11 | 31.9 |
 
 ---
 
@@ -1959,6 +1962,17 @@ The client owns the connection pool, so reuse is both an ergonomic and performan
 
 A one-shot call without an explicit client uses a package-managed default client and pool. That default is PID-guarded (§26.4), is configurable through `zu_set_default_client()`, and is reported by `zu_info()` so its configuration is never invisible.
 
+##### `base_url` is joined, not resolved (D-34)
+
+A request path is **concatenated** to `base_url`, not resolved against it in the RFC 3986 sense:
+
+```r
+zu_client(base_url = "https://api.example.com/v1")
+zu_get("/users", client = api)      # -> https://api.example.com/v1/users
+```
+
+RFC 3986 resolution would produce `https://api.example.com/users`, silently discarding the `/v1` the caller set the base URL for. That behaviour is the single most reported surprise in libraries that resolve here, and nobody who writes `base_url = ".../v1"` means it. Resolution against the *response* URL — redirects, `Location` — remains strict RFC 3986 in C (§19), where the RFC's semantics are the correct ones; this rule applies only to the base_url/path join. An absolute request URL ignores `base_url` entirely.
+
 ---
 
 #### 31.4 API level 3: explicit functional request composition
@@ -2238,6 +2252,10 @@ zu_get("/slow", timeout = NULL, client = api)   # package default, not api's 30s
 
 Both forms must be documented next to the merge table, since "how do I turn this off" is the first question the merge rules provoke.
 
+##### Three states, not two (D-35)
+
+Implementing the `NULL` rule requires the merge to distinguish **argument absent**, **argument supplied as `NULL`**, and **argument supplied with a value** — two states are not enough, because "absent" inherits the client's value and "`NULL`" does not. The R layer reads absence with `missing()` in the calling frame and carries an explicit reset sentinel through composition, since an R list cannot hold a `NULL` element as a value.
+
 ---
 
 #### 31.10 Derived clients
@@ -2435,6 +2453,8 @@ res <- zu_get(url)
 ```
 
 uses a configurable default HTTP-status policy.
+
+**The default is `check = TRUE` (D-33).** A 4xx raises `zu_http_client_error`, a 5xx raises `zu_http_server_error`, and both inherit `zu_http_status_error` and `zu_error` (§34.1). An unchecked status that flows on as data is the error most likely to reach a user's data rather than their console, and R's own idiom — `stop()` on failure — is the one R users expect. `zu_resp_ok()` and `zu_resp_status()` still describe any response, and the policy is per-client as well as per-request.
 
 Users can always opt into raw response semantics:
 

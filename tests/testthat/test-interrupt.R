@@ -26,7 +26,7 @@ test_that("a request completes with the interrupt checkpoint installed", {
   # installing it broke the poll loop, this is where that shows.
   r <- zu_get("https://example.com")
   expect_identical(zu_resp_status(r), 200L)
-  expect_gt(length(zu_resp_body(r)), 0)
+  expect_gt(length(zu_resp_raw(r)), 0)
 })
 
 test_that("repeated requests do not accumulate state", {
@@ -58,7 +58,7 @@ test_that("zu_interrupted_error is a distinct, catchable class (§34.1)", {
 })
 
 test_that("an interrupted request would report as interrupted, not cancelled", {
-  # The mapping C_zu_get applies: our tick returns 1 only for a user interrupt,
+  # The mapping C_zu_perform applies: our tick returns 1 only for a user interrupt,
   # so ZU_ERR_CANCELLED arriving from the engine means exactly that. This tests
   # the classification, which is the part that does not need a real signal.
   expect_true(zu_code_retryable("zu_connect_error"))

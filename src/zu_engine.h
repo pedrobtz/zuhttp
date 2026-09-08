@@ -23,12 +23,28 @@
 #include "zu_buffer.h"
 #include "zu_net.h"
 
+/* A request the engine can perform. Headers are parallel arrays rather than a
+ * zu_headers, so the R layer can pass them without building one — the engine
+ * validates every name and value through zu_headers_add anyway (§17.1). */
+typedef struct {
+    const char        *method;         /* NULL => "GET" */
+    const char *const *header_names;
+    const char *const *header_values;
+    size_t             n_headers;
+    const void        *body;           /* NULL => no body */
+    size_t             body_len;
+} zu_req_spec;
+
 typedef struct {
     long        timeout_ms;      /* total, across redirects (§24.1); <=0 = 30s */
     int         max_redirects;   /* §63.2 slice ships 1; 0 disables */
     int         verify;          /* TLS peer + hostname; default 1 (§14.1) */
     const char *ca_file;         /* replaces system trust when set (D-12) */
     uint64_t    max_body;        /* §40 cap on the decoded body; 0 = 16 MiB */
+    int         no_decode;       /* §21.2: leave Content-Encoding alone and
+                                  * hand back the wire bytes. Negated so that
+                                  * a zeroed struct still decodes, which is
+                                  * what every existing caller expects. */
     const char *user_agent;
     zu_tick_fn  tick;            /* §25.1 interrupt seam; may be NULL */
     void       *tick_ctx;
@@ -51,6 +67,15 @@ void zu_result_free(zu_result *r);
 
 /* Perform one GET. On ZU_OK `out` owns everything and the caller frees it with
  * zu_result_free(); on failure `out` is left empty and `err` describes why. */
+/* Perform one request. `req` may be NULL, which means a plain GET.
+ *
+ * On ZU_OK `out` owns everything and the caller frees it with
+ * zu_result_free(); on failure `out` is left empty and `err` says why. */
+zu_code zu_engine_perform(zu_result *out, const char *url,
+                          const zu_req_spec *req, const zu_get_opts *o,
+                          zu_error *err);
+
+/* Convenience wrapper: a GET with no extra headers and no body. */
 zu_code zu_engine_get(zu_result *out, const char *url,
                       const zu_get_opts *o, zu_error *err);
 

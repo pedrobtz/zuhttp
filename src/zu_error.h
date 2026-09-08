@@ -33,6 +33,13 @@ typedef enum {
     ZU_ERR_BODY_LIMIT,
     ZU_ERR_BODY_DECODE,
     ZU_ERR_BODY_NOT_REPLAYABLE,
+    /* A valid response that carries an error status. Not a transport failure:
+     * the request succeeded, the server said no. Raised only by the R layer's
+     * zu_resp_check() (§31.14), never by the engine — which is why the C core
+     * never sets these, but defines them, so §34.1 has one definition. */
+    ZU_ERR_HTTP_STATUS,
+    ZU_ERR_HTTP_CLIENT,   /* 4xx */
+    ZU_ERR_HTTP_SERVER,   /* 5xx */
     ZU_ERR_CANCELLED,
     ZU_ERR_INTERRUPTED,
     ZU_ERR_FORK,          /* §26.4 hazard 2, macOS */

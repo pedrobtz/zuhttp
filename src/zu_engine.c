@@ -263,11 +263,22 @@ static zu_code decode_body(zu_headers *h, zu_buffer *body, uint64_t max_body,
 
 zu_code zu_engine_get(zu_result *out, const char *url,
                       const zu_get_opts *o, zu_error *err) {
+    return zu_engine_perform(out, url, NULL, o, err);
+}
+
+zu_code zu_engine_perform(zu_result *out, const char *url,
+                          const zu_req_spec *req, const zu_get_opts *o,
+                          zu_error *err) {
     zu_get_opts defaults;
     zu_uri cur;
     zu_deadline total;
     size_t hops = 0;
     zu_code rc;
+    const char *method = (req && req->method) ? req->method : "GET";
+    const void *body   = req ? req->body : NULL;
+    size_t body_len    = req ? req->body_len : 0;
+    size_t n_hdr       = req ? req->n_headers : 0;
+    int is_head        = (strcmp(method, "HEAD") == 0);
 
     if (!out || !url) return ZU_ERR_URL;
     zu_result_init(out);
@@ -284,8 +295,9 @@ zu_code zu_engine_get(zu_result *out, const char *url,
 
     for (;;) {
         zu_stream *s = NULL;
-        zu_request req;
+        zu_request rq;
         zu_response resp;
+        size_t hi;
         zu_buffer wire, raw;
         zu_framing fr;
         size_t consumed = 0;
@@ -294,23 +306,61 @@ zu_code zu_engine_get(zu_result *out, const char *url,
         if (rc != ZU_OK) { zu_uri_free(&cur); zu_result_free(out); return rc; }
 
         /* --- send --- */
-        zu_request_init(&req);
-        req.method = "GET";
-        req.target = cur.path_query;
-        req.host   = cur.host;
-        req.form   = ZU_TARGET_ORIGIN;
-        req.body   = ZU_BODY_NONE;
+        zu_request_init(&rq);
+        rq.method = method;
+        rq.target = cur.path_query;
+        rq.host   = cur.host;
+        rq.form   = ZU_TARGET_ORIGIN;
+        if (body_len > 0) {
+            rq.body           = ZU_BODY_LENGTH;
+            rq.content_length = (uint64_t)body_len;
+        } else {
+            rq.body = ZU_BODY_NONE;
+        }
+        /* §21.2: a caller who asked for the wire bytes wants the server to
+         * stop encoding, not just for us to stop decoding — otherwise
+         * "wire bytes" means "gzip, if the server felt like it". An explicit
+         * Accept-Encoding from the caller still wins: this is only a default,
+         * and it is added before the caller's headers for that reason. */
+        if (o->no_decode) {
+            rc = zu_headers_add_str(&rq.headers, "Accept-Encoding", "identity");
+            if (rc != ZU_OK) {
+                zu_request_free(&rq); zu_stream_free(s);
+                zu_uri_free(&cur); zu_result_free(out);
+                return rc;
+            }
+        }
+        /* Caller headers first, so §17.2's defaults only fill what is absent
+         * and an explicit Accept or User-Agent wins. Every name and value is
+         * validated here, which is what stops a header carrying a CRLF from
+         * becoming a second request (§17.1). */
+        for (hi = 0; hi < n_hdr; hi++) {
+            rc = zu_headers_add_str(&rq.headers, req->header_names[hi],
+                                    req->header_values[hi]);
+            if (rc != ZU_OK) {
+                zu_error_set(err, rc, ZU_PHASE_NONE,
+                             "header %lu is not valid", (unsigned long)hi + 1);
+                zu_request_free(&rq); zu_stream_free(s);
+                zu_uri_free(&cur); zu_result_free(out);
+                return rc;
+            }
+        }
         if (!zu_buf_init(&wire, 512, 64 * 1024)) {
-            zu_request_free(&req); zu_stream_free(s);
+            zu_request_free(&rq); zu_stream_free(s);
             zu_uri_free(&cur); zu_result_free(out);
             return ZU_ERR_NOMEM;
         }
-        rc = zu_request_add_defaults(&req, o->user_agent);
-        if (rc == ZU_OK) rc = zu_request_write(&req, &wire);
+        rc = zu_request_add_defaults(&rq, o->user_agent);
+        if (rc == ZU_OK) rc = zu_request_write(&rq, &wire);
+        /* The body is appended to the same buffer rather than written
+         * separately: one write means one TCP segment for a small request,
+         * and it keeps the "headers sent but body not" window closed. */
+        if (rc == ZU_OK && body_len > 0 && !zu_buf_append(&wire, body, body_len))
+            rc = ZU_ERR_NOMEM;
         if (rc == ZU_OK && !zu_stream_write_all(s, wire.data, wire.len, total, err))
             rc = err->code ? err->code : ZU_ERR_IO;
         zu_buf_free(&wire);
-        zu_request_free(&req);
+        zu_request_free(&rq);
         if (rc != ZU_OK) {
             zu_stream_free(s); zu_uri_free(&cur); zu_result_free(out);
             return rc;
@@ -332,7 +382,7 @@ zu_code zu_engine_get(zu_result *out, const char *url,
             consumed = 0;
             rc = read_headers(s, &raw, &resp, &consumed, total, err);
         }
-        if (rc == ZU_OK) rc = zu_response_decide_framing(&resp, 0, err);
+        if (rc == ZU_OK) rc = zu_response_decide_framing(&resp, is_head, err);
         if (rc == ZU_OK) {
             fr = resp.framing;
             rc = read_body(s, &fr, &out->body,
@@ -372,13 +422,18 @@ zu_code zu_engine_get(zu_result *out, const char *url,
             }
             zu_redirect_policy_init(&pol);
             pol.max_redirects = (size_t)o->max_redirects;
-            rc = zu_redirect_decide(&pol, out->status, "GET", &cur, &next,
+            rc = zu_redirect_decide(&pol, out->status, method, &cur, &next,
                                     hops, &dec, err);
             if (rc != ZU_OK) {
                 zu_uri_free(&next); zu_uri_free(&cur); zu_result_free(out);
                 return rc;
             }
             if (dec.action == ZU_REDIRECT_FOLLOW) {
+                /* §19.1: a rewritten method drops the body with it. Keeping
+                 * the body after 303 -> GET would send a body no method
+                 * expects. */
+                if (dec.rewrite_to_get) { method = "GET"; is_head = 0; }
+                if (dec.drop_body) { body = NULL; body_len = 0; }
                 zu_uri_free(&cur);
                 cur = next;
                 hops++;
@@ -393,9 +448,11 @@ zu_code zu_engine_get(zu_result *out, const char *url,
         break;
     }
 
-    rc = decode_body(&out->headers, &out->body,
-                     o->max_body ? o->max_body : ZU_DEFAULT_MAX_BODY, err);
-    if (rc != ZU_OK) { zu_uri_free(&cur); zu_result_free(out); return rc; }
+    if (!o->no_decode) {
+        rc = decode_body(&out->headers, &out->body,
+                         o->max_body ? o->max_body : ZU_DEFAULT_MAX_BODY, err);
+        if (rc != ZU_OK) { zu_uri_free(&cur); zu_result_free(out); return rc; }
+    }
 
     out->final_url = url_of(&cur);
     zu_uri_free(&cur);

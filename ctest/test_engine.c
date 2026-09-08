@@ -70,6 +70,28 @@ int main(void) {
         printf("  skipped: %s\n", e.message);
     }
 
+    ZU_CASE("no_decode hands back the wire bytes (§21.2)");
+    {
+        zu_get_opts nd = o;
+        nd.no_decode = 1;
+        rc = zu_engine_get(&r, "https://httpbin.org/gzip", &nd, &e);
+        if (rc == ZU_OK) {
+            const char *ce = zu_headers_get(&r.headers, "Content-Encoding");
+            ZU_CHECK_EQ_INT(r.status, 200);
+            /* The header still says gzip, and the body really starts with the
+             * gzip magic number -- this endpoint encodes whatever we send in
+             * Accept-Encoding, which is exactly why the flag cannot be only
+             * about the request header. */
+            ZU_CHECK(ce != NULL && strcmp(ce, "gzip") == 0);
+            ZU_CHECK(r.body.len > 2 &&
+                     r.body.data[0] == 0x1f && r.body.data[1] == 0x8b);
+            ZU_CHECK(!contains(&r.body, "gzipped"));
+            zu_result_free(&r);
+        } else {
+            printf("  skipped: %s\n", e.message);
+        }
+    }
+
     ZU_CASE("one redirect is followed and the final URL reported");
     /* An http:// start that redirects to https:// also exercises the §19.3
      * direction that IS allowed (upgrade); the refused direction is a
@@ -120,6 +142,76 @@ int main(void) {
         zu_get_opts fast = o;
         fast.timeout_ms = 1;                     /* cannot possibly complete */
         rc = zu_engine_get(&r, "https://example.com/", &fast, &e);
+        ZU_CHECK(rc != ZU_OK);
+        printf("  -> %s\n", zu_code_class(rc));
+        if (rc == ZU_OK) zu_result_free(&r);
+    }
+
+    /* --- S11: methods, headers and bodies --- */
+
+    ZU_CASE("POST with a JSON body round-trips");
+    {
+        static const char json[] = "{\"name\":\"alice\",\"n\":42}";
+        static const char *const hn[] = { "Content-Type" };
+        static const char *const hv[] = { "application/json" };
+        zu_req_spec req;
+        memset(&req, 0, sizeof req);
+        req.method = "POST";
+        req.header_names = hn; req.header_values = hv; req.n_headers = 1;
+        req.body = json; req.body_len = sizeof json - 1;
+
+        rc = zu_engine_perform(&r, "https://httpbin.org/post", &req, &o, &e);
+        if (rc == ZU_OK) {
+            ZU_CHECK_EQ_INT(r.status, 200);
+            /* httpbin echoes what it received, so this proves the body and the
+             * Content-Type both arrived rather than merely that we sent them. */
+            ZU_CHECK(contains(&r.body, "\"name\": \"alice\""));
+            ZU_CHECK(contains(&r.body, "application/json"));
+            zu_result_free(&r);
+        } else {
+            printf("  skipped: %s\n", e.message);
+        }
+    }
+
+    ZU_CASE("a caller header overrides the §17.2 default");
+    {
+        static const char *const hn[] = { "User-Agent" };
+        static const char *const hv[] = { "zuhttp-test/1" };
+        zu_req_spec req;
+        memset(&req, 0, sizeof req);
+        req.header_names = hn; req.header_values = hv; req.n_headers = 1;
+        rc = zu_engine_perform(&r, "https://httpbin.org/headers", &req, &o, &e);
+        if (rc == ZU_OK) {
+            ZU_CHECK(contains(&r.body, "zuhttp-test/1"));
+            zu_result_free(&r);
+        }
+    }
+
+    ZU_CASE("HEAD gets no body whatever the headers claim (§18.1)");
+    {
+        zu_req_spec req;
+        memset(&req, 0, sizeof req);
+        req.method = "HEAD";
+        rc = zu_engine_perform(&r, "https://example.com/", &req, &o, &e);
+        ZU_CHECK_EQ_INT(rc, ZU_OK);
+        if (rc == ZU_OK) {
+            ZU_CHECK_EQ_INT(r.status, 200);
+            /* Content-Length is present and non-zero, and the body must still
+             * be empty; getting this wrong hangs waiting for bytes that never
+             * come. */
+            ZU_CHECK_EQ_INT((long long)r.body.len, 0);
+            zu_result_free(&r);
+        }
+    }
+
+    ZU_CASE("a header carrying CRLF is refused, not sent (§17.1)");
+    {
+        static const char *const hn[] = { "X-Evil" };
+        static const char *const hv[] = { "a\r\nInjected: yes" };
+        zu_req_spec req;
+        memset(&req, 0, sizeof req);
+        req.header_names = hn; req.header_values = hv; req.n_headers = 1;
+        rc = zu_engine_perform(&r, "https://example.com/", &req, &o, &e);
         ZU_CHECK(rc != ZU_OK);
         printf("  -> %s\n", zu_code_class(rc));
         if (rc == ZU_OK) zu_result_free(&r);

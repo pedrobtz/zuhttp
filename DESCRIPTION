@@ -30,13 +30,13 @@ Depends:
     R (>= 3.5)
 Suggests:
     jsonlite,
-    testthat (>= 3.0.0)
-SystemRequirements: OpenSSL >= 1.1.1, zlib. NOTE: the design uses each
-    platform's native TLS stack (Schannel on Windows, the system trust store
-    on macOS); until those backends land the package links OpenSSL
-    everywhere, which is what ./configure looks for. On Windows that build
-    cannot verify certificates, because OpenSSL there does not consult the
-    Windows certificate store -- HTTPS is not usable on Windows yet.
+    parallel,
+    testthat (>= 3.1.7)
+SystemRequirements: zlib; and each platform's own TLS stack, which
+    ./configure selects: Schannel on Windows and Secure Transport on macOS,
+    both part of the operating system, and OpenSSL >= 1.1.1 on other Unix.
+    No certificate bundle is shipped: the system trust store is used
+    everywhere.
 URL: https://github.com/pedrobtz/zuhttp
 BugReports: https://github.com/pedrobtz/zuhttp/issues
 Config/testthat/edition: 3

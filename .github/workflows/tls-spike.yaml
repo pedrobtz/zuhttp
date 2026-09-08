@@ -444,7 +444,7 @@ jobs:
 
           r <- zu_get("https://example.com")
           cat("status", zu_resp_status(r), "tls", r$tls_version,
-              "bytes", length(zu_resp_body(r)), "\n")
+              "bytes", length(zu_resp_raw(r)), "\n")
           stopifnot(zu_resp_status(r) == 200L)
           stopifnot(grepl("Example Domain", zu_resp_text(r), fixed = TRUE))
           stopifnot(identical(r$tls_version, "TLSv1.2"))

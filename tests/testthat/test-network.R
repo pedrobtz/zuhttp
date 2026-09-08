@@ -25,8 +25,8 @@ test_that("a plain HTTPS GET returns a usable response", {
 
   expect_s3_class(r, "zu_response")
   expect_identical(zu_resp_status(r), 200L)
-  expect_true(is.raw(zu_resp_body(r)))
-  expect_gt(length(zu_resp_body(r)), 0)
+  expect_true(is.raw(zu_resp_raw(r)))
+  expect_gt(length(zu_resp_raw(r)), 0)
   expect_match(zu_resp_text(r), "Example Domain", fixed = TRUE)
   expect_identical(zu_resp_url(r), "https://example.com/")
 })
@@ -58,7 +58,7 @@ test_that("one redirect is followed and the final URL is reported", {
 
 test_that("the redirect budget is respected", {
   skip_unless_online()
-  r <- zu_get("http://github.com/", follow_redirects = 0L)
+  r <- zu_get("http://github.com/", redirects = 0L, check = FALSE)
   expect_gte(zu_resp_status(r), 300L)
   expect_lt(zu_resp_status(r), 400L)
   expect_identical(r$redirects, 0L)
@@ -110,13 +110,41 @@ test_that("the total timeout is enforced", {
   expect_s3_class(e, "zu_error")
 })
 
-test_that("printing a response redacts credential headers (§42.2)", {
-  r <- structure(
-    list(status = 200L,
-         headers = c(Authorization = "Bearer SECRET", Accept = "*/*"),
-         body = raw(0), url = "https://h/", tls_version = NULL, redirects = 0L),
-    class = "zu_response")
-  out <- paste(capture.output(print(r)), collapse = "\n")
-  expect_false(grepl("SECRET", out, fixed = TRUE))
-  expect_match(out, "<redacted>", fixed = TRUE)
+test_that("an error status raises by default and is inspectable with check = FALSE", {
+  skip_unless_online()
+  expect_error(zu_get("https://httpbin.org/status/404", timeout = 30),
+               class = "zu_http_client_error")
+  r <- zu_get("https://httpbin.org/status/404", check = FALSE, timeout = 30)
+  expect_identical(zu_resp_status(r), 404L)
+})
+
+test_that("a JSON POST reaches the server as JSON", {
+  skip_unless_online()
+  skip_if_not_installed("jsonlite")
+  r <- zu_post("https://httpbin.org/post", json = list(name = "Alice", active = TRUE),
+               timeout = 30)
+  echo <- zu_resp_json(r)
+  expect_identical(echo$data, '{"name":"Alice","active":true}')
+  expect_identical(echo$headers$`Content-Type`, "application/json")
+})
+
+test_that("decode = FALSE returns the wire bytes (§21.2)", {
+  skip_unless_online()
+  decoded <- zu_get("https://httpbin.org/gzip", timeout = 30)
+  wire    <- zu_get("https://httpbin.org/gzip", decode = FALSE, timeout = 30)
+
+  expect_identical(zu_resp_header(decoded, "content-encoding"), character())
+  expect_identical(zu_resp_header(wire, "content-encoding"), "gzip")
+  # The gzip magic number: these really are the bytes the server sent.
+  expect_identical(head(zu_resp_raw(wire), 2), as.raw(c(0x1f, 0x8b)))
+})
+
+test_that("a client's base_url and headers reach the server", {
+  skip_unless_online()
+  skip_if_not_installed("jsonlite")
+  api <- zu_client(base_url = "https://httpbin.org",
+                   headers = c("X-Zu-Test" = "1"), timeout = 30)
+  echo <- zu_resp_json(zu_get("/get", query = list(q = "a b"), client = api))
+  expect_identical(echo$headers$`X-Zu-Test`, "1")
+  expect_identical(echo$args$q, "a b")
 })

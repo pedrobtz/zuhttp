@@ -160,8 +160,30 @@ test_that("the canary does not leak through a redacted URL or form (§42.4)", {
     paste0("api_key=", CANARY, "&x=1")), fixed = TRUE))
 })
 
+test_that("the canary does not leak through a printed request (§42.4)", {
+  req <- zu_request("POST", paste0("https://api.example.com/x?api_key=", CANARY))
+  req <- zu_headers(req, Authorization = paste("Bearer", CANARY))
+  req <- zu_body_form(req, list(client_secret = CANARY, grant_type = "client_credentials"))
+
+  # PRINTED, not stored: §42.3 requires the live request to keep the real
+  # credential, or a redacted request would no longer be executable. What must
+  # never carry it is the display.
+  printed <- paste(utils::capture.output(print(req)), collapse = "\n")
+  expect_false(grepl(CANARY, printed, fixed = TRUE))
+  expect_true(grepl(CANARY, req$headers[["Authorization"]], fixed = TRUE))
+
+  # And through a printed response, and the request a condition carries.
+  api <- zu_client(headers = c(Authorization = paste("Bearer", CANARY)),
+                   transport = zu_mock_transport(function(r) zu_response(500L)))
+  e <- tryCatch(zu_get(paste0("https://h/x?api_key=", CANARY), client = api),
+                zu_error = function(e) e)
+  expect_no_canary(e, "condition payload from a failed request")
+  expect_no_canary(e$request, "the request stored on a condition")
+  expect_no_canary(e$response, "the response stored on a condition")
+})
+
 test_that("canary coverage of the remaining egresses is tracked, not assumed", {
-  # These are real §42.2 egresses with no implementation yet. They must fail
+  # Still real §42.2 egresses with no implementation yet. They must fail
   # loudly as "not covered" rather than quietly pass.
-  skip("verbose transport logging, request printing and recordings arrive with S11/S14/S35")
+  skip("verbose transport logging and recordings arrive with S14/S35")
 })

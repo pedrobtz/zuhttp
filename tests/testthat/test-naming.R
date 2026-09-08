@@ -43,6 +43,13 @@ test_that("response accessors use the zu_resp_ prefix (D-1)", {
   bare <- grep("^zu_(status|headers?|body|json|text|raw|url|timings)$",
                exports, value = TRUE)
 
+  # §31.11 names zu_headers() and zu_query() as REQUEST transformers, and they
+  # take a request as argument one: zu_headers(req, Accept = "..."). They are
+  # not response accessors and are exempt by name rather than by accident --
+  # the rule being enforced here is about a bare *response* property, e.g.
+  # zu_status() where zu_resp_status() is meant.
+  bare <- setdiff(bare, "zu_headers")
+
   expect_identical(
     bare, character(0),
     info = paste("these read as response accessors and should be zu_resp_*:",

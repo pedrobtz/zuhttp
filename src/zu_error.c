@@ -51,6 +51,9 @@ static const char *const k_class[ZU_CODE_COUNT] = {
     "zu_body_limit_error",
     "zu_body_decode_error",
     "zu_body_not_replayable",
+    "zu_http_status_error",
+    "zu_http_client_error",
+    "zu_http_server_error",
     "zu_cancelled_error",
     "zu_interrupted_error",
     "zu_fork_error",
@@ -70,6 +73,8 @@ static zu_code class_parent(zu_code code) {
         case ZU_ERR_PROXY_AUTH:         return ZU_ERR_PROXY;
         case ZU_ERR_TOO_MANY_REDIRECTS: return ZU_ERR_REDIRECT;
         case ZU_ERR_INTERRUPTED:        return ZU_ERR_CANCELLED;
+        case ZU_ERR_HTTP_CLIENT:
+        case ZU_ERR_HTTP_SERVER:        return ZU_ERR_HTTP_STATUS;
         default:                        return ZU_CODE_COUNT;
     }
 }
@@ -128,6 +133,12 @@ int zu_code_retryable(zu_code code) {
         case ZU_ERR_INTERRUPTED:
         case ZU_ERR_FORK:
         case ZU_ERR_BODY_NOT_REPLAYABLE:
+        /* Whether a 5xx or a 429 is worth another attempt depends on the
+         * method's idempotency and on Retry-After, neither of which is visible
+         * from a bare code. That is the retry layer's call (§33.2), not ours. */
+        case ZU_ERR_HTTP_STATUS:
+        case ZU_ERR_HTTP_CLIENT:
+        case ZU_ERR_HTTP_SERVER:
             return 0;
         /* Timeouts are retryable only if budget remains; that is the retry
          * layer's call (§24.3), not ours. Report the possibility. */

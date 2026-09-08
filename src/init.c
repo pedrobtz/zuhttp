@@ -277,23 +277,64 @@ static SEXP headers_to_r(const zu_headers *h) {
     return out;
 }
 
-static SEXP C_zu_get(SEXP url, SEXP timeout_ms, SEXP max_redirects,
-                     SEXP verify, SEXP max_body, SEXP user_agent) {
+/* One entry point for every method. The R layer owns argument shaping; this
+ * function's job is to translate and to own nothing across a longjmp. */
+static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
+                         SEXP header_values, SEXP body, SEXP timeout_ms,
+                         SEXP max_redirects, SEXP verify, SEXP max_body,
+                         SEXP user_agent, SEXP decode) {
     zu_get_opts o;
+    zu_req_spec spec;
     zu_result r;
     zu_error e;
     zu_code rc;
     const char *u;
+    int nh = 0, i;
 
     if (!Rf_isString(url) || Rf_length(url) != 1 || STRING_ELT(url, 0) == NA_STRING)
         Rf_error("url must be a single non-NA string");
     u = Rf_translateCharUTF8(STRING_ELT(url, 0));
+
+    memset(&spec, 0, sizeof spec);
+    if (Rf_isString(method) && Rf_length(method) == 1)
+        spec.method = Rf_translateCharUTF8(STRING_ELT(method, 0));
+
+    if (header_names != R_NilValue) {
+        if (!Rf_isString(header_names) || !Rf_isString(header_values) ||
+            Rf_length(header_names) != Rf_length(header_values))
+            Rf_error("header names and values must be character vectors of equal length");
+        nh = Rf_length(header_names);
+    }
+    if (nh > 0) {
+        /* R_alloc storage is released when the .Call returns, including on a
+         * longjmp, so these borrowed pointers cannot outlive their memory. */
+        const char **hn = (const char **)R_alloc((size_t)nh, sizeof(char *));
+        const char **hv = (const char **)R_alloc((size_t)nh, sizeof(char *));
+        for (i = 0; i < nh; i++) {
+            SEXP n = STRING_ELT(header_names, i), v = STRING_ELT(header_values, i);
+            if (n == NA_STRING || v == NA_STRING)
+                Rf_error("header names and values must not be NA");
+            hn[i] = Rf_translateCharUTF8(n);
+            hv[i] = Rf_translateCharUTF8(v);
+        }
+        spec.header_names  = hn;
+        spec.header_values = hv;
+        spec.n_headers     = (size_t)nh;
+    }
+
+    if (body != R_NilValue) {
+        if (TYPEOF(body) != RAWSXP)
+            Rf_error("body must be a raw vector; the R layer serialises everything else");
+        spec.body     = RAW(body);
+        spec.body_len = (size_t)Rf_xlength(body);
+    }
 
     zu_get_opts_init(&o);
     o.timeout_ms    = (long)Rf_asInteger(timeout_ms);
     o.max_redirects = Rf_asInteger(max_redirects);
     o.verify        = Rf_asLogical(verify) == TRUE;
     o.max_body      = (uint64_t)Rf_asReal(max_body);
+    o.no_decode     = Rf_asLogical(decode) != TRUE;
     if (Rf_isString(user_agent) && Rf_length(user_agent) == 1)
         o.user_agent = Rf_translateCharUTF8(STRING_ELT(user_agent, 0));
 
@@ -303,7 +344,7 @@ static SEXP C_zu_get(SEXP url, SEXP timeout_ms, SEXP max_redirects,
     o.tick_ctx = NULL;
 
     zu_error_clear(&e);
-    rc = zu_engine_get(&r, u, &o, &e);
+    rc = zu_engine_perform(&r, u, &spec, &o, &e);
     if (rc != ZU_OK) {
         /* Our tick returns 1 only for a pending user interrupt, so a
          * cancellation reaching here is always that (§34.1 separates
@@ -377,7 +418,7 @@ static const R_CallMethodDef call_methods[] = {
     {"C_zu_redact_form",       (DL_FUNC) &C_zu_redact_form,       2},
     {"C_zu_is_secret_header",  (DL_FUNC) &C_zu_is_secret_header,  2},
     {"C_zu_is_secret_param",   (DL_FUNC) &C_zu_is_secret_param,   2},
-    {"C_zu_get",               (DL_FUNC) &C_zu_get,               6},
+    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          11},
     {"C_zu_tls_backend",       (DL_FUNC) &C_zu_tls_backend,       0},
     {NULL, NULL, 0}
 };
