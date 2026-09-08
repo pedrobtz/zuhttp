@@ -24,7 +24,13 @@
 #' to get right or wrong. That is why verbose logging is implemented as hooks
 #' rather than as its own path through the request.
 #'
-#' @seealso [zu_hooks()] for your own handlers.
+#' @section Seeing the whole chain:
+#' Pair it with `trace = TRUE` on the request and the §35.3 phases appear —
+#' DNS, connect, TLS handshake, request, headers, body — each with the time it
+#' happened and the gap since the previous one. Without `trace`, the output is
+#' the HTTP layer only.
+#'
+#' @seealso [zu_resp_trace()], [zu_hooks()] for your own handlers.
 #' @export
 #' @examples
 #' cli <- zu_client(hooks = zu_verbose(),
@@ -41,6 +47,25 @@ zu_verbose <- function(to = stderr(), body = TRUE) {
     },
     after_response = function(p) {
       r <- p$response
+      # §35.3's phases, when the request was traced. Printed before the
+      # response line because that is the order they happened in, and the
+      # point of a trace is to show where the time went rather than to
+      # summarise it afterwards.
+      tr <- zu_resp_trace(r)
+      if (!is.null(tr)) {
+        prev <- 0
+        for (i in seq_len(nrow(tr))) {
+          gap <- tr$at_ms[i] - prev
+          prev <- tr$at_ms[i]
+          say("* ", format(sprintf("%.0fms", tr$at_ms[i]), width = 7),
+              " +", format(sprintf("%.0f", gap), width = 4), "  ",
+              format(tr$event[i], width = 18),
+              if (nzchar(tr$detail[i])) tr$detail[i] else "",
+              if (tr$n[i] > 0) paste0("  (", tr$n[i], ")") else "")
+        }
+        if (!is.null(attr(tr, "dropped")))
+          say("* ", attr(tr, "dropped"), " further events not recorded")
+      }
       say("< HTTP ", r$status %||% NA,
           if (!is.null(r$tls_version)) paste0(" over ", r$tls_version) else "")
       h <- r$headers

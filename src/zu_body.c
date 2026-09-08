@@ -110,6 +110,11 @@ zu_code zu_body_read(zu_stream *s, const zu_framing *fr, zu_body_pipe *p,
         if (seed_len) {
             size_t len = seed_len;
             memcpy(work, seed, seed_len);
+            /* WIRE bytes, before de-chunking: `len` comes back as the decoded
+             * length, so counting that would report the body and call it the
+             * wire. The difference is the chunk framing, which is exactly what
+             * someone comparing the two numbers wants to see. */
+            p->raw_seen += seed_len;
             rc = zu_chunked_decode(&dec, work, &len, err);
             if (len) {
                 zu_code w = zu_body_pipe_feed(p, work, len, err);
@@ -129,6 +134,7 @@ zu_code zu_body_read(zu_stream *s, const zu_framing *fr, zu_body_pipe *p,
                 break;
             }
             len = (size_t)n;
+            p->raw_seen += (uint64_t)n;
             rc = zu_chunked_decode(&dec, work, &len, err);
             if (len) {
                 zu_code w = zu_body_pipe_feed(p, work, len, err);

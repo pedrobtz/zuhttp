@@ -110,6 +110,21 @@ zu_req_callback <- function(req, f) {
   req
 }
 
+#' Record a §35.3 event trace for this request
+#'
+#' @param req A `zu_request`.
+#' @param trace `TRUE` to collect the trace; `FALSE` (the default) to not.
+#' @return The request, modified.
+#' @seealso [zu_resp_trace()] to read it back.
+#' @export
+#' @examples
+#' zu_req_trace(zu_request("GET", "https://example.com"))
+zu_req_trace <- function(req, trace = TRUE) {
+  req <- check_req(req)
+  req$trace <- isTRUE(trace)
+  req
+}
+
 check_req <- function(req) {
   if (!inherits(req, "zu_request"))
     stop("expected a request from zu_request(); got ", class(req)[[1]],

@@ -12,6 +12,7 @@
 #include "zu_sink.h"
 #include "zu_body.h"
 #include "zu_proxy.h"
+#include "zu_trace.h"
 #include "zu_time.h"
 #include <string.h>
 #include <stdio.h>
@@ -38,6 +39,7 @@ void zu_result_init(zu_result *r) {
     if (!r) return;
     memset(r, 0, sizeof *r);
     zu_headers_init(&r->headers);
+    zu_timings_init(&r->timings);
 }
 
 void zu_result_free(zu_result *r) {
@@ -285,6 +287,7 @@ static zu_code open_stream(zu_stream **out, const zu_uri *u,
     zu_stream *tcp = NULL;
     zu_code rc;
     int via_proxy = px && px->in_use;
+    zu_millis t_open = zu_now_ms();
 
     /* §26: a live connection for this exact key, if the pool has one. The
      * pool has already run the fork guard, the idle-timeout check and the
@@ -299,6 +302,10 @@ static zu_code open_stream(zu_stream **out, const zu_uri *u,
         if (reused) {
             if (u->is_https) record_tls_info(reused, res);
             res->reused_connection = 1;   /* §35.2 */
+            /* §35.1 leaves dns/connect/tls at -1 here, which is the honest
+             * answer for a pooled connection: those phases did not happen on
+             * this request. Reporting 0 would claim they were instantaneous. */
+            zu_trace_add(o->trace, ZU_EV_CONNECTION_REUSED, u->host, 0);
             *out = reused;
             return ZU_OK;
         }
@@ -307,6 +314,8 @@ static zu_code open_stream(zu_stream **out, const zu_uri *u,
     zu_net_opts_init(&nopts);
     nopts.tick     = o->tick;
     nopts.tick_ctx = o->tick_ctx;
+    nopts.trace    = o->trace;
+    nopts.timings  = &res->timings;
 
     /* Through a proxy the socket goes to the PROXY, not the origin. For plain
      * HTTP that is the whole of it — the request then uses absolute-form
@@ -316,6 +325,9 @@ static zu_code open_stream(zu_stream **out, const zu_uri *u,
     else
         rc = zu_net_connect(&tcp, u->host, u->port, dl, &nopts, err);
     if (rc != ZU_OK) return rc;
+    /* dns and connect are filled by zu_net, which is the only layer that can
+     * see the boundary between them. */
+    (void)t_open;
 
     /* §35.2 remote_ip, taken from the TCP stream before TLS wraps it — the
      * outer stream has no address of its own. Through a proxy this is the
@@ -361,7 +373,12 @@ static zu_code open_stream(zu_stream **out, const zu_uri *u,
         cfg.verify_hostname = o->verify;
         if (o->ca_file) { cfg.ca_file = o->ca_file; cfg.source = ZU_TRUST_FILE; }
 
-        rc = zu_tls_connect(&tls, tcp, u->host, &cfg, dl, err);
+        {
+            zu_millis t_tls = zu_now_ms();
+            zu_trace_add(o->trace, ZU_EV_TLS_START, u->host, 0);
+            rc = zu_tls_connect(&tls, tcp, u->host, &cfg, dl, err);
+            res->timings.tls = (long)(zu_now_ms() - t_tls);
+        }
         if (rc != ZU_OK) {
             /* zu_tls_connect does not take ownership of `inner` on failure,
              * so the TCP stream is still ours to free (S7). */
@@ -369,6 +386,8 @@ static zu_code open_stream(zu_stream **out, const zu_uri *u,
             return rc;
         }
         record_tls_info(tls, res);
+        zu_trace_add(o->trace, ZU_EV_TLS_DONE,
+                     res->tls_version ? res->tls_version : "tls", 0);
         *out = tls;
         return ZU_OK;
     }
@@ -422,6 +441,7 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
     zu_sink mem_sink;
     zu_sink *body_sink = NULL;
     zu_env  sysenv;
+    zu_millis t_start;
     const char *method = (req && req->method) ? req->method : "GET";
     const void *body   = req ? req->body : NULL;
     size_t body_len    = req ? req->body_len : 0;
@@ -430,7 +450,9 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
 
     if (!out || !url) return ZU_ERR_URL;
     zu_env_system(&sysenv);
+    t_start = zu_now_ms();
     zu_result_init(out);
+    zu_trace_add(o ? o->trace : NULL, ZU_EV_REQUEST_START, url, 0);
     if (!o) { zu_get_opts_init(&defaults); o = &defaults; }
 
     /* §24.1: one deadline for the whole operation, redirects included. */
@@ -575,6 +597,10 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
             rc = ZU_ERR_NOMEM;
         if (rc == ZU_OK && !zu_stream_write_all(s, wire.data, wire.len, total, err))
             rc = err->code ? err->code : ZU_ERR_IO;
+        if (rc == ZU_OK) {
+            out->timings.request_write = (long)(zu_now_ms() - t_start);
+            zu_trace_add(o->trace, ZU_EV_REQUEST_SENT, method, wire.len);
+        }
         zu_buf_free(&wire);
         if (have_absform) { zu_buf_free(&absform); have_absform = 0; }
         zu_request_free(&rq);
@@ -598,6 +624,19 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
             zu_response_init(&resp);
             consumed = 0;
             rc = read_headers(s, &raw, &resp, &consumed, total, err);
+        }
+        if (rc == ZU_OK) {
+            /* §35.1's ttfb. Measured at the end of the header block rather
+             * than at the literal first byte: that is the first moment the
+             * response means anything, and it is what every other client
+             * reports under this name. */
+            out->timings.ttfb = (long)(zu_now_ms() - t_start);
+            {
+                char st[32];
+                snprintf(st, sizeof st, "%d", resp.status);
+                zu_trace_add(o->trace, ZU_EV_HEADERS_RECEIVED, st,
+                             (uint64_t)resp.headers.n);
+            }
         }
         if (rc == ZU_OK) rc = zu_response_decide_framing(&resp, is_head, err);
         if (rc == ZU_OK) {
@@ -632,6 +671,13 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
                 rc = zu_body_read(s, &fr, &pipe,
                                (const char *)raw.data + consumed, raw.len - consumed,
                                cap, total, err);
+            if (!may_follow) {
+                out->timings.response_read = (long)(zu_now_ms() - t_start);
+                out->timings.body_bytes_wire    = pipe.raw_seen;
+                out->timings.body_bytes_decoded = hop_sink ? hop_sink->written : 0;
+                zu_trace_add(o->trace, ZU_EV_BODY_CHUNK, "body",
+                             hop_sink ? hop_sink->written : 0);
+            }
             zu_body_pipe_free(&pipe);
         }
         zu_buf_free(&raw);
@@ -704,6 +750,7 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
                 zu_buf_reset(&out->body);
                 zu_headers_free(&out->headers);
                 zu_headers_init(&out->headers);
+                zu_trace_add(o->trace, ZU_EV_REDIRECT_FOLLOWED, loc, (uint64_t)hops);
                 zu_proxy_free(&px);           /* re-resolved for the next hop */
                 continue;                     /* §19.5: the body never reaches the caller */
             }
@@ -720,6 +767,9 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
         }
         break;
     }
+
+    out->timings.total = (long)(zu_now_ms() - t_start);
+    zu_trace_add(o->trace, ZU_EV_REQUEST_DONE, NULL, (uint64_t)out->status);
 
     out->final_url = url_of(&cur);
     zu_uri_free(&cur);

@@ -28,11 +28,19 @@ to get right or wrong. That is why verbose logging is implemented as hooks
 rather than as its own path through the request.
 }
 
+\section{Seeing the whole chain}{
+
+Pair it with \code{trace = TRUE} on the request and the §35.3 phases appear —
+DNS, connect, TLS handshake, request, headers, body — each with the time it
+happened and the gap since the previous one. Without \code{trace}, the output is
+the HTTP layer only.
+}
+
 \examples{
 cli <- zu_client(hooks = zu_verbose(),
                  transport = zu_mock_transport(function(r) zu_response(200L)))
 invisible(zu_get("https://example.test/x", client = cli))
 }
 \seealso{
-\code{\link[=zu_hooks]{zu_hooks()}} for your own handlers.
+\code{\link[=zu_resp_trace]{zu_resp_trace()}}, \code{\link[=zu_hooks]{zu_hooks()}} for your own handlers.
 }

@@ -8,7 +8,7 @@
 
 one_shot <- function(method, url, query, headers, policy, client,
                      body = NULL, json = NULL, form = NULL, file = NULL,
-                     path = NULL, callback = NULL) {
+                     path = NULL, callback = NULL, trace = FALSE) {
   given <- c(body = !is.null(body), json = !is.null(json),
              form = !is.null(form), file = !is.null(file))
   if (sum(given) > 1L)
@@ -27,6 +27,7 @@ one_shot <- function(method, url, query, headers, policy, client,
   # something a client inherits or the §31.9 three-state merge applies to.
   if (!is.null(path)) req <- zu_req_path(req, path)
   if (!is.null(callback)) req <- zu_req_callback(req, callback)
+  if (isTRUE(trace)) req <- zu_req_trace(req)
   zu_perform(req, client = client)
 }
 
@@ -56,6 +57,8 @@ one_shot <- function(method, url, query, headers, policy, client,
 #' @param user_agent `User-Agent` to send.
 #' @param retry A [zu_retry()] policy for this request. Overrides the
 #'   client's; `NULL` inherits it (§31.9).
+#' @param trace Collect a §35.3 event trace, readable with
+#'   [zu_resp_trace()]. Off by default.
 #' @param tls Certificate trust settings from [zu_tls()] for this request.
 #' @param proxy Proxy URL for this request, or `FALSE` for a direct
 #'   connection. See [zu_client()] for why disabling is `FALSE`, not `NULL`.
@@ -90,9 +93,10 @@ zu_get <- function(url, query = NULL, headers = NULL, timeout = NULL,
                    redirects = NULL, verify = NULL, max_body = NULL,
                    user_agent = NULL, check = NULL, decode = NULL,
                    retry = NULL, path = NULL, callback = NULL,
-                   proxy = NULL, tls = NULL, client = zu_default_client()) {
+                   proxy = NULL, tls = NULL, trace = FALSE,
+                   client = zu_default_client()) {
   one_shot("GET", url, query, headers, collect_policy(environment()), client,
-           path = path, callback = callback)
+           path = path, callback = callback, trace = trace)
 }
 
 #' @rdname zu_methods
@@ -101,9 +105,10 @@ zu_head <- function(url, query = NULL, headers = NULL, timeout = NULL,
                     redirects = NULL, verify = NULL, max_body = NULL,
                     user_agent = NULL, check = NULL, decode = NULL,
                     retry = NULL, path = NULL, callback = NULL,
-                   proxy = NULL, tls = NULL, client = zu_default_client()) {
+                   proxy = NULL, tls = NULL, trace = FALSE,
+                   client = zu_default_client()) {
   one_shot("HEAD", url, query, headers, collect_policy(environment()), client,
-           path = path, callback = callback)
+           path = path, callback = callback, trace = trace)
 }
 
 #' @rdname zu_methods
@@ -112,9 +117,10 @@ zu_post <- function(url, query = NULL, headers = NULL, body = NULL, json = NULL,
                     form = NULL, file = NULL, timeout = NULL, redirects = NULL,
                     verify = NULL, max_body = NULL, user_agent = NULL,
                     check = NULL, decode = NULL, retry = NULL, path = NULL, callback = NULL,
-                   proxy = NULL, tls = NULL, client = zu_default_client()) {
+                   proxy = NULL, tls = NULL, trace = FALSE,
+                   client = zu_default_client()) {
   one_shot("POST", url, query, headers, collect_policy(environment()), client,
-           body = body, json = json, form = form, file = file, path = path, callback = callback)
+           body = body, json = json, form = form, file = file, path = path, callback = callback, trace = trace)
 }
 
 #' @rdname zu_methods
@@ -123,9 +129,10 @@ zu_put <- function(url, query = NULL, headers = NULL, body = NULL, json = NULL,
                    form = NULL, file = NULL, timeout = NULL, redirects = NULL,
                    verify = NULL, max_body = NULL, user_agent = NULL,
                    check = NULL, decode = NULL, retry = NULL, path = NULL, callback = NULL,
-                   proxy = NULL, tls = NULL, client = zu_default_client()) {
+                   proxy = NULL, tls = NULL, trace = FALSE,
+                   client = zu_default_client()) {
   one_shot("PUT", url, query, headers, collect_policy(environment()), client,
-           body = body, json = json, form = form, file = file, path = path, callback = callback)
+           body = body, json = json, form = form, file = file, path = path, callback = callback, trace = trace)
 }
 
 #' @rdname zu_methods
@@ -134,9 +141,10 @@ zu_patch <- function(url, query = NULL, headers = NULL, body = NULL, json = NULL
                      form = NULL, file = NULL, timeout = NULL, redirects = NULL,
                      verify = NULL, max_body = NULL, user_agent = NULL,
                      check = NULL, decode = NULL, retry = NULL, path = NULL, callback = NULL,
-                   proxy = NULL, tls = NULL, client = zu_default_client()) {
+                   proxy = NULL, tls = NULL, trace = FALSE,
+                   client = zu_default_client()) {
   one_shot("PATCH", url, query, headers, collect_policy(environment()), client,
-           body = body, json = json, form = form, file = file, path = path, callback = callback)
+           body = body, json = json, form = form, file = file, path = path, callback = callback, trace = trace)
 }
 
 #' @rdname zu_methods
@@ -146,9 +154,10 @@ zu_delete <- function(url, query = NULL, headers = NULL, body = NULL,
                       redirects = NULL, verify = NULL, max_body = NULL,
                       user_agent = NULL, check = NULL, decode = NULL,
                       retry = NULL, path = NULL, callback = NULL,
-                   proxy = NULL, tls = NULL, client = zu_default_client()) {
+                   proxy = NULL, tls = NULL, trace = FALSE,
+                   client = zu_default_client()) {
   one_shot("DELETE", url, query, headers, collect_policy(environment()), client,
-           body = body, json = json, form = form, file = file, path = path, callback = callback)
+           body = body, json = json, form = form, file = file, path = path, callback = callback, trace = trace)
 }
 
 #' Client-first wrappers

@@ -26,6 +26,7 @@ zu_get(
   callback = NULL,
   proxy = NULL,
   tls = NULL,
+  trace = FALSE,
   client = zu_default_client()
 )
 
@@ -45,6 +46,7 @@ zu_head(
   callback = NULL,
   proxy = NULL,
   tls = NULL,
+  trace = FALSE,
   client = zu_default_client()
 )
 
@@ -68,6 +70,7 @@ zu_post(
   callback = NULL,
   proxy = NULL,
   tls = NULL,
+  trace = FALSE,
   client = zu_default_client()
 )
 
@@ -91,6 +94,7 @@ zu_put(
   callback = NULL,
   proxy = NULL,
   tls = NULL,
+  trace = FALSE,
   client = zu_default_client()
 )
 
@@ -114,6 +118,7 @@ zu_patch(
   callback = NULL,
   proxy = NULL,
   tls = NULL,
+  trace = FALSE,
   client = zu_default_client()
 )
 
@@ -137,6 +142,7 @@ zu_delete(
   callback = NULL,
   proxy = NULL,
   tls = NULL,
+  trace = FALSE,
   client = zu_default_client()
 )
 }
@@ -182,6 +188,9 @@ as it arrives (§27). Returning \code{FALSE} stops the transfer. See
 connection. See \code{\link[=zu_client]{zu_client()}} for why disabling is \code{FALSE}, not \code{NULL}.}
 
 \item{tls}{Certificate trust settings from \code{\link[=zu_tls]{zu_tls()}} for this request.}
+
+\item{trace}{Collect a §35.3 event trace, readable with
+\code{\link[=zu_resp_trace]{zu_resp_trace()}}. Off by default.}
 
 \item{client}{A \code{zu_client}. Always named.}
 

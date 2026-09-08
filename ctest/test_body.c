@@ -10,6 +10,7 @@
 #include "zu_sink.h"
 #include "zu_mock_stream.h"
 #include "zu_tls.h"
+#include "zu_trace.h"
 #include "zu_alloc.h"
 #include <string.h>
 #include <stdio.h>
@@ -444,6 +445,75 @@ void suite_body(void) {
         ZU_CHECK(zu_tls_cipher_name(0x0000) == NULL);
         ZU_CHECK(zu_tls_cipher_name(0xFFFF) == NULL);
         ZU_CHECK(zu_tls_cipher_name(0x1399) == NULL);
+    }
+
+    /* --- §35 the trace buffer ------------------------------------------ */
+
+    ZU_CASE("§35.3: every event has a name, and out-of-range does not crash");
+    {
+        int i;
+        for (i = 0; i < ZU_EV_COUNT; i++)
+            ZU_CHECK(zu_event_name((zu_event)i)[0] != '\0');
+        ZU_CHECK(streq(zu_event_name(ZU_EV_DNS_START), "dns.start"));
+        ZU_CHECK(streq(zu_event_name(ZU_EV_REQUEST_DONE), "request.done"));
+        ZU_CHECK(streq(zu_event_name((zu_event)-1), "?"));
+        ZU_CHECK(streq(zu_event_name((zu_event)999), "?"));
+    }
+
+    ZU_CASE("§35.1: a phase that did not happen is -1, not 0");
+    {
+        zu_timings t;
+        zu_timings_init(&t);
+        /* Zero would claim the phase was instantaneous. A pooled connection
+         * has no dns time and an http:// request has no tls time, and both
+         * need to be distinguishable from "too fast to measure". */
+        ZU_CHECK_EQ_INT((int)t.dns, -1);
+        ZU_CHECK_EQ_INT((int)t.connect, -1);
+        ZU_CHECK_EQ_INT((int)t.tls, -1);
+        ZU_CHECK_EQ_INT((int)t.total, -1);
+        ZU_CHECK(t.body_bytes_wire == 0);
+    }
+
+    ZU_CASE("§35: a NULL trace is a no-op, which is what makes the seam free");
+    {
+        /* Every zu_trace_add() in the connect and handshake paths passes a
+         * possibly-NULL pointer. If this crashed, tracing could not be
+         * optional. */
+        zu_trace_add(NULL, ZU_EV_DNS_START, "x", 1);
+        ZU_CHECK_EQ_INT((int)zu_trace_elapsed(NULL), -1);
+    }
+
+    ZU_CASE("§35: the trace is bounded and reports what it dropped");
+    {
+        zu_trace *t = (zu_trace *)zu_alloc(sizeof *t);
+        int i;
+        ZU_CHECK(t != NULL);
+        if (t) {
+            zu_trace_init(t);
+            for (i = 0; i < ZU_TRACE_MAX + 25; i++)
+                zu_trace_add(t, ZU_EV_BODY_CHUNK, "chunk", (uint64_t)i);
+            /* A body.chunk per read means a large download would otherwise
+             * grow this without bound. Silently stopping would read as a
+             * request that silently stopped, so the overflow is counted. */
+            ZU_CHECK_EQ_INT((int)t->n, ZU_TRACE_MAX);
+            ZU_CHECK_EQ_INT(t->dropped, 25);
+            ZU_CHECK(streq(t->ev[0].detail, "chunk"));
+        }
+        zu_free(t);
+    }
+
+    ZU_CASE("§35: a NULL detail is stored as empty, not as a stray pointer");
+    {
+        zu_trace *t = (zu_trace *)zu_alloc(sizeof *t);
+        ZU_CHECK(t != NULL);
+        if (t) {
+            zu_trace_init(t);
+            zu_trace_add(t, ZU_EV_REQUEST_DONE, NULL, 200);
+            ZU_CHECK_EQ_INT((int)t->n, 1);
+            ZU_CHECK(t->ev[0].detail[0] == '\0');
+            ZU_CHECK(t->ev[0].n == 200);
+        }
+        zu_free(t);
     }
 
     ZU_CASE("no leaks across the suite");

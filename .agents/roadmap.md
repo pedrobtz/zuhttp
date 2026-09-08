@@ -973,6 +973,94 @@ User docs per §55: TLS backend and trust per OS, proxy behavior, timeout semant
 - [ ] Three R users unfamiliar with the package each write a working GET and JSON POST within 5 minutes using only the reference index (§61.11).
 - [ ] Every documented limitation from the design doc appears in user-facing help — especially DNS non-interruptibility (§25.4) and `ca_file` replacing rather than adding (§14.2).
 
+### S-unassigned · §35.1 timings and §35.3 events — ✅ **DONE 2026-09-08**
+
+Both were specified from the start and neither existed. `zu_resp_timings()`
+returned `total` alone — one of nine — and the only hooks were the four
+HTTP-level ones, so the phases anyone actually wants to see (DNS, connect, TLS
+handshake) were exactly the invisible ones.
+
+All nine timings now, and eleven of §35.3's events. `zu_get(trace = TRUE)` plus
+`zu_resp_trace()`, or `zu_verbose()` to have it narrated:
+
+```text
+* 0ms     +0     request.start     https://example.com
+* 2ms     +2     dns.done          example.com
+* 8ms     +6     connect.done      2606:4700:10::6814:179a
+* 40ms    +32    tls.done          TLSv1.2
+* 41ms    +1     request.sent      GET  (128)
+* 56ms    +15    headers.received  200  (11)
+```
+
+**Collected, not called back.** The obvious design fires a hook per event, and
+it is wrong here: these events happen inside the connect and handshake paths,
+where an R error would longjmp past a half-built socket and a live TLS context.
+That is §27.3's hazard at six more call sites, and a trace does not need to be
+live to be useful — it is read after the request either way. The engine appends
+to a fixed-capacity log with no allocation; tracing off costs one NULL check.
+
+**A phase that did not happen is NA, not 0.** A pooled connection has no dns
+or connect time and an `http://` request has no tls time; zero would claim
+they were instantaneous. The reused case makes the point better than any
+documentation could — the phases are simply *absent*, which is the explanation
+for the speed rather than a symptom of it.
+
+**Two bugs found by looking at the output.**
+
+`body_bytes_wire` read 0 for every chunked response — the chunked branch never
+counted wire bytes, and chunked is most of the modern web. And the dns/connect
+split had to move into `zu_net`, because only that layer can see the boundary:
+from outside, resolution and connection are one call, and reporting the sum
+hides which of the two a slow request is waiting on, which is usually the
+question.
+
+Also worth recording: the first draft of the tests failed because the
+**default client pools**, so a test that ran earlier left a warm connection and
+the next request correctly skipped the phases being measured. The pooling was
+right; sharing a client between tests that measure connection setup was not.
+
+### S-unassigned · Spike: Mbed TLS as the macOS portable engine — 📋 **TODO**
+
+**Raised 2026-09-08.** Not scheduled; recorded so the option is not
+rediscovered later under pressure.
+
+**The framing that matters: this is R-15 mitigation, not a TLS 1.3 feature.**
+Measured 2026-09-08, every major host still accepts TLS 1.2, zuhttp reaches
+all of them, and Google negotiates `ECDHE-ECDSA-AES128-GCM-SHA256` — forward
+secrecy, AEAD. There is no connectivity problem to solve. What there is: a
+deprecated engine (87 markers in the current SDK) whose recorded fallback is
+"ship static OpenSSL and amend §2" at **4.64 MB** of bundled cryptography.
+
+**The gap in the existing analysis.** R-13's spike evaluated static OpenSSL
+and Network.framework. It never evaluated Mbed TLS, so "the alternatives all
+fail a constraint" is not actually established — only that two of them do.
+
+**It fits the architecture rather than fighting it.** §13.1's macOS row
+already reads *"portable engine + Keychain via SecTrust (S0: validated)"*, and
+`zu_tls.h` states that only the trust evaluator must be native for the
+system-trust promise to hold. A vendored engine paired with SecTrust keeps
+`ca_extra` semantics, the §50.5 matrix and "system trust store" intact. Only
+the protocol half changes.
+
+**What it would cost.** The "no bundled cryptography" claim in CLAUDE.md's
+summary and the framing of §2 (whose actual list says "smaller native code and
+dependency surface", not "zero crypto"). And §46's ongoing obligation: a CVE
+in Mbed TLS becomes a CRAN resubmission on someone else's timetable. That, not
+the megabytes, is the thing to weigh.
+
+**Why Mbed TLS specifically.** Apache-2.0 (CRAN-clean), TLS 1.3 since 3.x,
+designed for embedding, pure C, no external dependencies. wolfSSL is
+GPL-or-commercial; BearSSL has no TLS 1.3; s2n drags in libcrypto.
+
+**Exit criteria for the spike** (S0-shaped: measure, do not commit)
+
+- [ ] Trimmed Mbed TLS source size, against S19's ≤ 2 MB tarball criterion.
+- [ ] Mbed TLS composes over a **caller-owned socket** — the exact property
+      that disqualified Network.framework (§20.3 CONNECT).
+- [ ] The handshake's peer chain can be handed to `SecTrustEvaluateWithError`,
+      i.e. §13.1's split still holds and trust stays native.
+- [ ] A number for the maintenance obligation: release cadence and CVE history.
+
 ### S-unassigned · §35.2 `zu_resp_connection()` — ✅ **DONE 2026-09-08**
 
 Found by a question nobody could answer from the package: *what cipher did

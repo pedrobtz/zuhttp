@@ -42,8 +42,10 @@ zu_response <- function(status = 200L, headers = NULL, body = raw(),
 #'   character vector, length 0 when the header is absent and longer than 1
 #'   when it repeats; `zu_resp_url()` the final URL after redirects, with any
 #'   credentials removed (§42); `zu_resp_method()` the method actually sent,
-#'   which a 303 may have rewritten to `GET`; `zu_resp_timings()` a named
-#'   numeric vector of seconds.
+#'   which a 303 may have rewritten to `GET`; `zu_resp_timings()` §35.1's nine
+#'   measurements — seven phase durations in seconds, then two byte counts.
+#'   `NA` for a phase that did not happen, which a pooled connection and a
+#'   plain http:// request both produce.
 #' @name zu_resp
 #' @examples
 #' r <- zu_response(200L, c("Set-Cookie" = "a=1", "Set-Cookie" = "b=2"))
@@ -129,10 +131,60 @@ zu_resp_connection <- function(resp) {
 #' @rdname zu_resp
 #' @export
 zu_resp_timings <- function(resp) {
-  # Total only for now; the per-phase breakdown (dns, connect, tls, ttfb) is
-  # §35's, and reporting NA for phases we have not measured would be worse
-  # than not reporting them.
-  resp$timings
+  # §35.1's nine, in SECONDS — the unit every other timing in this package
+  # uses, and the unit `timeout` is expressed in, so a user can compare the
+  # two without converting.
+  #
+  # NA means the phase did not happen, which is a real answer: a pooled
+  # connection has no dns or connect time and an http:// request has no tls
+  # time. Zero would claim they were instantaneous.
+  ms <- resp$timings_ms
+  if (is.null(ms)) return(resp$timings)          # a hand-built zu_response()
+  secs <- c("dns", "connect", "tls", "request_write", "ttfb",
+            "response_read", "total")
+  out <- ms
+  out[secs] <- ms[secs] / 1000
+  # The elapsed total measured in R covers the whole zu_perform() including
+  # retries and middleware; the C one covers the last attempt. Prefer R's,
+  # because it is the number that answers "how long did my call take".
+  if (!is.null(resp$timings) && !is.na(resp$timings[["total"]]))
+    out[["total"]] <- unname(resp$timings[["total"]])
+  out
+}
+
+#' The event trace for a request
+#'
+#' §35.3's lifecycle events, in order, when the request was made with
+#' `trace = TRUE`. This is the DNS-to-body view: the phases a timing summary
+#' can only total up.
+#'
+#' @param resp A `zu_response`.
+#' @return A data frame of `event`, `at_ms`, `n` and `detail`, or `NULL` if
+#'   the request was not traced. `at_ms` is milliseconds from the start of the
+#'   operation, so the gaps between rows are the phases.
+#'
+#' @section Why a trace is collected rather than streamed:
+#' These events happen inside the connect and handshake paths, where an R
+#' error raised from a callback would longjmp past a half-built socket and a
+#' live TLS context — the §27.3 hazard, at six more call sites. A trace does
+#' not need to be live to be useful, so the engine appends to a fixed log and
+#' R renders it afterwards. Tracing off costs one NULL check per event.
+#'
+#' @seealso [zu_resp_timings()] for the summary, [zu_verbose()] for a printed
+#'   narration.
+#' @export
+#' @examples
+#' r <- zu_get("https://example.com", trace = TRUE)
+#' zu_resp_trace(r)
+zu_resp_trace <- function(resp) {
+  tr <- resp$trace
+  if (is.null(tr)) return(NULL)
+  df <- data.frame(event = tr$event, at_ms = tr$at_ms, n = tr$n,
+                   detail = tr$detail, stringsAsFactors = FALSE)
+  # Surfaced, not hidden: a truncated trace that looked complete would read as
+  # a request that stopped early.
+  if (isTRUE(tr$dropped > 0L)) attr(df, "dropped") <- tr$dropped
+  df
 }
 
 #' The response body, decoded

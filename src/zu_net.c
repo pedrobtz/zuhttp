@@ -234,6 +234,7 @@ zu_code zu_net_connect(zu_stream **out, const char *host, uint16_t port,
     net_impl *m = NULL;
     zu_code last = ZU_ERR_CONNECT;
     int gai;
+    zu_millis t_dns, t_conn = 0;
 
     if (!out || !host) return ZU_ERR_PARSE;
     *out = NULL;
@@ -247,12 +248,21 @@ zu_code zu_net_connect(zu_stream **out, const char *host, uint16_t port,
     hints.ai_family = AF_UNSPEC;          /* §3.1: IPv4 and IPv6 */
     hints.ai_socktype = SOCK_STREAM;
 
-    /* Synchronous and uninterruptible — see the header note and §25.4. */
+    /* Synchronous and uninterruptible — see the header note and §25.4. That
+     * is exactly why it is worth timing: a request that appears to hang here
+     * is not hung, it is in a resolver call zuhttp cannot cancel, and the
+     * trace is the only way to tell those apart. */
+    zu_trace_add(opts ? opts->trace : NULL, ZU_EV_DNS_START, host, 0);
+    t_dns = zu_now_ms();
     gai = getaddrinfo(host, portstr, &hints, &res);
+    if (opts && opts->timings)
+        opts->timings->dns = (long)(zu_now_ms() - t_dns);
     if (gai != 0 || !res) {
         zu_error_set(err, ZU_ERR_DNS, ZU_PHASE_DNS, "cannot resolve '%s'", host);
         return ZU_ERR_DNS;
     }
+    zu_trace_add(opts ? opts->trace : NULL, ZU_EV_DNS_DONE, host, 0);
+    t_conn = zu_now_ms();
 
     st = (zu_stream *)zu_calloc(1, sizeof *st);
     m  = (net_impl *)zu_calloc(1, sizeof *m);
@@ -266,11 +276,16 @@ zu_code zu_net_connect(zu_stream **out, const char *host, uint16_t port,
         zu_sock fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (fd == ZU_INVALID_SOCK) continue;
         if (!set_nonblocking(fd)) { zu_closesocket(fd); continue; }
+        /* Per candidate address, not once: getaddrinfo returns a list and
+         * this loop walks it, so a host whose first AAAA is black-holed shows
+         * up as several connect.start events rather than as one slow one. */
+        zu_trace_add(m->opts.trace, ZU_EV_CONNECT_START, host, 0);
         setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof one);
         m->fd = fd;
 
         if (connect(fd, ai->ai_addr, (socklen_t)ai->ai_addrlen) == 0) {
             record_peer(m, ai);
+            zu_trace_add(m->opts.trace, ZU_EV_CONNECT_DONE, m->peer, 0);
             last = ZU_OK;
             break;
         }
@@ -281,6 +296,7 @@ zu_code zu_net_connect(zu_stream **out, const char *host, uint16_t port,
                 socklen_t l = sizeof soerr;
                 if (getsockopt(fd, SOL_SOCKET, SO_ERROR, (char *)&soerr, &l) == 0 && soerr == 0) {
                     record_peer(m, ai);
+                    zu_trace_add(m->opts.trace, ZU_EV_CONNECT_DONE, m->peer, 0);
                     last = ZU_OK;
                     break;
                 }
@@ -305,6 +321,11 @@ zu_code zu_net_connect(zu_stream **out, const char *host, uint16_t port,
         zu_closesocket(fd);
         m->fd = ZU_INVALID_SOCK;
     }
+    /* After the address loop, so a host whose first candidate is black-holed
+     * has that wait counted here rather than lost — which is precisely the
+     * case someone reads this number to understand. */
+    if (opts && opts->timings)
+        opts->timings->connect = (long)(zu_now_ms() - t_conn);
     freeaddrinfo(res);
 
     if (last != ZU_OK) {

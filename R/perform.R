@@ -88,7 +88,8 @@ zu_transport_perform.zu_native_transport <- function(transport, req) {
                req$path,
                req$callback,
                p$proxy,
-               check_tls(p$tls))
+               check_tls(p$tls),
+               isTRUE(req$trace))
   structure(raw, class = "zu_response")
 }
 

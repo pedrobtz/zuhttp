@@ -36,8 +36,10 @@ zu_resp_timings(resp)
 character vector, length 0 when the header is absent and longer than 1
 when it repeats; \code{zu_resp_url()} the final URL after redirects, with any
 credentials removed (§42); \code{zu_resp_method()} the method actually sent,
-which a 303 may have rewritten to \code{GET}; \code{zu_resp_timings()} a named
-numeric vector of seconds.
+which a 303 may have rewritten to \code{GET}; \code{zu_resp_timings()} §35.1's nine
+measurements — seven phase durations in seconds, then two byte counts.
+\code{NA} for a phase that did not happen, which a pooled connection and a
+plain http:// request both produce.
 }
 \description{
 Response accessors

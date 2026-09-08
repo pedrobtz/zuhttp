@@ -30,6 +30,7 @@
 #include "zu_sink.h"
 #include "zu_proxy.h"
 #include "zu_tls.h"
+#include "zu_trace.h"
 
 /* A request the engine can perform. Headers are parallel arrays rather than a
  * zu_headers, so the R layer can pass them without building one — the engine
@@ -97,6 +98,11 @@ typedef struct {
      * process environment, which is not thread-safe and leaks between
      * tests. */
     const zu_env *env;
+
+    /* §35. NULL disables tracing entirely, which costs one NULL check per
+     * event — the reason the seam can sit in the connect and handshake paths
+     * without anyone paying for it. */
+    zu_trace   *trace;
 } zu_get_opts;
 
 void zu_get_opts_init(zu_get_opts *o);
@@ -118,6 +124,11 @@ typedef struct {
     int        http_version;     /* 0 or 1, for HTTP/1.x */
     int        proxy_used;
     int        reused_connection;
+
+    /* §35.1. Filled whether or not tracing is on: the phase boundaries are
+     * known anyway, and a caller who wants a timing should not have to have
+     * asked for a full event log first. */
+    zu_timings timings;
 } zu_result;
 
 void zu_result_init(zu_result *r);

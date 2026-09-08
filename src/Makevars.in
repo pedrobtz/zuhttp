@@ -35,6 +35,7 @@ OBJECTS = init.o \
           zu_pool.o \
           zu_sink.o \
           zu_body.o \
+          zu_trace.o \
           zu_proxy.o \
           zu_redact.o \
           vendor/uriparser/UriParse.o \

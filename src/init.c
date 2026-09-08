@@ -24,6 +24,7 @@
 #include "zu_tls.h"
 #include "zu_pool.h"
 #include "zu_sink.h"
+#include "zu_trace.h"
 #include <string.h>
 
 /* Anything a caller could make arbitrarily large is bounded here rather than
@@ -421,14 +422,22 @@ static int r_interrupt_tick(void *ctx) {
 
 /* --- §63.2 the vertical slice --------------------------------------------- */
 
+/* build_response needs the trace as well as the result, and R_UnwindProtect
+ * passes one pointer. Bundling them beats a file-scope pointer, which would
+ * be wrong the moment a callback issued a nested request (§27.4 permits that
+ * on a different client). */
+typedef struct { zu_result *r; zu_trace *t; } resp_ctx;
+
 static SEXP build_response(void *data);
+static SEXP timings_to_r(const zu_timings *t);
+static SEXP trace_to_r(const zu_trace *t);
 
 /* Runs whether build_response returned or longjmped (§25.2 mechanism (a)).
  * `jump` is TRUE only on the unwind path; the work is identical either way,
  * so it is deliberately not branched on. */
 static void free_result_on_unwind(void *data, Rboolean jump) {
     (void)jump;
-    zu_result_free((zu_result *)data);
+    zu_result_free(((resp_ctx *)data)->r);
 }
 
 /* Raise the §34.1 condition for a zu_error by calling back into R. Building
@@ -484,12 +493,14 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
                          SEXP header_values, SEXP body, SEXP timeout_ms,
                          SEXP max_redirects, SEXP verify, SEXP max_body,
                          SEXP user_agent, SEXP decode, SEXP pool,
-                         SEXP path, SEXP callback, SEXP proxy, SEXP tls) {
+                         SEXP path, SEXP callback, SEXP proxy, SEXP tls,
+                         SEXP trace) {
     zu_get_opts o;
     zu_req_spec spec;
     cb_ctx cb;
     zu_sink cb_sink;
     zu_tls_config tlscfg;
+    zu_trace tracebuf;
     zu_result r;
     zu_error e;
     zu_code rc;
@@ -605,6 +616,13 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
         if (tlscfg.ca_file) o.ca_file = tlscfg.ca_file;
     }
 
+    /* §35: opt-in. Without this the trace pointer stays NULL and every
+     * zu_trace_add() in the connect, handshake and read paths is one branch. */
+    if (Rf_asLogical(trace) == TRUE) {
+        zu_trace_init(&tracebuf);
+        o.trace = &tracebuf;
+    }
+
     memset(&cb, 0, sizeof cb);
     if (Rf_isFunction(callback)) {
         memset(&cb_sink, 0, sizeof cb_sink);
@@ -678,7 +696,12 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
      * `cont == NULL` and allocates its own token in that case; R_NilValue is a
      * perfectly valid SEXP, so it passes that check and is then used as a
      * continuation it is not, which fails with "bad value" on every call. */
-    return R_UnwindProtect(build_response, &r, free_result_on_unwind, &r, NULL);
+    {
+        resp_ctx ctx;
+        ctx.r = &r;
+        ctx.t = o.trace;
+        return R_UnwindProtect(build_response, &ctx, free_result_on_unwind, &ctx, NULL);
+    }
 }
 
 /* Everything below runs with `r` still owning C memory, and every R allocation
@@ -686,7 +709,8 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
  * runs either way — §25.2's mechanism (a), used to release promptly rather
  * than at the next GC. */
 static SEXP build_response(void *data) {
-    zu_result *rp = (zu_result *)data;
+    resp_ctx  *ctx = (resp_ctx *)data;
+    zu_result *rp = ctx->r;
     zu_result r = *rp;
     SEXP out, nms, body;
 
@@ -696,8 +720,8 @@ static SEXP build_response(void *data) {
     /* §35.2's connection metadata rides on the response rather than being a
      * second call, because it describes the connection THIS response came
      * over — asking again later would answer about a different one. */
-    out = PROTECT(Rf_allocVector(VECSXP, 12));
-    nms = PROTECT(Rf_allocVector(STRSXP, 12));
+    out = PROTECT(Rf_allocVector(VECSXP, 14));
+    nms = PROTECT(Rf_allocVector(STRSXP, 14));
     SET_VECTOR_ELT(out, 0, Rf_ScalarInteger(r.status));
     SET_STRING_ELT(nms, 0, Rf_mkChar("status"));
     SET_VECTOR_ELT(out, 1, headers_to_r(&r.headers));
@@ -722,9 +746,76 @@ static SEXP build_response(void *data) {
     SET_STRING_ELT(nms, 10, Rf_mkChar("proxy_used"));
     SET_VECTOR_ELT(out, 11, Rf_ScalarInteger(r.http_version));
     SET_STRING_ELT(nms, 11, Rf_mkChar("http_minor"));
+    SET_VECTOR_ELT(out, 12, timings_to_r(&r.timings));
+    SET_STRING_ELT(nms, 12, Rf_mkChar("timings_ms"));
+    SET_VECTOR_ELT(out, 13, trace_to_r(ctx->t));
+    SET_STRING_ELT(nms, 13, Rf_mkChar("trace"));
     Rf_setAttrib(out, R_NamesSymbol, nms);
 
     UNPROTECT(3);
+    return out;
+}
+
+/* --- §35.1 timings and §35.3 events, as R objects -------------------------
+ *
+ * -1 becomes NA rather than -1. A phase that did not happen is unknown, not
+ * negative, and NA is the value every R idiom already handles correctly —
+ * mean(), plotting, comparison. Handing back -1 would put a guard in every
+ * caller and eventually produce a chart with a bar below the axis.
+ */
+static SEXP timings_to_r(const zu_timings *t) {
+    static const char *nm[] = {
+        "dns", "connect", "tls", "request_write", "ttfb", "response_read",
+        "total", "body_bytes_wire", "body_bytes_decoded", NULL
+    };
+    const long v[7] = { t->dns, t->connect, t->tls, t->request_write,
+                        t->ttfb, t->response_read, t->total };
+    SEXP out, names;
+    int i, n = 0;
+    while (nm[n]) n++;
+
+    out   = PROTECT(Rf_allocVector(REALSXP, n));
+    names = PROTECT(Rf_allocVector(STRSXP, n));
+    for (i = 0; i < 7; i++)
+        REAL(out)[i] = (v[i] < 0) ? NA_REAL : (double)v[i];
+    REAL(out)[7] = (double)t->body_bytes_wire;
+    REAL(out)[8] = (double)t->body_bytes_decoded;
+    for (i = 0; i < n; i++) SET_STRING_ELT(names, i, Rf_mkChar(nm[i]));
+    Rf_setAttrib(out, R_NamesSymbol, names);
+    UNPROTECT(2);
+    return out;
+}
+
+/* A data-frame-shaped list: event, at_ms, bytes, detail. Columns rather than
+ * a list of rows, because the first thing anyone does with a trace is look at
+ * it as a table. */
+static SEXP trace_to_r(const zu_trace *t) {
+    SEXP out, names, ev, at, n_, detail;
+    size_t i;
+    if (!t) return R_NilValue;
+
+    ev     = PROTECT(Rf_allocVector(STRSXP,  (R_xlen_t)t->n));
+    at     = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t)t->n));
+    n_     = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t)t->n));
+    detail = PROTECT(Rf_allocVector(STRSXP,  (R_xlen_t)t->n));
+    for (i = 0; i < t->n; i++) {
+        SET_STRING_ELT(ev, (R_xlen_t)i, Rf_mkChar(zu_event_name(t->ev[i].ev)));
+        REAL(at)[i] = (double)t->ev[i].at_ms;
+        REAL(n_)[i] = (double)t->ev[i].n;
+        SET_STRING_ELT(detail, (R_xlen_t)i, Rf_mkChar(t->ev[i].detail));
+    }
+    out   = PROTECT(Rf_allocVector(VECSXP, 5));
+    names = PROTECT(Rf_allocVector(STRSXP, 5));
+    SET_VECTOR_ELT(out, 0, ev);     SET_STRING_ELT(names, 0, Rf_mkChar("event"));
+    SET_VECTOR_ELT(out, 1, at);     SET_STRING_ELT(names, 1, Rf_mkChar("at_ms"));
+    SET_VECTOR_ELT(out, 2, n_);     SET_STRING_ELT(names, 2, Rf_mkChar("n"));
+    SET_VECTOR_ELT(out, 3, detail); SET_STRING_ELT(names, 3, Rf_mkChar("detail"));
+    /* Reported, not hidden: a truncated trace that looked complete would read
+     * as a request that stopped early. */
+    SET_VECTOR_ELT(out, 4, Rf_ScalarInteger(t->dropped));
+    SET_STRING_ELT(names, 4, Rf_mkChar("dropped"));
+    Rf_setAttrib(out, R_NamesSymbol, names);
+    UNPROTECT(6);
     return out;
 }
 
@@ -795,7 +886,7 @@ static const R_CallMethodDef call_methods[] = {
     {"C_zu_redact_form",       (DL_FUNC) &C_zu_redact_form,       2},
     {"C_zu_is_secret_header",  (DL_FUNC) &C_zu_is_secret_header,  2},
     {"C_zu_is_secret_param",   (DL_FUNC) &C_zu_is_secret_param,   2},
-    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          16},
+    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          17},
     {"C_zu_pool_new",          (DL_FUNC) &C_zu_pool_new,          3},
     {"C_zu_pool_valid",        (DL_FUNC) &C_zu_pool_valid,        1},
     {"C_zu_pool_stats",        (DL_FUNC) &C_zu_pool_stats,        1},

@@ -16,6 +16,7 @@
 
 #include "zu_platform.h"
 #include "zu_stream.h"
+#include "zu_trace.h"
 #include "zu_error.h"
 #include "zu_time.h"
 
@@ -31,6 +32,18 @@ typedef struct {
     zu_tick_fn tick;
     void      *tick_ctx;
     int        tick_ms;      /* poll slice; <= 0 uses 100ms (§25.1) */
+
+    /* §35: where dns.start/done and connect.start/done are recorded. Only
+     * this layer can split them — from outside, resolution and connection are
+     * one call, and reporting them together would hide which of the two a
+     * slow request is waiting on, which is usually the question. */
+    zu_trace  *trace;
+
+    /* §35.1's dns and connect, filled here because only this layer can split
+     * them: from outside, resolution and connection are one call, and
+     * reporting the sum hides which of the two a slow request is waiting on —
+     * usually the question being asked. */
+    zu_timings *timings;
 } zu_net_opts;
 
 void zu_net_opts_init(zu_net_opts *o);
