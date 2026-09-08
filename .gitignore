@@ -37,3 +37,4 @@ spike/macos-tls/fork_trust_test
 spike/windows-schannel/*.exe
 src/Makevars
 src/Makevars.win
+ctest/zu_engtest_st

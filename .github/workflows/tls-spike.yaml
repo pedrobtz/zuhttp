@@ -315,3 +315,47 @@ jobs:
         env:
           PKG_CONFIG_PATH: /opt/homebrew/opt/openssl@3/lib/pkgconfig:/usr/local/opt/openssl@3/lib/pkgconfig
         run: make engine
+
+  # S9 — the macOS system stack: Secure Transport engine + SecTrust trust.
+  # Needs no OpenSSL at all, which is the point (§2, R-13).
+  slice-sectransport:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: macos-latest
+    name: S9 macOS system TLS (Secure Transport + SecTrust)
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build and run the slice on the system stack
+        timeout-minutes: 10
+        working-directory: ctest
+        run: make engine-st
+
+      # D-32 / R-12: HTTPS after fork() must raise a named condition, never
+      # take the worker down. S0 measured the unmitigated case as SIGSEGV, so
+      # this is a regression test against a crash and must run on macOS.
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
+      - name: Install and check the fork guard
+        timeout-minutes: 10
+        env:
+          NOT_CRAN: "true"
+        run: |
+          R CMD INSTALL .
+          Rscript -e '
+            library(zuhttp); library(parallel)
+            stopifnot(identical(zu_tls_backend(), "securetransport"))
+            invisible(zu_get("https://example.com"))     # parent uses trustd
+            res <- mclapply(1:2, function(i)
+              tryCatch({ zu_get("https://example.com"); "UNEXPECTED SUCCESS" },
+                       zu_fork_error = function(e) "zu_fork_error",
+                       error = function(e) paste("other:", class(e)[1])),
+              mc.cores = 2)
+            # A NULL element means the child DIED rather than returned.
+            if (any(vapply(res, is.null, logical(1))))
+              stop("R-12 regression: a forked child died instead of erroring")
+            if (!all(vapply(res, identical, logical(1), "zu_fork_error")))
+              stop("R-12 regression: unexpected result ", paste(unlist(res), collapse=", "))
+            cat("R-12 mitigated: both children raised zu_fork_error\n")
+          '

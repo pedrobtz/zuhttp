@@ -10,5 +10,6 @@ else
     SSL_LIBS="-lssl -lcrypto -lcrypt32 -lbcrypt"
 fi
 sed -e "s|@SSL_CFLAGS@|$SSL_CFLAGS|g" -e "s|@SSL_LIBS@|$SSL_LIBS|g" \
+    -e "s|@TLS_OBJ@|zu_tls_openssl.o|g" \
     src/Makevars.win.in > src/Makevars.win
 echo "configure.win: wrote src/Makevars.win"

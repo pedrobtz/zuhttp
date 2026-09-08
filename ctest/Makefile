@@ -98,7 +98,7 @@ endif
 
 TLSSRC := $(SRC)/zu_alloc.c $(SRC)/zu_buffer.c $(SRC)/zu_error.c \
           $(SRC)/zu_time.c $(SRC)/zu_stream.c $(SRC)/zu_net.c \
-          $(SRC)/zu_tls_openssl.c
+          $(SRC)/zu_tls.c $(SRC)/zu_tls_openssl.c
 
 zu_tlstest: $(TLSSRC) test_tls.c
 	$(CC) $(CFLAGS) $(OPENSSL_CFLAGS) -o $@ $(TLSSRC) test_tls.c \
@@ -113,7 +113,8 @@ ENGSRC := $(SRC)/zu_alloc.c $(SRC)/zu_buffer.c $(SRC)/zu_error.c \
           $(SRC)/zu_time.c $(SRC)/zu_stream.c $(SRC)/zu_net.c \
           $(SRC)/zu_headers.c $(SRC)/zu_request.c $(SRC)/zu_framing.c \
           $(SRC)/zu_response.c $(SRC)/zu_uri.c $(SRC)/zu_redirect.c \
-          $(SRC)/zu_inflate.c $(SRC)/zu_tls_openssl.c $(SRC)/zu_engine.c \
+          $(SRC)/zu_inflate.c $(SRC)/zu_tls.c $(SRC)/zu_tls_openssl.c \
+          $(SRC)/zu_engine.c $(SRC)/zu_fork.c \
           $(VENDOR)/picohttpparser.c \
           $(URIDIR)/UriParse.c $(URIDIR)/UriParseBase.c $(URIDIR)/UriResolve.c \
           $(URIDIR)/UriRecompose.c $(URIDIR)/UriCommon.c $(URIDIR)/UriMemory.c \
@@ -126,7 +127,18 @@ zu_engtest: $(ENGSRC) test_engine.c
 engine: zu_engtest
 	./zu_engtest
 
-clean:
-	rm -rf zu_ctest zu_ctest_asan zu_tlstest zu_engtest *.dSYM build build-asan *.o
+# The same slice on the macOS system TLS stack (§13.2, D-4): Secure Transport
+# for the protocol, SecTrust for trust, nothing bundled.
+STSRC := $(subst $(SRC)/zu_tls_openssl.c,$(SRC)/zu_tls_sectransport.c,$(ENGSRC))
 
-.PHONY: all run strict asan clean tls engine
+zu_engtest_st: $(STSRC) test_engine.c
+	$(CC) $(BASE) $(URIFLAGS) -o $@ $(STSRC) test_engine.c \
+	      -framework Security -framework CoreFoundation -lz $(NETLIBS)
+
+engine-st: zu_engtest_st
+	./zu_engtest_st
+
+clean:
+	rm -rf zu_ctest zu_ctest_asan zu_tlstest zu_engtest zu_engtest_st *.dSYM build build-asan *.o
+
+.PHONY: all run strict asan clean tls engine engine-st

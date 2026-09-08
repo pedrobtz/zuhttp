@@ -1,42 +1,82 @@
 #!/bin/sh
-# Locate OpenSSL and generate src/Makevars (design §47.2, roadmap S19).
+# Select the TLS backend and generate src/Makevars (design §13, roadmap S9/S19).
 #
-# zuhttp's premise is the SYSTEM TLS stack, not a bundled one, so this script
-# only ever looks for what the platform already provides and fails loudly if
-# it is absent — it never downloads or vendors a copy.
+# zuhttp's premise (§2) is the platform's own TLS stack and trust store, with
+# no bundled cryptography library and no bundled certificate bundle. This
+# script therefore picks the SYSTEM backend where one exists and only falls
+# back to linking OpenSSL where the platform provides nothing usable.
 #
-# Note for §13: the walking slice uses OpenSSL on every platform. Schannel
-# (D-5) and the macOS engine (D-4/R-13) replace it at S8 and S9; until then
-# this is the one backend, and DESCRIPTION says so.
+#   macOS   Secure Transport + SecTrust   nothing to install, nothing bundled
+#   Linux   system OpenSSL (dynamic)      the platform's own shared library
+#
+# See spike/macos-engine/FINDINGS.md for why macOS is Secure Transport and not
+# OpenSSL or Network.framework: it is the only macOS API that both reaches TLS
+# over a socket the caller owns (§9, and §20.3 proxy CONNECT needs it) and
+# does not require bundling ~4.6 MB of cryptography.
 set -eu
 
 : "${R_HOME:=$(R RHOME)}"
 CC=$("${R_HOME}/bin/R" CMD config CC)
 CFLAGS=$("${R_HOME}/bin/R" CMD config CFLAGS)
+UNAME=$(uname -s)
 
 SSL_CFLAGS=""
 SSL_LIBS=""
+TLS_OBJ=""
 
-if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists openssl 2>/dev/null; then
-    SSL_CFLAGS=$(pkg-config --cflags openssl)
-    SSL_LIBS=$(pkg-config --libs openssl)
-    echo "configure: OpenSSL $(pkg-config --modversion openssl) via pkg-config"
+if [ "$UNAME" = "Darwin" ]; then
+    # --- macOS: the system stack. No OpenSSL, nothing to install. ----------
+    TLS_OBJ="zu_tls_sectransport.o"
+    SSL_LIBS="-framework Security -framework CoreFoundation"
+    # Deprecation warnings from Secure Transport are NOT suppressed. Both
+    # ways of doing so are worse: --as-cran NOTEs a #pragma that suppresses
+    # diagnostics and WARNs on -Wno-* in PKG_CPPFLAGS. And they should not be
+    # suppressed on the merits either — R-15 is "Apple may remove this API",
+    # so a warning on every build is the signal, not noise.
+    echo "configure: TLS backend = Secure Transport + SecTrust (system)"
+    echo "configure: NOTE macOS tops out at TLS 1.2; see ?zuhttp_tls"
+
+    tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+    cat > "$tmp/t.c" <<'CEOF'
+#include <Security/SecureTransport.h>
+#include <Security/Security.h>
+int main(void) {
+    SSLContextRef c = SSLCreateContext(NULL, kSSLClientSide, kSSLStreamType);
+    /* SecTrustEvaluateWithError is the non-deprecated trust API the whole
+       §13.1 split depends on; requiring it here fails early rather than at
+       the first HTTPS request. */
+    (void)&SecTrustEvaluateWithError;
+    if (c) CFRelease(c);
+    return c ? 0 : 1;
+}
+CEOF
+    # shellcheck disable=SC2086
+    if ! $CC $CFLAGS -Wno-deprecated-declarations -o "$tmp/t" "$tmp/t.c" \
+             $SSL_LIBS >/dev/null 2>&1; then
+        echo "configure: Security.framework did not link. This is unexpected on macOS." >&2
+        exit 1
+    fi
+    echo "configure: Security.framework links, SecTrustEvaluateWithError present"
 else
-    # Homebrew and MacPorts do not put openssl on the default search path,
-    # because macOS ships a header-less LibreSSL that must not be picked up.
-    for p in /opt/homebrew/opt/openssl@3 /usr/local/opt/openssl@3 \
-             /opt/local /usr/local /usr; do
-        if [ -f "$p/include/openssl/ssl.h" ]; then
-            SSL_CFLAGS="-I$p/include"
-            SSL_LIBS="-L$p/lib -lssl -lcrypto"
-            echo "configure: OpenSSL headers found under $p"
-            break
-        fi
-    done
-fi
+    # --- everything else: the system OpenSSL, dynamically linked ----------
+    TLS_OBJ="zu_tls_openssl.o"
+    if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists openssl 2>/dev/null; then
+        SSL_CFLAGS=$(pkg-config --cflags openssl)
+        SSL_LIBS=$(pkg-config --libs openssl)
+        echo "configure: TLS backend = OpenSSL $(pkg-config --modversion openssl) (system)"
+    else
+        for p in /usr/local /usr /opt/local; do
+            if [ -f "$p/include/openssl/ssl.h" ]; then
+                SSL_CFLAGS="-I$p/include"
+                SSL_LIBS="-L$p/lib -lssl -lcrypto"
+                echo "configure: OpenSSL headers found under $p"
+                break
+            fi
+        done
+    fi
 
-if [ -z "$SSL_LIBS" ]; then
-    cat >&2 <<'MSG'
+    if [ -z "$SSL_LIBS" ]; then
+        cat >&2 <<'MSG'
 configure: could not find OpenSSL.
 
 zuhttp uses the system TLS stack and does not bundle one. Install the
@@ -44,35 +84,35 @@ development package and retry:
 
   Debian/Ubuntu   apt-get install libssl-dev
   Fedora/RHEL     dnf install openssl-devel
-  macOS           brew install openssl@3
   Alpine          apk add openssl-dev
 MSG
-    exit 1
-fi
+        exit 1
+    fi
 
-# Do not trust the flags: prove they compile AND link before writing them out.
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
-cat > "$tmp/t.c" <<'CEOF'
+    tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+    cat > "$tmp/t.c" <<'CEOF'
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
 int main(void) {
     SSL_CTX *c = SSL_CTX_new(TLS_client_method());
     SSL *s = c ? SSL_new(c) : 0;
-    /* §13.5: hostname verification must come from the library, never from a
+    /* §13.5: hostname verification comes from the library, never from a
        hand-rolled comparison, so this symbol is a hard requirement. */
     if (s) SSL_set1_host(s, "example.com");
     return c ? 0 : 1;
 }
 CEOF
-# shellcheck disable=SC2086
-if ! $CC $CFLAGS $SSL_CFLAGS -o "$tmp/t" "$tmp/t.c" $SSL_LIBS >/dev/null 2>&1; then
-    echo "configure: found OpenSSL headers but could not link a test program." >&2
-    echo "configure: CFLAGS=$SSL_CFLAGS LIBS=$SSL_LIBS" >&2
-    exit 1
+    # shellcheck disable=SC2086
+    if ! $CC $CFLAGS $SSL_CFLAGS -o "$tmp/t" "$tmp/t.c" $SSL_LIBS >/dev/null 2>&1; then
+        echo "configure: found OpenSSL headers but could not link a test program." >&2
+        echo "configure: CFLAGS=$SSL_CFLAGS LIBS=$SSL_LIBS" >&2
+        exit 1
+    fi
+    echo "configure: OpenSSL links, and SSL_set1_host is available"
 fi
-echo "configure: OpenSSL links, and SSL_set1_host is available"
 
-sed -e "s|@SSL_CFLAGS@|$SSL_CFLAGS|g" -e "s|@SSL_LIBS@|$SSL_LIBS|g" \
+sed -e "s|@SSL_CFLAGS@|$SSL_CFLAGS|g" \
+    -e "s|@SSL_LIBS@|$SSL_LIBS|g" \
+    -e "s|@TLS_OBJ@|$TLS_OBJ|g" \
     src/Makevars.in > src/Makevars
-echo "configure: wrote src/Makevars"
+echo "configure: wrote src/Makevars (TLS object: $TLS_OBJ)"

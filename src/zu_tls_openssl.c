@@ -22,15 +22,7 @@
 #include <openssl/evp.h>
 #include <openssl/bio.h>
 
-void zu_tls_config_init(zu_tls_config *c) {
-    memset(c, 0, sizeof *c);
-    c->source = ZU_TRUST_SYSTEM;
-    c->verify_peer = 1;       /* §14.1: never default to off */
-    c->verify_hostname = 1;
-    c->revocation = 0;        /* §14.5 / S0 F-4 */
-    c->min_version = 12;      /* TLS 1.2 */
-    c->alpn = "http/1.1";
-}
+/* zu_tls_config_init() is backend-neutral policy and lives in zu_tls.c. */
 
 const char *zu_tls_backend_name(void) { return "openssl"; }
 int         zu_tls_available(void)    { return 1; }

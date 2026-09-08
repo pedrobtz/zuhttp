@@ -19,7 +19,7 @@ Firm decisions and open questions were previously indistinguishable in this docu
 | D-1 | R prefix `zu_`, response accessors `zu_resp_`, C macros `ZUHTTP_` | **Accepted** | 1.1 |
 | D-2 | No `zuhttp` export may collide with an httr2 export | **Accepted** | 1.1, 5 |
 | D-3 | Separate TLS protocol engine from trust evaluation | **Accepted** | 13.1 |
-| D-4 | macOS: portable engine + `SecTrustEvaluateWithError` for Keychain trust | **Accepted** — validated by S0 | 13.2 |
+| D-4 | macOS: **Secure Transport** engine + `SecTrustEvaluateWithError` Keychain trust | **Accepted** — R-13 resolved, S9 | 13.2 |
 | D-5 | Windows: Schannel for both engine and trust | **Accepted, effort unquantified** | 13.4 |
 | D-6 | Unix: system OpenSSL for both | **Accepted** | 13.5 |
 | D-7 | Link system zlib; do not vendor miniz | **Accepted** | 21.1 |
@@ -715,6 +715,35 @@ int zu_trust_evaluate(
 ```
 
 #### 13.2 Why macOS forces this
+
+**Resolved (R-13, 2026-09-08): Secure Transport for the engine, `SecTrust` for
+trust.** The measurements are in `spike/macos-engine/FINDINGS.md`; the summary
+is that macOS offers no option satisfying all of this project's constraints:
+
+| | TLS 1.3 | Caller-owned socket (§9) | Bundles crypto |
+|---|---|---|---|
+| Secure Transport | **no — 1.2 ceiling** | yes | no |
+| Network.framework | yes | **no — owns the socket** | no |
+| Static OpenSSL | yes | yes | **yes — 4.64 MB** |
+
+Network.framework is disqualified on architecture, not preference:
+`nw_connection` is created from an endpoint with no API to adopt an existing
+descriptor, so it cannot run TLS over a socket we already established — which
+is exactly what §20.3 proxy CONNECT is. Static OpenSSL is CRAN-viable (the
+`openssl` package ships 5.3 MB the same way) but bundles the cryptography
+library that §2 exists to avoid.
+
+So macOS ships **TLS 1.2 as its ceiling**, and that is a stated, documented
+limitation rather than an oversight. The resulting shared object is 0.17 MB
+and links only `Security.framework`.
+
+**The cost is protocol version; the benefit is everything else.** Trust still
+comes from the system Keychain, so enterprise roots, inspection proxies and
+OS-managed certificate updates all work — that is the half of §13.1 users
+actually feel. And because Apple has deprecated Secure Transport (87 markers
+in the SDK), §62 must carry the contingency: if it is removed, D-4 reopens
+with only two options, and neither is free.
+
 
 §8.3 of the previous draft asked for Keychain trust, modern non-deprecated APIs, and no bundled OpenSSL, while §25 and §29 require a synchronous, single-threaded, poll-driven design with no background threads touching R. **Those requirements are not jointly satisfiable with either Apple TLS API:**
 
@@ -3868,8 +3897,9 @@ Ordered by expected impact. Each risk has an owner-facing mitigation and an expl
 | ID | Risk | L | I | Mitigation | Kill / rescope trigger |
 |---|---|---|---|---|---|
 | ~~R-1~~ | ~~**macOS TLS dead end.**~~ **RETIRED 2026-09-07** by the S0 spike: OpenSSL engine + `SecTrustEvaluateWithError` works with TLS 1.3, Keychain trust, and a caller-owned poll loop. | — | — | — | — |
-| **R-12** | **macOS forked HTTPS crashes.** Security.framework's `trustd` XPC connection does not survive `fork()`; a child calling it after the parent segfaults (S0 F-5). `mclapply` + HTTPS is a very common R pattern. | **High** | **High** | PID guard on the trust evaluator raising a named condition instead of dying (§26.4); document `PSOCK`/`multisession` as the supported path | Cannot reliably detect the forked state before the crash → macOS HTTPS must be documented as unsupported under forked parallelism |
-| **R-13** | **No CRAN-viable macOS TLS engine.** S0 linked Homebrew OpenSSL; CRAN macOS binaries need a static engine from the recipes toolchain or an alternative (§62.1). | Medium | High | Resolve during S4 before committing to the macOS backend | No acceptable engine → fall back to TLS 1.2-only Secure Transport, or drop macOS |
+| ~~**R-12**~~ | ~~macOS forked HTTPS crashes~~ — **MITIGATED 2026-09-08 (S9).** The trust evaluator now carries the §26.4 PID guard, so a forked child raises `zu_fork_error` instead of dying. Verified end to end: `mclapply` + HTTPS after a parent request returns the condition from every child and the session survives; CI runs it as a regression test against a SIGSEGV. | — | — | Done | Residual: forked HTTPS still does not WORK on macOS, it only fails diagnosably. `PSOCK` / `multisession` remain the supported path. |
+| **R-15** | **Apple may remove Secure Transport.** It is deprecated (87 markers in the current SDK) and is now zuhttp's macOS engine (D-4). Removal would leave only two options, both of which fail a project constraint: Network.framework cannot do §20.3 CONNECT, static OpenSSL bundles 4.64 MB of cryptography. | Low | **High** | Track Apple's SDK each release; keep the §13.1 split so only the engine half would change | Ship static OpenSSL on macOS and amend §2 to drop the no-bundled-crypto claim |
+| ~~**R-13**~~ | ~~No CRAN-viable macOS TLS engine.~~ **RETIRED 2026-09-08.** Secure Transport + SecTrust ships with nothing bundled (0.17 MB `.so`), at a **TLS 1.2 ceiling**. Static OpenSSL was viable but costs 4.64 MB of bundled cryptography; Network.framework has TLS 1.3 but cannot run over a caller-owned socket, so it fails §20.3. See `spike/macos-engine/FINDINGS.md`. | — | — | Done | Residual: Apple may remove Secure Transport — see R-15 |
 | **R-2** | **Schannel overrun.** 1,500–2,500 lines of security-critical code, low-confidence estimate (§13.4, §64). | High | High | Time-box the spike; measure LOC against §51.3 early | Schannel backend exceeds 3,500 LOC or 8 weeks → reconsider a portable engine + `CertGetCertificateChain` trust on Windows too |
 | **R-3** | **CONFIRMED 2026-09-07 (S1).** Rtools mingw-w64 11.0 lacks the `SCH_CREDENTIALS` / `TLS_PARAMETERS` typedefs; not a version gate (§47.4). Blocks TLS 1.3 on Windows only. | **Certain** | Medium | Declare the two structures locally behind a feature guard; the constants already exist. **ABI must be verified on a real Win10+ target** — a wrong layout into `AcquireCredentialsHandle` is a memory-safety bug, not a compile error | ABI cannot be verified confidently → ship Windows TLS 1.2-only for v1, documented |
 | **R-4** | **Size budget blown.** Vendored dependencies plus three backends exceed the auditability claim that justifies the project (§51.3). | Medium | High | Hard thresholds in §51.3; parser and URI decisions made against them | > 40k total LOC or > 12k project-owned → the "small and auditable" positioning is false; revise §1 and §6 publicly or stop |
