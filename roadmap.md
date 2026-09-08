@@ -129,6 +129,25 @@ allocations.
 platform, including Windows and macOS. D-5 and D-4 call for Schannel and the
 system trust store; those are S8 and S9. DESCRIPTION says so explicitly.
 
+**And that shortcut does not work on Windows at all**, which CI established
+the moment the slice ran there:
+
+```
+Error in zu_get("https://example.com") :
+  certificate verification failed for 'example.com':
+  unable to get local issuer certificate
+```
+
+The package *builds and links* fine under Rtools — the failure is at runtime.
+OpenSSL on Windows looks for a CA bundle at a path compiled into the library
+which does not exist, and it does not consult the Windows certificate store.
+There are no trust anchors, so every certificate fails.
+
+This is D-5's rationale, confirmed by measurement rather than argument:
+**HTTPS on Windows requires Schannel (S8), not merely prefers it.** Until S8
+lands, Windows can build the package but cannot make an HTTPS request, and
+DESCRIPTION and `?zu_get` both say so.
+
 ---
 
 ## Track A — Feasibility spikes

@@ -37,9 +37,21 @@ certificate and hostname verification, request construction, strict response
 framing, chunked decoding, transparent gzip, one redirect, and a total
 deadline.
 }
+\section{Platform status}{
+
+The long-term design uses each platform's native TLS stack. Until those
+backends land this package links OpenSSL everywhere, and \strong{on Windows that
+means HTTPS cannot verify certificates}: OpenSSL there looks for a CA
+bundle at a compiled-in path that does not exist and does not consult the
+Windows certificate store. \code{zu_get()} on Windows therefore fails with
+\code{zu_tls_certificate_error} until the Schannel backend arrives.
+}
+
 \examples{
-\donttest{
+# Requires network access, so it is not run during checks.
+\dontrun{
 r <- zu_get("https://example.com")
 zu_resp_status(r)
+zu_resp_text(r)
 }
 }

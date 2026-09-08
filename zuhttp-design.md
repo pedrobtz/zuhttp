@@ -763,6 +763,24 @@ Use Winsock, Schannel, and the Windows certificate trust store.
 
 Benefits: no OpenSSL dependency, native enterprise trust, native certificate updates, Windows policy integration.
 
+**Schannel is required, not merely preferred — measured.** The §63.2 slice
+temporarily linked OpenSSL on every platform, and on Windows it builds and
+links cleanly under Rtools but cannot verify a single certificate:
+
+```text
+Error in zu_get("https://example.com") :
+  certificate verification failed for 'example.com':
+  unable to get local issuer certificate
+```
+
+OpenSSL on Windows looks for a CA bundle at a path compiled into the library,
+which does not exist there, and it does not consult the Windows certificate
+store. There are no trust anchors at all. The alternatives to Schannel are
+therefore shipping a certificate bundle — which §2 rejects outright, since
+avoiding one is a stated reason the project exists — or reading the Windows
+store manually and feeding it to OpenSSL, which is most of the Schannel work
+with none of the benefits. D-5 is confirmed.
+
 Requirements: SNI, hostname verification, chain validation, TLS 1.2+, TLS 1.3 where the platform supports it, custom CA support that does not undermine native trust (§14.3).
 
 **Effort warning.** Schannel is not a drop-in. A correct client requires the `AcquireCredentialsHandle` / `InitializeSecurityContext` loop with manual `SecBuffer` framing, `SECBUFFER_EXTRA` handling, `SEC_I_CONTINUE_NEEDED` and `SEC_E_INCOMPLETE_MESSAGE` state, `EncryptMessage`/`DecryptMessage` against `SECPKG_ATTR_STREAM_SIZES`, renegotiation, graceful shutdown via `ApplyControlToken`, and manual chain policy validation. Realistically **1,500–2,500 lines of security-critical code** — a material fraction of the entire size budget, and the single largest line item in §64.

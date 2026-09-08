@@ -21,11 +21,21 @@
 #' @param user_agent `User-Agent` to send.
 #' @return A `zu_response` object. Use [zu_resp_status()], [zu_resp_body()],
 #'   [zu_resp_headers()] and [zu_resp_url()] to read it.
+#' @section Platform status:
+#' The long-term design uses each platform's native TLS stack. Until those
+#' backends land this package links OpenSSL everywhere, and **on Windows that
+#' means HTTPS cannot verify certificates**: OpenSSL there looks for a CA
+#' bundle at a compiled-in path that does not exist and does not consult the
+#' Windows certificate store. `zu_get()` on Windows therefore fails with
+#' `zu_tls_certificate_error` until the Schannel backend arrives.
+#'
 #' @export
 #' @examples
-#' \donttest{
+#' # Requires network access, so it is not run during checks.
+#' \dontrun{
 #' r <- zu_get("https://example.com")
 #' zu_resp_status(r)
+#' zu_resp_text(r)
 #' }
 zu_get <- function(url, timeout = 30, follow_redirects = 1L, verify = TRUE,
                    max_body = 16 * 1024^2, user_agent = NULL) {
