@@ -430,22 +430,38 @@ jobs:
         timeout-minutes: 3
         run: Rscript --vanilla -e 'library(zuhttp); cat("backend:", zu_tls_backend(), "\n"); stopifnot(identical(zu_tls_backend(), "schannel"))'
 
-      # R3 crashes with no output and the C harness passes at R's own flags, so
-      # reasoning has run out of road: get the actual faulting frame. Rtools
-      # ships gdb; if it is absent this step says so and does not fail the job,
-      # because the R3 step below is the real gate.
+      # A discriminator that costs nothing and should have come first: drive
+      # the SAME engine and the SAME SEXP construction over plain HTTP, with
+      # follow_redirects = 0 so no TLS is involved at all.
+      #
+      #   crashes -> the fault is in the engine or in C_zu_get, not Schannel
+      #   passes  -> the fault is Schannel-specific, inside R only
+      - name: R2b plain HTTP, no TLS at all
+        timeout-minutes: 5
+        continue-on-error: true
+        run: |
+          Rscript --vanilla -e '
+            library(zuhttp)
+            r <- zu_get("http://example.com", follow_redirects = 0L)
+            cat("http-only status:", zu_resp_status(r),
+                "bytes", length(zu_resp_body(r)), "\n")'
+
       - name: Backtrace the crash under gdb
         if: always()
         continue-on-error: true
         timeout-minutes: 10
         run: |
-          if ! command -v gdb >/dev/null 2>&1; then
-            echo "gdb not present in this Rtools; skipping"
-            exit 0
-          fi
-          gdb --batch -ex run -ex "bt 40" -ex "info registers" --args \
-            "$(R RHOME)/bin/x64/Rterm.exe" --vanilla --no-echo \
-            -e 'library(zuhttp); zu_get("https://example.com")' 2>&1 | tail -60
+          command -v gdb >/dev/null 2>&1 || { echo "no gdb"; exit 0; }
+          gdb --version | head -1
+          RT="$(R RHOME)/bin/x64/Rterm.exe"
+          ls -l "$RT" || { echo "Rterm not at $RT"; ls "$(R RHOME)/bin"; exit 0; }
+          gdb --batch \
+              -ex "set pagination off" \
+              -ex "set confirm off" \
+              -ex run \
+              -ex "bt full" \
+              --args "$RT" --vanilla --no-echo \
+              -e 'library(zuhttp); zu_get("https://example.com")' 2>&1 | tail -70
 
       - name: R3 one plain HTTPS request
         timeout-minutes: 5
