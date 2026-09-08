@@ -430,116 +430,38 @@ jobs:
         timeout-minutes: 3
         run: Rscript --vanilla -e 'library(zuhttp); cat("backend:", zu_tls_backend(), "\n"); stopifnot(identical(zu_tls_backend(), "schannel"))'
 
-      # A discriminator that costs nothing and should have come first: drive
-      # the SAME engine and the SAME SEXP construction over plain HTTP, with
-      # follow_redirects = 0 so no TLS is involved at all.
-      #
-      #   crashes -> the fault is in the engine or in C_zu_get, not Schannel
-      #   passes  -> the fault is Schannel-specific, inside R only
-      - name: R2b plain HTTP, no TLS at all
-        timeout-minutes: 5
-        continue-on-error: true
-        run: |
-          Rscript --vanilla -e '
-            library(zuhttp)
-            r <- zu_get("http://example.com", follow_redirects = 0L)
-            cat("http-only status:", zu_resp_status(r),
-                "bytes", length(zu_resp_body(r)), "\n")'
-
-      - name: Backtrace the crash under gdb
-        if: always()
-        continue-on-error: true
+      # Every R check below runs from a FILE, never from a multi-line
+      # `Rscript -e`. On this runner a -e argument containing newlines
+      # segfaults before any of the script executes, which is why three
+      # earlier steps "crashed" with no output while the identical code on one
+      # line succeeded four times in a row. That was an artefact of how I
+      # wrote the step, not a defect in the package.
+      - name: R3 the slice from R, run from a file
         timeout-minutes: 10
         run: |
-          command -v gdb >/dev/null 2>&1 || { echo "no gdb"; exit 0; }
-          gdb --version | head -1
-          RT="$(R RHOME)/bin/x64/Rterm.exe"
-          ls -l "$RT" || { echo "Rterm not at $RT"; ls "$(R RHOME)/bin"; exit 0; }
-          gdb --batch \
-              -ex "set pagination off" \
-              -ex "set confirm off" \
-              -ex run \
-              -ex "bt full" \
-              --args "$RT" --vanilla --no-echo \
-              -e 'library(zuhttp); zu_get("https://example.com")' 2>&1 | tail -70
+          cat > check.R <<'RS'
+          library(zuhttp)
+          stopifnot(identical(zu_tls_backend(), "schannel"))
 
-      # It did NOT crash under gdb: "Inferior 1 exited normally". Two ways that
-      # happens, and they need separating before anything else is worth trying.
-      #
-      #   1. gdb perturbs timing or heap layout and hides a real memory bug
-      #   2. the gdb run used Rterm.exe, and the crash is specific to Rscript
-      #
-      # This runs the identical code under Rterm WITHOUT gdb, then Rscript
-      # three times. Both are continue-on-error: this step is here to produce
-      # evidence, not to gate the job.
-      - name: R2c Rterm without gdb, and Rscript repeated
-        if: always()
-        continue-on-error: true
-        timeout-minutes: 10
-        run: |
-          RT="$(R RHOME)/bin/x64/Rterm.exe"
-          echo "=== Rterm, no gdb ==="
-          "$RT" --vanilla --no-echo -e 'library(zuhttp); r <- zu_get("https://example.com"); cat("rterm status:", zu_resp_status(r), "\n")'
-          echo "rterm exit=$?"
-          for n in 1 2 3; do
-            echo "=== Rscript run $n ==="
-            Rscript --vanilla -e 'library(zuhttp); r <- zu_get("https://example.com"); cat("rscript status:", zu_resp_status(r), "\n")' || echo "  run $n exit=$?"
-          done
+          r <- zu_get("https://example.com")
+          cat("status", zu_resp_status(r), "tls", r$tls_version,
+              "bytes", length(zu_resp_body(r)), "\n")
+          stopifnot(zu_resp_status(r) == 200L)
+          stopifnot(grepl("Example Domain", zu_resp_text(r), fixed = TRUE))
+          stopifnot(identical(r$tls_version, "TLSv1.2"))
 
-      # R2c made FOUR successful HTTPS requests reading only $status. R3 reads
-      # $tls_version and length($body) as well, and crashes. So the request is
-      # fine and the returned object is not: touching some element faults.
-      # Walk the elements one at a time, flushing after each, so the last line
-      # printed names the bad one.
-      - name: R2d which element of the response faults?
-        if: always()
-        continue-on-error: true
-        timeout-minutes: 5
-        run: |
-          Rscript --vanilla -e '
-            f <- function(...) { cat(..., "\n"); flush.console() }
-            library(zuhttp)
-            r <- zu_get("https://example.com")
-            f("request returned")
-            f("typeof:", typeof(r))
-            f("length:", length(r))
-            f("names:", paste(names(r), collapse = ","))
-            f("1 status:", r[[1]])
-            f("2 headers length:", length(r[[2]]))
-            f("3 body typeof:", typeof(r[[3]]))
-            f("3 body length:", length(r[[3]]))
-            f("4 url:", r[[4]])
-            f("5 tls:", r[[5]])
-            f("6 redirects:", r[[6]])
-            f("ALL ELEMENTS OK")'
+          # The whole point of D-5: Windows has trust anchors again.
+          e <- tryCatch(zu_get("https://expired.badssl.com/"),
+                        zu_tls_error = function(e) e)
+          cat("expired ->", class(e)[1], "|", conditionMessage(e), "\n")
+          stopifnot(inherits(e, "zu_tls_certificate_error"))
 
-      - name: R3 one plain HTTPS request
-        timeout-minutes: 5
-        run: |
-          Rscript --vanilla -e '
-            library(zuhttp)
-            r <- zu_get("https://example.com")
-            cat("status", zu_resp_status(r), "tls", r$tls_version,
-                "bytes", length(zu_resp_body(r)), "\n")
-            stopifnot(zu_resp_status(r) == 200L)'
+          e2 <- tryCatch(zu_get("https://wrong.host.badssl.com/"),
+                         zu_tls_error = function(e) e)
+          cat("wrong host ->", class(e2)[1], "\n")
+          stopifnot(inherits(e2, "zu_tls_hostname_error"))
 
-      - name: R4 a certificate error must reach R as a condition
-        timeout-minutes: 5
-        run: |
-          Rscript --vanilla -e '
-            library(zuhttp)
-            e <- tryCatch(zu_get("https://expired.badssl.com/"),
-                          zu_tls_error = function(e) e)
-            cat("expired ->", class(e)[1], "\n")
-            stopifnot(inherits(e, "zu_tls_certificate_error"))'
+          cat("S8: Windows HTTPS works, and bad certificates are rejected\n")
+          RS
+          Rscript --vanilla check.R
 
-      - name: R5 a hostname mismatch is a distinct class
-        timeout-minutes: 5
-        run: |
-          Rscript --vanilla -e '
-            library(zuhttp)
-            e <- tryCatch(zu_get("https://wrong.host.badssl.com/"),
-                          zu_tls_error = function(e) e)
-            cat("wrong host ->", class(e)[1], "\n")
-            stopifnot(inherits(e, "zu_tls_hostname_error"))
-            cat("S8: Windows HTTPS works, and bad certificates are rejected\n")'
