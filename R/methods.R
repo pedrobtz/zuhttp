@@ -7,7 +7,8 @@
 # positional polymorphism outright.
 
 one_shot <- function(method, url, query, headers, policy, client,
-                     body = NULL, json = NULL, form = NULL, file = NULL) {
+                     body = NULL, json = NULL, form = NULL, file = NULL,
+                     path = NULL, callback = NULL) {
   given <- c(body = !is.null(body), json = !is.null(json),
              form = !is.null(form), file = !is.null(file))
   if (sum(given) > 1L)
@@ -22,6 +23,10 @@ one_shot <- function(method, url, query, headers, policy, client,
   if (!is.null(body))    req <- zu_body_raw(req, body)
   if (!is.null(file))    req <- zu_body_file(req, file)
   req$policy <- policy
+  # §27: not a policy. Where a response goes is a property of this call, not
+  # something a client inherits or the §31.9 three-state merge applies to.
+  if (!is.null(path)) req <- zu_req_path(req, path)
+  if (!is.null(callback)) req <- zu_req_callback(req, callback)
   zu_perform(req, client = client)
 }
 
@@ -51,6 +56,15 @@ one_shot <- function(method, url, query, headers, policy, client,
 #' @param user_agent `User-Agent` to send.
 #' @param retry A [zu_retry()] policy for this request. Overrides the
 #'   client's; `NULL` inherits it (§31.9).
+#' @param callback A function of one argument called with each decoded chunk
+#'   as it arrives (§27). Returning `FALSE` stops the transfer. See
+#'   [zu_req_callback()] for what happens when it raises an error.
+#' @param path Write the response body to this file instead of holding it in
+#'   memory (§27). The download is written beside the destination and renamed
+#'   on success, so a failed or interrupted transfer never leaves a truncated
+#'   file at `path`. Note the asymmetry with `file`, which is a request *body*
+#'   source (§31.6): `path` is where the response goes, `file` is where a
+#'   request body comes from.
 #' @param check Raise a condition for 4xx and 5xx (§31.14). `FALSE` returns the
 #'   response whatever its status.
 #' @param decode Decompress transparently. `FALSE` returns the wire bytes and
@@ -72,8 +86,10 @@ NULL
 zu_get <- function(url, query = NULL, headers = NULL, timeout = NULL,
                    redirects = NULL, verify = NULL, max_body = NULL,
                    user_agent = NULL, check = NULL, decode = NULL,
-                   retry = NULL, client = zu_default_client()) {
-  one_shot("GET", url, query, headers, collect_policy(environment()), client)
+                   retry = NULL, path = NULL, callback = NULL,
+                   client = zu_default_client()) {
+  one_shot("GET", url, query, headers, collect_policy(environment()), client,
+           path = path, callback = callback)
 }
 
 #' @rdname zu_methods
@@ -81,8 +97,10 @@ zu_get <- function(url, query = NULL, headers = NULL, timeout = NULL,
 zu_head <- function(url, query = NULL, headers = NULL, timeout = NULL,
                     redirects = NULL, verify = NULL, max_body = NULL,
                     user_agent = NULL, check = NULL, decode = NULL,
-                    retry = NULL, client = zu_default_client()) {
-  one_shot("HEAD", url, query, headers, collect_policy(environment()), client)
+                    retry = NULL, path = NULL, callback = NULL,
+                   client = zu_default_client()) {
+  one_shot("HEAD", url, query, headers, collect_policy(environment()), client,
+           path = path, callback = callback)
 }
 
 #' @rdname zu_methods
@@ -90,9 +108,10 @@ zu_head <- function(url, query = NULL, headers = NULL, timeout = NULL,
 zu_post <- function(url, query = NULL, headers = NULL, body = NULL, json = NULL,
                     form = NULL, file = NULL, timeout = NULL, redirects = NULL,
                     verify = NULL, max_body = NULL, user_agent = NULL,
-                    check = NULL, decode = NULL, retry = NULL, client = zu_default_client()) {
+                    check = NULL, decode = NULL, retry = NULL, path = NULL, callback = NULL,
+                   client = zu_default_client()) {
   one_shot("POST", url, query, headers, collect_policy(environment()), client,
-           body = body, json = json, form = form, file = file)
+           body = body, json = json, form = form, file = file, path = path, callback = callback)
 }
 
 #' @rdname zu_methods
@@ -100,9 +119,10 @@ zu_post <- function(url, query = NULL, headers = NULL, body = NULL, json = NULL,
 zu_put <- function(url, query = NULL, headers = NULL, body = NULL, json = NULL,
                    form = NULL, file = NULL, timeout = NULL, redirects = NULL,
                    verify = NULL, max_body = NULL, user_agent = NULL,
-                   check = NULL, decode = NULL, retry = NULL, client = zu_default_client()) {
+                   check = NULL, decode = NULL, retry = NULL, path = NULL, callback = NULL,
+                   client = zu_default_client()) {
   one_shot("PUT", url, query, headers, collect_policy(environment()), client,
-           body = body, json = json, form = form, file = file)
+           body = body, json = json, form = form, file = file, path = path, callback = callback)
 }
 
 #' @rdname zu_methods
@@ -110,9 +130,10 @@ zu_put <- function(url, query = NULL, headers = NULL, body = NULL, json = NULL,
 zu_patch <- function(url, query = NULL, headers = NULL, body = NULL, json = NULL,
                      form = NULL, file = NULL, timeout = NULL, redirects = NULL,
                      verify = NULL, max_body = NULL, user_agent = NULL,
-                     check = NULL, decode = NULL, retry = NULL, client = zu_default_client()) {
+                     check = NULL, decode = NULL, retry = NULL, path = NULL, callback = NULL,
+                   client = zu_default_client()) {
   one_shot("PATCH", url, query, headers, collect_policy(environment()), client,
-           body = body, json = json, form = form, file = file)
+           body = body, json = json, form = form, file = file, path = path, callback = callback)
 }
 
 #' @rdname zu_methods
@@ -121,9 +142,10 @@ zu_delete <- function(url, query = NULL, headers = NULL, body = NULL,
                       json = NULL, form = NULL, file = NULL, timeout = NULL,
                       redirects = NULL, verify = NULL, max_body = NULL,
                       user_agent = NULL, check = NULL, decode = NULL,
-                      retry = NULL, client = zu_default_client()) {
+                      retry = NULL, path = NULL, callback = NULL,
+                   client = zu_default_client()) {
   one_shot("DELETE", url, query, headers, collect_policy(environment()), client,
-           body = body, json = json, form = form, file = file)
+           body = body, json = json, form = form, file = file, path = path, callback = callback)
 }
 
 #' Client-first wrappers

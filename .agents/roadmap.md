@@ -2,7 +2,7 @@
 
 **Companion to:** [zuhttp-design.md](zuhttp-design.md)
 **Status:** Draft
-**Last updated:** 2026-09-08 · **Track D complete (S11–S14); S16 complete; S12/S15 explicitly partial**
+**Last updated:** 2026-09-08 · **Track D complete (S11–S14); S16, S17 complete; S12/S15 explicitly partial**
 **Total estimate:** 41–48 person-weeks (§64 of the design doc, plus spikes)
 
 ---
@@ -48,7 +48,7 @@ graph TD
 
     S15["S15 · Cancellation + unwind"]
     S16["S16 · Pool + fork/session safety<br/>COMPLETE — R-12 closed"]
-    S17["S17 · Streaming sinks"]
+    S17["S17 · Streaming sinks<br/>COMPLETE"]
 
     S18["S18 · Fuzzing + sanitizers + CI<br/>PARTIAL — 8 targets"]
     S19["S19 · CRAN packaging"]
@@ -755,18 +755,58 @@ Verified non-vacuously: stubbing out `zu_pool_acquire()` fails 5 assertions
 across 3 tests, including the parent-side reuse check at the end of the
 `mclapply` test.
 
-### S17 · Streaming sinks
+### S17 · Streaming sinks — ✅ **COMPLETE 2026-09-08**
 
 **Effort:** 1.5 weeks. **Depends on:** S5, S15, S16.
 
 Memory/file/discard/connection/callback sinks; atomic file writes via temp-and-rename (§27.1); callback error handling through `R_tryCatch` with re-signalling (§27.3); the re-entrancy depth guard (§27.4).
 
+`zu_sink` (§27's write function plus a finish/abort lifecycle, since §27.1's
+atomicity is not expressible in a write callback alone), `zu_body.c` for the
+decode-and-deliver loop, and `path =` / `callback =` on every verb, with
+`zu_req_path()` and `zu_req_callback()` as the composable forms. See §27.6 for
+D-45, D-46 and D-47.
+
 **Exit criteria**
 
-- [ ] 100 MB download with peak RSS under 16 MB over baseline.
-- [ ] A callback raising an R error surfaces **the user's** error, not a wrapped one, and leaks nothing.
-- [ ] A nested request on the same client errors clearly rather than deadlocking.
-- [ ] An interrupted download leaves no truncated file at the target path.
+- [x] 100 MB download with peak RSS under 16 MB over baseline. Measured in the
+      offline C suite against a mock stream — a 100 MB response is exactly
+      what you cannot ask a real server for on every CI run. **100 MiB to a
+      discard sink grows peak RSS by 0 KiB, to a file by 0 KiB, and into a
+      memory sink by ~100 MB.** The third is a deliberate control: without it
+      the first two are unfalsifiable, because "RSS did not grow" is also what
+      a broken measurement reports.
+- [x] A callback raising an R error surfaces **the user's** error, not a
+      wrapped one, and leaks nothing. `conditionMessage()` is the caller's own
+      text and the condition does not inherit `zu_error`; the read loop
+      unwinds normally first, so the connection is released rather than
+      longjmped past, and the next request on the same client succeeds.
+- [x] A nested request on the same client errors clearly rather than
+      deadlocking — and a request through a *different* client is
+      unrestricted, which is the half that says the guard is not just a
+      blanket ban.
+- [x] An interrupted download leaves no truncated file at the target path.
+      Asserted three ways: abort leaves neither the destination nor the
+      temporary file; a sink dropped without abort cleans up too; and a
+      failed download does not destroy a file that was already there.
+
+**Two things found while doing this.**
+
+§27.3 says to catch "a condition". Catching the `condition` class outright is
+wrong — `warning()` and `message()` signal and then restart, so they never
+unwind past C, and swallowing them turns an informational message inside a
+callback into a fatal transport error. testthat signals expectations the same
+way, so an `expect_true()` inside a callback was caught and re-signalled as an
+error; that is how it surfaced. Narrowed to error and interrupt (D-47), and
+§27.3 corrected.
+
+And a lazy-evaluation trap in the re-entrancy guard, worth recording because
+the symptom pointed nowhere near the cause. The caller writes
+`r$callback <- guard_callback(r$callback, st)`, so `f` is a promise for a
+binding that is then replaced by the wrapper; unforced, calling the wrapper
+resolves `f` to the wrapper and recurses until R's expression depth runs out —
+surfacing as "evaluation nested too deeply" from inside a C callback that had
+not yet run. `force(f)` is load-bearing, and there is a regression test for it.
 
 ### S18 · Fuzzing, sanitizers, CI
 
@@ -937,9 +977,12 @@ That last item is the honest test of the whole project. `zuhttp` exists on the p
    criteria, including the Ctrl-C one S15 had recorded as untestable.
    **Track D is now complete.** 12 of 13 §31.16 workflows pass; only
    workflow 6 (streaming download) remains, and it belongs to S17.
-9. **Next: S17 (streaming sinks)**, which closes the last workflow and the
-   last `skip()` outside S12's verbose-logging gap. After that, Track E's
-   unfinished stages: S18's 24h soak, then S19–S21.
+9. ~~**S17 · Streaming sinks.**~~ ✅ Done 2026-09-08 — all four criteria.
+   **All 13 §31.16 workflows now pass**, and the whole R suite has exactly one
+   `skip()` left: S12's verbose-logging egress, which needs §35 event hooks to
+   have something to trace.
+10. **Next: Track E's unfinished stages** — S18's 24h fuzz soak, then S19
+    (CRAN packaging), S20 (documentation) and S21 (security review → 1.0).
 
    Still open and not blockers: the mermaid graph marks **S9** DONE with all
    four criteria unticked, and **S7** has no marker with 0 of 3. Rule 2 makes

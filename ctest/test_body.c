@@ -1,0 +1,387 @@
+/* Response body streaming and sinks — design §27, §21, §19.5.
+ *
+ * All of it on the mock stream, which is the point of S17 having split
+ * zu_body.c out of the engine: the guarantee under test is "memory does not
+ * grow with the body", and proving that needs a 100 MB response, which is
+ * exactly the thing you cannot ask a real server for on every CI run.
+ */
+#include "zu_test.h"
+#include "zu_body.h"
+#include "zu_sink.h"
+#include "zu_mock_stream.h"
+#include "zu_alloc.h"
+#include <string.h>
+#include <stdio.h>
+
+#if defined(ZU_POSIX)
+#  include <sys/resource.h>
+#  include <unistd.h>
+#endif
+
+void suite_body(void);
+
+static zu_deadline forever(void) { return zu_deadline_in(60000); }
+
+/* Drive one body through a pipe into `sink` and return the status. */
+static zu_code run_body(const zu_mock_step *steps, size_t nsteps,
+                        zu_frame_kind kind, uint64_t length,
+                        zu_sink *sink, zu_headers *h, int no_decode,
+                        uint64_t max_body, zu_error *err) {
+    zu_stream *s = zu_mock_stream_new(steps, nsteps, 0, 0);
+    zu_body_pipe p;
+    zu_framing fr;
+    zu_code rc;
+
+    if (!s) return ZU_ERR_NOMEM;
+    fr.kind = kind; fr.length = length; fr.poolable = 1;
+
+    rc = zu_body_pipe_init(&p, sink, h, no_decode, max_body, err);
+    if (rc == ZU_OK)
+        rc = zu_body_read(s, &fr, &p, NULL, 0, max_body, forever(), err);
+    zu_body_pipe_free(&p);
+    zu_stream_free(s);
+    return rc;
+}
+
+void suite_body(void) {
+    zu_error e;
+    zu_headers h;
+
+    /* --- the sinks themselves ---------------------------------------- */
+
+    ZU_CASE("§27: a memory sink accumulates exactly what it is given");
+    {
+        zu_buffer b;
+        zu_sink sink;
+        ZU_CHECK(zu_buf_init(&b, 8, 1 << 20));
+        zu_sink_memory_init(&sink, &b);
+        ZU_CHECK_EQ_INT(zu_sink_write(&sink, "abc", 3, &e), ZU_OK);
+        ZU_CHECK_EQ_INT(zu_sink_write(&sink, "de", 2, &e), ZU_OK);
+        ZU_CHECK_EQ_INT((int)b.len, 5);
+        ZU_CHECK(memcmp(b.data, "abcde", 5) == 0);
+        ZU_CHECK_EQ_INT((int)sink.written, 5);
+        /* A zero-length write is not an error and must not be counted. */
+        ZU_CHECK_EQ_INT(zu_sink_write(&sink, "", 0, &e), ZU_OK);
+        ZU_CHECK_EQ_INT((int)sink.written, 5);
+        zu_buf_free(&b);
+    }
+
+    ZU_CASE("§19.5: a discard sink counts without keeping");
+    {
+        zu_sink *d = zu_sink_discard();
+        ZU_CHECK(d != NULL);
+        ZU_CHECK_EQ_INT(zu_sink_write(d, "12345", 5, &e), ZU_OK);
+        ZU_CHECK_EQ_INT((int)d->written, 5);
+        zu_sink_free(d);
+    }
+
+    /* --- §27.1 atomic file writes ------------------------------------- */
+
+    ZU_CASE("§27.1: a finished download appears at the target path");
+    {
+        const char *path = "zu_test_dl_ok.bin";
+        zu_sink *f;
+        FILE *fp;
+        char buf[16];
+        size_t n;
+
+        remove(path);
+        f = zu_sink_file(path, &e);
+        ZU_CHECK(f != NULL);
+        /* Nothing at the destination until finish(): that IS the guarantee. */
+        ZU_CHECK(fopen(path, "rb") == NULL);
+        ZU_CHECK_EQ_INT(zu_sink_write(f, "hello", 5, &e), ZU_OK);
+        ZU_CHECK(fopen(path, "rb") == NULL);
+        ZU_CHECK_EQ_INT(zu_sink_finish(f, &e), ZU_OK);
+        zu_sink_free(f);
+
+        fp = fopen(path, "rb");
+        ZU_CHECK(fp != NULL);
+        if (fp) {
+            n = fread(buf, 1, sizeof buf, fp);
+            fclose(fp);
+            ZU_CHECK_EQ_INT((int)n, 5);
+            ZU_CHECK(memcmp(buf, "hello", 5) == 0);
+        }
+        remove(path);
+    }
+
+    ZU_CASE("§27.1: an aborted download leaves NOTHING at the target path");
+    {
+        const char *path = "zu_test_dl_abort.bin";
+        zu_sink *f;
+        const char *tmp;
+        char tmpcopy[256];
+
+        remove(path);
+        f = zu_sink_file(path, &e);
+        ZU_CHECK(f != NULL);
+        tmp = zu_sink_file_tmp_path(f);
+        ZU_CHECK(tmp != NULL);
+        if (tmp) { strncpy(tmpcopy, tmp, sizeof tmpcopy - 1); tmpcopy[sizeof tmpcopy - 1] = 0; }
+
+        ZU_CHECK_EQ_INT(zu_sink_write(f, "partial", 7, &e), ZU_OK);
+        zu_sink_abort(f);
+        zu_sink_free(f);
+
+        /* Neither the destination nor the temporary file survives. The
+         * second half matters as much as the first: a leftover .zudl beside
+         * every failed download is its own bug report. */
+        ZU_CHECK(fopen(path, "rb") == NULL);
+        ZU_CHECK(fopen(tmpcopy, "rb") == NULL);
+    }
+
+    ZU_CASE("§27.1: an abandoned download cleans up even without abort()");
+    {
+        const char *path = "zu_test_dl_drop.bin";
+        zu_sink *f;
+        remove(path);
+        f = zu_sink_file(path, &e);
+        ZU_CHECK(f != NULL);
+        ZU_CHECK_EQ_INT(zu_sink_write(f, "partial", 7, &e), ZU_OK);
+        zu_sink_free(f);                 /* destroy without finish or abort */
+        ZU_CHECK(fopen(path, "rb") == NULL);
+    }
+
+    ZU_CASE("§27.1: finishing replaces an existing file");
+    {
+        const char *path = "zu_test_dl_replace.bin";
+        zu_sink *f;
+        FILE *fp = fopen(path, "wb");
+        char buf[16];
+        size_t n;
+        if (fp) { fwrite("old", 1, 3, fp); fclose(fp); }
+
+        f = zu_sink_file(path, &e);
+        ZU_CHECK(f != NULL);
+        ZU_CHECK_EQ_INT(zu_sink_write(f, "new!", 4, &e), ZU_OK);
+        ZU_CHECK_EQ_INT(zu_sink_finish(f, &e), ZU_OK);
+        zu_sink_free(f);
+
+        fp = fopen(path, "rb");
+        ZU_CHECK(fp != NULL);
+        if (fp) { n = fread(buf, 1, sizeof buf, fp); fclose(fp);
+                  ZU_CHECK_EQ_INT((int)n, 4);
+                  ZU_CHECK(memcmp(buf, "new!", 4) == 0); }
+        remove(path);
+    }
+
+    /* --- framing through the pipe ------------------------------------- */
+
+    ZU_CASE("a Content-Length body stops at the length, whatever else arrived");
+    {
+        static const zu_mock_step steps[] = {
+            { ZU_MOCK_DATA, "HELLOandthenTHENEXTRESPONSE", 27, ZU_OK }
+        };
+        zu_buffer b; zu_sink sink;
+        ZU_CHECK(zu_buf_init(&b, 8, 1 << 20));
+        zu_sink_memory_init(&sink, &b);
+        zu_headers_init(&h);
+        ZU_CHECK_EQ_INT(run_body(steps, 1, ZU_FRAME_LENGTH, 5, &sink, &h, 1,
+                                 1u << 20, &e), ZU_OK);
+        ZU_CHECK_EQ_INT((int)b.len, 5);
+        ZU_CHECK(memcmp(b.data, "HELLO", 5) == 0);
+        zu_headers_free(&h);
+        zu_buf_free(&b);
+    }
+
+    /* No ZU_MOCK_WOULDBLOCK step here, deliberately. The stream contract is
+     * that a read blocks until data, EOF or the deadline: zu_net.c loops
+     * internally on EWOULDBLOCK and never surfaces it, so a body reader that
+     * handled it would be handling a case that cannot occur. Scripting one
+     * would test the mock rather than the code. */
+    ZU_CASE("a body split across many reads arrives whole");
+    {
+        static const zu_mock_step steps[] = {
+            { ZU_MOCK_DATA, "ab", 2, ZU_OK },
+            { ZU_MOCK_DATA, "cd", 2, ZU_OK },
+            { ZU_MOCK_DATA, "e",  1, ZU_OK }
+        };
+        zu_buffer b; zu_sink sink;
+        ZU_CHECK(zu_buf_init(&b, 8, 1 << 20));
+        zu_sink_memory_init(&sink, &b);
+        zu_headers_init(&h);
+        ZU_CHECK_EQ_INT(run_body(steps, 3, ZU_FRAME_LENGTH, 5, &sink, &h, 1,
+                                 1u << 20, &e), ZU_OK);
+        ZU_CHECK_EQ_INT((int)b.len, 5);
+        ZU_CHECK(memcmp(b.data, "abcde", 5) == 0);
+        zu_headers_free(&h);
+        zu_buf_free(&b);
+    }
+
+    ZU_CASE("§27.1: the body limit applies to a FILE sink, not only to memory");
+    {
+        static const zu_mock_step steps[] = {
+            { ZU_MOCK_DATA, "0123456789", 10, ZU_OK },
+            { ZU_MOCK_DATA, "0123456789", 10, ZU_OK },
+            { ZU_MOCK_DATA, "0123456789", 10, ZU_OK }
+        };
+        const char *path = "zu_test_dl_limit.bin";
+        zu_sink *f;
+        remove(path);
+        f = zu_sink_file(path, &e);
+        ZU_CHECK(f != NULL);
+        zu_headers_init(&h);
+        /* An unbounded download to disk is still a denial of service, just
+         * against a different resource. */
+        ZU_CHECK_EQ_INT(run_body(steps, 3, ZU_FRAME_UNTIL_CLOSE, 0, f, &h, 1,
+                                 12, &e), ZU_ERR_BODY_LIMIT);
+        zu_sink_abort(f);
+        zu_sink_free(f);
+        ZU_CHECK(fopen(path, "rb") == NULL);
+        zu_headers_free(&h);
+    }
+
+    /* --- §27: memory does not grow with the body ---------------------- */
+
+#if defined(ZU_POSIX)
+    ZU_CASE("§27: a 100 MB body streams in constant memory (S17 criterion)");
+    {
+        /* 1600 steps over one 64 KiB buffer: the mock hands out the same page
+         * repeatedly, so the TEST does not need 100 MB either. */
+        enum { CHUNK = 64u * 1024u, STEPS = 1600 };
+        const uint64_t total = (uint64_t)CHUNK * STEPS;   /* 100 MiB */
+        char *page = (char *)zu_alloc(CHUNK);
+        zu_mock_step *steps = (zu_mock_step *)zu_alloc(sizeof(zu_mock_step) * STEPS);
+        zu_sink *d = zu_sink_discard();
+        struct rusage before, after;
+        long grew_kb;
+        int i;
+
+        ZU_CHECK(page && steps && d);
+        if (page && steps && d) {
+            memset(page, 'x', CHUNK);
+            for (i = 0; i < STEPS; i++) {
+                steps[i].kind = ZU_MOCK_DATA;
+                steps[i].data = page;
+                steps[i].len  = CHUNK;
+                steps[i].code = ZU_OK;
+            }
+            zu_headers_init(&h);
+            getrusage(RUSAGE_SELF, &before);
+            ZU_CHECK_EQ_INT(run_body(steps, STEPS, ZU_FRAME_LENGTH, total, d,
+                                     &h, 1, total + 1, &e), ZU_OK);
+            getrusage(RUSAGE_SELF, &after);
+            zu_headers_free(&h);
+
+            /* Every byte arrived... */
+            ZU_CHECK(d->written == total);
+
+            /* ...and peak RSS did not follow it. ru_maxrss is bytes on macOS
+             * and kilobytes on Linux; normalising to KiB keeps one threshold.
+             * It is a PEAK, so this measures growth over whatever the suite
+             * had already touched — which is the honest reading of "under
+             * 16 MB over baseline". */
+#if defined(__APPLE__)
+            grew_kb = (long)((after.ru_maxrss - before.ru_maxrss) / 1024);
+#else
+            grew_kb = (long)(after.ru_maxrss - before.ru_maxrss);
+#endif
+            if (grew_kb < 0) grew_kb = 0;
+            printf("    (100 MiB body; peak RSS grew %ld KiB)\n", grew_kb);
+            ZU_CHECK(grew_kb < 16 * 1024);
+        }
+        zu_sink_free(d);
+        zu_free(steps);
+        zu_free(page);
+    }
+
+    ZU_CASE("§27: 100 MB to a FILE sink is also constant-memory");
+    {
+        enum { CHUNK = 64u * 1024u, STEPS = 1600 };
+        const uint64_t total = (uint64_t)CHUNK * STEPS;
+        const char *path = "zu_test_dl_big.bin";
+        char *page = (char *)zu_alloc(CHUNK);
+        zu_mock_step *steps = (zu_mock_step *)zu_alloc(sizeof(zu_mock_step) * STEPS);
+        zu_sink *f;
+        struct rusage before, after;
+        long grew_kb;
+        int i;
+
+        remove(path);
+        f = zu_sink_file(path, &e);
+        ZU_CHECK(page && steps && f);
+        if (page && steps && f) {
+            memset(page, 'y', CHUNK);
+            for (i = 0; i < STEPS; i++) {
+                steps[i].kind = ZU_MOCK_DATA; steps[i].data = page;
+                steps[i].len = CHUNK; steps[i].code = ZU_OK;
+            }
+            zu_headers_init(&h);
+            getrusage(RUSAGE_SELF, &before);
+            ZU_CHECK_EQ_INT(run_body(steps, STEPS, ZU_FRAME_LENGTH, total, f,
+                                     &h, 1, total + 1, &e), ZU_OK);
+            ZU_CHECK_EQ_INT(zu_sink_finish(f, &e), ZU_OK);
+            getrusage(RUSAGE_SELF, &after);
+            zu_headers_free(&h);
+#if defined(__APPLE__)
+            grew_kb = (long)((after.ru_maxrss - before.ru_maxrss) / 1024);
+#else
+            grew_kb = (long)(after.ru_maxrss - before.ru_maxrss);
+#endif
+            if (grew_kb < 0) grew_kb = 0;
+            printf("    (100 MiB to disk; peak RSS grew %ld KiB)\n", grew_kb);
+            ZU_CHECK(grew_kb < 16 * 1024);
+        }
+        zu_sink_free(f);
+        remove(path);
+        zu_free(steps);
+        zu_free(page);
+    }
+
+    /* The control. Without it the two assertions above are unfalsifiable:
+     * "RSS did not grow" is also what you measure when the measurement does
+     * not work, when the mock never delivered the body, or when ru_maxrss is
+     * not wired up on this platform. Sending the SAME 100 MiB somewhere that
+     * genuinely keeps it must move the number. */
+    ZU_CASE("§27: the RSS measurement detects accumulation (control)");
+    {
+        enum { CHUNK = 64u * 1024u, STEPS = 1600 };
+        const uint64_t total = (uint64_t)CHUNK * STEPS;
+        char *page = (char *)zu_alloc(CHUNK);
+        zu_mock_step *steps = (zu_mock_step *)zu_alloc(sizeof(zu_mock_step) * STEPS);
+        zu_buffer keep;
+        zu_sink sink;
+        struct rusage before, after;
+        long grew_kb;
+        int i;
+
+        ZU_CHECK(page && steps);
+        ZU_CHECK(zu_buf_init(&keep, CHUNK, (size_t)total + CHUNK));
+        if (page && steps) {
+            memset(page, 'z', CHUNK);
+            for (i = 0; i < STEPS; i++) {
+                steps[i].kind = ZU_MOCK_DATA; steps[i].data = page;
+                steps[i].len = CHUNK; steps[i].code = ZU_OK;
+            }
+            zu_sink_memory_init(&sink, &keep);
+            zu_headers_init(&h);
+            getrusage(RUSAGE_SELF, &before);
+            ZU_CHECK_EQ_INT(run_body(steps, STEPS, ZU_FRAME_LENGTH, total,
+                                     &sink, &h, 1, total + 1, &e), ZU_OK);
+            getrusage(RUSAGE_SELF, &after);
+            zu_headers_free(&h);
+#if defined(__APPLE__)
+            grew_kb = (long)((after.ru_maxrss - before.ru_maxrss) / 1024);
+#else
+            grew_kb = (long)(after.ru_maxrss - before.ru_maxrss);
+#endif
+            if (grew_kb < 0) grew_kb = 0;
+            printf("    (100 MiB kept in memory; peak RSS grew %ld KiB)\n", grew_kb);
+            ZU_CHECK(keep.len == total);
+            /* Well above the 16 MiB the streaming cases must stay under. */
+            ZU_CHECK(grew_kb > 32 * 1024);
+        }
+        zu_buf_free(&keep);
+        zu_free(steps);
+        zu_free(page);
+    }
+#endif
+
+    ZU_CASE("no leaks across the suite");
+    {
+        zu_alloc_stats end;
+        zu_alloc_stats_get(&end);
+        ZU_CHECK_EQ_INT(end.live_blocks, 0);
+    }
+}

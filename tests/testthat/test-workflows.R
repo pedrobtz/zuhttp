@@ -95,7 +95,29 @@ test_that("5. retried idempotent request", {
 })
 
 test_that("6. streaming download", {
-  skip("streaming sinks are S17; today every body is a memory body")
+  # §31.16 workflow 6, unblocked by S17. The workflow is "fetch something too
+  # big to hold", so what it has to demonstrate is that the body reached the
+  # disk WITHOUT passing through memory — not merely that a file appeared.
+  testthat::skip_on_cran()
+  if (!identical(Sys.getenv("ZU_TEST_NETWORK"), "1"))
+    testthat::skip("set ZU_TEST_NETWORK=1 to run network tests")
+  testthat::skip_if_offline()
+
+  d <- tempfile(); dir.create(d); on.exit(unlink(d, recursive = TRUE), add = TRUE)
+  f <- file.path(d, "download.bin")
+
+  r <- zu_get("https://example.com", path = f)
+  expect_identical(zu_resp_status(r), 200L)
+  expect_gt(file.size(f), 0)
+  expect_identical(length(zu_resp_raw(r)), 0L)
+  expect_length(list.files(d), 1L)     # the committed file, and nothing else
+
+  # And the callback form of the same workflow, for a caller who wants to
+  # process as it arrives rather than land it on disk.
+  n <- 0L
+  r2 <- zu_get("https://example.com", callback = function(chunk) n <<- n + length(chunk))
+  expect_identical(zu_resp_status(r2), 200L)
+  expect_identical(n, as.integer(file.size(f)))
 })
 
 test_that("7. mocked package test", {

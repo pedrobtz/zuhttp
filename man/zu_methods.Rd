@@ -22,6 +22,8 @@ zu_get(
   check = NULL,
   decode = NULL,
   retry = NULL,
+  path = NULL,
+  callback = NULL,
   client = zu_default_client()
 )
 
@@ -37,6 +39,8 @@ zu_head(
   check = NULL,
   decode = NULL,
   retry = NULL,
+  path = NULL,
+  callback = NULL,
   client = zu_default_client()
 )
 
@@ -56,6 +60,8 @@ zu_post(
   check = NULL,
   decode = NULL,
   retry = NULL,
+  path = NULL,
+  callback = NULL,
   client = zu_default_client()
 )
 
@@ -75,6 +81,8 @@ zu_put(
   check = NULL,
   decode = NULL,
   retry = NULL,
+  path = NULL,
+  callback = NULL,
   client = zu_default_client()
 )
 
@@ -94,6 +102,8 @@ zu_patch(
   check = NULL,
   decode = NULL,
   retry = NULL,
+  path = NULL,
+  callback = NULL,
   client = zu_default_client()
 )
 
@@ -113,6 +123,8 @@ zu_delete(
   check = NULL,
   decode = NULL,
   retry = NULL,
+  path = NULL,
+  callback = NULL,
   client = zu_default_client()
 )
 }
@@ -142,6 +154,17 @@ asks the server not to encode (§21.2).}
 
 \item{retry}{A \code{\link[=zu_retry]{zu_retry()}} policy for this request. Overrides the
 client's; \code{NULL} inherits it (§31.9).}
+
+\item{path}{Write the response body to this file instead of holding it in
+memory (§27). The download is written beside the destination and renamed
+on success, so a failed or interrupted transfer never leaves a truncated
+file at \code{path}. Note the asymmetry with \code{file}, which is a request \emph{body}
+source (§31.6): \code{path} is where the response goes, \code{file} is where a
+request body comes from.}
+
+\item{callback}{A function of one argument called with each decoded chunk
+as it arrives (§27). Returning \code{FALSE} stops the transfer. See
+\code{\link[=zu_req_callback]{zu_req_callback()}} for what happens when it raises an error.}
 
 \item{client}{A \code{zu_client}. Always named.}
 

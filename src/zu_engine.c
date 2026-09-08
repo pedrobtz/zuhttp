@@ -9,6 +9,8 @@
 #include "zu_tls.h"
 #include "zu_stream.h"
 #include "zu_pool.h"
+#include "zu_sink.h"
+#include "zu_body.h"
 #include "zu_time.h"
 #include <string.h>
 #include <stdio.h>
@@ -17,6 +19,10 @@
 #define ZU_DEFAULT_MAX_BODY    (16u * 1024u * 1024u)
 #define ZU_MAX_HEADER_BYTES    (64u * 1024u)
 #define ZU_READ_CHUNK          16384
+/* §19.5's "small cap" on a redirect body we are going to drain. Large enough
+ * for any real 3xx explanation page, small enough that draining one is never
+ * the reason a download is memory-hungry. */
+#define ZU_MAX_REDIRECT_BODY   (64u * 1024u)
 
 void zu_get_opts_init(zu_get_opts *o) {
     if (!o) return;
@@ -249,108 +255,6 @@ static zu_code read_headers(zu_stream *s, zu_buffer *raw, zu_response *resp,
 
 /* Read the body according to the §18.1 framing decision. `seed` is whatever
  * already arrived alongside the headers. */
-static zu_code read_body(zu_stream *s, const zu_framing *fr, zu_buffer *out,
-                         const char *seed, size_t seed_len,
-                         uint64_t max_body, zu_deadline dl, zu_error *err) {
-    if (fr->kind == ZU_FRAME_NONE) return ZU_OK;
-
-    if (fr->kind == ZU_FRAME_CHUNKED) {
-        zu_chunked dec;
-        char *work;
-        zu_code rc = zu_chunked_init(&dec, 0, max_body);
-        if (rc != ZU_OK) return rc;
-
-        work = (char *)zu_alloc(ZU_READ_CHUNK);
-        if (!work) { zu_chunked_free(&dec); return ZU_ERR_NOMEM; }
-
-        if (seed_len) {
-            size_t len = seed_len;
-            memcpy(work, seed, seed_len);
-            rc = zu_chunked_decode(&dec, work, &len, err);
-            if (len && !zu_buf_append(out, work, len)) rc = ZU_ERR_NOMEM;
-        } else {
-            rc = ZU_ERR_WOULDBLOCK;
-        }
-        while (rc == ZU_ERR_WOULDBLOCK) {
-            size_t len;
-            zu_ssize n = zu_stream_read(s, work, ZU_READ_CHUNK, dl, err);
-            if (n < 0) { rc = err->code; break; }
-            if (n == 0) {
-                zu_error_set(err, ZU_ERR_PARSE, ZU_PHASE_READ,
-                             "connection closed inside a chunked body");
-                rc = ZU_ERR_PARSE;
-                break;
-            }
-            len = (size_t)n;
-            rc = zu_chunked_decode(&dec, work, &len, err);
-            if (len && !zu_buf_append(out, work, len)) { rc = ZU_ERR_NOMEM; break; }
-        }
-        zu_free(work);
-        zu_chunked_free(&dec);
-        return rc == ZU_OK ? ZU_OK : rc;
-    }
-
-    /* LENGTH and UNTIL_CLOSE differ only in when they stop. */
-    if (seed_len && !zu_buf_append(out, seed, seed_len)) return ZU_ERR_NOMEM;
-    for (;;) {
-        char chunk[ZU_READ_CHUNK];
-        zu_ssize n;
-
-        if (fr->kind == ZU_FRAME_LENGTH && out->len >= fr->length) break;
-        if (out->len > max_body) {
-            zu_error_set(err, ZU_ERR_BODY_LIMIT, ZU_PHASE_READ,
-                         "response body exceeds the configured limit");
-            return ZU_ERR_BODY_LIMIT;
-        }
-        n = zu_stream_read(s, chunk, sizeof chunk, dl, err);
-        if (n < 0) return err->code;
-        if (n == 0) {
-            if (fr->kind == ZU_FRAME_UNTIL_CLOSE) break;
-            zu_error_set(err, ZU_ERR_PARSE, ZU_PHASE_READ,
-                         "connection closed with %lu of %lu body bytes read",
-                         (unsigned long)out->len, (unsigned long)fr->length);
-            return ZU_ERR_PARSE;
-        }
-        if (!zu_buf_append(out, chunk, (size_t)n)) return ZU_ERR_NOMEM;
-    }
-    if (fr->kind == ZU_FRAME_LENGTH && out->len > fr->length)
-        out->len = (size_t)fr->length;   /* trailing bytes are the next response */
-    return ZU_OK;
-}
-
-/* §21: decode Content-Encoding in place. */
-static zu_code decode_body(zu_headers *h, zu_buffer *body, uint64_t max_body,
-                           zu_error *err) {
-    const char *enc = zu_headers_get(h, "Content-Encoding");
-    zu_encoding kind = zu_encoding_parse(enc);
-    zu_inflate z;
-    zu_buffer out;
-    zu_code rc;
-
-    if (kind == ZU_ENC_IDENTITY) return ZU_OK;
-    if (kind == ZU_ENC_UNSUPPORTED) {
-        zu_error_set(err, ZU_ERR_BODY_DECODE, ZU_PHASE_DECODE,
-                     "unsupported Content-Encoding: %s", enc ? enc : "(none)");
-        return ZU_ERR_BODY_DECODE;
-    }
-    rc = zu_inflate_init(&z, kind, max_body, 0);
-    if (rc != ZU_OK) return rc;
-    if (!zu_buf_init(&out, body->len ? body->len * 2 : 256, max_body * 2 + 1024)) {
-        zu_inflate_free(&z);
-        return ZU_ERR_NOMEM;
-    }
-    rc = zu_inflate_run(&z, body->data, body->len, &out, err);
-    zu_inflate_free(&z);
-    if (rc != ZU_OK && rc != ZU_ERR_WOULDBLOCK) { zu_buf_free(&out); return rc; }
-
-    zu_buf_free(body);
-    *body = out;                     /* ownership moves */
-    /* The body is no longer encoded, so the header would now be a lie. */
-    (void)zu_headers_remove(h, "Content-Encoding");
-    (void)zu_headers_remove(h, "Content-Length");
-    return ZU_OK;
-}
-
 zu_code zu_engine_get(zu_result *out, const char *url,
                       const zu_get_opts *o, zu_error *err) {
     return zu_engine_perform(out, url, NULL, o, err);
@@ -364,6 +268,8 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
     zu_deadline total;
     size_t hops = 0;
     zu_code rc;
+    zu_sink mem_sink;
+    zu_sink *body_sink = NULL;
     const char *method = (req && req->method) ? req->method : "GET";
     const void *body   = req ? req->body : NULL;
     size_t body_len    = req ? req->body_len : 0;
@@ -383,13 +289,24 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
         return ZU_ERR_URL;
     }
 
+    /* §27: where the final body goes. `o->sink` is the caller's; without one
+     * the body is buffered into the result, which is the pre-S17 behaviour and
+     * still what zu_resp_raw() needs. mem_sink always exists because followed
+     * redirect bodies use it whatever the caller chose (§19.5). */
+    zu_sink_memory_init(&mem_sink, &out->body);
+    body_sink = o->sink ? o->sink : &mem_sink;
+
     for (;;) {
         zu_stream *s = NULL;
         zu_request rq;
         zu_response resp;
         size_t hi;
         zu_buffer wire, raw;
+        zu_body_pipe pipe;
+        zu_sink *hop_sink = NULL;
         size_t consumed = 0;
+
+        memset(&pipe, 0, sizeof pipe);
         /* Pre-set to the §26.3 safe default. `fr` is only really filled once
          * zu_response_decide_framing() succeeds, so every path that fails
          * before that point must still give reuse_after() something that
@@ -478,17 +395,59 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
         }
         if (rc == ZU_OK) rc = zu_response_decide_framing(&resp, is_head, err);
         if (rc == ZU_OK) {
+            /* §19.5: "Redirect response bodies must never reach the caller's
+             * sink." A 3xx we are going to follow is drained into a capped
+             * buffer instead — drained rather than skipped, because the
+             * connection is only poolable if the body was consumed whole.
+             *
+             * The buffer, rather than a discard sink, is because the redirect
+             * DECISION has not been made yet: zu_redirect_decide() may refuse
+             * to follow (a cross-scheme downgrade, say), and then this 3xx is
+             * the response the caller receives and its body is theirs. Held
+             * bytes are bounded by ZU_MAX_REDIRECT_BODY, so this is not a
+             * route back to buffering a large body. */
+            int may_follow = zu_status_is_redirect(resp.status) &&
+                             hops < (size_t)o->max_redirects &&
+                             zu_headers_get(&resp.headers, "Location") != NULL;
+            uint64_t cap = o->max_body ? o->max_body : ZU_DEFAULT_MAX_BODY;
+
             fr = resp.framing;
-            rc = read_body(s, &fr, &out->body,
-                           (const char *)raw.data + consumed, raw.len - consumed,
-                           o->max_body ? o->max_body : ZU_DEFAULT_MAX_BODY,
-                           total, err);
+            /* A followed redirect's body lands in the result buffer, which
+             * is reset before the next hop — never in the caller's sink. When
+             * the decision below turns out to be "do not follow", the 3xx is
+             * the caller's response and those bytes are flushed onward. */
+            hop_sink = may_follow ? &mem_sink : body_sink;
+            if (may_follow) cap = ZU_MAX_REDIRECT_BODY;
+            /* Per hop, not cumulative: the limit describes one body. */
+            hop_sink->written = 0;
+            rc = zu_body_pipe_init(&pipe, hop_sink, &resp.headers,
+                                   o->no_decode, cap, err);
+            if (rc == ZU_OK)
+                rc = zu_body_read(s, &fr, &pipe,
+                               (const char *)raw.data + consumed, raw.len - consumed,
+                               cap, total, err);
+            zu_body_pipe_free(&pipe);
         }
         zu_buf_free(&raw);
         /* §26.3. The decision is made HERE, while the framing and the
          * response headers that justify it are still in scope — not inside
          * the pool, which cannot see them. */
-        done_with_stream(o, &cur, s, zu_reuse_decide(rc, &fr, &resp.headers, resp.minor_version));
+        {
+            zu_reuse reason = zu_reuse_decide(rc, &fr, &resp.headers,
+                                              resp.minor_version);
+            /* §27.2: a sink that asked to stop ended the transfer CLEANLY —
+             * the caller gets their response. The connection still cannot be
+             * reused, because the body was not read to its end and the
+             * framing position is therefore unknown (§26.3). Flipping rc here
+             * rather than in the R layer matters: the engine has to keep
+             * building the result, and by the time it has returned an error
+             * the result is already torn down. */
+            if (rc == ZU_ERR_CANCELLED && hop_sink && hop_sink->stopped) {
+                rc = ZU_OK;
+                reason = ZU_NOREUSE_CANCELLED;
+            }
+            done_with_stream(o, &cur, s, reason);
+        }
 
         if (rc != ZU_OK) {
             zu_response_free(&resp); zu_uri_free(&cur); zu_result_free(out);
@@ -541,13 +500,16 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
             }
             zu_uri_free(&next);
         }
+        /* The decision was "do not follow", so this 3xx IS the caller's
+         * response and the bytes held for it are theirs. Without this a
+         * download whose final hop is an unfollowed redirect would leave an
+         * empty file and put the body somewhere the caller never looks. */
+        if (body_sink != &mem_sink && out->body.len) {
+            rc = zu_sink_write(body_sink, out->body.data, out->body.len, err);
+            zu_buf_reset(&out->body);
+            if (rc != ZU_OK) { zu_uri_free(&cur); zu_result_free(out); return rc; }
+        }
         break;
-    }
-
-    if (!o->no_decode) {
-        rc = decode_body(&out->headers, &out->body,
-                         o->max_body ? o->max_body : ZU_DEFAULT_MAX_BODY, err);
-        if (rc != ZU_OK) { zu_uri_free(&cur); zu_result_free(out); return rc; }
     }
 
     out->final_url = url_of(&cur);

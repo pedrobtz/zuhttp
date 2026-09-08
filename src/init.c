@@ -23,11 +23,108 @@
 #include "zu_headers.h"
 #include "zu_tls.h"
 #include "zu_pool.h"
+#include "zu_sink.h"
 #include <string.h>
 
 /* Anything a caller could make arbitrarily large is bounded here rather than
  * in the R layer, so the bound cannot be bypassed by a different caller. */
 #define ZU_R_TEXT_MAX (1u << 20)
+
+/* --- §27 the R callback sink ----------------------------------------------
+ *
+ * §27.3 is the whole difficulty. A user callback can raise an R error, and
+ * that error longjmps out of the middle of the C read loop — past the socket,
+ * the TLS context and the inflate stream, all of which are C allocations with
+ * no R finalizer. The identical hazard to §25.2, and it takes the identical
+ * mechanism:
+ *
+ *   1. call through R_tryCatch(), never a bare Rf_eval();
+ *   2. on a caught condition, record it, let the native loop unwind NORMALLY
+ *      so every C resource is released, and only then re-signal the original
+ *      condition — so the user sees THEIR error, not a zu_* error that
+ *      swallowed it.
+ *
+ * The re-signal is the part that is easy to get subtly wrong: wrapping the
+ * condition, or reporting a cancellation, turns a clear "object 'x' not
+ * found" in the user's own callback into a mysterious transport failure.
+ */
+typedef struct {
+    SEXP fn;
+    SEXP caught;     /* preserved condition, or NULL */
+    int  stopped;    /* the callback asked to stop (§27.2 sentinel) */
+} cb_ctx;
+
+typedef struct { cb_ctx *c; SEXP chunk; } cb_call;
+
+static SEXP cb_body(void *data) {
+    cb_call *cc = (cb_call *)data;
+    SEXP call = PROTECT(Rf_lang2(cc->c->fn, cc->chunk));
+    SEXP res  = Rf_eval(call, R_GlobalEnv);
+    UNPROTECT(1);
+    return res;
+}
+
+static SEXP cb_handler(SEXP cond, void *data) {
+    cb_ctx *c = (cb_ctx *)data;
+    /* Preserved rather than PROTECTed: this has to survive until after the
+     * engine has unwound, which is past the end of any protection frame we
+     * could open here. */
+    if (!c->caught) { R_PreserveObject(cond); c->caught = cond; }
+    return R_NilValue;
+}
+
+static zu_code cb_write(zu_sink *s, const unsigned char *d, size_t n,
+                        zu_error *err) {
+    cb_ctx *c = (cb_ctx *)s->ctx;
+    cb_call cc;
+    SEXP classes, res;
+
+    if (c->caught || c->stopped) return ZU_ERR_CANCELLED;
+
+    cc.c = c;
+    cc.chunk = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t)n));
+    memcpy(RAW(cc.chunk), d, n);
+
+    /* "error" and "interrupt", NOT "condition".
+     *
+     * §27.3 says to catch a condition, but catching every condition class is
+     * too broad and actively wrong: warning() and message() signal conditions
+     * and then INVOKE A RESTART to carry on, so they never unwind past C and
+     * never threaten the socket. Swallowing them would turn an informational
+     * message inside someone's callback into a fatal transport error. Worse,
+     * testthat signals its own expectation class as a condition, so a plain
+     * expect_true() inside a callback would be caught here and re-signalled
+     * as an error — which is exactly how this was found.
+     *
+     * Errors and interrupts are the two that longjmp, and they are the two
+     * this exists to intercept. */
+    classes = PROTECT(Rf_allocVector(STRSXP, 2));
+    SET_STRING_ELT(classes, 0, Rf_mkChar("error"));
+    SET_STRING_ELT(classes, 1, Rf_mkChar("interrupt"));
+    res = R_tryCatch(cb_body, &cc, classes, cb_handler, c, NULL, NULL);
+    UNPROTECT(2);
+
+    if (c->caught) {
+        /* Not reported as a transport error: the caller gets the original
+         * condition re-signalled once the loop has unwound (§27.3). */
+        zu_error_set(err, ZU_ERR_CANCELLED, ZU_PHASE_READ,
+                     "the body callback raised a condition");
+        return ZU_ERR_CANCELLED;
+    }
+    /* §27.2: "the callback's return value controls flow: a sentinel return
+     * stops the transfer cleanly", which then makes the connection
+     * unpoolable (§26.3) — zu_reuse_decide() maps ZU_ERR_CANCELLED to
+     * ZU_NOREUSE_CANCELLED, so that happens without a special case. */
+    if (res != R_NilValue && TYPEOF(res) == LGLSXP && Rf_length(res) == 1 &&
+        LOGICAL(res)[0] == FALSE) {
+        c->stopped = 1;
+        s->stopped = 1;
+        zu_error_set(err, ZU_ERR_CANCELLED, ZU_PHASE_READ,
+                     "the body callback stopped the transfer");
+        return ZU_ERR_CANCELLED;
+    }
+    return ZU_OK;
+}
 
 /* --- §26 the connection pool, as an R object ------------------------------
  *
@@ -386,9 +483,12 @@ static SEXP headers_to_r(const zu_headers *h) {
 static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
                          SEXP header_values, SEXP body, SEXP timeout_ms,
                          SEXP max_redirects, SEXP verify, SEXP max_body,
-                         SEXP user_agent, SEXP decode, SEXP pool) {
+                         SEXP user_agent, SEXP decode, SEXP pool,
+                         SEXP path, SEXP callback) {
     zu_get_opts o;
     zu_req_spec spec;
+    cb_ctx cb;
+    zu_sink cb_sink;
     zu_result r;
     zu_error e;
     zu_code rc;
@@ -447,6 +547,25 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
      * layer re-creates the pool before the next call (§26.5). */
     o.pool = pool_ptr_get(pool);
 
+    /* §27.1: a download goes to a temporary file beside the destination and
+     * is renamed only once the body has arrived whole, so an interrupted or
+     * failed transfer never leaves a truncated file at the target path. The
+     * engine deliberately does not own this sink — committing or discarding
+     * depends on the outcome, and only this frame sees it. */
+    memset(&cb, 0, sizeof cb);
+    if (Rf_isFunction(callback)) {
+        memset(&cb_sink, 0, sizeof cb_sink);
+        cb.fn         = callback;
+        cb_sink.write = cb_write;
+        cb_sink.ctx   = &cb;
+        o.sink        = &cb_sink;
+    } else if (Rf_isString(path) && Rf_length(path) == 1 &&
+               STRING_ELT(path, 0) != NA_STRING) {
+        const char *dest = Rf_translateCharUTF8(STRING_ELT(path, 0));
+        o.sink = zu_sink_file(dest, &e);
+        if (!o.sink) { raise_zu_error(&e, u); return R_NilValue; }
+    }
+
     /* §25.1: a checkpoint at most one tick apart, and never inside a blocking
      * call. 100 ms is the design's ceiling. */
     o.tick     = r_interrupt_tick;
@@ -454,6 +573,34 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
 
     zu_error_clear(&e);
     rc = zu_engine_perform(&r, u, &spec, &o, &e);
+
+    /* §27.3: the loop has unwound and every C resource it held is released,
+     * so this is the first point at which raising is safe. Re-signal the
+     * USER's condition — wrapping it here would turn "object 'x' not found"
+     * inside their callback into a mysterious transport failure. */
+    if (cb.caught) {
+        SEXP cond = cb.caught;
+        SEXP call;
+        cb.caught = NULL;
+        zu_result_free(&r);
+        PROTECT(cond);
+        R_ReleaseObject(cond);
+        call = PROTECT(Rf_lang2(Rf_install("stop"), cond));
+        Rf_eval(call, R_GlobalEnv);
+        UNPROTECT(2);
+        return R_NilValue;   /* not reached */
+    }
+    if (o.sink && o.sink != &cb_sink) {
+        /* Commit or discard, then release. A failure to rename is a failure
+         * of the request: the caller asked for a file at that path and there
+         * is not one, so reporting success would be a lie. */
+        if (rc == ZU_OK) rc = zu_sink_finish(o.sink, &e);
+        else             zu_sink_abort(o.sink);
+        if (rc != ZU_OK) zu_sink_abort(o.sink);
+        r.body.len = 0;              /* the bytes went to the file, not here */
+        zu_sink_free(o.sink);
+        o.sink = NULL;
+    }
     if (rc != ZU_OK) {
         /* Our tick returns 1 only for a pending user interrupt, so a
          * cancellation reaching here is always that (§34.1 separates
@@ -527,7 +674,7 @@ static const R_CallMethodDef call_methods[] = {
     {"C_zu_redact_form",       (DL_FUNC) &C_zu_redact_form,       2},
     {"C_zu_is_secret_header",  (DL_FUNC) &C_zu_is_secret_header,  2},
     {"C_zu_is_secret_param",   (DL_FUNC) &C_zu_is_secret_param,   2},
-    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          12},
+    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          14},
     {"C_zu_pool_new",          (DL_FUNC) &C_zu_pool_new,          3},
     {"C_zu_pool_valid",        (DL_FUNC) &C_zu_pool_valid,        1},
     {"C_zu_pool_stats",        (DL_FUNC) &C_zu_pool_stats,        1},

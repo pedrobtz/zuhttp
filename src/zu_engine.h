@@ -27,6 +27,7 @@
 #include "zu_buffer.h"
 #include "zu_net.h"
 #include "zu_pool.h"
+#include "zu_sink.h"
 
 /* A request the engine can perform. Headers are parallel arrays rather than a
  * zu_headers, so the R layer can pass them without building one — the engine
@@ -59,6 +60,15 @@ typedef struct {
      * a one-shot request. The pool is NOT owned here — it outlives any single
      * request, which is the entire point of it (§26.5). */
     zu_pool    *pool;
+
+    /* §27. NULL buffers the body into zu_result.body, which is the pre-S17
+     * behaviour. A sink here receives the FINAL response body only — never an
+     * intermediate redirect body (§19.5).
+     *
+     * The engine does not own it and never calls finish() or abort() on it:
+     * whether a transfer is committed depends on what the caller does with
+     * the return code, and only the caller knows. */
+    zu_sink    *sink;
 } zu_get_opts;
 
 void zu_get_opts_init(zu_get_opts *o);

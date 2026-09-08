@@ -84,7 +84,9 @@ zu_transport_perform.zu_native_transport <- function(transport, req) {
                as.numeric(p$max_body),
                p$user_agent,
                isTRUE(p$decode),
-               req$pool)
+               req$pool,
+               req$path,
+               req$callback)
   structure(raw, class = "zu_response")
 }
 
@@ -203,7 +205,22 @@ zu_perform <- function(req, client = zu_default_client()) {
   if (!inherits(client, "zu_client"))
     stop("`client` must be a zu_client(); got ", class(client)[[1]],
          call. = FALSE)
+  # §27.4. A streaming callback runs arbitrary R code, which may call zu_get()
+  # again. Re-entrancy is permitted — but not on the client whose connection
+  # is currently being read, which would deadlock on a pool slot or interleave
+  # writes onto a live connection. The flag lives in the client's pool_state
+  # environment because that is already the one reference cell a client
+  # carries, and it is set only while the user's callback is on the stack, so
+  # ordinary nesting through middleware is unaffected.
+  st <- attr(client, "pool_state")
+  if (is.environment(st) && isTRUE(st$in_callback))
+    stop("a streaming callback cannot make a request on the same client\n",
+         "  it would reuse the connection it is currently reading from\n",
+         "  use a different client, or collect the data and request afterwards",
+         call. = FALSE)
+
   r <- resolve_request(req, client)
+  if (is.function(r$callback)) r$callback <- guard_callback(r$callback, st)
   hooks <- client$hooks %||% list()
 
   t0 <- proc.time()[["elapsed"]]
@@ -284,4 +301,27 @@ attempt_with_retries <- function(r, client, hooks, deadline_at) {
   if (is.null(resp)) stop(cnd)
   resp$attempts <- attempt
   resp
+}
+
+# §27.4: mark the client as "inside a callback" for exactly as long as the
+# user's function is on the stack, and no longer. on.exit() rather than a
+# plain assignment after the call, so an error thrown by the callback — which
+# §27.3 re-signals — still clears the flag and does not leave the client
+# permanently unusable.
+guard_callback <- function(f, state) {
+  # force() is load-bearing, not defensive. The caller writes
+  #   r$callback <- guard_callback(r$callback, st)
+  # so `f` is a promise for `r$callback` in the caller's frame — and that
+  # binding is replaced by THIS wrapper before the promise is ever forced.
+  # Without force(), calling f(chunk) evaluates the promise, gets the wrapper
+  # back, and recurses until R's expression depth runs out. The symptom is an
+  # "evaluation nested too deeply" from inside a C callback, which points
+  # nowhere near the actual cause.
+  force(f)
+  if (!is.environment(state)) return(f)
+  function(chunk) {
+    state$in_callback <- TRUE
+    on.exit(state$in_callback <- FALSE, add = TRUE)
+    f(chunk)
+  }
 }

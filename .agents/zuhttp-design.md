@@ -60,6 +60,9 @@ Firm decisions and open questions were previously indistinguishable in this docu
 | D-42 | Retrying is **off by default** (`attempts = 1`); `retry` is a merged policy field | **Accepted** 2026-09-08 — S13 | 33, 31.9 |
 | D-43 | Retry admissibility is decided **once**, before the first attempt | **Accepted** 2026-09-08 — S13 | 33.1 |
 | D-44 | The retry loop sits **inside** middleware: middleware sees one logical request | **Accepted** 2026-09-08 — S13 | 31.13 |
+| D-45 | The response sink argument is `path =`, never `file =` (which is a request BODY) | **Accepted** 2026-09-08 — S17 | 27, 31.6 |
+| D-46 | The body path lives in `zu_body.c`, not the engine, so it is mock-testable | **Accepted** 2026-09-08 — S17 | 27, 50.1 |
+| D-47 | A callback is caught on **error and interrupt only**, not on every condition | **Accepted** 2026-09-08 — S17 | 27.3 |
 
 ---
 
@@ -1183,7 +1186,7 @@ These are chain-wide, not per-hop — otherwise a redirect chain multiplies ever
 
 #### 19.5 Interaction with sinks
 
-**Redirect response bodies must never reach the caller's sink.** A `zu_get(url, file = "out.bin")` that follows two redirects must write only the final 200 body to `out.bin`. Intermediate bodies are read to completion (so the connection stays poolable) into a discard sink, subject to a small cap; a redirect response with a body larger than `max_redirect_body` closes the connection instead of draining it.
+**Redirect response bodies must never reach the caller's sink.** A `zu_get(url, path = "out.bin")` that follows two redirects must write only the final 200 body to `out.bin`. (This section originally wrote `file =`; D-45 renamed it, because §31.6 gives `file =` to the request *body* and one argument name cannot mean both directions.) Intermediate bodies are read to completion (so the connection stays poolable) into a discard sink, subject to a small cap; a redirect response with a body larger than `max_redirect_body` closes the connection instead of draining it.
 
 #### 19.6 Resolving the `Location` header
 
@@ -1667,6 +1670,55 @@ A streaming callback runs arbitrary R code, which may call `zu_get()` again — 
 #### 27.5 R connections as sinks
 
 R connections are convenient but go through R's own buffering and may not be performant enough for high-throughput streaming (§62). The connection sink must therefore be implemented in terms of the same `zu_body_sink` contract, so it can be benchmarked against, and swapped for, the raw file sink without touching the engine.
+
+#### 27.6 How this landed (S17)
+
+`zu_sink` is §27's `zu_body_sink` write function plus a **lifecycle** —
+finish/abort/destroy — because §27.1's atomicity is not expressible in a write
+callback alone. The file sink writes beside its destination and renames on
+finish; abort and a plain destroy both unlink. A sink that is dropped without
+finishing therefore leaves nothing behind, which is the property §27.1 asks
+for stated as an invariant rather than as a code path.
+
+**D-45, the argument is `path =`.** §19.5 originally wrote
+`zu_get(url, file = "out.bin")` while §31.6 gave `file =` to the request body.
+One name cannot mean "where the response goes" on GET and "where the request
+comes from" on POST; `path` is the response destination on every verb.
+
+**D-46, the body path is its own translation unit.** `zu_body.c` holds the
+decode-and-deliver loop, split out of the engine so the offline suite can
+drive it: the guarantee under test is "memory does not grow with the body",
+and proving that needs a 100 MB response, which is exactly what you cannot ask
+a real server for on every CI run. Both decompression and delivery are now
+incremental — before S17 the body was accumulated whole and then inflated
+whole, so a 100 MB gzip response cost the compressed size plus the decoded
+size resident.
+
+Measured, with a control: 100 MiB streamed to a discard sink grows peak RSS by
+**0 KiB**, the same 100 MiB to a file by **0 KiB**, and the same 100 MiB into a
+memory sink by **~100 MB**. The third case is not decoration — without it the
+first two are unfalsifiable, since "RSS did not grow" is also what a broken
+measurement reports.
+
+**D-47, catch error and interrupt, not every condition.** §27.3 says to invoke
+the callback through `R_tryCatch()` and catch "a condition". Catching the
+`condition` class outright is too broad and actively wrong: `warning()` and
+`message()` signal and then invoke a restart to continue, so they never unwind
+past C and never threaten the socket — swallowing them would turn an
+informational message inside a callback into a fatal transport error. testthat
+signals its expectations the same way, so `expect_true()` inside a callback
+was being caught and re-signalled as an error, which is how this was found.
+Errors and interrupts are the two that longjmp, and they are the two to
+intercept.
+
+**§27.2's sentinel is resolved in the engine, not above it.** A callback
+returning `FALSE` stops the transfer cleanly, so the caller still receives
+their response — which means the engine has to keep building the result. By
+the time an error has propagated out of `zu_engine_perform()` the result is
+already torn down, so the "stopped" flag is read where the reuse decision is
+made: `rc` becomes `ZU_OK` and the reason becomes `ZU_NOREUSE_CANCELLED`,
+since the body was not read to its end and the framing position is unknown
+(§26.3).
 
 ### 28. Request Body Sources
 

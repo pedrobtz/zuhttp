@@ -45,6 +45,71 @@ zu_request <- function(method, url) {
   )
 }
 
+#' Stream the response body to a file
+#'
+#' The composable equivalent of `zu_get(url, path = )`. The body is written to
+#' a temporary file in the same directory as `path` and renamed once it has
+#' arrived whole (§27.1), so a failed, cancelled or interrupted transfer never
+#' leaves a truncated file where the caller will find it and trust it.
+#'
+#' The same directory, rather than `tempdir()`: `rename()` is atomic only
+#' within a filesystem, and a temporary directory on another mount turns the
+#' commit into a copy that can itself fail halfway.
+#'
+#' @param req A `zu_request`.
+#' @param path Destination path.
+#' @return The request, modified.
+#' @seealso [zu_body_file()], which is the opposite direction — a request body
+#'   read *from* a file.
+#' @export
+#' @examples
+#' req <- zu_req_path(zu_request("GET", "https://x.test/big.bin"),
+#'                    file.path(tempdir(), "big.bin"))
+zu_req_path <- function(req, path) {
+  req <- check_req(req)
+  if (!is.character(path) || length(path) != 1L || is.na(path) || !nzchar(path))
+    stop("`path` must be a single non-empty file path", call. = FALSE)
+  req$path <- path.expand(path)
+  req
+}
+
+#' Stream the response body to a callback
+#'
+#' `f` is called with each decoded chunk as a raw vector, as it arrives.
+#' Returning `FALSE` stops the transfer cleanly (§27.2); the connection is
+#' then not reused, because its framing position is no longer known (§26.3).
+#'
+#' @section If your callback raises an error:
+#' You get *your* error, not a transport error wrapping it (§27.3). The
+#' callback runs inside `R_tryCatch()`, the native read loop unwinds normally
+#' so the socket and decompressor are released, and only then is the original
+#' condition re-signalled. That ordering is the whole point: a longjmp
+#' straight out of the read loop would leak the connection.
+#'
+#' @section What you may not do inside it:
+#' Issue another request on the **same** client (§27.4). That would deadlock
+#' on a pool slot or interleave writes onto the connection currently being
+#' read, so it raises an error naming the problem instead. A request through a
+#' *different* client is unrestricted.
+#'
+#' @param req A `zu_request`.
+#' @param f A function of one argument (a raw vector). Return `FALSE` to stop.
+#' @return The request, modified.
+#' @seealso [zu_req_path()] to stream to a file instead.
+#' @export
+#' @examples
+#' total <- 0
+#' req <- zu_req_callback(zu_request("GET", "https://x.test/big"),
+#'                        function(chunk) total <<- total + length(chunk))
+zu_req_callback <- function(req, f) {
+  req <- check_req(req)
+  if (!is.function(f))
+    stop("`callback` must be a function of one argument (a raw vector)",
+         call. = FALSE)
+  req$callback <- f
+  req
+}
+
 check_req <- function(req) {
   if (!inherits(req, "zu_request"))
     stop("expected a request from zu_request(); got ", class(req)[[1]],
