@@ -404,24 +404,33 @@ jobs:
           NOT_CRAN: "true"
         run: |
           R CMD INSTALL .
+          # stderr is unbuffered, so a segfault cannot swallow the progress
+          # that identifies where it happened. The previous attempt reported
+          # exit 139 and not one line of output.
           Rscript -e '
+            say <- function(...) { cat(..., "\n", file = stderr()) }
+            say("loading")
             library(zuhttp)
+            say("backend:", zu_tls_backend())
             stopifnot(identical(zu_tls_backend(), "schannel"))
+            say("request 1: plain GET")
             r <- zu_get("https://example.com")
-            cat("status", zu_resp_status(r), "| tls", r$tls_version,
-                "|", length(zu_resp_body(r)), "bytes\n")
+            say("  status", zu_resp_status(r), "tls", r$tls_version,
+                "bytes", length(zu_resp_body(r)))
             stopifnot(zu_resp_status(r) == 200L)
             stopifnot(grepl("Example Domain", zu_resp_text(r), fixed = TRUE))
+            say("request 2: raising a condition from C")
 
             # The whole point of D-5: Windows has trust anchors again.
             e <- tryCatch(zu_get("https://expired.badssl.com/"),
                           zu_tls_error = function(e) e)
-            cat("expired ->", class(e)[1], "|", conditionMessage(e), "\n")
+            say("  expired ->", class(e)[1])
             stopifnot(inherits(e, "zu_tls_certificate_error"))
+            say("request 3: hostname mismatch")
 
             e2 <- tryCatch(zu_get("https://wrong.host.badssl.com/"),
                            zu_tls_error = function(e) e)
-            cat("wrong host ->", class(e2)[1], "\n")
+            say("  wrong host ->", class(e2)[1])
             stopifnot(inherits(e2, "zu_tls_hostname_error"))
-            cat("S8: Windows HTTPS works, and bad certificates are rejected\n")
+            say("S8: Windows HTTPS works, and bad certificates are rejected")
           '

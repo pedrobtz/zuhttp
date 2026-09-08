@@ -197,11 +197,18 @@ static void raise_zu_error(const zu_error *e, const char *url) {
      *
      * Six arguments, and R only provides Rf_lang1..Rf_lang6 (function plus
      * five), so the call is built by hand rather than trimmed to fit. */
-    SEXP fn   = PROTECT(Rf_install("zu_stop_from_c"));
-    SEXP ns   = PROTECT(R_FindNamespace(Rf_mkString("zuhttp")));
-    SEXP args = PROTECT(Rf_allocList(6));
-    SEXP call = PROTECT(Rf_lcons(fn, args));   /* lcons yields a LANGSXP */
-    SEXP p    = args;
+    SEXP fn     = PROTECT(Rf_install("zu_stop_from_c"));
+    /* The name MUST be protected across R_FindNamespace: that call allocates
+     * (it evaluates getNamespace), and an unprotected mkString result can be
+     * collected underneath it. Writing it as
+     *     R_FindNamespace(Rf_mkString("zuhttp"))
+     * is the classic form of this bug, and it is timing-dependent — it ran
+     * clean on macOS and Linux and segfaulted on Windows. */
+    SEXP nsname = PROTECT(Rf_mkString("zuhttp"));
+    SEXP ns     = PROTECT(R_FindNamespace(nsname));
+    SEXP args   = PROTECT(Rf_allocList(6));
+    SEXP call   = PROTECT(Rf_lcons(fn, args));   /* lcons yields a LANGSXP */
+    SEXP p      = args;
 
     SETCAR(p, Rf_ScalarInteger((int)e->code));                          p = CDR(p);
     SETCAR(p, Rf_mkString(e->message[0] ? e->message : "request failed")); p = CDR(p);
@@ -211,7 +218,7 @@ static void raise_zu_error(const zu_error *e, const char *url) {
     SETCAR(p, Rf_ScalarInteger(e->backend_code));
 
     Rf_eval(call, ns);           /* zu_stop_from_c() does not return */
-    UNPROTECT(4);
+    UNPROTECT(5);
 }
 
 static SEXP headers_to_r(const zu_headers *h) {
