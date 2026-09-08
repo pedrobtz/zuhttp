@@ -1,3 +1,16 @@
+/* getpid() lives behind glibc's __USE_POSIX, which -std=c99 does not enable
+ * on its own. It happens to compile today, but zu_net.c and zu_time.c both
+ * carry this preamble for the same reason and the third file silently not
+ * carrying it is exactly how the zu_time.c defect survived (see 3d2bd18).
+ * MUST precede every system header. */
+#if !defined(_WIN32)
+#  if defined(__APPLE__)
+#    define _DARWIN_C_SOURCE
+#  else
+#    define _POSIX_C_SOURCE 200112L
+#  endif
+#endif
+
 #include "zu_fork.h"
 
 #if defined(ZU_WINDOWS)

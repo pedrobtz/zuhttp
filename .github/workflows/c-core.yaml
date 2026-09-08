@@ -50,6 +50,12 @@ jobs:
         with:
           r-version: release
 
+      # This class has bitten twice and the second instance did not fail to
+      # build — it compiled, passed the tests, and hung. See the script.
+      - name: Feature-test macros present where POSIX headers are used
+        if: runner.os == 'Linux'
+        run: ./tools/check-feature-macros
+
       - name: Compiler identity
         working-directory: ctest
         run: |

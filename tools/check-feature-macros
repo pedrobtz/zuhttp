@@ -1,0 +1,40 @@
+#!/bin/sh
+# Every project-owned .c that includes a POSIX header must set the feature-test
+# macros first (design §52, C99 with no compiler extensions).
+#
+# This exists because the class has bitten twice:
+#
+#   2230b11  zu_net.c   -std=c99 hid struct addrinfo and getnameinfo
+#   3d2bd18  zu_time.c  -std=c99 hid CLOCK_MONOTONIC, so zu_now_ms() returned
+#                       0 forever on Linux and NO DEADLINE EVER EXPIRED
+#
+# The second one did not fail to build. It compiled, passed every test that
+# asserted the clock was "monotonic" (a constant is non-decreasing), and hung
+# the first operation that waited for a timeout. A grep is cheap insurance
+# against a third instance.
+set -eu
+cd "$(dirname "$0")/.."
+
+POSIX_HDRS='time|sys/socket|netdb|unistd|poll|arpa/inet|netinet/in|sys/wait|fcntl|sys/types|sys/select|signal'
+bad=0
+
+for f in src/zu_*.c src/init.c; do
+    [ -f "$f" ] || continue
+    hdrs=$(grep -oE "#[[:space:]]*include[[:space:]]*<($POSIX_HDRS)\.h>" "$f" 2>/dev/null \
+           | sed -E 's/.*<(.*)>/\1/' | sort -u | tr '\n' ' ') || true
+    [ -z "$hdrs" ] && continue
+    if ! grep -qE '_POSIX_C_SOURCE|_DARWIN_C_SOURCE' "$f"; then
+        echo "MISSING feature-test macros: $f (includes: $hdrs)" >&2
+        bad=1
+    fi
+done
+
+if [ "$bad" -ne 0 ]; then
+    echo >&2
+    echo "Add the preamble used by src/zu_net.c and src/zu_time.c, BEFORE any" >&2
+    echo "system header. Without it glibc hides POSIX declarations under" >&2
+    echo "-std=c99, and the symptom can be a silent wrong answer rather than a" >&2
+    echo "build failure." >&2
+    exit 1
+fi
+echo "feature-test macros: ok"
