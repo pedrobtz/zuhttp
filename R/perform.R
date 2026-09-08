@@ -14,7 +14,9 @@
 #' network, a server, or an internet-dependent CRAN check.
 #'
 #' @param handler A function of one argument (a `zu_request` with client
-#'   configuration already merged in) returning a [zu_response()].
+#'   configuration already merged in) returning a [zu_response()]; or one or
+#'   more [zu_stub()]s, which match on method, URL, headers and body (§37).
+#' @param ... Further [zu_stub()]s.
 #' @return A transport object, for `zu_client(transport = )`.
 #' @name zu_transport
 #' @examples
@@ -33,8 +35,23 @@ zu_native_transport <- function() {
 
 #' @rdname zu_transport
 #' @export
-zu_mock_transport <- function(handler) {
-  stopifnot(is.function(handler))
+zu_mock_transport <- function(handler = NULL, ...) {
+  stubs <- c(if (inherits(handler, "zu_stub")) list(handler)
+             else if (is.list(handler) && !is.function(handler)) handler,
+             list(...))
+  if (length(stubs)) {
+    if (!all(vapply(stubs, inherits, logical(1), "zu_stub")))
+      stop("every stub must come from zu_stub()", call. = FALSE)
+    # An environment, not a list: `times` has to count across calls, and a
+    # transport is copied by value into every request that uses it.
+    state <- new.env(parent = emptyenv())
+    state$stubs <- stubs
+    return(structure(list(state = state),
+                     class = c("zu_mock_transport", "zu_transport")))
+  }
+  if (!is.function(handler))
+    stop("zu_mock_transport() needs a handler function or one or more zu_stub()s",
+         call. = FALSE)
   structure(list(handler = handler),
             class = c("zu_mock_transport", "zu_transport"))
 }
@@ -83,7 +100,27 @@ timeout_ms <- function(seconds) {
 
 #' @export
 zu_transport_perform.zu_mock_transport <- function(transport, req) {
-  resp <- transport$handler(req)
+  if (!is.null(transport$state)) {
+    stubs <- transport$state$stubs
+    for (i in seq_along(stubs)) {
+      if (!stub_matches(stubs[[i]], req)) next
+      # Count the match before running the response, so a handler that itself
+      # performs a request cannot re-enter this stub past its `times`.
+      stubs[[i]]$matched <- stubs[[i]]$matched + 1L
+      transport$state$stubs <- stubs
+      r <- stubs[[i]]$response
+      resp <- if (is.function(r)) r(req) else r
+      return(check_mock_response(resp))
+    }
+    # Naming the request is the whole value of this error: an unmatched mock
+    # otherwise surfaces as a confusing NULL several frames later.
+    stop("no zu_stub() matched ", req$method, " ", zu_redact_url(req$url),
+         "\n  ", length(stubs), " stub(s) were tried", call. = FALSE)
+  }
+  check_mock_response(transport$handler(req))
+}
+
+check_mock_response <- function(resp) {
   if (!inherits(resp, "zu_response"))
     stop("a mock transport must return a zu_response(); got ",
          class(resp)[[1]], call. = FALSE)

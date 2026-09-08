@@ -54,6 +54,9 @@ Firm decisions and open questions were previously indistinguishable in this docu
 | D-36 | The live pool hangs off the client as an **attribute environment**, not as a list element | **Accepted** 2026-09-08 — S16 | 26.5 |
 | D-37 | Pooling is **on by default** for a client; `zu_client(pool = NULL)` opts out | **Accepted** 2026-09-08 — S16 | 26.2 |
 | D-38 | `zu_pool_stats()` is exported, so reuse is observable rather than merely claimed | **Accepted** 2026-09-08 — S16 | 26.2 |
+| D-39 | §42.1's default secret-parameter list extended for the cassette egress | **Accepted** 2026-09-08 — S14 | 42.1, 37 |
+| D-40 | A cassette's match key is computed from the **redacted** request | **Accepted** 2026-09-08 — S14 | 37 |
+| D-41 | Cassettes are written **uncompressed**, so a byte-level canary means something | **Accepted** 2026-09-08 — S14 | 37, 42.4 |
 
 ---
 
@@ -2916,6 +2919,54 @@ Sensitive headers must be redacted:
 - Cookie.
 - Proxy-Authorization.
 - API-key patterns where configurable.
+
+#### 37.1 How this landed (S14)
+
+`zu_cassette_transport(dir, name, mode)` with `mode` one of `"auto"` (record a
+miss, replay a hit), `"replay"` (never perform; error on a miss) and
+`"record"` (always perform; overwrite). A cassette is one uncompressed `.rds`
+holding a list of interactions, under `tempdir()` by default so nothing is
+written outside the session unless asked.
+
+Three decisions, each a trap avoided rather than a taste:
+
+**D-39 — the §42.1 default parameter list grew.** It was `access_token`,
+`api_key`, `signature`, `sig` — tuned for console output. A cassette is the
+one egress that outlives the session and reaches version control, and a form
+body of `client_secret=…` or `password=…` was being written in plaintext. The
+list now also carries `apikey`, `client_secret`, `password`, `passwd`, `pwd`,
+`secret`, `token`, `refresh_token`, `id_token`, `private_key`, `auth_token`
+and `session_token`. Extending the *shared* policy rather than special-casing
+cassettes is what keeps §42's "one policy at every egress" true: the same
+names are now redacted in URLs, printed objects and conditions too.
+
+Matching is exact and case-insensitive, which is what makes the bare names
+safe: `token` does not redact `page_token`, and `api_key` does not redact
+`api_key_id`. That property is asserted directly, because it is the whole
+argument for including short names.
+
+**D-40 — the match key is computed from the redacted request.** The obvious
+design keys on the real URL and stores only a hash, but a hash of a URL whose
+shape is known is brute-forceable, and "we only stored the hash" is precisely
+how credentials leak from fixtures. Keying on `method + redacted URL +
+redacted body` means the index cannot carry a secret. It also gives the
+behaviour a test wants: two requests differing only in their credential
+collapse to one interaction, so rotating a token does not invalidate a
+recorded suite. Headers are deliberately **not** part of the key — they vary
+with client configuration in ways that do not change what a server would
+reply, and including them makes cassettes miss for reasons the test author
+cannot see.
+
+**D-41 — cassettes are uncompressed.** A compressed cassette would hide a
+plaintext credential from a byte-level scan, so the §42.4 canary would pass
+while the leak stood. The canary greps the file itself, so the file has to be
+greppable. This is a case where the cheaper representation makes the test
+dishonest rather than merely larger.
+
+Mock matching (§37's first half) is `zu_stub(response, method, url, regex,
+headers, body, times)`, ANDed, with an omitted criterion matching anything.
+`zu_mock_transport()` still accepts a bare function, which is the form §36
+documents.
 
 ### 38. Authentication Scope
 

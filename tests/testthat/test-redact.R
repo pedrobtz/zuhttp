@@ -124,6 +124,14 @@ test_that("form bodies are redacted with the same policy", {
 
 CANARY <- "hunter2-DO-NOT-LEAK"
 
+# A byte-level search, so a scan of a file on disk cannot be defeated by an
+# encoding or a locale: grepRaw() takes a raw pattern and never converts.
+raw_contains <- function(haystack, needle) {
+  n <- charToRaw(needle)
+  length(haystack) >= length(n) &&
+    length(grepRaw(n, haystack, fixed = TRUE, all = FALSE)) > 0
+}
+
 expect_no_canary <- function(x, label) {
   txt <- paste(utils::capture.output(print(x)), collapse = "\n")
   txt <- paste(txt, paste(unlist(lapply(x, function(e) {
@@ -172,6 +180,14 @@ test_that("the canary does not leak through a printed request (§42.4)", {
   expect_false(grepl(CANARY, printed, fixed = TRUE))
   expect_true(grepl(CANARY, req$headers[["Authorization"]], fixed = TRUE))
 
+  # The body arm above is VACUOUS on its own and was so until S14: print()
+  # renders "Body: form, 63 bytes" and never the bytes, so the canary could
+  # not have appeared whether or not zu_redact_form() worked. Assert against
+  # something that really renders the body — otherwise this test claims
+  # coverage of an egress it does not touch (§50, "verify non-vacuously").
+  expect_false(grepl(CANARY, zu_redact_form(rawToChar(req$body)), fixed = TRUE))
+  expect_true(grepl(CANARY, rawToChar(req$body), fixed = TRUE))
+
   # And through a printed response, and the request a condition carries.
   api <- zu_client(headers = c(Authorization = paste("Bearer", CANARY)),
                    transport = zu_mock_transport(function(r) zu_response(500L)))
@@ -182,8 +198,43 @@ test_that("the canary does not leak through a printed request (§42.4)", {
   expect_no_canary(e$response, "the response stored on a condition")
 })
 
+test_that("the canary does not reach a cassette on disk (§37, §42.4)", {
+  # The egress that matters most, because it is the only one that outlives the
+  # session: a cassette gets committed. The byte-level scan is the assertion —
+  # inspecting the parsed interaction would only prove the accessors redact,
+  # not that the FILE is clean.
+  dir <- file.path(tempdir(), "zu-canary-cassette")
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  unlink(dir, recursive = TRUE)
+
+  live <- zu_mock_transport(function(req)
+    zu_response(200L, headers = c("Set-Cookie" = paste0("s=", CANARY)), body = "ok"))
+  api <- zu_client(headers = c(Authorization = paste("Bearer", CANARY)),
+                   transport = zu_cassette_transport(dir, "canary", transport = live))
+  req <- zu_body_form(
+    zu_request("POST", paste0("https://h/x?api_key=", CANARY)),
+    list(password = CANARY, client_secret = CANARY, page = "2"))
+  expect_identical(zu_resp_status(zu_perform(req, client = api)), 200L)
+
+  f <- file.path(dir, "canary.rds")
+  expect_true(file.exists(f))
+  # Searched as BYTES. The cassette is written uncompressed precisely so that
+  # this scan means something; a compressed file would hide a plaintext
+  # credential from it and the test would pass while the leak stood.
+  expect_false(raw_contains(readBin(f, "raw", file.size(f)), CANARY))
+
+  # ...and the interaction is still usable, i.e. redaction did not simply
+  # destroy the cassette.
+  rec <- zu_cassette_interactions(dir, "canary")
+  expect_length(rec, 1L)
+  expect_match(rec[[1]]$request$url, "api_key=<redacted>", fixed = TRUE)
+  expect_identical(unname(rec[[1]]$request$headers[["Authorization"]]), "<redacted>")
+  expect_match(rawToChar(rec[[1]]$request$body), "page=2", fixed = TRUE)
+})
+
 test_that("canary coverage of the remaining egresses is tracked, not assumed", {
-  # Still real §42.2 egresses with no implementation yet. They must fail
-  # loudly as "not covered" rather than quietly pass.
-  skip("verbose transport logging and recordings arrive with S14/S35")
+  # Recordings are covered as of S14 (above). Verbose transport logging is a
+  # real §42.2 egress that still does not exist; it must fail loudly as "not
+  # covered" rather than quietly pass.
+  skip("verbose transport logging arrives with S35 event hooks")
 })

@@ -13,11 +13,33 @@ static const char *const k_headers[] = {
     NULL
 };
 
+/* Matching is exact and case-insensitive (in_list compares full length), so
+ * "token" here does NOT redact "page_token" or "next_token" — a pagination
+ * cursor stays readable, which is what makes including the bare name safe.
+ *
+ * The list grew in S14 (D-39). Record/replay writes a cassette to DISK, where
+ * a credential outlives the session and reaches version control; that is the
+ * egress §42 exists for, and a list tuned for console output was too narrow
+ * for it. Extending the shared policy rather than special-casing cassettes
+ * keeps §42's "one policy at every egress" true — the same names are now
+ * redacted in URLs, printed objects and conditions too. */
 static const char *const k_params[] = {
     "access_token",
     "api_key",
+    "apikey",
     "signature",
     "sig",
+    "client_secret",
+    "password",
+    "passwd",
+    "pwd",
+    "secret",
+    "token",
+    "refresh_token",
+    "id_token",
+    "private_key",
+    "auth_token",
+    "session_token",
     NULL
 };
 

@@ -174,6 +174,54 @@ void suite_redact(void) {
     }
     zu_buf_free(&b);
 
+    /* ---- §42.1 default parameter names, extended in S14 (D-39) ---- */
+    ZU_CASE("every default secret parameter name is redacted");
+    {
+        static const char *const names[] = {
+            "access_token", "api_key", "apikey", "signature", "sig",
+            "client_secret", "password", "passwd", "pwd", "secret",
+            "token", "refresh_token", "id_token", "private_key",
+            "auth_token", "session_token", NULL
+        };
+        int i;
+        for (i = 0; names[i]; i++) {
+            ZU_CHECK(zu_redact_is_secret_param(&p, names[i], strlen(names[i])));
+            /* Case must not matter: a server that accepts API_KEY accepts it
+             * as a credential too. */
+            ZU_CHECK(zu_redact_is_secret_param(&p, "API_KEY", 7));
+        }
+    }
+
+    /* The property that makes bare "token" and "secret" safe to include: the
+     * comparison is exact, so a pagination cursor or a public identifier that
+     * merely CONTAINS a secret name stays readable. Without this, adding
+     * "token" would have redacted every page_token in every trace. */
+    ZU_CASE("a name that merely contains a secret name is not redacted");
+    {
+        static const char *const fine[] = {
+            "page_token", "next_token", "tokens", "token_type",
+            "password_hint", "secretary", "signature_version",
+            "api_key_id", "not_a_secret", NULL
+        };
+        int i;
+        for (i = 0; fine[i]; i++)
+            ZU_CHECK(!zu_redact_is_secret_param(&p, fine[i], strlen(fine[i])));
+    }
+
+    ZU_CASE("the new names redact in a form body, not just in a URL");
+    ZU_CHECK(zu_buf_init(&b, 64, 1 << 20));
+    {
+        static const char body[] =
+            "grant_type=client_credentials&client_secret=SHH&password=P&page_token=t2";
+        const char *out = NULL;
+        ZU_CHECK(zu_redact_form_body(&p, body, sizeof body - 1, &b));
+        ZU_CHECK(zu_buf_cstr(&b, &out));
+        ZU_CHECK(streq(out,
+            "grant_type=client_credentials&client_secret=<redacted>"
+            "&password=<redacted>&page_token=t2"));
+    }
+    zu_buf_free(&b);
+
     /* ---- §34.1 class chain ---- */
 
     ZU_CASE("the class chain walks the §34.1 tree");

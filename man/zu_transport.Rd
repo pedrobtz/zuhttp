@@ -8,11 +8,14 @@
 \usage{
 zu_native_transport()
 
-zu_mock_transport(handler)
+zu_mock_transport(handler = NULL, ...)
 }
 \arguments{
 \item{handler}{A function of one argument (a \code{zu_request} with client
-configuration already merged in) returning a \code{\link[=zu_response]{zu_response()}}.}
+configuration already merged in) returning a \code{\link[=zu_response]{zu_response()}}; or one or
+more \code{\link[=zu_stub]{zu_stub()}}s, which match on method, URL, headers and body (§37).}
+
+\item{...}{Further \code{\link[=zu_stub]{zu_stub()}}s.}
 }
 \value{
 A transport object, for \code{zu_client(transport = )}.

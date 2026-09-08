@@ -2,7 +2,7 @@
 
 **Companion to:** [zuhttp-design.md](zuhttp-design.md)
 **Status:** Draft
-**Last updated:** 2026-09-08 · **S0–S9, S11, S12, S15 complete or explicitly partial; S16 COMPLETE**
+**Last updated:** 2026-09-08 · **S0–S9, S11, S12, S15 complete or explicitly partial; S14 and S16 COMPLETE**
 **Total estimate:** 41–48 person-weeks (§64 of the design doc, plus spikes)
 
 ---
@@ -44,7 +44,7 @@ graph TD
     S11["S11 · R API surface<br/>COMPLETE — 11/13 workflows"]
     S12["S12 · Conditions + redaction<br/>PARTIAL — canary incomplete"]
     S13["S13 · Retry, middleware, hooks"]
-    S14["S14 · R transports<br/>mock, record/replay"]
+    S14["S14 · R transports<br/>COMPLETE — mock + cassettes"]
 
     S15["S15 · Cancellation + unwind"]
     S16["S16 · Pool + fork/session safety<br/>COMPLETE — R-12 closed"]
@@ -502,14 +502,21 @@ one definition:
       the formatting layer, and `zu_redact_headers_for_display()` is verified
       not to mutate its input.
 - [ ] The §42.4 canary test finds no credential in verbose output, printed
-      objects, error payloads, hook payloads, or recordings. **Partial:**
-      conditions, displayed headers, URLs, form bodies, printed requests and
-      responses, and the request/response stored on a condition are covered
-      (the last three added by S11).
-      Verbose transport logging and recordings do not exist
-      yet (S14/§35) and are marked with an explicit `skip()` naming what
-      is missing — an incomplete canary that looks complete is worse than one
-      that says what it does not cover.
+      objects, error payloads, hook payloads, or recordings. **Partial, and
+      down to one gap.** Conditions, displayed headers, URLs, form bodies,
+      printed requests and responses, and the request/response stored on a
+      condition are covered (the last three added by S11); **recordings joined
+      them in S14**, asserted at the byte level on the cassette file.
+      Verbose transport logging does not exist yet (§35 event hooks) and is
+      marked with an explicit `skip()` naming what is missing — an incomplete
+      canary that looks complete is worse than one that says what it does not
+      cover.
+
+      S14 also found that one arm of this canary was **vacuous**: it asserted
+      a form body's `client_secret` did not appear in a printed request, but
+      the printed form never renders the body. Fixed there. The lesson is the
+      one §50 already states — a canary that cannot fail is worse than no
+      canary, because it is counted as coverage.
 
 ### S13 · Retry, middleware, hooks
 
@@ -524,16 +531,46 @@ Policy/middleware split (§31.13); retry admissibility (§33.1); the §33.2 cond
 - [ ] `zu_get(url, timeout = 30)` with 3 retries returns within 30s (§24.3).
 - [ ] Backoff sleep responds to Ctrl-C.
 
-### S14 · R transports
+### S14 · R transports — ✅ **COMPLETE 2026-09-08**
 
 **Effort:** 1 week. **Depends on:** S11.
 
 `zu_native_transport()`, `zu_mock_transport()` with method/URL/header/body matching, and record/replay with §37 redaction and a `tempdir()` default.
 
+Delivered as `zu_stub()` + `zu_mock_transport(...)` for matching, and
+`zu_cassette_transport(dir, name, mode)` for record/replay, with
+`zu_cassette_interactions()` and `zu_cassette_clear()` to inspect and delete.
+See §37.1 for the three decisions (D-39, D-40, D-41).
+
 **Exit criteria**
 
-- [ ] A downstream package's test suite runs fully offline.
-- [ ] A cassette contains no credential.
+- [x] A downstream package's test suite runs fully offline. All 63 checks in
+      `test-record.R` run with no network — deliberately, since a stage whose
+      criterion is "runs offline" cannot prove it with a test that needs a
+      server. Where a "real" transport is needed, a `zu_mock_transport()`
+      plays that part; §36.1 makes that faithful, because a transport
+      implements network semantics only and everything above it (merging,
+      redirects, redaction) is the same code either way. `mode = "replay"`
+      holds no underlying transport at all, so a cassette miss cannot silently
+      fall through to the network.
+- [x] A cassette contains no credential. Asserted at the **byte** level on the
+      file itself (`grepRaw`), not on the parsed interaction — the latter
+      would only prove the accessors redact. Non-vacuous: removing the header
+      redaction from `redacted_request()` fails it.
+
+**Found while doing this, and worth reading.** Closing the second criterion
+turned up two defects, one of them in shipped code:
+
+1. §42.1's default parameter list was too narrow for this egress — a form body
+   of `client_secret=` or `password=` reached the disk in plaintext. Fixed by
+   extending the shared C policy (D-39), so URLs, printed objects and
+   conditions gained the same protection.
+2. **S12's canary had a vacuous arm.** `test-redact.R` asserted that a form
+   body's `client_secret` did not appear in a printed request — but
+   `print.zu_request()` renders `Body: form, 63 bytes` and never the bytes, so
+   that assertion held whether or not `zu_redact_form()` worked. It claimed
+   coverage of an egress it did not touch. Replaced with an assertion against
+   something that really renders the body.
 
 ---
 
@@ -848,10 +885,13 @@ That last item is the honest test of the whole project. `zuhttp` exists on the p
 6. ~~**S16 · Connection pool.**~~ ✅ Done 2026-09-08 — all six criteria. The
    pool is in the request path, R-12 is closed, and both §26.4 hazards are
    tested from R.
-7. **Next: S13 (retry, middleware, hooks) or S14 (R transports).** Both are
-   unblocked by S11; S13 also needs S12, whose canary is still partial.
-   S13 closes the two workflows S11 could not run (retry) once it lands, and
-   S14 turns the mock transport seam into record/replay.
+7. ~~**S14 · R transports.**~~ ✅ Done 2026-09-08 — both criteria. Taken
+   before S13 because S12's remaining canary criterion named S14 as its
+   blocker and S13 depends on S12; doing S13 first would have left that
+   dependency inverted.
+8. **Next: S13 (retry, middleware, hooks).** Now the only unblocked stage in
+   Track D. S12's canary is down to one gap (verbose logging, §35), which S13
+   does not need. S13 closes the two §31.16 workflows S11 could not run.
 
    Two pieces of bookkeeping remain open and are NOT blockers: the mermaid
    graph still marks **S9** DONE with all four exit criteria unticked, and
