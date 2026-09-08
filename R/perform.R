@@ -125,6 +125,13 @@ resolve_request <- function(req, client) {
   if (!is.numeric(policy$redirects) || length(policy$redirects) != 1L ||
       is.na(policy$redirects) || policy$redirects < 0)
     stop("`redirects` must be 0 or more", call. = FALSE)
+  # Not merely a range check: the C side reads max_body == 0 as "use the
+  # default", so a caller writing max_body = 0 to mean "refuse any body"
+  # would silently get 16 MB. Refuse the value rather than honour the
+  # opposite of what it says.
+  if (!is.numeric(policy$max_body) || length(policy$max_body) != 1L ||
+      is.na(policy$max_body) || policy$max_body < 1)
+    stop("`max_body` must be at least 1 byte", call. = FALSE)
 
   req$url      <- url_with_query(url, merge_query(client$query, req$query))
   req$query    <- NULL          # folded into the URL; one representation

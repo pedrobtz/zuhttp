@@ -133,3 +133,29 @@ test_that("zu_resp_raw() returns decoded bytes", {
   r <- resp(200L, body = charToRaw("plain"))
   expect_identical(rawToChar(zu_resp_raw(r)), "plain")
 })
+
+test_that("zu_resp_json() says what went wrong, not what the parser thinks", {
+  skip_if_not_installed("jsonlite")
+  # An empty body is a valid response, and the parser's "premature EOF" gives
+  # no hint that it came from an HTTP call at all (§34.4).
+  e <- tryCatch(zu_resp_json(zu_response(204L)), zu_error = function(e) e)
+  expect_s3_class(e, "zu_body_decode_error")
+  expect_match(conditionMessage(e), "empty")
+  expect_match(conditionMessage(e), "204")
+
+  e <- tryCatch(zu_resp_json(zu_response(200L, c("Content-Type" = "application/json"),
+                                         "<html>oops</html>")),
+                zu_error = function(e) e)
+  expect_s3_class(e, "zu_body_decode_error")
+  expect_match(conditionMessage(e), "not valid JSON")
+  # The backend's own message is present, but last.
+  expect_match(conditionMessage(e), "Parser:")
+})
+
+test_that("max_body = 0 is refused rather than silently meaning 16 MB", {
+  # The C side reads 0 as "use the default", so honouring the value would do
+  # the opposite of what the caller wrote.
+  api <- zu_client(transport = zu_mock_transport(function(req) zu_response(200L)))
+  expect_error(zu_get("https://x/", max_body = 0, client = api), "at least 1 byte")
+  expect_error(zu_get("https://x/", max_body = -1, client = api), "at least 1 byte")
+})

@@ -202,7 +202,27 @@ bom_of <- function(b) {
 #' @seealso [zu_set_json_backend()] if you would rather not use `jsonlite`.
 #' @export
 zu_resp_json <- function(resp, ...) {
-  json_decode(zu_resp_text(resp, encoding = "UTF-8"), ...)
+  txt <- zu_resp_text(resp, encoding = "UTF-8")
+  if (!nzchar(trimws(txt)))
+    zu_stop("zu_body_decode_error",
+            paste0("the response body is empty, so there is no JSON to parse",
+                   " (HTTP ", resp$status, ").\n",
+                   "  A 204 or an empty 200 is a valid response; check",
+                   " zu_resp_status() before decoding."),
+            url = resp$url, phase = "decode", response = redact_response(resp))
+  # §34.4: the backend's own complaint is useful but is not a first line. A
+  # user seeing "premature EOF (right here) ---^" has to work out that it came
+  # from their HTTP call at all.
+  tryCatch(json_decode(txt, ...), error = function(e) {
+    if (inherits(e, "zu_error")) stop(e)
+    zu_stop("zu_body_decode_error",
+            paste0("the response body is not valid JSON (HTTP ", resp$status,
+                   ", ", length(resp$body), " bytes).\n",
+                   "  * If the server sent something else, zu_resp_text()",
+                   " shows what.\n",
+                   "  * Parser: ", conditionMessage(e)),
+            url = resp$url, phase = "decode", response = redact_response(resp))
+  })
 }
 
 #' Raise a condition for an error status
