@@ -88,16 +88,15 @@ done:
 /* Open the transport for one hop: TCP, then TLS when the scheme says so. */
 /* --- §26.1 pool key ------------------------------------------------------
  *
- * Built from the URI and the TLS settings this engine actually applies. That
- * is the whole of the §26.1 key that varies today: zu_get_opts carries no
- * proxy, no pin set, no client certificate and no ALPN override, so those
- * fields stay NULL rather than being invented here.
+ * Built from the URI, the proxy and the §14 TLS configuration this engine
+ * actually applies — which is now every field of §26.1 except the client
+ * certificate, since client certs are not yet a thing zu_get_opts can carry.
  *
- * When any of them IS plumbed through zu_get_opts, it must be added here in
- * the same commit. A key that ignores a field two clients differ on is the
- * "coarse key is a security bug, not a performance optimisation" failure
- * §26.1 names — it would let a request with verification off reuse a
- * connection established with it on. zu_pool_key_eq() compares every field of
+ * When one IS plumbed through, it must be added here in the same commit. A
+ * key that ignores a field two clients differ on is the "coarse key is a
+ * security bug, not a performance optimisation" failure §26.1 names — it
+ * would let a request with verification off, or without a pin, reuse a
+ * connection established with them. zu_pool_key_eq() compares every field of
  * the struct, so the risk is only ever a field missing HERE.
  *
  * The strings are owned copies, freed by pool_key_free(). Borrowing pointers
@@ -121,6 +120,43 @@ static int pool_key_for(zu_pool_key *k, const zu_uri *u, const zu_get_opts *o,
     if (o->ca_file) {
         k->ca_file = dup_str(o->ca_file);
         if (!k->ca_file) { zu_pool_key_free(k); return 0; }
+    }
+    /* §26.1 field by field. S16 left a note here saying that anything later
+     * plumbed through zu_get_opts must be added in the same commit, because a
+     * key that ignores a field two clients differ on is "a security bug, not a
+     * performance optimisation" — it would let a request pinned to one key
+     * reuse a connection established without the pin. This is that commit. */
+    if (o->tls) {
+        k->revocation  = o->tls->revocation;
+        k->min_version = o->tls->min_version;
+        if (o->tls->ca_extra_file) {
+            k->ca_extra_file = dup_str(o->tls->ca_extra_file);
+            if (!k->ca_extra_file) { zu_pool_key_free(k); return 0; }
+        }
+        if (o->tls->alpn) {
+            k->alpn = dup_str(o->tls->alpn);
+            if (!k->alpn) { zu_pool_key_free(k); return 0; }
+        }
+        if (o->tls->n_pins > 0) {
+            /* Joined in the order given. Two clients that list the same pins
+             * differently are treated as different, which costs a connection
+             * and never shares one that should not be shared — the safe way
+             * round for a key whose job is to keep things apart. */
+            zu_buffer b;
+            size_t i;
+            const char *joined = NULL;
+            if (!zu_buf_init(&b, 128, 64 * 1024)) { zu_pool_key_free(k); return 0; }
+            for (i = 0; i < o->tls->n_pins; i++) {
+                if (!zu_buf_append_str(&b, o->tls->pins[i]) ||
+                    !zu_buf_append_byte(&b, '\x1f')) {
+                    zu_buf_free(&b); zu_pool_key_free(k); return 0;
+                }
+            }
+            if (!zu_buf_cstr(&b, &joined)) { zu_buf_free(&b); zu_pool_key_free(k); return 0; }
+            k->pins = dup_str(joined);
+            zu_buf_free(&b);
+            if (!k->pins) { zu_pool_key_free(k); return 0; }
+        }
     }
     /* §26.1 requires proxy identity INCLUDING credentials, so that two
      * clients with different proxy credentials cannot share a tunnel. The
@@ -296,7 +332,12 @@ static zu_code open_stream(zu_stream **out, const zu_uri *u,
         zu_tls_config cfg;
         zu_stream *tls = NULL;
 
-        zu_tls_config_init(&cfg);
+        /* Start from the caller's §14 configuration when there is one, so
+         * ca_extra, pins, revocation and min_version arrive intact... */
+        if (o->tls) cfg = *o->tls; else zu_tls_config_init(&cfg);
+        /* ...then the two fields that have their own merged policy argument
+         * win, because §31.9 already owns them and two sources of truth for
+         * "is this connection verified" is not a thing to have. */
         cfg.verify_peer     = o->verify;
         cfg.verify_hostname = o->verify;
         if (o->ca_file) { cfg.ca_file = o->ca_file; cfg.source = ZU_TRUST_FILE; }

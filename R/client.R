@@ -37,7 +37,10 @@ zu_defaults <- function() {
     # §20.1: NULL is "consult the environment", which is what an unconfigured
     # client must do. Disabling is FALSE — see D-48 and the note in
     # zu_client()'s docs for why it cannot be NULL.
-    proxy      = NULL
+    proxy      = NULL,
+    # §14.1's defaults are what zu_tls() itself produces, so "unset" and
+    # "default" are the same object rather than two things to keep in step.
+    tls        = NULL
   )
 }
 
@@ -83,6 +86,7 @@ collect_policy <- function(env = parent.frame()) {
 #' @param pool Connection reuse settings from [zu_pool()], or `NULL` to open a
 #'   fresh connection for every request.
 #' @param retry A [zu_retry()] policy. The default retries nothing.
+#' @param tls Certificate trust settings from [zu_tls()].
 #' @param proxy Proxy URL, e.g. `"http://proxy:3128"`. Leave unset to honour
 #'   the environment (§20.1); pass `FALSE` to force a direct connection.
 #'   **Not `NULL`** — under the §31.9 merge rules `NULL` means "reset to the
@@ -123,7 +127,7 @@ zu_client <- function(base_url = NULL, headers = NULL, query = NULL,
                       max_body = NULL, user_agent = NULL, check = NULL,
                       decode = NULL, transport = zu_native_transport(),
                       pool = zu_pool(), retry = NULL, middleware = NULL,
-                      hooks = NULL, proxy = NULL) {
+                      hooks = NULL, proxy = NULL, tls = NULL) {
   structure(
     list(
       base_url   = base_url,
@@ -138,6 +142,7 @@ zu_client <- function(base_url = NULL, headers = NULL, query = NULL,
       decode     = decode,
       retry      = retry,
       proxy      = proxy,
+      tls        = tls,
       transport  = transport,
       pool       = pool,
       # §31.13: NOT policy. Middleware and hooks are user-supplied behaviour

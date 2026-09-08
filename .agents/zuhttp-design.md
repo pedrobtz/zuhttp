@@ -64,6 +64,7 @@ Firm decisions and open questions were previously indistinguishable in this docu
 | D-46 | The body path lives in `zu_body.c`, not the engine, so it is mock-testable | **Accepted** 2026-09-08 — S17 | 27, 50.1 |
 | D-47 | A callback is caught on **error and interrupt only**, not on every condition | **Accepted** 2026-09-08 — S17 | 27.3 |
 | D-48 | Proxying is disabled with `proxy = FALSE`, **not** `NULL` (§31.9 owns NULL) | **Accepted** 2026-09-08 — S10 | 20.1, 31.9 |
+| D-49 | `verify` and `ca_file` stay merged policy arguments; `zu_tls()` carries the rest | **Accepted** 2026-09-08 | 14.1, 31.9, 31.13 |
 
 ---
 
@@ -873,11 +874,17 @@ trust           = "system"
 `zuhttp` must never default to disabling verification, and must not offer a single "insecure" switch that disables both peer and hostname checking without naming what it turns off.
 
 ```r
-zu_request(
-  "https://example.com",
-  tls = zu_tls(verify = TRUE, ca = "system")
-)
+zu_get("https://example.com", tls = zu_tls(ca_extra = "corporate-root.pem"))
 ```
+
+**D-49 corrects this section's example.** `verify` is *not* a `zu_tls()`
+field. It is already a merged policy argument (§31.9) on both the client and
+the request, and `ca_file` likewise; putting either inside `zu_tls()` as well
+would give "is this connection verified?" two answers, which is the "it cannot
+be both" mistake §31.13 names for `retry`. `zu_tls()` carries what has no
+other home: `ca_extra`, `pins`, `revocation` and `min_version`. The engine
+takes the trust configuration from `zu_tls()` and then lets the two policy
+arguments win, so there is exactly one authority for each field.
 
 #### 14.2 Custom CA semantics
 
@@ -910,6 +917,14 @@ SecTrustSetAnchorCertificatesOnly(trust, replace ? true : false);   /* false => 
 Proven by test: with a locally generated CA supplied additively, a public host still validates through system trust; with the same CA supplied as a replacement, the public host is correctly rejected. Both `ca_extra` and `ca_file` semantics are therefore implementable and distinguishable.
 
 This also gives §50.5 a way to test custom-CA handling **without modifying the developer's or CI machine's Keychain**, which removes the main obstacle noted in §62 Q11.
+
+**Reachable from R as of 2026-09-08.** Until then none of §14 was: `grep
+'ca_file|ca_extra|zu_tls(' R/` returned nothing, so every semantic this
+section defines was implemented in C and unreachable. `test-tls.R` now states
+the paragraph above as a test — the *same* locally generated CA supplied both
+ways, so the only variable is which argument it went to: `ca_extra` and a
+public host still validates, `ca_file` and the same host is rejected with
+`zu_tls_certificate_error`.
 
 #### 14.4 Certificate pinning
 

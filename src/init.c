@@ -484,11 +484,12 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
                          SEXP header_values, SEXP body, SEXP timeout_ms,
                          SEXP max_redirects, SEXP verify, SEXP max_body,
                          SEXP user_agent, SEXP decode, SEXP pool,
-                         SEXP path, SEXP callback, SEXP proxy) {
+                         SEXP path, SEXP callback, SEXP proxy, SEXP tls) {
     zu_get_opts o;
     zu_req_spec spec;
     cb_ctx cb;
     zu_sink cb_sink;
+    zu_tls_config tlscfg;
     zu_result r;
     zu_error e;
     zu_code rc;
@@ -566,6 +567,44 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
      * failed transfer never leaves a truncated file at the target path. The
      * engine deliberately does not own this sink — committing or discarding
      * depends on the outcome, and only this frame sees it. */
+    /* §14. Built here rather than in R so there is one definition of what a
+     * TLS configuration is; the R layer validates paths, where the error can
+     * name which of ca_file and ca_extra was wrong. */
+    if (tls != R_NilValue && Rf_isVectorList(tls)) {
+        SEXP names = Rf_getAttrib(tls, R_NamesSymbol);
+        R_xlen_t i, n = Rf_xlength(tls);
+        zu_tls_config_init(&tlscfg);
+        for (i = 0; i < n; i++) {
+            const char *nm = (names == R_NilValue) ? ""
+                             : Rf_translateCharUTF8(STRING_ELT(names, i));
+            SEXP v = VECTOR_ELT(tls, i);
+            if (v == R_NilValue) continue;
+            if (strcmp(nm, "ca_file") == 0 && Rf_isString(v) && Rf_length(v) == 1) {
+                tlscfg.ca_file = Rf_translateCharUTF8(STRING_ELT(v, 0));
+                tlscfg.source  = ZU_TRUST_FILE;   /* §14.2: REPLACES */
+            } else if (strcmp(nm, "ca_extra") == 0 && Rf_isString(v) && Rf_length(v) == 1) {
+                /* §14.2: ADDS. Deliberately does NOT touch `source`, which is
+                 * the whole difference between the two arguments. */
+                tlscfg.ca_extra_file = Rf_translateCharUTF8(STRING_ELT(v, 0));
+            } else if (strcmp(nm, "pins") == 0 && Rf_isString(v) && Rf_length(v) > 0) {
+                R_xlen_t j, np = Rf_xlength(v);
+                const char **pins = (const char **)R_alloc((size_t)np, sizeof(char *));
+                for (j = 0; j < np; j++)
+                    pins[j] = Rf_translateCharUTF8(STRING_ELT(v, j));
+                tlscfg.pins   = pins;
+                tlscfg.n_pins = (size_t)np;
+            } else if (strcmp(nm, "revocation") == 0) {
+                tlscfg.revocation = (Rf_asLogical(v) == TRUE);
+            } else if (strcmp(nm, "min_version") == 0) {
+                int mv = Rf_asInteger(v);
+                if (mv == 12 || mv == 13) tlscfg.min_version = mv;
+            }
+        }
+        o.tls = &tlscfg;
+        /* One place names a replacement CA (§26.1's key reads it from here). */
+        if (tlscfg.ca_file) o.ca_file = tlscfg.ca_file;
+    }
+
     memset(&cb, 0, sizeof cb);
     if (Rf_isFunction(callback)) {
         memset(&cb_sink, 0, sizeof cb_sink);
@@ -741,7 +780,7 @@ static const R_CallMethodDef call_methods[] = {
     {"C_zu_redact_form",       (DL_FUNC) &C_zu_redact_form,       2},
     {"C_zu_is_secret_header",  (DL_FUNC) &C_zu_is_secret_header,  2},
     {"C_zu_is_secret_param",   (DL_FUNC) &C_zu_is_secret_param,   2},
-    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          15},
+    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          16},
     {"C_zu_pool_new",          (DL_FUNC) &C_zu_pool_new,          3},
     {"C_zu_pool_valid",        (DL_FUNC) &C_zu_pool_valid,        1},
     {"C_zu_pool_stats",        (DL_FUNC) &C_zu_pool_stats,        1},

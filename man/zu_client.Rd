@@ -20,7 +20,8 @@ zu_client(
   retry = NULL,
   middleware = NULL,
   hooks = NULL,
-  proxy = NULL
+  proxy = NULL,
+  tls = NULL
 )
 }
 \arguments{
@@ -67,6 +68,8 @@ package default", which for a proxy is "consult the environment". \code{FALSE}
 is the only spelling that can mean "definitely do not proxy" without
 making this one argument an exception to a rule every other policy
 argument follows.}
+
+\item{tls}{Certificate trust settings from \code{\link[=zu_tls]{zu_tls()}}.}
 }
 \value{
 A \code{zu_client} object.

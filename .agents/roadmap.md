@@ -325,9 +325,28 @@ The reference implementation of the §13.1 engine/trust split. Hostname verifica
 
 **Exit criteria**
 
-- [ ] The full §50.5 certificate matrix passes with distinguishable condition classes.
-- [ ] `ca_extra` adds to system trust; `ca_file` replaces it. Both proven by test.
-- [ ] Pin match and mismatch both behave, and pinning does not bypass chain verification.
+- [ ] The full §50.5 certificate matrix passes with distinguishable condition
+      classes. **Unblocked 2026-09-08**: §14's configuration is now reachable
+      from R, which it was not before — none of `ca_file`, `ca_extra`, `pins`,
+      `revocation` or `min_version` had an R-level spelling, so the matrix
+      could not have been written whatever server it ran against. What remains
+      is the local TLS server and the generated certificate set.
+- [x] `ca_extra` adds to system trust; `ca_file` replaces it. Both proven by
+      test — **2026-09-08**, once §14 became reachable from R at all. The same
+      locally generated CA is supplied both ways, so the only variable is
+      which argument it went to: `ca_extra` and a public host still
+      validates; `ca_file` and the same host is rejected. That is §14.3's
+      claim stated as a test rather than as prose.
+- [ ] Pin match and mismatch both behave, and pinning does not bypass chain
+      verification. **Reachable from R as of 2026-09-08** (`zu_tls(pins = )`),
+      and asserted to never silently do nothing: a build either enforces the
+      pin or raises `zu_tls_pin_error`, and a *successful* response to a
+      pinned request is a test failure. Match/mismatch against a real pin
+      still needs the §50.5 local server. On macOS the backend refuses to pin
+      at all, deliberately — Security.framework will not yield the
+      SubjectPublicKeyInfo without hand-parsing DER, and "a pin that silently
+      checks the wrong bytes is worse than no pin" — so this criterion cannot
+      be ticked there without reversing that decision.
 
 ### S8 · Schannel — ✅ **COMPLETE 2026-09-08 (TLS 1.2)**
 
@@ -381,7 +400,12 @@ Implements the S0-validated design: portable engine + `SecTrustEvaluateWithError
 
 **Exit criteria** — S7's, plus the three the spike created:
 
-- [ ] Same §50.5 matrix as S7, same condition classes.
+- [ ] Same §50.5 matrix as S7, same condition classes. Unblocked with S7's —
+      see there. Two of this backend's answers are already asserted from R:
+      TLS 1.3 is **refused rather than downgraded** (S0 finding F-1: Secure
+      Transport has no `kTLSProtocol13`, and silently giving a caller 1.2 when
+      they asked for 1.3 is weakening a security setting), and pinning refuses
+      rather than pretending.
 - [ ] **A CRAN-viable engine is identified and building** (R-13). Homebrew OpenSSL is not an answer; this is the stage's real risk, not the TLS code.
 - [ ] `SSL_VERIFY_PEER` set, with a test proving an invalid certificate aborts the handshake (F-3).
 - [ ] `zu_tls(revocation = TRUE)` works and is off by default (F-4).
@@ -933,6 +957,32 @@ User docs per §55: TLS backend and trust per OS, proxy behavior, timeout semant
 
 - [ ] Three R users unfamiliar with the package each write a working GET and JSON POST within 5 minutes using only the reference index (§61.11).
 - [ ] Every documented limitation from the design doc appears in user-facing help — especially DNS non-interruptibility (§25.4) and `ca_file` replacing rather than adding (§14.2).
+
+### S-unassigned · §14 TLS configuration reaches R — ✅ **DONE 2026-09-08**
+
+Not owned by a stage either, and it was blocking both S7 and S9. **None of
+§14 was reachable from R**: `grep 'ca_file|ca_extra|zu_tls(' R/` returned
+nothing, and `zu_get_opts` carried only `ca_file`, itself unexposed. So the
+§50.5 matrix could not have been written whatever server it ran against —
+there was no way to ask for a custom CA, a pin, revocation or a minimum
+version.
+
+`zu_tls(ca_file, ca_extra, pins, revocation, min_version)`, threaded through
+the engine as a pointer to one caller-owned `zu_tls_config` so there is a
+single definition of what a TLS configuration is.
+
+**D-49**: `verify` and `ca_file` stay merged policy arguments and are *not*
+`zu_tls()` fields, though §14.1's example showed `zu_tls(verify = )`. Two
+places to set "is this connection verified?" is the "it cannot be both"
+mistake §31.13 already names for `retry`. §14.1 corrected.
+
+**§26.1's key grew with it, in the same commit**, as the note S16 left there
+required. Without that, a request asking for a pin draws the connection an
+unpinned request established and the handshake — and with it the pin check —
+never runs. The pin is not bypassed by a flaw in pinning; it is bypassed by
+never being reached. `test-tls.R` asserts exactly that: a *successful*
+response to a pinned request is a failure. Dropping the TLS fields from the
+key turns it into a 200.
 
 ### S-unassigned · `zu_info()` (§39) — ✅ **DONE 2026-09-08**
 

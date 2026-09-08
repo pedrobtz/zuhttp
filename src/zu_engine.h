@@ -29,6 +29,7 @@
 #include "zu_pool.h"
 #include "zu_sink.h"
 #include "zu_proxy.h"
+#include "zu_tls.h"
 
 /* A request the engine can perform. Headers are parallel arrays rather than a
  * zu_headers, so the R layer can pass them without building one — the engine
@@ -47,6 +48,18 @@ typedef struct {
     int         max_redirects;   /* §63.2 slice ships 1; 0 disables */
     int         verify;          /* TLS peer + hostname; default 1 (§14.1) */
     const char *ca_file;         /* replaces system trust when set (D-12) */
+
+    /* §14. The rest of the trust configuration: ca_extra, pins, revocation,
+     * minimum version. NULL means the §14.1 defaults.
+     *
+     * A pointer to a caller-owned config rather than copies of its fields,
+     * so there is one definition of what a TLS configuration IS. `verify`
+     * above stays authoritative for verify_peer/verify_hostname — it is
+     * already a merged policy argument (§31.9), and letting zu_tls() carry it
+     * too would be the "it cannot be both" mistake §31.13 names. `ca_file`
+     * above likewise stays the one place a replacement CA is named; a
+     * `ca_file` inside `tls` would be a second. */
+    const zu_tls_config *tls;
     uint64_t    max_body;        /* §40 cap on the decoded body; 0 = 16 MiB */
     int         no_decode;       /* §21.2: leave Content-Encoding alone and
                                   * hand back the wire bytes. Negated so that

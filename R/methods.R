@@ -56,6 +56,7 @@ one_shot <- function(method, url, query, headers, policy, client,
 #' @param user_agent `User-Agent` to send.
 #' @param retry A [zu_retry()] policy for this request. Overrides the
 #'   client's; `NULL` inherits it (§31.9).
+#' @param tls Certificate trust settings from [zu_tls()] for this request.
 #' @param proxy Proxy URL for this request, or `FALSE` for a direct
 #'   connection. See [zu_client()] for why disabling is `FALSE`, not `NULL`.
 #' @param callback A function of one argument called with each decoded chunk
@@ -89,7 +90,7 @@ zu_get <- function(url, query = NULL, headers = NULL, timeout = NULL,
                    redirects = NULL, verify = NULL, max_body = NULL,
                    user_agent = NULL, check = NULL, decode = NULL,
                    retry = NULL, path = NULL, callback = NULL,
-                   proxy = NULL, client = zu_default_client()) {
+                   proxy = NULL, tls = NULL, client = zu_default_client()) {
   one_shot("GET", url, query, headers, collect_policy(environment()), client,
            path = path, callback = callback)
 }
@@ -100,7 +101,7 @@ zu_head <- function(url, query = NULL, headers = NULL, timeout = NULL,
                     redirects = NULL, verify = NULL, max_body = NULL,
                     user_agent = NULL, check = NULL, decode = NULL,
                     retry = NULL, path = NULL, callback = NULL,
-                   proxy = NULL, client = zu_default_client()) {
+                   proxy = NULL, tls = NULL, client = zu_default_client()) {
   one_shot("HEAD", url, query, headers, collect_policy(environment()), client,
            path = path, callback = callback)
 }
@@ -111,7 +112,7 @@ zu_post <- function(url, query = NULL, headers = NULL, body = NULL, json = NULL,
                     form = NULL, file = NULL, timeout = NULL, redirects = NULL,
                     verify = NULL, max_body = NULL, user_agent = NULL,
                     check = NULL, decode = NULL, retry = NULL, path = NULL, callback = NULL,
-                   proxy = NULL, client = zu_default_client()) {
+                   proxy = NULL, tls = NULL, client = zu_default_client()) {
   one_shot("POST", url, query, headers, collect_policy(environment()), client,
            body = body, json = json, form = form, file = file, path = path, callback = callback)
 }
@@ -122,7 +123,7 @@ zu_put <- function(url, query = NULL, headers = NULL, body = NULL, json = NULL,
                    form = NULL, file = NULL, timeout = NULL, redirects = NULL,
                    verify = NULL, max_body = NULL, user_agent = NULL,
                    check = NULL, decode = NULL, retry = NULL, path = NULL, callback = NULL,
-                   proxy = NULL, client = zu_default_client()) {
+                   proxy = NULL, tls = NULL, client = zu_default_client()) {
   one_shot("PUT", url, query, headers, collect_policy(environment()), client,
            body = body, json = json, form = form, file = file, path = path, callback = callback)
 }
@@ -133,7 +134,7 @@ zu_patch <- function(url, query = NULL, headers = NULL, body = NULL, json = NULL
                      form = NULL, file = NULL, timeout = NULL, redirects = NULL,
                      verify = NULL, max_body = NULL, user_agent = NULL,
                      check = NULL, decode = NULL, retry = NULL, path = NULL, callback = NULL,
-                   proxy = NULL, client = zu_default_client()) {
+                   proxy = NULL, tls = NULL, client = zu_default_client()) {
   one_shot("PATCH", url, query, headers, collect_policy(environment()), client,
            body = body, json = json, form = form, file = file, path = path, callback = callback)
 }
@@ -145,7 +146,7 @@ zu_delete <- function(url, query = NULL, headers = NULL, body = NULL,
                       redirects = NULL, verify = NULL, max_body = NULL,
                       user_agent = NULL, check = NULL, decode = NULL,
                       retry = NULL, path = NULL, callback = NULL,
-                   proxy = NULL, client = zu_default_client()) {
+                   proxy = NULL, tls = NULL, client = zu_default_client()) {
   one_shot("DELETE", url, query, headers, collect_policy(environment()), client,
            body = body, json = json, form = form, file = file, path = path, callback = callback)
 }
