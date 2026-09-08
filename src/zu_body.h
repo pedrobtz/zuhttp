@@ -28,6 +28,7 @@ typedef struct {
     int        inflating;
     zu_buffer  staging;     /* decoded bytes, drained to the sink each pass */
     uint64_t   raw_seen;    /* pre-decode, so LENGTH framing can find its end */
+    uint64_t   max_body;    /* §40; checked BEFORE the sink sees a byte */
 } zu_body_pipe;
 
 /* Reads Content-Encoding from `h` and, when it decodes, REMOVES that header

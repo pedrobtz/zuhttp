@@ -8,7 +8,7 @@ import shutil
 import zlib
 
 TARGETS = ("response", "chunked", "headers", "uri", "redirect", "inflate",
-           "proxy", "redact")
+           "proxy", "redact", "body")
 
 README = """\
 Curated fuzz seeds (design §43, §50.3).
@@ -161,6 +161,40 @@ def main():
     for name in ("gzip", "deflate", "br", "identity", "GZIP", "gzip, deflate", ""):
         fn = "inflate/enc_" + (name or "empty").replace(", ", "_")
         w(fn, b"\x02" + name.encode())
+
+    # --- body (§27, §21, §40) ------------------------------------------
+    #
+    # The first byte selects the shape: bits 0-1 the framing, bits 2-3 the
+    # Content-Encoding, bit 4 whether decoding is off. One corpus therefore
+    # covers every combination the engine can build.
+    #
+    #   framing:  0 LENGTH=size  1 LENGTH=oversized  2 CHUNKED  3 UNTIL_CLOSE
+    #   encoding: 0 gzip  1 deflate  2 br (unsupported)  3 identity
+    IDENT_CLOSE = 0x0F      # identity, read to close
+    IDENT_CHUNK = 0x0E      # identity, chunked
+    DEFLATE_LEN = 0x04      # deflate, LENGTH = size
+    DEFLATE_CLOSE = 0x07    # deflate, read to close
+
+    body_payload = b"hello " * 200
+    w("body/identity-small", bytes([IDENT_CLOSE]) + b"hello world")
+    w("body/empty", bytes([IDENT_CLOSE]))
+    # The §40 cap is 64 KB in the target: one seed under it, one exactly on
+    # it, one past it. The last is the regression for the bug this target
+    # found on its first run — the sink was handed a whole read chunk past
+    # the cap before the check fired.
+    w("body/identity-under-cap", bytes([IDENT_CLOSE]) + b"B" * 60000)
+    w("body/regress-identity-over-cap", bytes([IDENT_CLOSE]) + b"C" * 131072)
+    w("body/deflate-small", bytes([DEFLATE_LEN]) + zlib.compress(body_payload))
+    w("body/deflate-truncated", bytes([DEFLATE_LEN]) + zlib.compress(body_payload)[:20])
+    # A bomb through the streaming path: the cap must hold during inflation,
+    # not after it (§21.4), and now also before the sink sees a byte (§40).
+    w("body/deflate-bomb", bytes([DEFLATE_CLOSE]) + zlib.compress(b"\x00" * (4 << 20)))
+    w("body/brotli-unsupported", bytes([0x08]) + b"anything")
+    w("body/chunked-ok", bytes([IDENT_CHUNK]) + b"3\r\nabc\r\n0\r\n\r\n")
+    w("body/chunked-bad-size", bytes([IDENT_CHUNK]) + b"zzzz\r\n")
+    w("body/chunked-huge-size", bytes([IDENT_CHUNK]) + b"ffffffffffffffff\r\nx")
+    w("body/chunked-trailer", bytes([IDENT_CHUNK]) + b"3\r\nabc\r\n0\r\nX-T: 1\r\n\r\n")
+    w("body/chunked-truncated", bytes([IDENT_CHUNK]) + b"5\r\nab")
 
     with open(os.path.join("corpus", "README"), "w") as f:
         f.write(README)

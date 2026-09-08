@@ -848,6 +848,12 @@ Rtools, where libFuzzer does not exist).
       parse — and so is a hand-rolled scanner over attacker-controlled bytes.
       Its assertion is the security property: no userinfo may survive into
       the output.
+
+      **A ninth, `body`, was added 2026-09-08** for the streaming path S17
+      introduced — every response body passes through it, and S17 moved the
+      §21.4/§40 limit logic into a streaming loop, which is exactly when a
+      limit check drifts. Its assertion is the limit itself: the sink must
+      never receive more than `max_body`.
 - [x] Warnings-as-errors green on all platforms (already enforced by
       `c-core.yaml`; the fuzz targets add no project-owned code).
 - [ ] 24 h per target with zero crashes and zero sanitizer reports. **Partial:**
@@ -862,6 +868,21 @@ inflate chunk, so a 1 MB `max_decompressed_bytes` delivered 1 MB + 16 KB. The
 figure a caller sized memory from was therefore not a bound. Fixed by bounding
 the zlib output window to the remaining allowance and never delivering past
 the cap; `out_total <= cap` is now exact, and there are three regression tests.
+
+**And then the same bug again, one layer out.** The `body` target aborted on
+its first seed: `zu_body_read()` checked `written > max_body` at the top of
+the loop, i.e. *after* a chunk had already gone to the sink. Reproduced from R
+in one line — `max_body = 1024` with `decode = FALSE` handed **1593 bytes** to
+a user's callback. The check was firing correctly and far too late; a byte a
+caller has already received cannot be un-received, and for a callback sink
+there is no abort that takes it back. Moved into `zu_body_pipe_feed()`, which
+refuses before writing, so the cap holds for every sink. Regression tests walk
+every cap from 1 to 30 across the read boundaries, plus the off-by-one in the
+other direction — a body *exactly* at the cap must still be delivered.
+
+That is the same mistake in two different functions, found the same way both
+times. It is a strong argument for the §43 rule that every new byte-handling
+path gets a target rather than a review.
 
 Two harness assertions were themselves wrong and worth recording, because both
 are easy to repeat: asserting a resolved `Location` has no userinfo at all

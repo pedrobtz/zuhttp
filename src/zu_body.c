@@ -21,6 +21,7 @@ zu_code zu_body_pipe_init(zu_body_pipe *p, zu_sink *sink, zu_headers *h,
     zu_encoding kind;
     memset(p, 0, sizeof *p);
     p->sink = sink;
+    p->max_body = max_body;
 
     kind = no_decode ? ZU_ENC_IDENTITY
                      : zu_encoding_parse(zu_headers_get(h, "Content-Encoding"));
@@ -52,13 +53,39 @@ void zu_body_pipe_free(zu_body_pipe *p) {
     p->inflating = 0;
 }
 
+/* §40's cap, enforced BEFORE the sink sees anything.
+ *
+ * That placement is the whole point. Checking afterwards — "did we go over?"
+ * — is how a 1 KB max_body handed 1593 bytes to a user's callback: the check
+ * fired correctly, but a byte a caller has already received cannot be
+ * un-received. A bound someone sizes a buffer or a disk quota from has to
+ * hold before the write, not after it. Found by fuzz_body on its first seed;
+ * the identical mistake was found in zu_inflate by fuzzing at S18, which is
+ * why the compressed path below is already exact. */
+static zu_code cap_check(const zu_body_pipe *p, size_t n, zu_error *err) {
+    uint64_t written = p->sink ? p->sink->written : 0;
+    if (p->max_body == 0) return ZU_OK;              /* 0 = no cap */
+    if (written + (uint64_t)n <= p->max_body) return ZU_OK;
+    zu_error_set(err, ZU_ERR_BODY_LIMIT, ZU_PHASE_READ,
+                 "response body exceeds the configured limit");
+    return ZU_ERR_BODY_LIMIT;
+}
+
 /* Hand one run of wire bytes onward, inflating first when the response was
  * compressed. The staging buffer is truncated rather than freed each pass, so
  * it settles at the size of the largest single expansion and stops growing. */
 zu_code zu_body_pipe_feed(zu_body_pipe *p, const void *data, size_t n, zu_error *err) {
     zu_code rc;
     if (n == 0) return ZU_OK;
-    if (!p->inflating) return zu_sink_write(p->sink, data, n, err);
+    if (!p->inflating) {
+        /* Identity: output length equals input length, so one check up front
+         * makes the cap exact. The compressed branch does not need it —
+         * zu_inflate bounds its own output window to the remaining allowance
+         * and never emits past it (§21.4). */
+        rc = cap_check(p, n, err);
+        if (rc != ZU_OK) return rc;
+        return zu_sink_write(p->sink, data, n, err);
+    }
 
     p->staging.len = 0;
     rc = zu_inflate_run(&p->inflate, data, n, &p->staging, err);
@@ -133,15 +160,13 @@ zu_code zu_body_read(zu_stream *s, const zu_framing *fr, zu_body_pipe *p,
         size_t take;
 
         if (fr->kind == ZU_FRAME_LENGTH && p->raw_seen >= fr->length) break;
-        /* §27.1: the cap applies to every sink, file included — an unbounded
-         * download to disk is still a denial of service, just against a
-         * different resource. Measured on what the sink has taken, because
-         * there may no longer be a buffer to measure. */
-        if (p->sink && p->sink->written > max_body) {
-            zu_error_set(err, ZU_ERR_BODY_LIMIT, ZU_PHASE_READ,
-                         "response body exceeds the configured limit");
-            return ZU_ERR_BODY_LIMIT;
-        }
+        /* No cap check here any more. It used to live at exactly this point,
+         * AFTER a chunk had already reached the sink, which made max_body
+         * something noticed rather than a bound enforced. zu_body_pipe_feed()
+         * refuses before writing, so reaching this line means the cap still
+         * holds. §27.1's rule that the cap covers every sink, file included,
+         * is satisfied there — where every sink's bytes pass.
+         */
         n = zu_stream_read(s, chunk, sizeof chunk, dl, err);
         if (n < 0) return err->code;
         if (n == 0) {

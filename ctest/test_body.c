@@ -232,6 +232,54 @@ void suite_body(void) {
         zu_headers_free(&h);
     }
 
+    /* --- §40: the cap is a BOUND, not a thing noticed afterwards ------- */
+
+    ZU_CASE("§40: the sink is never handed a byte past max_body");
+    {
+        /* Found by fuzz_body on its first seed, and reproducible from R: a
+         * max_body of 1024 handed 1593 bytes to a user's callback. The old
+         * check ran after a chunk had already been delivered, so it reported
+         * the overrun correctly and far too late. A byte a caller has already
+         * received cannot be un-received. */
+        static const zu_mock_step steps[] = {
+            { ZU_MOCK_DATA, "0123456789", 10, ZU_OK },
+            { ZU_MOCK_DATA, "0123456789", 10, ZU_OK },
+            { ZU_MOCK_DATA, "0123456789", 10, ZU_OK }
+        };
+        zu_sink *d;
+        int cap;
+        for (cap = 1; cap <= 30; cap++) {
+            d = zu_sink_discard();
+            ZU_CHECK(d != NULL);
+            zu_headers_init(&h);
+            (void)run_body(steps, 3, ZU_FRAME_UNTIL_CLOSE, 0, d, &h, 1,
+                           (uint64_t)cap, &e);
+            /* Exactly the promise §40 makes, at every cap around the read
+             * boundaries — not just at a convenient one. */
+            ZU_CHECK(d->written <= (uint64_t)cap);
+            zu_headers_free(&h);
+            zu_sink_free(d);
+        }
+    }
+
+    ZU_CASE("§40: a body exactly at the cap is delivered, not refused");
+    {
+        static const zu_mock_step steps[] = {
+            { ZU_MOCK_DATA, "0123456789", 10, ZU_OK }
+        };
+        zu_buffer b; zu_sink sink;
+        ZU_CHECK(zu_buf_init(&b, 8, 1 << 20));
+        zu_sink_memory_init(&sink, &b);
+        zu_headers_init(&h);
+        /* Off-by-one in the other direction: refusing a body that fits would
+         * make max_body mean "one less than it says". */
+        ZU_CHECK_EQ_INT(run_body(steps, 1, ZU_FRAME_LENGTH, 10, &sink, &h, 1,
+                                 10, &e), ZU_OK);
+        ZU_CHECK_EQ_INT((int)b.len, 10);
+        zu_headers_free(&h);
+        zu_buf_free(&b);
+    }
+
     /* --- §27: memory does not grow with the body ---------------------- */
 
 #if defined(ZU_POSIX)
