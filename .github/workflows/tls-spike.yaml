@@ -430,6 +430,23 @@ jobs:
         timeout-minutes: 3
         run: Rscript --vanilla -e 'library(zuhttp); cat("backend:", zu_tls_backend(), "\n"); stopifnot(identical(zu_tls_backend(), "schannel"))'
 
+      # R3 crashes with no output and the C harness passes at R's own flags, so
+      # reasoning has run out of road: get the actual faulting frame. Rtools
+      # ships gdb; if it is absent this step says so and does not fail the job,
+      # because the R3 step below is the real gate.
+      - name: Backtrace the crash under gdb
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          if ! command -v gdb >/dev/null 2>&1; then
+            echo "gdb not present in this Rtools; skipping"
+            exit 0
+          fi
+          gdb --batch -ex run -ex "bt 40" -ex "info registers" --args \
+            "$(R RHOME)/bin/x64/Rterm.exe" --vanilla --no-echo \
+            -e 'library(zuhttp); zu_get("https://example.com")' 2>&1 | tail -60
+
       - name: R3 one plain HTTPS request
         timeout-minutes: 5
         run: |
