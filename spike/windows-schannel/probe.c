@@ -1,6 +1,6 @@
 /*
  * zuhttp — Stage S1: Rtools / mingw-w64 Schannel header probe
- * See roadmap.md (S1) and zuhttp-design.md §47.4, Appendix B R-3.
+ * See .agents/roadmap.md (S1) and .agents/zuhttp-design.md §47.4, Appendix B R-3.
  *
  * Question: does the mingw-w64 SDK shipped with current Rtools expose the
  * declarations needed for a TLS 1.3-capable Schannel client, or must
@@ -131,7 +131,7 @@ int main(void) {
     if (missing == 0)
         printf("All probed declarations present. TLS 1.3 Schannel path is available.\n");
     else
-        printf("%d declaration(s) missing. See zuhttp-design.md Appendix B R-3:\n"
+        printf("%d declaration(s) missing. See .agents/zuhttp-design.md Appendix B R-3:\n"
                "zuhttp must declare them locally behind version guards, or ship\n"
                "Windows TLS 1.2-only for v1.\n", missing);
 

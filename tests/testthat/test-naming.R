@@ -1,4 +1,4 @@
-# Executable form of the naming decisions in zuhttp-design.md §1.1 (D-1, D-2).
+# Executable form of the naming decisions in .agents/zuhttp-design.md §1.1 (D-1, D-2).
 #
 # These have teeth from the first exported function onward, and they guard a
 # mistake that is cheap now and expensive after release: an export that masks

@@ -1,7 +1,7 @@
 ^zuhttp\.Rproj$
 ^\.Rproj\.user$
-^zuhttp-design\.md$
-^roadmap\.md$
+^\.agents$
+^CLAUDE\.md$
 ^spike$
 ^fuzz$
 ^\.github$
