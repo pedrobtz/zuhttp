@@ -486,6 +486,33 @@ jobs:
             Rscript --vanilla -e 'library(zuhttp); r <- zu_get("https://example.com"); cat("rscript status:", zu_resp_status(r), "\n")' || echo "  run $n exit=$?"
           done
 
+      # R2c made FOUR successful HTTPS requests reading only $status. R3 reads
+      # $tls_version and length($body) as well, and crashes. So the request is
+      # fine and the returned object is not: touching some element faults.
+      # Walk the elements one at a time, flushing after each, so the last line
+      # printed names the bad one.
+      - name: R2d which element of the response faults?
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          Rscript --vanilla -e '
+            f <- function(...) { cat(..., "\n"); flush.console() }
+            library(zuhttp)
+            r <- zu_get("https://example.com")
+            f("request returned")
+            f("typeof:", typeof(r))
+            f("length:", length(r))
+            f("names:", paste(names(r), collapse = ","))
+            f("1 status:", r[[1]])
+            f("2 headers length:", length(r[[2]]))
+            f("3 body typeof:", typeof(r[[3]]))
+            f("3 body length:", length(r[[3]]))
+            f("4 url:", r[[4]])
+            f("5 tls:", r[[5]])
+            f("6 redirects:", r[[6]])
+            f("ALL ELEMENTS OK")'
+
       - name: R3 one plain HTTPS request
         timeout-minutes: 5
         run: |
