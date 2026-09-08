@@ -57,6 +57,9 @@ Firm decisions and open questions were previously indistinguishable in this docu
 | D-39 | §42.1's default secret-parameter list extended for the cassette egress | **Accepted** 2026-09-08 — S14 | 42.1, 37 |
 | D-40 | A cassette's match key is computed from the **redacted** request | **Accepted** 2026-09-08 — S14 | 37 |
 | D-41 | Cassettes are written **uncompressed**, so a byte-level canary means something | **Accepted** 2026-09-08 — S14 | 37, 42.4 |
+| D-42 | Retrying is **off by default** (`attempts = 1`); `retry` is a merged policy field | **Accepted** 2026-09-08 — S13 | 33, 31.9 |
+| D-43 | Retry admissibility is decided **once**, before the first attempt | **Accepted** 2026-09-08 — S13 | 33.1 |
+| D-44 | The retry loop sits **inside** middleware: middleware sees one logical request | **Accepted** 2026-09-08 — S13 | 31.13 |
 
 ---
 
@@ -2705,6 +2708,42 @@ The stale-connection case is important and is why it is exempt from the attempt 
 #### 33.4 Observability
 
 Every retry emits a `before_retry` hook event (§35) carrying attempt number, the triggering condition, and the computed delay. A retry that is never surfaced is a latency mystery for whoever debugs it later.
+
+#### 33.5 How this landed (S13)
+
+The layer is R, above the transport, because a retry re-runs the whole
+transport call — including a mock or a cassette, which is what makes every
+retry test in the suite offline.
+
+**D-42, off by default.** `retry` is a policy field carrying
+`zu_retry(attempts = 1)`, so it takes part in §31.9's three-state merge and
+`retry = NULL` resets to "no retrying" rather than to the client's setting.
+§33 opens by warning that a client which silently replays a POST is a
+data-integrity bug; the default has to be the safe one, and `attempts` counts
+the first try so `1` reads as "no retrying" without arithmetic.
+
+**D-43, admissibility is decided once**, before the first attempt, not
+re-derived per failure. Whether a request may be replayed is a property of the
+request, and re-asking inside the loop invites a path where it answers
+differently on attempt three than on attempt one. The same reasoning makes
+`zu_body_not_replayable` fire eagerly: a caller who asked for retries on a
+body that cannot be replayed has a bug, and surfacing it only on the first
+failure would make that bug intermittent.
+
+**D-44, the retry loop is inside middleware.** `middleware = list(a, b)` wraps
+one *logical* request, not each attempt — `a` is entered once even when three
+attempts are made. The alternative (middleware inside the loop) would make a
+signing middleware re-sign per attempt, which sounds harmless until a
+signature carries a nonce.
+
+**On the interruptible sleep.** An early draft had an `interrupt_pending()`
+checkpoint in the sleep loop that always returned `FALSE`. It read as a
+mechanism and was not one. Ctrl-C responsiveness comes from `Sys.sleep()`,
+which R implements as an interruptible wait on every platform; the slice loop
+exists for the **deadline**, so a budget that expires during a long backoff
+cuts the wait short instead of being noticed after it. §25's checkpoint
+language applies to the C read loop, not here, and conflating the two produced
+a stub that made this function look more careful than it was.
 
 ### 34. Error Model
 

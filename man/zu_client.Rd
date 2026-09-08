@@ -16,7 +16,10 @@ zu_client(
   check = NULL,
   decode = NULL,
   transport = zu_native_transport(),
-  pool = zu_pool()
+  pool = zu_pool(),
+  retry = NULL,
+  middleware = NULL,
+  hooks = NULL
 )
 }
 \arguments{
@@ -48,6 +51,13 @@ tests.}
 
 \item{pool}{Connection reuse settings from \code{\link[=zu_pool]{zu_pool()}}, or \code{NULL} to open a
 fresh connection for every request.}
+
+\item{retry}{A \code{\link[=zu_retry]{zu_retry()}} policy. The default retries nothing.}
+
+\item{middleware}{A function of \verb{(req, next_fn)}, or a list of them,
+wrapping request execution (§31.13). The first is outermost.}
+
+\item{hooks}{Lifecycle observers from \code{\link[=zu_hooks]{zu_hooks()}}.}
 }
 \value{
 A \code{zu_client} object.

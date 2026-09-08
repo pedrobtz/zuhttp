@@ -29,7 +29,11 @@ zu_defaults <- function() {
     max_body   = 16 * 1024^2,
     user_agent = NULL,
     check      = TRUE,
-    decode     = TRUE
+    decode     = TRUE,
+    # Retrying is off by default (§33): attempts counts the FIRST try, so 1
+    # means "no retrying". A client that silently replayed requests would be
+    # the data-integrity bug §33 opens by warning about.
+    retry      = zu_retry(attempts = 1L)
   )
 }
 
@@ -74,6 +78,10 @@ collect_policy <- function(env = parent.frame()) {
 #'   tests.
 #' @param pool Connection reuse settings from [zu_pool()], or `NULL` to open a
 #'   fresh connection for every request.
+#' @param retry A [zu_retry()] policy. The default retries nothing.
+#' @param middleware A function of `(req, next_fn)`, or a list of them,
+#'   wrapping request execution (§31.13). The first is outermost.
+#' @param hooks Lifecycle observers from [zu_hooks()].
 #' @return A `zu_client` object.
 #'
 #' @details
@@ -103,7 +111,8 @@ zu_client <- function(base_url = NULL, headers = NULL, query = NULL,
                       timeout = NULL, redirects = NULL, verify = NULL,
                       max_body = NULL, user_agent = NULL, check = NULL,
                       decode = NULL, transport = zu_native_transport(),
-                      pool = zu_pool()) {
+                      pool = zu_pool(), retry = NULL, middleware = NULL,
+                      hooks = NULL) {
   structure(
     list(
       base_url   = base_url,
@@ -116,8 +125,15 @@ zu_client <- function(base_url = NULL, headers = NULL, query = NULL,
       user_agent = user_agent,
       check      = check,
       decode     = decode,
+      retry      = retry,
       transport  = transport,
-      pool       = pool
+      pool       = pool,
+      # §31.13: NOT policy. Middleware and hooks are user-supplied behaviour
+      # and observability; they do not take part in the §31.9 three-state
+      # merge, because "reset to the package default" is meaningless for a
+      # list of the caller's own functions.
+      middleware = check_middleware(middleware),
+      hooks      = hooks %||% list()
     ),
     class = "zu_client",
     # §26.5. The live pool is native state, so it does NOT belong in the list

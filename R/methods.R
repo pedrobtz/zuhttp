@@ -49,6 +49,8 @@ one_shot <- function(method, url, query, headers, policy, client,
 #' @param verify Verify the certificate and hostname. Leave this `TRUE`.
 #' @param max_body Maximum decoded body size in bytes.
 #' @param user_agent `User-Agent` to send.
+#' @param retry A [zu_retry()] policy for this request. Overrides the
+#'   client's; `NULL` inherits it (§31.9).
 #' @param check Raise a condition for 4xx and 5xx (§31.14). `FALSE` returns the
 #'   response whatever its status.
 #' @param decode Decompress transparently. `FALSE` returns the wire bytes and
@@ -70,7 +72,7 @@ NULL
 zu_get <- function(url, query = NULL, headers = NULL, timeout = NULL,
                    redirects = NULL, verify = NULL, max_body = NULL,
                    user_agent = NULL, check = NULL, decode = NULL,
-                   client = zu_default_client()) {
+                   retry = NULL, client = zu_default_client()) {
   one_shot("GET", url, query, headers, collect_policy(environment()), client)
 }
 
@@ -79,7 +81,7 @@ zu_get <- function(url, query = NULL, headers = NULL, timeout = NULL,
 zu_head <- function(url, query = NULL, headers = NULL, timeout = NULL,
                     redirects = NULL, verify = NULL, max_body = NULL,
                     user_agent = NULL, check = NULL, decode = NULL,
-                    client = zu_default_client()) {
+                    retry = NULL, client = zu_default_client()) {
   one_shot("HEAD", url, query, headers, collect_policy(environment()), client)
 }
 
@@ -88,7 +90,7 @@ zu_head <- function(url, query = NULL, headers = NULL, timeout = NULL,
 zu_post <- function(url, query = NULL, headers = NULL, body = NULL, json = NULL,
                     form = NULL, file = NULL, timeout = NULL, redirects = NULL,
                     verify = NULL, max_body = NULL, user_agent = NULL,
-                    check = NULL, decode = NULL, client = zu_default_client()) {
+                    check = NULL, decode = NULL, retry = NULL, client = zu_default_client()) {
   one_shot("POST", url, query, headers, collect_policy(environment()), client,
            body = body, json = json, form = form, file = file)
 }
@@ -98,7 +100,7 @@ zu_post <- function(url, query = NULL, headers = NULL, body = NULL, json = NULL,
 zu_put <- function(url, query = NULL, headers = NULL, body = NULL, json = NULL,
                    form = NULL, file = NULL, timeout = NULL, redirects = NULL,
                    verify = NULL, max_body = NULL, user_agent = NULL,
-                   check = NULL, decode = NULL, client = zu_default_client()) {
+                   check = NULL, decode = NULL, retry = NULL, client = zu_default_client()) {
   one_shot("PUT", url, query, headers, collect_policy(environment()), client,
            body = body, json = json, form = form, file = file)
 }
@@ -108,7 +110,7 @@ zu_put <- function(url, query = NULL, headers = NULL, body = NULL, json = NULL,
 zu_patch <- function(url, query = NULL, headers = NULL, body = NULL, json = NULL,
                      form = NULL, file = NULL, timeout = NULL, redirects = NULL,
                      verify = NULL, max_body = NULL, user_agent = NULL,
-                     check = NULL, decode = NULL, client = zu_default_client()) {
+                     check = NULL, decode = NULL, retry = NULL, client = zu_default_client()) {
   one_shot("PATCH", url, query, headers, collect_policy(environment()), client,
            body = body, json = json, form = form, file = file)
 }
@@ -119,7 +121,7 @@ zu_delete <- function(url, query = NULL, headers = NULL, body = NULL,
                       json = NULL, form = NULL, file = NULL, timeout = NULL,
                       redirects = NULL, verify = NULL, max_body = NULL,
                       user_agent = NULL, check = NULL, decode = NULL,
-                      client = zu_default_client()) {
+                      retry = NULL, client = zu_default_client()) {
   one_shot("DELETE", url, query, headers, collect_policy(environment()), client,
            body = body, json = json, form = form, file = file)
 }

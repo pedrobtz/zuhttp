@@ -21,6 +21,7 @@ zu_get(
   user_agent = NULL,
   check = NULL,
   decode = NULL,
+  retry = NULL,
   client = zu_default_client()
 )
 
@@ -35,6 +36,7 @@ zu_head(
   user_agent = NULL,
   check = NULL,
   decode = NULL,
+  retry = NULL,
   client = zu_default_client()
 )
 
@@ -53,6 +55,7 @@ zu_post(
   user_agent = NULL,
   check = NULL,
   decode = NULL,
+  retry = NULL,
   client = zu_default_client()
 )
 
@@ -71,6 +74,7 @@ zu_put(
   user_agent = NULL,
   check = NULL,
   decode = NULL,
+  retry = NULL,
   client = zu_default_client()
 )
 
@@ -89,6 +93,7 @@ zu_patch(
   user_agent = NULL,
   check = NULL,
   decode = NULL,
+  retry = NULL,
   client = zu_default_client()
 )
 
@@ -107,6 +112,7 @@ zu_delete(
   user_agent = NULL,
   check = NULL,
   decode = NULL,
+  retry = NULL,
   client = zu_default_client()
 )
 }
@@ -133,6 +139,9 @@ response whatever its status.}
 
 \item{decode}{Decompress transparently. \code{FALSE} returns the wire bytes and
 asks the server not to encode (§21.2).}
+
+\item{retry}{A \code{\link[=zu_retry]{zu_retry()}} policy for this request. Overrides the
+client's; \code{NULL} inherits it (§31.9).}
 
 \item{client}{A \code{zu_client}. Always named.}
 

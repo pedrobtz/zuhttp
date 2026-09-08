@@ -204,10 +204,23 @@ zu_perform <- function(req, client = zu_default_client()) {
     stop("`client` must be a zu_client(); got ", class(client)[[1]],
          call. = FALSE)
   r <- resolve_request(req, client)
+  hooks <- client$hooks %||% list()
 
   t0 <- proc.time()[["elapsed"]]
-  resp <- zu_transport_perform(client$transport, r)
+  # §24.3: `total` is a wall-clock budget for the WHOLE call — every redirect
+  # hop and every retry attempt, never reset between them. It is the only
+  # reading under which zu_get(url, timeout = 30) actually returns in 30s.
+  deadline_at <- t0 + r$resolved$timeout
+
+  # §31.13: middleware wraps request execution; the retry loop is inside it,
+  # so a user's middleware sees one logical request and not each attempt.
+  terminal <- function(rq) attempt_with_retries(rq, client, hooks, deadline_at)
+  resp <- compose_middleware(check_middleware(client$middleware), terminal)(r)
   elapsed <- proc.time()[["elapsed"]] - t0
+
+  if (!inherits(resp, "zu_response"))
+    stop("middleware must return a zu_response(); got ", class(resp)[[1]],
+         call. = FALSE)
 
   # Fields the transport should not have to fill in, and that a mock would
   # otherwise have to fake to keep the accessors honest.
@@ -217,6 +230,58 @@ zu_perform <- function(req, client = zu_default_client()) {
   resp$request <- r
   if (is.null(resp$redirects)) resp$redirects <- 0L
 
+  fire_hook(hooks, "after_response",
+            list(request = r, response = resp, attempt = resp$attempts %||% 1L))
   if (isTRUE(r$resolved$check)) zu_resp_check(resp)
+  resp
+}
+
+# §33.1. All three preconditions must hold, and each defaults to "no".
+#
+# Admissibility is decided ONCE, before the first attempt, and not re-derived
+# per failure: whether a request may be replayed is a property of the request,
+# and re-asking it inside the loop invites a code path where it answers
+# differently on attempt three than on attempt one.
+attempt_with_retries <- function(r, client, hooks, deadline_at) {
+  policy <- r$resolved$retry %||% zu_retry(attempts = 1L)
+  may_replay <- policy$attempts > 1L && zu_req_replay_safe(r)
+
+  # §33.1's third condition, and §28.2's promise to refuse rather than
+  # truncate. Raised eagerly: a caller who asked for retries on a body that
+  # cannot be replayed has a bug, and discovering it only on the first
+  # failure makes it intermittent.
+  if (may_replay && !zu_body_rewindable(r))
+    zu_stop("zu_body_not_replayable",
+            "this request's body cannot be replayed, so it cannot be retried",
+            url = r$url)
+
+  attempt <- 1L
+  repeat {
+    fire_hook(hooks, "before_request", list(request = r, attempt = attempt))
+    resp <- NULL; cnd <- NULL
+    resp <- tryCatch(zu_transport_perform(client$transport, r),
+                     zu_error = function(e) { cnd <<- e; NULL })
+
+    if (!may_replay || attempt >= policy$attempts) break
+    v <- retry_verdict(resp, cnd, policy)
+    if (!isTRUE(v$retry)) break
+
+    delay <- backoff_delay(policy, attempt, v$after)
+    # §33.3: check the budget BEFORE sleeping and fail now rather than sleep
+    # past the deadline. Without this, `timeout = 30` with three retries is a
+    # promise the client cannot keep.
+    left <- deadline_at - proc.time()[["elapsed"]]
+    if (left <= 0 || delay >= left) break
+
+    fire_hook(hooks, "before_retry",
+              list(request = r, attempt = attempt, delay = delay, why = v$why))
+    retry_sleep(delay, deadline_at)
+    attempt <- attempt + 1L
+    fire_hook(hooks, "after_retry", list(request = r, attempt = attempt))
+  }
+
+  # A condition that survived the loop is the caller's to see, unchanged.
+  if (is.null(resp)) stop(cnd)
+  resp$attempts <- attempt
   resp
 }

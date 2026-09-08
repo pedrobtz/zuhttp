@@ -132,12 +132,31 @@ raw_contains <- function(haystack, needle) {
     length(grepRaw(n, haystack, fixed = TRUE, all = FALSE)) > 0
 }
 
+# Every string reachable from `x`, at any depth, plus the names along the way.
+#
+# The shallow version of this walked one level and leaned on print(), which is
+# how the hook-payload arm below came to pass while redaction was disabled: a
+# payload is list(request = <zu_request>, ...), the request is not atomic so
+# the one-level unlist() skipped it, and print() of a zu_request redacts on
+# the way out. The canary was inspecting the redacted rendering of the thing
+# it was supposed to be checking. Depth is not a refinement here — without it
+# the assertion does not touch the value at all.
+deep_strings <- function(x) {
+  if (is.function(x) || is.environment(x) || is.null(x)) return(character())
+  if (is.raw(x)) {
+    # Raw bodies may hold NULs, which rawToChar() refuses; drop them rather
+    # than lose the whole vector, since a credential is never a NUL.
+    return(rawToChar(x[x != as.raw(0)]))
+  }
+  if (is.atomic(x)) return(c(names(x), as.character(x)))
+  if (is.list(x))
+    return(c(names(x), unlist(lapply(x, deep_strings), use.names = FALSE)))
+  character()
+}
+
 expect_no_canary <- function(x, label) {
-  txt <- paste(utils::capture.output(print(x)), collapse = "\n")
-  txt <- paste(txt, paste(unlist(lapply(x, function(e) {
-    if (is.atomic(e)) as.character(e) else ""
-  })), collapse = " "))
-  expect_false(grepl(CANARY, txt, fixed = TRUE),
+  txt <- c(utils::capture.output(print(x)), deep_strings(x))
+  expect_false(any(grepl(CANARY, txt, fixed = TRUE)),
                info = paste("canary leaked via", label))
 }
 
@@ -232,9 +251,28 @@ test_that("the canary does not reach a cassette on disk (§37, §42.4)", {
   expect_match(rawToChar(rec[[1]]$request$body), "page=2", fixed = TRUE)
 })
 
+test_that("the canary does not reach a hook payload (§35.3, §42.4)", {
+  # §35.3: "All hook payloads pass through the redaction filter in §42 before
+  # the handler sees them." A trace handler that logs request headers must not
+  # be the mechanism by which a bearer token reaches a log file — which is the
+  # whole point, since logging is exactly what hooks are for.
+  seen <- list()
+  cli <- zu_client(
+    headers   = c(Authorization = paste("Bearer", CANARY)),
+    transport = zu_mock_transport(function(r) zu_response(200L)),
+    hooks     = zu_hooks(before_request = function(p) seen$before <<- p,
+                         after_response = function(p) seen$after  <<- p))
+  invisible(zu_get(paste0("https://h/x?api_key=", CANARY), client = cli))
+
+  expect_length(seen, 2L)
+  expect_no_canary(seen$before, "the before_request hook payload")
+  expect_no_canary(seen$after, "the after_response hook payload")
+})
+
 test_that("canary coverage of the remaining egresses is tracked, not assumed", {
-  # Recordings are covered as of S14 (above). Verbose transport logging is a
-  # real §42.2 egress that still does not exist; it must fail loudly as "not
+  # Recordings joined the canary in S14, hook payloads in S13. Verbose
+  # transport logging is a real §42.2 egress that still does not exist at all
+  # — there is no verbose mode to trace — so it must fail loudly as "not
   # covered" rather than quietly pass.
-  skip("verbose transport logging arrives with S35 event hooks")
+  skip("verbose transport logging is not implemented; no egress to test yet")
 })

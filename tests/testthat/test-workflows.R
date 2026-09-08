@@ -75,7 +75,23 @@ test_that("4. a package builds a request without performing it", {
 })
 
 test_that("5. retried idempotent request", {
-  skip("retry policy is S13 (zu_retry, zu_req_retry); no half-implementation here")
+  # §31.16 workflow 5, unblocked by S13. The point of the workflow is that a
+  # caller writes one line and gets bounded, safe retrying — not that the
+  # mechanism exists somewhere.
+  n <- 0L
+  flaky <- zu_mock_transport(function(req) {
+    n <<- n + 1L
+    if (n < 3L) zu_response(503L) else zu_response(200L, body = '{"ok":true}',
+                                                  headers = c("Content-Type" = "application/json"))
+  })
+  r <- zu_get("https://api.example.com/things",
+              retry = zu_retry(attempts = 3, base = 0.01),
+              client = zu_client(transport = flaky))
+
+  expect_identical(zu_resp_status(r), 200L)
+  expect_true(zu_resp_json(r)$ok)
+  expect_identical(n, 3L)
+  expect_identical(r$attempts, 3L)
 })
 
 test_that("6. streaming download", {

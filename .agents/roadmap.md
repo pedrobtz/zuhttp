@@ -2,7 +2,7 @@
 
 **Companion to:** [zuhttp-design.md](zuhttp-design.md)
 **Status:** Draft
-**Last updated:** 2026-09-08 · **S0–S9, S11, S12, S15 complete or explicitly partial; S14 and S16 COMPLETE**
+**Last updated:** 2026-09-08 · **Track D complete (S11–S14); S16 complete; S12/S15 explicitly partial**
 **Total estimate:** 41–48 person-weeks (§64 of the design doc, plus spikes)
 
 ---
@@ -43,7 +43,7 @@ graph TD
 
     S11["S11 · R API surface<br/>COMPLETE — 11/13 workflows"]
     S12["S12 · Conditions + redaction<br/>PARTIAL — canary incomplete"]
-    S13["S13 · Retry, middleware, hooks"]
+    S13["S13 · Retry, middleware, hooks<br/>COMPLETE"]
     S14["S14 · R transports<br/>COMPLETE — mock + cassettes"]
 
     S15["S15 · Cancellation + unwind"]
@@ -512,24 +512,68 @@ one definition:
       canary that looks complete is worse than one that says what it does not
       cover.
 
-      S14 also found that one arm of this canary was **vacuous**: it asserted
-      a form body's `client_secret` did not appear in a printed request, but
-      the printed form never renders the body. Fixed there. The lesson is the
-      one §50 already states — a canary that cannot fail is worse than no
-      canary, because it is counted as coverage.
+      **Hook payloads joined the canary in S13.**
 
-### S13 · Retry, middleware, hooks
+      Two arms of this canary turned out to be **vacuous**, both found by
+      stages that came later. S14: it asserted a form body's `client_secret`
+      did not appear in a printed request, but the printed form never renders
+      the body. S13: `expect_no_canary()` walked one level and leaned on
+      `print()`, so a nested payload was checked only through a rendering that
+      had already redacted it. Both fixed; the helper now walks to any depth.
+      The lesson is the one §50 already states — a canary that cannot fail is
+      worse than no canary, because it is counted as coverage. Two of them
+      here were, for months.
+
+### S13 · Retry, middleware, hooks — ✅ **COMPLETE 2026-09-08**
 
 **Effort:** 2 weeks. **Depends on:** S11, S12.
 
 Policy/middleware split (§31.13); retry admissibility (§33.1); the §33.2 condition table; backoff with jitter, clamped `Retry-After`, budget checks before sleeping, interruptible sleeps; hook events (§35.3).
 
+`zu_retry()`, `zu_req_retry()`, `zu_req_replay_safe()`, `zu_body_rewindable()`,
+`zu_hooks()`, and `middleware =` on the client. The retry loop lives in R,
+above the transport, so a retry re-runs the whole transport call — which is
+what makes every test below offline.
+
 **Exit criteria**
 
-- [ ] A POST is never retried without explicit opt-in or an idempotency key.
-- [ ] A non-rewindable body raises `zu_body_not_replayable` rather than truncating.
-- [ ] `zu_get(url, timeout = 30)` with 3 retries returns within 30s (§24.3).
-- [ ] Backoff sleep responds to Ctrl-C.
+- [x] A POST is never retried without explicit opt-in or an idempotency key.
+      All six idempotent methods retry; POST does not; `replay_safe = TRUE`
+      and an `Idempotency-Key` header each enable it. Admissibility is decided
+      once, before the first attempt, rather than re-derived per failure.
+- [x] A non-rewindable body raises `zu_body_not_replayable` rather than
+      truncating — and raises it **before any attempt**, since discovering it
+      only on the first failure would make it intermittent. No public API
+      builds a non-rewindable body yet (§28.2's connection and callback rows
+      are S17), so the test sets the marker directly; what it asserts is the
+      mechanism S17 will hand a real body to.
+- [x] `zu_get(url, timeout = 30)` with 3 retries returns within 30s (§24.3).
+      Tested from both sides: a budget that cannot fit the backoff returns
+      immediately, **and** a backoff that does fit is actually slept — the
+      first assertion alone would be satisfied by never sleeping at all.
+- [x] Backoff sleep responds to Ctrl-C. **S15 records that this harness cannot
+      test cancellation; for a blocking read in C that is true, but a backoff
+      sleep is R-level and can be tested honestly.** A helper process parks in
+      a 60-second backoff, the test delivers `SIGINT`, and the process reacts
+      in well under a second. Non-vacuous: suppressing the signal fails it.
+
+**Two findings while doing this.**
+
+An early draft of `retry_sleep()` carried an `interrupt_pending()` that always
+returned `FALSE` — a checkpoint that checked nothing, reading as a mechanism
+without being one. Removed. Ctrl-C responsiveness comes from `Sys.sleep()`
+itself; the slice loop exists for the **deadline**, so that a budget expiring
+*during* a long backoff cuts the wait short. Saying which property comes from
+where is the difference between a comment and a claim.
+
+**S12's canary had a second vacuous arm**, found when the new hook-payload arm
+passed with the redaction filter commented out. `expect_no_canary()` walked
+one level and leaned on `print()`; a hook payload is
+`list(request = <zu_request>, …)`, the request is not atomic so the one-level
+`unlist()` skipped it, and `print.zu_request()` redacts on the way out — so
+the canary was inspecting the redacted *rendering* of the value it was meant
+to check. The helper now walks to any depth. That strengthens every existing
+arm, and all of them still pass.
 
 ### S14 · R transports — ✅ **COMPLETE 2026-09-08**
 
@@ -889,9 +933,18 @@ That last item is the honest test of the whole project. `zuhttp` exists on the p
    before S13 because S12's remaining canary criterion named S14 as its
    blocker and S13 depends on S12; doing S13 first would have left that
    dependency inverted.
-8. **Next: S13 (retry, middleware, hooks).** Now the only unblocked stage in
-   Track D. S12's canary is down to one gap (verbose logging, §35), which S13
-   does not need. S13 closes the two §31.16 workflows S11 could not run.
+8. ~~**S13 · Retry, middleware, hooks.**~~ ✅ Done 2026-09-08 — all four
+   criteria, including the Ctrl-C one S15 had recorded as untestable.
+   **Track D is now complete.** 12 of 13 §31.16 workflows pass; only
+   workflow 6 (streaming download) remains, and it belongs to S17.
+9. **Next: S17 (streaming sinks)**, which closes the last workflow and the
+   last `skip()` outside S12's verbose-logging gap. After that, Track E's
+   unfinished stages: S18's 24h soak, then S19–S21.
+
+   Still open and not blockers: the mermaid graph marks **S9** DONE with all
+   four criteria unticked, and **S7** has no marker with 0 of 3. Rule 2 makes
+   the criteria authoritative, so both are partial. Reconciling them means
+   running the §50.5 certificate matrix, not editing the diagram.
 
    Two pieces of bookkeeping remain open and are NOT blockers: the mermaid
    graph still marks **S9** DONE with all four exit criteria unticked, and
