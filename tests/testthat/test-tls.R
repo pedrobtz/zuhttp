@@ -14,18 +14,13 @@ skip_unless_online <- function() {
 }
 
 # A CA that is real, correctly formed, and trusts nothing on the internet.
-# That is exactly what distinguishes "adds to" from "replaces": with it added,
-# a public host still validates; with it substituted, the same host must not.
+# That is what distinguishes "adds to" from "replaces": with it added, a
+# public host still validates; with it substituted, the same host must not.
+# Shared with the §50.5 matrix in test-certs.R via helper-tlsfixture.R rather
+# than generated twice — two fixtures for one concept drift.
 local_ca <- function() {
-  if (!nzchar(Sys.which("openssl"))) skip("openssl CLI not available")
-  d <- tempfile("zu-ca-"); dir.create(d)
-  pem <- file.path(d, "ca.pem")
-  rc <- suppressWarnings(system2("openssl",
-    c("req", "-x509", "-newkey", "rsa:2048", "-keyout", file.path(d, "ca.key"),
-      "-out", pem, "-days", "30", "-nodes", "-subj", "/CN=zuhttp-test-CA"),
-    stdout = FALSE, stderr = FALSE))
-  if (rc != 0 || !file.exists(pem)) skip("could not generate a test CA")
-  list(dir = d, pem = pem)
+  fx <- tls_fixture()
+  list(dir = fx$dir, pem = fx$ca)
 }
 
 # --- the object (offline) ------------------------------------------------
@@ -77,7 +72,6 @@ test_that("the printed form says `replaces` and `adds to` (§14.2)", {
 test_that("ca_extra ADDS to system trust and ca_file REPLACES it", {
   skip_unless_online()
   ca <- local_ca()
-  on.exit(unlink(ca$dir, recursive = TRUE), add = TRUE)
 
   # §14.3's claim, stated as a test: "with a locally generated CA supplied
   # additively, a public host still validates through system trust; with the
@@ -146,7 +140,6 @@ test_that("pinning either works or refuses; it never silently does nothing", {
 test_that("a connection is never shared across a TLS-config difference", {
   skip_unless_online()
   ca <- local_ca()
-  on.exit(unlink(ca$dir, recursive = TRUE), add = TRUE)
 
   api <- zu_client()
   expect_identical(zu_resp_status(zu_get("https://example.com", client = api)), 200L)

@@ -326,11 +326,24 @@ The reference implementation of the §13.1 engine/trust split. Hostname verifica
 **Exit criteria**
 
 - [ ] The full §50.5 certificate matrix passes with distinguishable condition
-      classes. **Unblocked 2026-09-08**: §14's configuration is now reachable
-      from R, which it was not before — none of `ca_file`, `ca_extra`, `pins`,
-      `revocation` or `min_version` had an R-level spelling, so the matrix
-      could not have been written whatever server it ran against. What remains
-      is the local TLS server and the generated certificate set.
+      classes. **Seven of the eight rows pass as of 2026-09-08**
+      (`test-certs.R`), against locally generated certificates served by
+      `openssl s_server` on loopback — no Keychain is touched and nothing
+      reaches the internet, which §50.5 requires. Trusted, unknown issuer,
+      wrong hostname, expired, not-yet-valid, `ca_file` as a replacement and
+      `ca_extra` as an addition all behave, and the classes are genuinely
+      distinguishable: a hostname mismatch raises `zu_tls_hostname_error` and
+      *not* `zu_tls_certificate_error`, because the two have different fixes.
+
+      **Unticked for the eighth row: pin match/mismatch.** See the pinning
+      criterion below.
+
+      Verified against the bug it exists for. S0's finding F-3 was a build
+      that accepted *every* invalid certificate while looking perfectly
+      healthy; simulating it — forcing `verify_peer = 0` in the engine — fails
+      **10 assertions** across the matrix. The file also carries a row that
+      must SUCCEED, because a client that rejected everything would otherwise
+      satisfy every negative test in it.
 - [x] `ca_extra` adds to system trust; `ca_file` replaces it. Both proven by
       test — **2026-09-08**, once §14 became reachable from R at all. The same
       locally generated CA is supplied both ways, so the only variable is
@@ -400,8 +413,10 @@ Implements the S0-validated design: portable engine + `SecTrustEvaluateWithError
 
 **Exit criteria** — S7's, plus the three the spike created:
 
-- [ ] Same §50.5 matrix as S7, same condition classes. Unblocked with S7's —
-      see there. Two of this backend's answers are already asserted from R:
+- [ ] Same §50.5 matrix as S7, same condition classes. Seven of eight rows
+      pass here too — `test-certs.R` is backend-agnostic and runs against
+      whichever backend the build linked, so S7 and S9 are covered by the same
+      file rather than by two that drift. Two of this backend's answers are already asserted from R:
       TLS 1.3 is **refused rather than downgraded** (S0 finding F-1: Secure
       Transport has no `kTLSProtocol13`, and silently giving a caller 1.2 when
       they asked for 1.3 is weakening a security setting), and pinning refuses
