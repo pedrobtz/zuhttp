@@ -11,7 +11,7 @@ PKG_CPPFLAGS = -I. -Ivendor/picohttpparser -Ivendor/uriparser \
 
 # @-substituted by ./configure, which locates OpenSSL. System zlib is
 # decision D-7 and is present everywhere R runs.
-PKG_LIBS = @SSL_LIBS@ -lz -lws2_32
+PKG_LIBS = @SSL_LIBS@ -lz
 
 OBJECTS = init.o \
           zu_alloc.o \

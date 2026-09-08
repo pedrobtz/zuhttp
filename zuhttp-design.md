@@ -20,7 +20,7 @@ Firm decisions and open questions were previously indistinguishable in this docu
 | D-2 | No `zuhttp` export may collide with an httr2 export | **Accepted** | 1.1, 5 |
 | D-3 | Separate TLS protocol engine from trust evaluation | **Accepted** | 13.1 |
 | D-4 | macOS: **Secure Transport** engine + `SecTrustEvaluateWithError` Keychain trust | **Accepted** — R-13 resolved, S9 | 13.2 |
-| D-5 | Windows: Schannel for both engine and trust | **Accepted, effort unquantified** | 13.4 |
+| D-5 | Windows: Schannel for both engine and trust | **Accepted** — required, not preferred (§13.4) | 13.4 |
 | D-6 | Unix: system OpenSSL for both | **Accepted** | 13.5 |
 | D-7 | Link system zlib; do not vendor miniz | **Accepted** | 21.1 |
 | D-8 | Send `Accept-Encoding: gzip` by default; decode transparently | **Accepted** | 21.2 |

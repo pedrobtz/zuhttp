@@ -37,7 +37,7 @@ graph TD
 
     S6["S6 · Sockets + poll + deadlines<br/>DONE"]
     S7["S7 · OpenSSL engine + trust"]
-    S8["S8 · Schannel<br/>GATE R-2"]
+    S8["S8 · Schannel<br/>IN PROGRESS — TLS 1.2"]
     S9["S9 · macOS engine + trust<br/>DONE — R-13 + R-12 closed"]
     S10["S10 · Proxy + CONNECT<br/>PARTIAL — C core done"]
 

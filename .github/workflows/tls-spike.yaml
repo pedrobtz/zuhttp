@@ -359,3 +359,58 @@ jobs:
               stop("R-12 regression: unexpected result ", paste(unlist(res), collapse=", "))
             cat("R-12 mitigated: both children raised zu_fork_error\n")
           '
+
+  # S8 — Windows on Schannel. This is the only place it can be built or run:
+  # there is no Windows machine in the loop, so CI is the compiler.
+  slice-schannel:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: windows-latest
+    name: S8 Windows system TLS (Schannel)
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
+      # Compile the backend on its own first. A syntax or type error here is
+      # far easier to read than the same error inside R CMD INSTALL.
+      - name: Compile the Schannel backend standalone
+        timeout-minutes: 5
+        run: |
+          CC=$(R CMD config CC)
+          echo "compiler: $CC"
+          $CC --version | head -1
+          $CC -std=c99 -Wall -Wextra -c -Isrc -Isrc/vendor/picohttpparser \
+              -o /tmp/sch.o src/zu_tls_schannel.c
+
+      - name: Install and make a real HTTPS request
+        timeout-minutes: 10
+        env:
+          NOT_CRAN: "true"
+        run: |
+          R CMD INSTALL .
+          Rscript -e '
+            library(zuhttp)
+            stopifnot(identical(zu_tls_backend(), "schannel"))
+            r <- zu_get("https://example.com")
+            cat("status", zu_resp_status(r), "| tls", r$tls_version,
+                "|", length(zu_resp_body(r)), "bytes\n")
+            stopifnot(zu_resp_status(r) == 200L)
+            stopifnot(grepl("Example Domain", zu_resp_text(r), fixed = TRUE))
+
+            # The whole point of D-5: Windows has trust anchors again.
+            e <- tryCatch(zu_get("https://expired.badssl.com/"),
+                          zu_tls_error = function(e) e)
+            cat("expired ->", class(e)[1], "|", conditionMessage(e), "\n")
+            stopifnot(inherits(e, "zu_tls_certificate_error"))
+
+            e2 <- tryCatch(zu_get("https://wrong.host.badssl.com/"),
+                           zu_tls_error = function(e) e)
+            cat("wrong host ->", class(e2)[1], "\n")
+            stopifnot(inherits(e2, "zu_tls_hostname_error"))
+            cat("S8: Windows HTTPS works, and bad certificates are rejected\n")
+          '
