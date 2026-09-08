@@ -66,7 +66,8 @@ zu_transport_perform.zu_native_transport <- function(transport, req) {
                isTRUE(p$verify),
                as.numeric(p$max_body),
                p$user_agent,
-               isTRUE(p$decode))
+               isTRUE(p$decode),
+               req$pool)
   structure(raw, class = "zu_response")
 }
 
@@ -137,6 +138,11 @@ resolve_request <- function(req, client) {
   req$query    <- NULL          # folded into the URL; one representation
   req$headers  <- headers
   req$resolved <- policy
+  # §26.5: resolved here, not in the transport, because this is the last point
+  # that can see the client. A transport receives a request that needs no
+  # further context — that is the whole contract (§31.12) — so the pool has to
+  # travel with it rather than be looked up later.
+  req$pool     <- client_pool(client)
   req
 }
 

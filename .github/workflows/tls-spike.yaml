@@ -337,28 +337,25 @@ jobs:
         with:
           r-version: release
 
-      - name: Install and check the fork guard
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::testthat
+
+      # The assertions live in tests/testthat/test-fork.R, not inline here.
+      # Two reasons: this repo requires every CI R check to run FROM A FILE
+      # (an `Rscript -e` with a multi-line argument dies on Windows before it
+      # executes anything, which cost five rounds in S8), and a check that
+      # only exists in a workflow is invisible to anyone running the suite
+      # locally. The file skips itself unless it is on macOS, on the Secure
+      # Transport backend, and online — so it is inert everywhere else.
+      - name: Install and check the fork guard (R-12)
         timeout-minutes: 10
         env:
           NOT_CRAN: "true"
+          ZU_TEST_NETWORK: "1"
         run: |
           R CMD INSTALL .
-          Rscript -e '
-            library(zuhttp); library(parallel)
-            stopifnot(identical(zu_tls_backend(), "securetransport"))
-            invisible(zu_get("https://example.com"))     # parent uses trustd
-            res <- mclapply(1:2, function(i)
-              tryCatch({ zu_get("https://example.com"); "UNEXPECTED SUCCESS" },
-                       zu_fork_error = function(e) "zu_fork_error",
-                       error = function(e) paste("other:", class(e)[1])),
-              mc.cores = 2)
-            # A NULL element means the child DIED rather than returned.
-            if (any(vapply(res, is.null, logical(1))))
-              stop("R-12 regression: a forked child died instead of erroring")
-            if (!all(vapply(res, identical, logical(1), "zu_fork_error")))
-              stop("R-12 regression: unexpected result ", paste(unlist(res), collapse=", "))
-            cat("R-12 mitigated: both children raised zu_fork_error\n")
-          '
+          Rscript tools/ci-fork-guard.R
 
   # S8 — Windows on Schannel. This is the only place it can be built or run:
   # there is no Windows machine in the loop, so CI is the compiler.

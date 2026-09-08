@@ -2,7 +2,7 @@
 
 **Companion to:** [zuhttp-design.md](zuhttp-design.md)
 **Status:** Draft
-**Last updated:** 2026-09-08 · **S0–S9, S11, S12, S15, S16 complete or explicitly partial**
+**Last updated:** 2026-09-08 · **S0–S9, S11, S12, S15 complete or explicitly partial; S16 COMPLETE**
 **Total estimate:** 41–48 person-weeks (§64 of the design doc, plus spikes)
 
 ---
@@ -47,7 +47,7 @@ graph TD
     S14["S14 · R transports<br/>mock, record/replay"]
 
     S15["S15 · Cancellation + unwind"]
-    S16["S16 · Pool + fork/session safety<br/>PARTIAL — C core done"]
+    S16["S16 · Pool + fork/session safety<br/>COMPLETE — R-12 closed"]
     S17["S17 · Streaming sinks"]
 
     S18["S18 · Fuzzing + sanitizers + CI<br/>PARTIAL — 8 targets"]
@@ -597,9 +597,9 @@ not — failing with `bad value` on **every single request**, and looping until
 it had produced 2 GB of error output. Caught immediately because it broke the
 normal path, not the interrupt path.
 
-### S16 · Connection pool
+### S16 · Connection pool — ✅ **COMPLETE 2026-09-08**
 
-**Effort:** 2 weeks. **Depends on:** S7. **Status: C core complete; two criteria blocked.**
+**Effort:** 2 weeks. **Depends on:** S7. **Status: ✅ COMPLETE 2026-09-08** — all six criteria.
 
 Pool key by value (§26.1); policy and stale detection (§26.2); the no-reuse rules (§26.3); **PID guard on every acquisition and in every finalizer** (§26.4); lazy pool re-creation after deserialization (§26.5).
 
@@ -623,15 +623,56 @@ evaluator, not the pool.
 - [x] A real `fork()` drops inherited connections without a graceful close,
       re-arms the guard, and leaves the parent's connection intact. Verified
       non-vacuous: breaking the guard makes the test fail.
-- [ ] A pooled client used inside `parallel::mclapply()` corrupts nothing and
-      drops inherited connections. **Blocked on S11** (needs an R client).
-- [ ] On macOS, HTTPS in a forked child raises `zu_fork_error` with an
-      actionable message — **and does not crash the worker** (R-12). **Blocked
-      on S9**: the mechanism and the canonical message exist
-      (`zu_fork_message()`), but there is no macOS trust backend to guard yet.
-      This remains the project's top unmitigated risk.
-- [ ] A client survives a `saveRDS()`/`readRDS()` round-trip into a fresh
-      session (§26.5). **Blocked on S11.**
+- [x] On macOS, HTTPS in a forked child raises `zu_fork_error` with an
+      actionable message — **and does not crash the worker** (R-12). Closed
+      2026-09-08 by `tests/testthat/test-fork.R`, once S9 shipped the Secure
+      Transport backend that gave the guard something to protect. **R-12 is no
+      longer the project's top unmitigated risk.** Verified non-vacuously in
+      the strongest available sense: disabling the `zu_fork_guard_tripped()`
+      branch in `zu_tls_sectransport.c` reproduces F-5 exactly — the worker
+      dies with `caught segfault, address 0x110, cause 'memory not mapped'`
+      and its `mclapply()` element comes back `NULL`. A second test proves a
+      child tripping the guard does not disarm the parent. `tools/ci-fork-guard.R`
+      is the CI gate and fails on a *skip* as well as on a failure, so a build
+      on the wrong backend cannot turn the check green by not running it.
+- [x] A pooled client used inside `parallel::mclapply()` corrupts nothing and
+      drops inherited connections. Closed 2026-09-08. Each child reports
+      `forks_detected = 1`, `discarded_fork = 1` and `hits = 0` — it saw the
+      fork, dropped the inherited socket and did **not** reuse it — while the
+      parent's own connection stays idle and is reused afterwards. Tested over
+      plain HTTP on purpose: on macOS hazard 2 (R-12) would abort the child
+      before hazard 1 could be observed, and hazard 1 is what this criterion
+      is about.
+- [x] A client survives a `saveRDS()`/`readRDS()` round-trip into a fresh
+      session (§26.5). Closed 2026-09-08. The restored client's external
+      pointer is a live SEXP with a NULL address; `C_zu_pool_valid` says so,
+      and the next request lazily builds a new pool from the retained
+      configuration. The test asserts the stale pointer is *present and
+      invalid* rather than only that a request works, which is what stops it
+      passing for a client that carries no native state at all.
+
+**What closing these took (D-36, D-37, D-38).** `zu_pool.{h,c}` was complete
+and unit-tested from S16's first half, but nothing called it — the engine
+opened and closed one connection per hop by design. So this stage's second
+half was engine and R-layer work, not test-writing:
+
+- `zu_get_opts.pool` (NULL keeps the old behaviour, which is what the fuzzers
+  and the offline suites still use);
+- acquire in `open_stream()`, and a §26.3 `reuse_after()` decision at the
+  disposal site, where the framing and response headers that justify it are
+  still in scope;
+- `zu_pool_key` built from the URI and TLS settings — the fields
+  `zu_get_opts` actually carries, with a comment saying that a field added
+  there must be added to the key in the same commit;
+- an external pointer with a tag and a finalizer, and the §26.5 lazy
+  re-creation in `R/pool.R`;
+- `zu_pool_stats()` exported (D-38), because without it a pooled client and an
+  unpooled one are indistinguishable from R and every test here would be
+  vacuous.
+
+Verified non-vacuously: stubbing out `zu_pool_acquire()` fails 5 assertions
+across 3 tests, including the parent-side reuse check at the end of the
+`mclapply` test.
 
 ### S17 · Streaming sinks
 
@@ -804,7 +845,17 @@ That last item is the honest test of the whole project. `zuhttp` exists on the p
 3. ~~**Start S2.**~~ ✅ Done, along with S3–S9 and the §63.2 slice.
 4. ~~**Fix `DESCRIPTION`**~~ ✅ Done.
 5. ~~**S11 · R API surface.**~~ ✅ Done 2026-09-08 — 11 of 13 §31.16 workflows.
-6. **Next: S13 (retry, middleware, hooks) or S14 (R transports).** Both are
-   unblocked by S11 now; S13 also needs S12, whose canary is still partial.
+6. ~~**S16 · Connection pool.**~~ ✅ Done 2026-09-08 — all six criteria. The
+   pool is in the request path, R-12 is closed, and both §26.4 hazards are
+   tested from R.
+7. **Next: S13 (retry, middleware, hooks) or S14 (R transports).** Both are
+   unblocked by S11; S13 also needs S12, whose canary is still partial.
    S13 closes the two workflows S11 could not run (retry) once it lands, and
    S14 turns the mock transport seam into record/replay.
+
+   Two pieces of bookkeeping remain open and are NOT blockers: the mermaid
+   graph still marks **S9** DONE with all four exit criteria unticked, and
+   **S7** carries no graph marker with 0 of 3 criteria. Rule 2 says the
+   criteria are authoritative, so both stages are partial and the graph is
+   stale. Reconciling them means running the §50.5 certificate matrix, not
+   editing the diagram.

@@ -319,6 +319,96 @@ void suite_pool(void) {
 
     zu_pool_key_free(&a);
 
+    /* --- §26.3, the decision itself ------------------------------------
+     *
+     * zu_reuse_decide() is the policy the engine applies at the end of every
+     * exchange. It lives here rather than in zu_engine.c precisely so it can
+     * be driven directly: the engine would need a server to produce these
+     * responses, and half of them are cases a cooperative server never sends.
+     */
+    {
+        zu_framing ok_len   = { ZU_FRAME_LENGTH, 5, 1 };
+        zu_framing closed   = { ZU_FRAME_UNTIL_CLOSE, 0, 0 };
+        zu_headers h;
+
+        ZU_CASE("§26.3: a clean length-framed HTTP/1.1 response is reusable");
+        zu_headers_init(&h);
+        ZU_CHECK_EQ_INT(zu_reuse_decide(ZU_OK, &ok_len, &h, 1), ZU_REUSE_OK);
+
+        ZU_CASE("§26.3: close-framed is never reusable");
+        ZU_CHECK_EQ_INT(zu_reuse_decide(ZU_OK, &closed, &h, 1),
+                        ZU_NOREUSE_CLOSE_FRAMED);
+
+        ZU_CASE("§26.3: HTTP/1.0 is not persistent unless the server opts in");
+        ZU_CHECK_EQ_INT(zu_reuse_decide(ZU_OK, &ok_len, &h, 0),
+                        ZU_NOREUSE_CONNECTION_CLOSE);
+        zu_headers_free(&h);
+
+        ZU_CASE("§26.3: HTTP/1.0 WITH keep-alive is reusable");
+        zu_headers_init(&h);
+        zu_headers_add_str(&h, "Connection", "keep-alive");
+        ZU_CHECK_EQ_INT(zu_reuse_decide(ZU_OK, &ok_len, &h, 0), ZU_REUSE_OK);
+        zu_headers_free(&h);
+
+        /* The bug this replaced: an exact-match test on the whole field value
+         * reads every one of these as "not close" and pools the connection. */
+        ZU_CASE("§26.3: Connection is a token LIST, not a single value");
+        {
+            static const char *closing[] = {
+                "close", "Close", "CLOSE", "keep-alive, close",
+                "close, keep-alive", "Upgrade, close", " close ",
+                "TE,close", "keep-alive,  Close", NULL
+            };
+            int i;
+            for (i = 0; closing[i]; i++) {
+                zu_headers_init(&h);
+                zu_headers_add_str(&h, "Connection", closing[i]);
+                ZU_CHECK_EQ_INT(zu_reuse_decide(ZU_OK, &ok_len, &h, 1),
+                                ZU_NOREUSE_CONNECTION_CLOSE);
+                zu_headers_free(&h);
+            }
+        }
+
+        ZU_CASE("§26.3: a token merely CONTAINING \"close\" is not the close token");
+        {
+            static const char *fine[] = { "keep-alive", "closed", "disclose",
+                                          "close-ish", "x-close", NULL };
+            int i;
+            for (i = 0; fine[i]; i++) {
+                zu_headers_init(&h);
+                zu_headers_add_str(&h, "Connection", fine[i]);
+                ZU_CHECK_EQ_INT(zu_reuse_decide(ZU_OK, &ok_len, &h, 1), ZU_REUSE_OK);
+                zu_headers_free(&h);
+            }
+        }
+
+        ZU_CASE("§26.3: a second Connection header is read too");
+        zu_headers_init(&h);
+        zu_headers_add_str(&h, "Connection", "keep-alive");
+        zu_headers_add_str(&h, "Connection", "close");
+        ZU_CHECK_EQ_INT(zu_reuse_decide(ZU_OK, &ok_len, &h, 1),
+                        ZU_NOREUSE_CONNECTION_CLOSE);
+        zu_headers_free(&h);
+
+        ZU_CASE("§26.3: a failed request names WHY it cannot be reused");
+        zu_headers_init(&h);
+        ZU_CHECK_EQ_INT(zu_reuse_decide(ZU_ERR_TIMEOUT, &ok_len, &h, 1),
+                        ZU_NOREUSE_CANCELLED);
+        ZU_CHECK_EQ_INT(zu_reuse_decide(ZU_ERR_INTERRUPTED, &ok_len, &h, 1),
+                        ZU_NOREUSE_CANCELLED);
+        ZU_CHECK_EQ_INT(zu_reuse_decide(ZU_ERR_PARSE, &ok_len, &h, 1),
+                        ZU_NOREUSE_FRAMING);
+        ZU_CHECK_EQ_INT(zu_reuse_decide(ZU_ERR_TLS_CERT, &ok_len, &h, 1),
+                        ZU_NOREUSE_TLS_ERROR);
+        ZU_CHECK_EQ_INT(zu_reuse_decide(ZU_ERR_IO, &ok_len, &h, 1),
+                        ZU_NOREUSE_BODY_INCOMPLETE);
+        /* An error outranks a clean framing: the body did not arrive, so the
+         * framing that would have described it is irrelevant. */
+        ZU_CHECK_EQ_INT(zu_reuse_decide(ZU_ERR_TIMEOUT, &closed, &h, 1),
+                        ZU_NOREUSE_CANCELLED);
+        zu_headers_free(&h);
+    }
+
     ZU_CASE("no leaks across the suite");
     {
         zu_alloc_stats end;

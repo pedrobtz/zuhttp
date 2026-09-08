@@ -9,10 +9,14 @@
  * one redirect, Content-Length and chunked, transparent gzip, a total
  * deadline, and a memory body.
  *
- * NOT here, and deliberately: the connection pool (the slice opens and closes
- * one connection), proxies, retries, streaming sinks. Each has its own stage
- * and its own tests; wiring them in before the simple path works end to end
- * would make the first integration failure harder to read.
+ * NOT here, and deliberately: proxies, retries, streaming sinks. Each has its
+ * own stage and its own tests; wiring them in before the simple path works end
+ * to end would make the first integration failure harder to read.
+ *
+ * The connection pool WAS on that list until S16. It is now opt-in through
+ * zu_get_opts.pool: NULL keeps the original behaviour of opening and closing
+ * one connection per hop, which is what the offline suites and the fuzzers
+ * still use.
  */
 #ifndef ZUHTTP_ENGINE_H
 #define ZUHTTP_ENGINE_H
@@ -22,6 +26,7 @@
 #include "zu_headers.h"
 #include "zu_buffer.h"
 #include "zu_net.h"
+#include "zu_pool.h"
 
 /* A request the engine can perform. Headers are parallel arrays rather than a
  * zu_headers, so the R layer can pass them without building one — the engine
@@ -48,6 +53,12 @@ typedef struct {
     const char *user_agent;
     zu_tick_fn  tick;            /* §25.1 interrupt seam; may be NULL */
     void       *tick_ctx;
+
+    /* §26. NULL means "no pooling": every hop opens and closes its own
+     * connection, which is the pre-S16 behaviour and still the right one for
+     * a one-shot request. The pool is NOT owned here — it outlives any single
+     * request, which is the entire point of it (§26.5). */
+    zu_pool    *pool;
 } zu_get_opts;
 
 void zu_get_opts_init(zu_get_opts *o);

@@ -1,6 +1,6 @@
 #include "zu_pool.h"
 #include "zu_alloc.h"
-#include "zu_headers.h"   /* zu_ascii_casecmp */
+#include "zu_headers.h"   /* zu_ascii_casecmp, and §26.3 reads Connection */
 #include <string.h>
 
 /* --- small string helpers ------------------------------------------------ */
@@ -340,3 +340,91 @@ void zu_pool_stats_get(const zu_pool *p, zu_pool_stats *out) {
 }
 
 size_t zu_pool_idle_count(const zu_pool *p) { return p ? p->idle : 0; }
+
+/* Does a comma-separated header value carry `tok` as a token?
+ *
+ * `Connection: close` is the common case, but the field is a LIST — a server
+ * may legitimately send "keep-alive, close" or "Upgrade, close", and RFC 9110
+ * makes the comparison case-insensitive. Matching the whole value against
+ * "close" (which an earlier draft of this function did) silently reuses a
+ * connection the server just said it was closing, and the symptom is the next
+ * request on that socket failing for no visible reason. */
+static int header_has_token(const char *v, const char *tok) {
+    size_t n = strlen(tok);
+    if (!v) return 0;
+    while (*v) {
+        const char *end;
+        size_t len;
+        while (*v == ' ' || *v == '\t' || *v == ',') v++;
+        if (!*v) break;
+        end = v;
+        while (*end && *end != ',') end++;
+        len = (size_t)(end - v);
+        while (len > 0 && (v[len - 1] == ' ' || v[len - 1] == '\t')) len--;
+        if (len == n) {
+            size_t i;
+            for (i = 0; i < n; i++) {
+                char a = v[i], b = tok[i];
+                if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+                if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+                if (a != b) break;
+            }
+            if (i == n) return 1;
+        }
+        v = end;
+    }
+    return 0;
+}
+
+/* Any Connection header carrying the token, not just the first: a response
+ * with two Connection lines is unusual but legal, and the safe reading is the
+ * union of them. */
+static int connection_has(const zu_headers *h, const char *tok) {
+    size_t n = zu_headers_count(h, "Connection"), i;
+    for (i = 0; i < n; i++)
+        if (header_has_token(zu_headers_get_at(h, "Connection", i), tok))
+            return 1;
+    return 0;
+}
+
+zu_reuse zu_reuse_decide(zu_code rc, const zu_framing *fr,
+                         const zu_headers *resp_headers, int minor_version) {
+
+    if (rc != ZU_OK) {
+        switch (rc) {
+            case ZU_ERR_TIMEOUT:
+            case ZU_ERR_CANCELLED:
+            case ZU_ERR_INTERRUPTED:  return ZU_NOREUSE_CANCELLED;
+            case ZU_ERR_PARSE:        return ZU_NOREUSE_FRAMING;
+            case ZU_ERR_TLS:
+            case ZU_ERR_TLS_CERT:
+            case ZU_ERR_TLS_HOSTNAME:
+            case ZU_ERR_TLS_HANDSHAKE:
+            case ZU_ERR_TLS_PIN:      return ZU_NOREUSE_TLS_ERROR;
+            /* Anything else means the body did not arrive whole, so the next
+             * response cannot be located on this connection. */
+            default:                  return ZU_NOREUSE_BODY_INCOMPLETE;
+        }
+    }
+
+    /* Rule 5 of §18.1: no framing information, body ends at EOF. */
+    if (!fr->poolable || fr->kind == ZU_FRAME_UNTIL_CLOSE)
+        return ZU_NOREUSE_CLOSE_FRAMED;
+
+    /* Either side may end the connection; the server's word is in the
+     * response. Our own request always says keep-alive (zu_request.c), so
+     * only the response has to be checked. */
+    if (connection_has(resp_headers, "close"))
+        return ZU_NOREUSE_CONNECTION_CLOSE;
+
+    /* HTTP/1.0 is not persistent by default — it is persistent only if the
+     * server opts in with `Connection: keep-alive`. Treating a 1.0 response
+     * like a 1.1 one leaves a connection in the pool that the server is about
+     * to close, and the next request to draw it fails. §26.3's "the safe
+     * default is to close" is exactly this case. */
+    if (minor_version == 0 && !connection_has(resp_headers, "keep-alive"))
+        return ZU_NOREUSE_CONNECTION_CLOSE;
+
+    return ZU_REUSE_OK;
+}
+

@@ -54,7 +54,7 @@ collect_policy <- function(env = parent.frame()) {
 #' Create a reusable client
 #'
 #' A client carries what many requests share: a base URL, default headers and
-#' query parameters, policy defaults, and (once §26 lands) the connection pool.
+#' query parameters, policy defaults, and the connection pool.
 #' It is never the first argument of a request function — see below.
 #'
 #' @param base_url Optional base URL, so that `zu_get("/users", client = api)`
@@ -72,6 +72,8 @@ collect_policy <- function(env = parent.frame()) {
 #' @param transport The object that actually performs requests. Defaults to
 #'   [zu_native_transport()]; [zu_mock_transport()] replaces the network in
 #'   tests.
+#' @param pool Connection reuse settings from [zu_pool()], or `NULL` to open a
+#'   fresh connection for every request.
 #' @return A `zu_client` object.
 #'
 #' @details
@@ -100,7 +102,8 @@ collect_policy <- function(env = parent.frame()) {
 zu_client <- function(base_url = NULL, headers = NULL, query = NULL,
                       timeout = NULL, redirects = NULL, verify = NULL,
                       max_body = NULL, user_agent = NULL, check = NULL,
-                      decode = NULL, transport = zu_native_transport()) {
+                      decode = NULL, transport = zu_native_transport(),
+                      pool = zu_pool()) {
   structure(
     list(
       base_url   = base_url,
@@ -113,9 +116,17 @@ zu_client <- function(base_url = NULL, headers = NULL, query = NULL,
       user_agent = user_agent,
       check      = check,
       decode     = decode,
-      transport  = transport
+      transport  = transport,
+      pool       = pool
     ),
-    class = "zu_client"
+    class = "zu_client",
+    # §26.5. The live pool is native state, so it does NOT belong in the list
+    # the user prints and copies — that list is the client's value, and it has
+    # to survive serialization intact. The environment is a cache hung beside
+    # it, created empty and filled on the first request. Copies made by
+    # zu_client_update() share it, which is safe because the §26.1 key
+    # discriminates on everything that must not be shared.
+    pool_state = new.env(parent = emptyenv())
   )
 }
 

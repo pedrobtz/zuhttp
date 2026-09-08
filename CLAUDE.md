@@ -98,6 +98,9 @@ tools/          update-uriparser, update-picohttpparser, check-feature-macros
 
 ## Current state
 
-S0–S12 and S15/S16 are complete or explicitly partial; S11 (the R API surface)
-landed 2026-09-08. The roadmap's status markers and per-stage exit criteria are
-authoritative — check them rather than inferring status from the code.
+S0–S12 and S15 are complete or explicitly partial. S11 (the R API surface) and
+S16 (the connection pool) both landed 2026-09-08; S16 closed R-12, so forked
+HTTPS on macOS now raises `zu_fork_error` rather than killing the worker. The
+roadmap's status markers and per-stage exit criteria are authoritative — check
+them rather than inferring status from the code, and note that its mermaid
+graph is stale for S7 and S9.

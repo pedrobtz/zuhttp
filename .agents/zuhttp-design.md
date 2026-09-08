@@ -51,6 +51,9 @@ Firm decisions and open questions were previously indistinguishable in this docu
 | D-33 | `check = TRUE` by default: a 4xx/5xx raises; `check = FALSE` returns it | **Accepted** 2026-09-08 — S11 | 31.14 |
 | D-34 | `base_url` is JOINED textually, not resolved per RFC 3986 | **Accepted** 2026-09-08 — S11 | 31.3 |
 | D-35 | Three-state policy merge: absent inherits, `NULL` resets, value overrides | **Accepted** 2026-09-08 — S11 | 31.9 |
+| D-36 | The live pool hangs off the client as an **attribute environment**, not as a list element | **Accepted** 2026-09-08 — S16 | 26.5 |
+| D-37 | Pooling is **on by default** for a client; `zu_client(pool = NULL)` opts out | **Accepted** 2026-09-08 — S16 | 26.2 |
+| D-38 | `zu_pool_stats()` is exported, so reuse is observable rather than merely claimed | **Accepted** 2026-09-08 — S16 | 26.2 |
 
 ---
 
@@ -1551,18 +1554,31 @@ Error: zuhttp cannot make HTTPS requests in a forked process on macOS.
 
 `PSOCK` clusters and `plan("multisession")` are safe because they `exec` fresh R processes.
 
-Turning a SIGSEGV into a named condition is the whole mitigation. It does not make forked HTTPS work; it makes the limitation diagnosable. **Until it exists, `zuhttp` has a worse macOS fork failure mode than `curl`** — a crash rather than an error — and §6.1 must say so.
+Turning a SIGSEGV into a named condition is the whole mitigation. It does not make forked HTTPS work; it makes the limitation diagnosable. **Until it exists, `zuhttp` has a worse macOS fork failure mode than `curl`** — a crash rather than an error — and §6.1 must say so. *(It exists as of 2026-09-08; §6.1 now describes an error, which is accurate.)*
 
 `pthread_atfork()` is not sufficient and is unavailable on Windows; the PID check is the portable mechanism and must run on every pool acquisition and every trust evaluation.
 
-**Implementation note (S16).** The guard is `zu_fork.{h,c}`, deliberately not a
-member of `zu_pool`: the two hazards share one mechanism but only hazard 1 is
-about connections. `zu_pool` calls it on every acquire, every release and in
-`zu_pool_free` (which is what an R finalizer will run); the trust evaluator
-must call it too, and that call site does not exist yet because no macOS trust
-backend does — **hazard 2 remains unmitigated until S9**, and §6.1 must keep
-saying so until then. `zu_fork_message()` holds the single canonical wording
-above so the C error, the R condition and the documentation cannot drift.
+**Implementation note (S16, complete 2026-09-08).** The guard is
+`zu_fork.{h,c}`, deliberately not a member of `zu_pool`: the two hazards share
+one mechanism but only hazard 1 is about connections. `zu_pool` calls it on
+every acquire, every release and in `zu_pool_free` — which is what the R
+external-pointer finalizer runs, satisfying §29's rule 3. `zu_fork_message()`
+holds the single canonical wording above so the C error, the R condition and
+the documentation cannot drift.
+
+Both hazards are now closed and tested from R:
+
+- **hazard 1** by `test-pool.R`, which forks a pooled client under
+  `mclapply()` over plain HTTP and asserts each child reports
+  `forks_detected = 1`, `discarded_fork = 1` and `hits = 0` while the
+  parent's own connection survives and is reused afterwards;
+- **hazard 2** by `test-fork.R` and the `tools/ci-fork-guard.R` gate, over
+  HTTPS on Secure Transport.
+
+Hazard 1 is deliberately tested over **http://** on macOS: hazard 2 aborts the
+child before hazard 1 can be observed there, so testing hazard 1 over HTTPS
+would assert nothing about connections. That is not a gap — it is the only
+ordering in which each hazard's own mechanism is what the test measures.
 
 #### 26.5 Serialization and session lifetime
 
@@ -1573,6 +1589,33 @@ Required behavior:
 - The external pointer is tagged, and a restored (null) pointer is detected on first use.
 - A client whose pool pointer is dead **lazily re-creates** its pool from the retained configuration rather than erroring. Configuration is plain R data and survives serialization; connections do not.
 - This is what makes §31.1 Principle 6's "value-like semantics" claim actually true across sessions.
+
+**How this landed (S16, D-36).** The client's *value* — the list a user prints,
+copies and serializes — holds only the pool's **configuration**, which is plain
+R data. The live pool hangs off the object as an attribute environment
+(`attr(client, "pool_state")`), created empty by `zu_client()` and filled on
+the first request. Putting the external pointer in the list itself was the
+obvious first move and is wrong: the list is the client's identity, so a
+pointer in it would print, would compare unequal between two otherwise
+identical clients, and would make `zu_client_update()` produce a value that
+differs from its parent in a field the user never set.
+
+Detection is by asking the pointer, not by tracking history: `C_zu_pool_valid`
+checks that the external pointer carries our tag *and* a non-NULL address. A
+restored pointer satisfies the first and fails the second, so "never built"
+and "did not survive `readRDS()`" collapse into one branch with one answer —
+build one now. A third case joins them for free: pool settings changed by
+`zu_client_update()` after a pool was already live, which must rebuild rather
+than silently keep the old policy.
+
+Copies made by `zu_client_update()` **share** the parent's environment, and so
+its pool. That is safe by construction rather than by care: the §26.1 key
+discriminates on scheme, host, port, proxy identity and the whole TLS
+configuration, so a derived client with `verify = FALSE` cannot draw a
+connection that was established with verification on. Proving that is what
+`test-pool.R`'s key tests are for, and they assert the **miss** count as well
+as the hit count — asserting only "no reuse happened" would pass just as
+happily with pooling switched off entirely.
 
 ### 27. Streaming Model
 
@@ -3934,7 +3977,7 @@ Ordered by expected impact. Each risk has an owner-facing mitigation and an expl
 | ID | Risk | L | I | Mitigation | Kill / rescope trigger |
 |---|---|---|---|---|---|
 | ~~R-1~~ | ~~**macOS TLS dead end.**~~ **RETIRED 2026-09-07** by the S0 spike: OpenSSL engine + `SecTrustEvaluateWithError` works with TLS 1.3, Keychain trust, and a caller-owned poll loop. | — | — | — | — |
-| ~~**R-12**~~ | ~~macOS forked HTTPS crashes~~ — **MITIGATED 2026-09-08 (S9).** The trust evaluator now carries the §26.4 PID guard, so a forked child raises `zu_fork_error` instead of dying. Verified end to end: `mclapply` + HTTPS after a parent request returns the condition from every child and the session survives; CI runs it as a regression test against a SIGSEGV. | — | — | Done | Residual: forked HTTPS still does not WORK on macOS, it only fails diagnosably. `PSOCK` / `multisession` remain the supported path. |
+| ~~**R-12**~~ | ~~macOS forked HTTPS crashes~~ — **MITIGATED 2026-09-08 (S9).** The trust evaluator now carries the §26.4 PID guard, so a forked child raises `zu_fork_error` instead of dying. Verified end to end: `mclapply` + HTTPS after a parent request returns the condition from every child and the session survives; `tests/testthat/test-fork.R` asserts it and `tools/ci-fork-guard.R` runs it in CI as a regression test against a SIGSEGV, failing on a *skip* as well as on a failure. Non-vacuity demonstrated 2026-09-08 by disabling the guard branch, which reproduces F-5 verbatim (`caught segfault, address 0x110`). S16's corresponding exit criterion is ticked. | — | — | Done | Residual: forked HTTPS still does not WORK on macOS, it only fails diagnosably. `PSOCK` / `multisession` remain the supported path. |
 | **R-15** | **Apple may remove Secure Transport.** It is deprecated (87 markers in the current SDK) and is now zuhttp's macOS engine (D-4). Removal would leave only two options, both of which fail a project constraint: Network.framework cannot do §20.3 CONNECT, static OpenSSL bundles 4.64 MB of cryptography. | Low | **High** | Track Apple's SDK each release; keep the §13.1 split so only the engine half would change | Ship static OpenSSL on macOS and amend §2 to drop the no-bundled-crypto claim |
 | ~~**R-13**~~ | ~~No CRAN-viable macOS TLS engine.~~ **RETIRED 2026-09-08.** Secure Transport + SecTrust ships with nothing bundled (0.17 MB `.so`), at a **TLS 1.2 ceiling**. Static OpenSSL was viable but costs 4.64 MB of bundled cryptography; Network.framework has TLS 1.3 but cannot run over a caller-owned socket, so it fails §20.3. See `spike/macos-engine/FINDINGS.md`. | — | — | Done | Residual: Apple may remove Secure Transport — see R-15 |
 | **R-2** | **Schannel overrun.** 1,500–2,500 lines of security-critical code, low-confidence estimate (§13.4, §64). | High | High | Time-box the spike; measure LOC against §51.3 early | Schannel backend exceeds 3,500 LOC or 8 weeks → reconsider a portable engine + `CertGetCertificateChain` trust on Windows too |

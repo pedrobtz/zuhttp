@@ -8,6 +8,7 @@
 #include "zu_inflate.h"
 #include "zu_tls.h"
 #include "zu_stream.h"
+#include "zu_pool.h"
 #include "zu_time.h"
 #include <string.h>
 #include <stdio.h>
@@ -78,12 +79,106 @@ done:
 }
 
 /* Open the transport for one hop: TCP, then TLS when the scheme says so. */
+/* --- §26.1 pool key ------------------------------------------------------
+ *
+ * Built from the URI and the TLS settings this engine actually applies. That
+ * is the whole of the §26.1 key that varies today: zu_get_opts carries no
+ * proxy, no pin set, no client certificate and no ALPN override, so those
+ * fields stay NULL rather than being invented here.
+ *
+ * When any of them IS plumbed through zu_get_opts, it must be added here in
+ * the same commit. A key that ignores a field two clients differ on is the
+ * "coarse key is a security bug, not a performance optimisation" failure
+ * §26.1 names — it would let a request with verification off reuse a
+ * connection established with it on. zu_pool_key_eq() compares every field of
+ * the struct, so the risk is only ever a field missing HERE.
+ *
+ * The strings are owned copies, freed by pool_key_free(). Borrowing pointers
+ * into the zu_uri would be cheaper and is what an earlier draft did, but the
+ * struct's contract is owned storage, and a later zu_pool_key_free() on a
+ * borrowed key is a double free waiting to happen.
+ *
+ * acquire and release each build their own key rather than sharing one across
+ * the hop. That is four strdups per pooled request instead of two, and it buys
+ * the loop's dozen early-return paths having no key to free — the kind of
+ * lifetime bookkeeping that leaks the first time someone adds a thirteenth. */
+static int pool_key_for(zu_pool_key *k, const zu_uri *u, const zu_get_opts *o) {
+    zu_pool_key_init(k);
+    k->scheme = dup_str(u->is_https ? "https" : "http");
+    k->host   = dup_str(u->host);
+    if (!k->scheme || !k->host) { zu_pool_key_free(k); return 0; }
+    k->port            = u->port;
+    k->verify_peer     = o->verify;
+    k->verify_hostname = o->verify;
+    if (o->ca_file) {
+        k->ca_file = dup_str(o->ca_file);
+        if (!k->ca_file) { zu_pool_key_free(k); return 0; }
+    }
+    return 1;
+}
+
+/* --- §26.3 may this connection go back? ----------------------------------
+ *
+ * §26.3's rule is "the safe default is to close", so this returns a NAMED
+ * reason rather than a bool and every path that is not provably clean lands
+ * on one of them. The order matters: a failed request is judged by WHY it
+ * failed before the framing is consulted, because a timeout mid-body and a
+ * clean close-framed body are both "no reuse" for very different reasons and
+ * the §42 trace should say which. */
+/* Hand the connection back to the pool, or close it when there is no pool.
+ * zu_pool_release takes ownership either way, so this is the ONLY place the
+ * happy path disposes of a stream and the caller never decides who frees. */
+static void done_with_stream(const zu_get_opts *o, const zu_uri *u,
+                             zu_stream *s, zu_reuse r) {
+    zu_pool_key key;
+    if (!s) return;
+    if (o->pool && pool_key_for(&key, u, o)) {
+        zu_pool_release(o->pool, &key, s, r);
+        zu_pool_key_free(&key);
+        return;
+    }
+    /* No pool, or the key could not be built (OOM). Either way the safe
+     * answer is §26.3's: close it. */
+    zu_stream_close(s);
+    zu_stream_free(s);
+}
+
+/* Record the negotiated TLS parameters on the result. Runs for a pooled
+ * connection as well as a fresh one: the handshake happened on some earlier
+ * request, but the session is the same one this response came over, so
+ * reporting it is not a courtesy — a caller that logs tls_version would
+ * otherwise see NULL on exactly the requests that reused a connection. */
+static void record_tls_info(zu_stream *s, zu_result *res) {
+    zu_tls_info info;
+    if (!zu_tls_get_info(s, &info)) return;
+    zu_free(res->tls_version); zu_free(res->tls_cipher);
+    res->tls_version = dup_str(info.protocol);
+    res->tls_cipher  = dup_str(info.cipher);
+}
+
 static zu_code open_stream(zu_stream **out, const zu_uri *u,
                            const zu_get_opts *o, zu_deadline dl,
                            zu_result *res, zu_error *err) {
     zu_net_opts nopts;
     zu_stream *tcp = NULL;
     zu_code rc;
+
+    /* §26: a live connection for this exact key, if the pool has one. The
+     * pool has already run the fork guard, the idle-timeout check and the
+     * §26.2 liveness probe by the time it answers, so a non-NULL return is
+     * usable as-is. */
+    if (o->pool) {
+        zu_pool_key key;
+        zu_stream *reused = NULL;
+        if (!pool_key_for(&key, u, o)) return ZU_ERR_NOMEM;
+        reused = zu_pool_acquire(o->pool, &key);
+        zu_pool_key_free(&key);
+        if (reused) {
+            if (u->is_https) record_tls_info(reused, res);
+            *out = reused;
+            return ZU_OK;
+        }
+    }
 
     zu_net_opts_init(&nopts);
     nopts.tick     = o->tick;
@@ -103,7 +198,6 @@ static zu_code open_stream(zu_stream **out, const zu_uri *u,
     {
         zu_tls_config cfg;
         zu_stream *tls = NULL;
-        zu_tls_info info;
 
         zu_tls_config_init(&cfg);
         cfg.verify_peer     = o->verify;
@@ -117,11 +211,7 @@ static zu_code open_stream(zu_stream **out, const zu_uri *u,
             zu_stream_free(tcp);
             return rc;
         }
-        if (zu_tls_get_info(tls, &info)) {
-            zu_free(res->tls_version); zu_free(res->tls_cipher);
-            res->tls_version = dup_str(info.protocol);
-            res->tls_cipher  = dup_str(info.cipher);
-        }
+        record_tls_info(tls, res);
         *out = tls;
         return ZU_OK;
     }
@@ -299,8 +389,12 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
         zu_response resp;
         size_t hi;
         zu_buffer wire, raw;
-        zu_framing fr;
         size_t consumed = 0;
+        /* Pre-set to the §26.3 safe default. `fr` is only really filled once
+         * zu_response_decide_framing() succeeds, so every path that fails
+         * before that point must still give reuse_after() something that
+         * means "do not reuse" rather than whatever was on the stack. */
+        zu_framing fr = { ZU_FRAME_UNTIL_CLOSE, 0, 0 };
 
         rc = open_stream(&s, &cur, o, total, out, err);
         if (rc != ZU_OK) { zu_uri_free(&cur); zu_result_free(out); return rc; }
@@ -391,8 +485,10 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
                            total, err);
         }
         zu_buf_free(&raw);
-        zu_stream_close(s);
-        zu_stream_free(s);
+        /* §26.3. The decision is made HERE, while the framing and the
+         * response headers that justify it are still in scope — not inside
+         * the pool, which cannot see them. */
+        done_with_stream(o, &cur, s, zu_reuse_decide(rc, &fr, &resp.headers, resp.minor_version));
 
         if (rc != ZU_OK) {
             zu_response_free(&resp); zu_uri_free(&cur); zu_result_free(out);

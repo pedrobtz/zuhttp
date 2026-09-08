@@ -15,7 +15,8 @@ zu_client(
   user_agent = NULL,
   check = NULL,
   decode = NULL,
-  transport = zu_native_transport()
+  transport = zu_native_transport(),
+  pool = zu_pool()
 )
 }
 \arguments{
@@ -44,13 +45,16 @@ returns the response whatever its status.}
 \item{transport}{The object that actually performs requests. Defaults to
 \code{\link[=zu_native_transport]{zu_native_transport()}}; \code{\link[=zu_mock_transport]{zu_mock_transport()}} replaces the network in
 tests.}
+
+\item{pool}{Connection reuse settings from \code{\link[=zu_pool]{zu_pool()}}, or \code{NULL} to open a
+fresh connection for every request.}
 }
 \value{
 A \code{zu_client} object.
 }
 \description{
 A client carries what many requests share: a base URL, default headers and
-query parameters, policy defaults, and (once §26 lands) the connection pool.
+query parameters, policy defaults, and the connection pool.
 It is never the first argument of a request function — see below.
 }
 \details{

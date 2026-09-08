@@ -22,11 +22,115 @@
 #include "zu_engine.h"
 #include "zu_headers.h"
 #include "zu_tls.h"
+#include "zu_pool.h"
 #include <string.h>
 
 /* Anything a caller could make arbitrarily large is bounded here rather than
  * in the R layer, so the bound cannot be bypassed by a different caller. */
 #define ZU_R_TEXT_MAX (1u << 20)
+
+/* --- §26 the connection pool, as an R object ------------------------------
+ *
+ * §26.5: "a zu_client is an ordinary R object holding an external pointer to
+ * native pool state", and a client restored from saveRDS() must lazily
+ * re-create its pool rather than erroring. Two things make that work:
+ *
+ *   - the pointer is TAGGED. A restored external pointer comes back with a
+ *     NULL address, and R will happily hand any other package's external
+ *     pointer to .Call, so "is this ours and is it alive" is one question
+ *     answered in one place (pool_ptr_get).
+ *   - a finalizer frees the pool when the client is collected. §26.4 requires
+ *     the PID guard in every finalizer; zu_pool_free() runs it, which is why
+ *     the finalizer body is just that call and not a hand-rolled teardown.
+ */
+static SEXP zu_pool_tag = NULL;   /* install()ed once in R_init_zuhttp */
+
+static void pool_finalizer(SEXP ptr) {
+    zu_pool *p = (zu_pool *)R_ExternalPtrAddr(ptr);
+    if (!p) return;
+    /* Runs the §26.4 fork guard internally: a finalizer in a forked child
+     * must not gracefully close sockets the parent still owns. */
+    zu_pool_free(p);
+    R_ClearExternalPtr(ptr);
+}
+
+/* The pool behind `ptr`, or NULL if there is none, it is not ours, or it did
+ * not survive serialization. NULL is not an error here — it is the signal the
+ * R layer turns into "create one now" (§26.5). */
+static zu_pool *pool_ptr_get(SEXP ptr) {
+    if (TYPEOF(ptr) != EXTPTRSXP) return NULL;
+    if (R_ExternalPtrTag(ptr) != zu_pool_tag) return NULL;
+    return (zu_pool *)R_ExternalPtrAddr(ptr);
+}
+
+static SEXP C_zu_pool_new(SEXP max_idle, SEXP max_per_host, SEXP idle_timeout_ms) {
+    zu_pool_config cfg;
+    zu_pool *p;
+    SEXP ptr;
+
+    zu_pool_config_init(&cfg);
+    if (Rf_asInteger(max_idle) > 0)     cfg.max_idle        = (size_t)Rf_asInteger(max_idle);
+    if (Rf_asInteger(max_per_host) > 0) cfg.max_per_host    = (size_t)Rf_asInteger(max_per_host);
+    if (Rf_asInteger(idle_timeout_ms) > 0)
+        cfg.idle_timeout_ms = (long)Rf_asInteger(idle_timeout_ms);
+
+    p = zu_pool_new(&cfg);
+    if (!p) Rf_error("could not allocate a connection pool");
+
+    ptr = PROTECT(R_MakeExternalPtr(p, zu_pool_tag, R_NilValue));
+    R_RegisterCFinalizerEx(ptr, pool_finalizer, TRUE);
+    UNPROTECT(1);
+    return ptr;
+}
+
+/* Is this pointer a live pool of ours? The R layer asks before every use, and
+ * a FALSE means "restored from a file, or never made" — both of which lead to
+ * the same lazy re-creation (§26.5). */
+static SEXP C_zu_pool_valid(SEXP ptr) {
+    return Rf_ScalarLogical(pool_ptr_get(ptr) != NULL);
+}
+
+/* §26.2 counters. These exist so a test can prove a connection was REUSED
+ * rather than merely that two requests both succeeded — without them, pooling
+ * is indistinguishable from not pooling from R. */
+static SEXP C_zu_pool_stats(SEXP ptr) {
+    static const char *nm[] = {
+        "idle", "hits", "misses", "discarded_stale", "discarded_expired",
+        "discarded_capacity", "discarded_unusable", "discarded_fork",
+        "forks_detected", NULL
+    };
+    zu_pool *p = pool_ptr_get(ptr);
+    zu_pool_stats st;
+    SEXP out, names;
+    int i, n = 0;
+
+    while (nm[n]) n++;
+    if (!p) return R_NilValue;
+    zu_pool_stats_get(p, &st);
+
+    out = PROTECT(Rf_allocVector(REALSXP, n));
+    REAL(out)[0] = (double)st.idle;
+    REAL(out)[1] = (double)st.hits;
+    REAL(out)[2] = (double)st.misses;
+    REAL(out)[3] = (double)st.discarded_stale;
+    REAL(out)[4] = (double)st.discarded_expired;
+    REAL(out)[5] = (double)st.discarded_capacity;
+    REAL(out)[6] = (double)st.discarded_unusable;
+    REAL(out)[7] = (double)st.discarded_fork;
+    REAL(out)[8] = (double)st.forks_detected;
+
+    names = PROTECT(Rf_allocVector(STRSXP, n));
+    for (i = 0; i < n; i++) SET_STRING_ELT(names, i, Rf_mkChar(nm[i]));
+    Rf_setAttrib(out, R_NamesSymbol, names);
+    UNPROTECT(2);
+    return out;
+}
+
+static SEXP C_zu_pool_clear(SEXP ptr) {
+    zu_pool *p = pool_ptr_get(ptr);
+    if (p) zu_pool_clear(p);
+    return R_NilValue;
+}
 
 /* --- §34.1 conditions ----------------------------------------------------- */
 
@@ -282,7 +386,7 @@ static SEXP headers_to_r(const zu_headers *h) {
 static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
                          SEXP header_values, SEXP body, SEXP timeout_ms,
                          SEXP max_redirects, SEXP verify, SEXP max_body,
-                         SEXP user_agent, SEXP decode) {
+                         SEXP user_agent, SEXP decode, SEXP pool) {
     zu_get_opts o;
     zu_req_spec spec;
     zu_result r;
@@ -337,6 +441,11 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
     o.no_decode     = Rf_asLogical(decode) != TRUE;
     if (Rf_isString(user_agent) && Rf_length(user_agent) == 1)
         o.user_agent = Rf_translateCharUTF8(STRING_ELT(user_agent, 0));
+    /* §26. NULL, a foreign pointer, or one that did not survive saveRDS() all
+     * mean "no pool for this request" — the engine then opens and closes its
+     * own connection, which is correct rather than merely tolerable. The R
+     * layer re-creates the pool before the next call (§26.5). */
+    o.pool = pool_ptr_get(pool);
 
     /* §25.1: a checkpoint at most one tick apart, and never inside a blocking
      * call. 100 ms is the design's ceiling. */
@@ -418,12 +527,19 @@ static const R_CallMethodDef call_methods[] = {
     {"C_zu_redact_form",       (DL_FUNC) &C_zu_redact_form,       2},
     {"C_zu_is_secret_header",  (DL_FUNC) &C_zu_is_secret_header,  2},
     {"C_zu_is_secret_param",   (DL_FUNC) &C_zu_is_secret_param,   2},
-    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          11},
+    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          12},
+    {"C_zu_pool_new",          (DL_FUNC) &C_zu_pool_new,          3},
+    {"C_zu_pool_valid",        (DL_FUNC) &C_zu_pool_valid,        1},
+    {"C_zu_pool_stats",        (DL_FUNC) &C_zu_pool_stats,        1},
+    {"C_zu_pool_clear",        (DL_FUNC) &C_zu_pool_clear,        1},
     {"C_zu_tls_backend",       (DL_FUNC) &C_zu_tls_backend,       0},
     {NULL, NULL, 0}
 };
 
 void attribute_visible R_init_zuhttp(DllInfo *dll) {
+    /* Interned once. Pointer identity against this symbol is what tells our
+     * external pointers from another package's (§26.5). */
+    zu_pool_tag = Rf_install("zu_pool");
     R_registerRoutines(dll, NULL, call_methods, NULL, NULL);
     R_useDynamicSymbols(dll, FALSE);
     R_forceSymbols(dll, TRUE);

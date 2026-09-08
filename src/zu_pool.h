@@ -18,6 +18,8 @@
 
 #include "zu_platform.h"
 #include "zu_stream.h"
+#include "zu_headers.h"
+#include "zu_framing.h"
 #include "zu_fork.h"
 #include "zu_time.h"
 
@@ -71,6 +73,19 @@ typedef enum {
 } zu_reuse;
 
 const char *zu_reuse_name(zu_reuse r);
+
+/* Decide §26.3 for one finished exchange.
+ *
+ * Lives here rather than in the engine so that the policy is unit-testable
+ * with no network and no engine — the same reason the rest of the pool is
+ * (§50.1). The engine calls it at the point where the framing and the
+ * response headers that justify the answer are still in scope; nothing else
+ * can see enough to decide.
+ *
+ * `rc` is the request's outcome, `fr` its framing, `minor_version` the 0 or 1
+ * of HTTP/1.x — 1.0 is not persistent unless the server opts in. */
+zu_reuse zu_reuse_decide(zu_code rc, const zu_framing *fr,
+                         const zu_headers *resp_headers, int minor_version);
 
 /* --- §26.2 policy -------------------------------------------------------- */
 typedef struct {

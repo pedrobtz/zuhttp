@@ -19,11 +19,6 @@ Useful links:
 \author{
 \strong{Maintainer}: Pedro Baltazar \email{pedrobtz@gmail.com}
 
-Authors:
-\itemize{
-  \item Pedro Baltazar \email{pedrobtz@gmail.com}
-}
-
 Other contributors:
 \itemize{
   \item Kazuho Oku (picohttpparser, see inst/COPYRIGHTS) [copyright holder]
