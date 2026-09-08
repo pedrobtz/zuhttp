@@ -21,6 +21,17 @@
 #' @param user_agent `User-Agent` to send.
 #' @return A `zu_response` object. Use [zu_resp_status()], [zu_resp_body()],
 #'   [zu_resp_headers()] and [zu_resp_url()] to read it.
+#' @section Cancellation:
+#' A request checks for a user interrupt roughly every 100 milliseconds, so
+#' Ctrl-C aborts it promptly and raises `zu_interrupted_error`. The connection
+#' is closed rather than reused, because after an interrupt the framing
+#' position is unknown and reusing it could splice one response into another.
+#'
+#' **DNS lookups are not interruptible.** A request blocked in the system
+#' resolver will not respond to Ctrl-C until the resolver returns, because
+#' `getaddrinfo()` offers no way to cancel it. In practice this bounds the
+#' worst-case delay by the resolver's own timeout, typically a few seconds.
+#'
 #' @section Platform status:
 #' The long-term design uses each platform's native TLS stack. Until those
 #' backends land this package links OpenSSL everywhere, and **on Windows that
