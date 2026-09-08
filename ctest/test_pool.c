@@ -268,24 +268,37 @@ void suite_pool(void) {
         ZU_CHECK_EQ_INT(zu_pool_idle_count(p), 1);
         kid = fork();
         if (kid == 0) {
-            int ok = 1;
-            /* Inherited one idle connection from the parent. */
-            if (zu_pool_idle_count(p) != 1) ok = 0;
-            if (zu_pool_check_fork(p) != 1) ok = 0;      /* fork detected */
-            if (zu_pool_idle_count(p) != 0) ok = 0;      /* and dropped */
-            {
-                zu_pool_stats cst;
+            /* The child cannot use the harness counters, so it reports the
+             * INDEX of the first failed check in its exit status. A single
+             * pass/fail bit told us the child failed under valgrind and
+             * nothing more, which is not a diagnostic. 0 means all passed. */
+            int step = 0;
+            zu_pool_stats cst;
+
+            if (zu_pool_idle_count(p) != 1)     step = 1;   /* inherited one */
+            else if (zu_pool_check_fork(p) != 1) step = 2;  /* fork detected */
+            else if (zu_pool_idle_count(p) != 0) step = 3;  /* and dropped */
+            else {
                 zu_pool_stats_get(p, &cst);
-                if (cst.discarded_fork != 1) ok = 0;
-                if (cst.forks_detected != 1) ok = 0;
+                if (cst.discarded_fork != 1)      step = 4;
+                else if (cst.forks_detected != 1) step = 5;
+                /* Re-armed, so a second check is a no-op, not a second drop. */
+                else if (zu_pool_check_fork(p) != 0) step = 6;
+                else {
+                    /* And the child can pool its own connections normally. */
+                    zu_pool_release(p, &a, idle_stream(), ZU_REUSE_OK);
+                    if (zu_pool_idle_count(p) != 1) step = 7;
+                }
             }
-            /* The guard re-armed, so the child owns an empty pool and a
-             * second check is a no-op rather than a repeated drop. */
-            if (zu_pool_check_fork(p) != 0) ok = 0;
-            /* And the child can pool its own connections normally. */
-            zu_pool_release(p, &a, idle_stream(), ZU_REUSE_OK);
-            if (zu_pool_idle_count(p) != 1) ok = 0;
-            _exit(ok ? 0 : 1);
+
+            /* Free the child's COPY of the inherited heap before _exit.
+             * Without this valgrind follows the fork and reports the parent's
+             * still-live allocations as leaked in the child — an artifact of
+             * fork, not a defect, but one that hides real findings. Freeing
+             * here touches only the child's copy-on-write pages. */
+            zu_pool_free(p);
+            zu_pool_key_free(&a);
+            _exit(step);
         }
         ZU_CHECK(kid > 0);
         if (kid > 0) {
@@ -293,6 +306,8 @@ void suite_pool(void) {
             ZU_CHECK(waitpid(kid, &status, 0) == kid);
             /* Not merely "exit 0": a SIGSEGV here is the R-12 failure mode. */
             ZU_CHECK(WIFEXITED(status));
+            /* A non-zero status names the check that failed, so a failure here
+             * is actionable without re-running under a debugger. */
             ZU_CHECK_EQ_INT(WIFEXITED(status) ? WEXITSTATUS(status) : -1, 0);
         }
         /* The parent still holds its connection: the child dropped its own
