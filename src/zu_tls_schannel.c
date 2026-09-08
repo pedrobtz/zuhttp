@@ -35,6 +35,19 @@
 #include <string.h>
 #include <stdio.h>
 
+/* Declared in wininet.h, which mingw-w64's wincrypt/schannel headers do not
+ * pull in — and including wininet.h here would drag in a large unrelated
+ * surface for one flag.
+ *
+ * Note the contrast with R-3: declaring a SCALAR CONSTANT locally is safe,
+ * because a wrong value means a wrong flag and nothing more. Declaring a
+ * STRUCT locally (SCH_CREDENTIALS, for TLS 1.3) is not, because a wrong
+ * layout handed to AcquireCredentialsHandle corrupts memory. That difference
+ * is why one is a footnote and the other is a tracked risk. */
+#ifndef SECURITY_FLAG_IGNORE_CERT_CN_INVALID
+#  define SECURITY_FLAG_IGNORE_CERT_CN_INVALID 0x00001000
+#endif
+
 #define ZU_SCH_MAX_TOKEN   (32 * 1024)
 #define ZU_SCH_READ_CHUNK  16384
 
@@ -175,8 +188,10 @@ static zu_code do_handshake(sch_impl *t, const char *hostname,
     SECURITY_STATUS ss;
     char detail[256];
     int first = 1;
+    int used_input;      /* was `inb` populated on THIS iteration? */
 
     for (;;) {
+        used_input = 0;
         outb[0].pvBuffer = NULL;
         outb[0].BufferType = SECBUFFER_TOKEN;
         outb[0].cbBuffer = 0;
@@ -190,6 +205,12 @@ static zu_code do_handshake(sch_impl *t, const char *hostname,
                                             &t->ctx, &outd, &attrs, NULL);
             first = 0;
             t->have_ctx = 1;
+            /* `inb` is deliberately NOT touched on this path, which is why the
+             * SECBUFFER_EXTRA checks below key off used_input rather than
+             * !first. Keying off `first` read uninitialised stack memory on
+             * exactly this iteration — undefined behaviour that would usually
+             * appear to work, because the garbage rarely equals
+             * SECBUFFER_EXTRA. Found by review; a test would not have. */
         } else {
             inb[0].pvBuffer   = t->enc.data;
             inb[0].cbBuffer   = (unsigned long)t->enc.len;
@@ -201,6 +222,7 @@ static zu_code do_handshake(sch_impl *t, const char *hostname,
             ind.cBuffers  = 2;
             ind.pBuffers  = inb;
 
+            used_input = 1;
             ss = InitializeSecurityContextA(&t->cred, &t->ctx, (SEC_CHAR *)hostname,
                                             req, 0, 0, &ind, 0,
                                             NULL, &outd, &attrs, NULL);
@@ -217,7 +239,7 @@ static zu_code do_handshake(sch_impl *t, const char *hostname,
 
         if (ss == SEC_E_OK) {
             /* Keep whatever arrived past the end of the handshake. */
-            if (!first && inb[1].BufferType == SECBUFFER_EXTRA && inb[1].cbBuffer > 0) {
+            if (used_input && inb[1].BufferType == SECBUFFER_EXTRA && inb[1].cbBuffer > 0) {
                 size_t extra = inb[1].cbBuffer;
                 memmove(t->enc.data, t->enc.data + (t->enc.len - extra), extra);
                 t->enc.len = extra;
@@ -232,7 +254,7 @@ static zu_code do_handshake(sch_impl *t, const char *hostname,
             zu_ssize n;
 
             if (ss == SEC_I_CONTINUE_NEEDED) {
-                if (inb[1].BufferType == SECBUFFER_EXTRA && inb[1].cbBuffer > 0) {
+                if (used_input && inb[1].BufferType == SECBUFFER_EXTRA && inb[1].cbBuffer > 0) {
                     size_t extra = inb[1].cbBuffer;
                     memmove(t->enc.data, t->enc.data + (t->enc.len - extra), extra);
                     t->enc.len = extra;

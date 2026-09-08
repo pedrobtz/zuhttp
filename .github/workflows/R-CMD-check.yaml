@@ -51,6 +51,19 @@ jobs:
           r-version: ${{ matrix.config.r }}
           http-user-agent: ${{ matrix.config.http-user-agent }}
 
+      # git cannot represent the executable bit in a Windows working tree, so
+      # R CMD build reports "did not have execute permissions: corrected" for
+      # configure and cleanup on every Windows run. It is harmless — R fixes it
+      # itself, and the tarball CRAN builds on Linux has the right bits — but it
+      # is noise competing with real warnings. This may not silence it: R's
+      # check uses file.access(mode = 1), whose behaviour on Windows is
+      # documented as unreliable. If the warning persists, it is intrinsic to
+      # building a source package on Windows and should simply be ignored.
+      - name: Restore executable bits (Windows checkout)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: chmod +x configure configure.win cleanup
+
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           extra-packages: any::rcmdcheck
