@@ -340,8 +340,10 @@ redact_request <- function(req) {
 print.zu_response <- function(x, ...) {
   st <- status_text(x$status)
   cat("<zu_response [", x$status, if (nzchar(st)) paste0(" ", st), "]>\n", sep = "")
-  cat(x$method %||% "", if (!is.null(x$method)) " ", zu_redact_url(x$url %||% ""),
-      "\n", sep = "")
+  # A hand-built response may have neither, and an empty line reads as a bug.
+  if (!is.null(x$method) || !is.null(x$url))
+    cat(x$method %||% "", if (!is.null(x$method)) " ", zu_redact_url(x$url %||% ""),
+        "\n", sep = "")
   h <- zu_redact_headers_for_display(x$headers)
   if (length(h)) {
     n <- min(length(h), 8L)

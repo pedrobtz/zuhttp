@@ -721,6 +721,20 @@ User docs per §55: TLS backend and trust per OS, proxy behavior, timeout semant
 - [ ] Three R users unfamiliar with the package each write a working GET and JSON POST within 5 minutes using only the reference index (§61.11).
 - [ ] Every documented limitation from the design doc appears in user-facing help — especially DNS non-interruptibility (§25.4) and `ca_file` replacing rather than adding (§14.2).
 
+### S-unassigned · `zu_info()` (§39)
+
+**Found during S11.** §39 specifies an information API — version, TLS backend,
+trust source, compression, IPv6, proxy — and two other sections lean on it:
+§31.3 says the default client's configuration "is never invisible" *because*
+`zu_info()` reports it, and §14.5 requires it to report the effective
+revocation policy, which differs per platform and is exactly the asymmetry
+that produces "works on my machine" reports.
+
+No stage owns it. It is small, but half of what it must report (proxy state,
+revocation policy) is only true once S10 and §14.5 are wired, so writing it
+now would produce a diagnostic that looks authoritative and is not. It belongs
+after S10, before S20 documents it.
+
 ### S21 · Security review → 1.0
 
 **Effort:** 2 weeks plus review turnaround. **Depends on:** S18, S19, S20.
@@ -787,5 +801,10 @@ That last item is the honest test of the whole project. `zuhttp` exists on the p
 
 1. ~~**Run S0.**~~ ✅ Done — verdict GO. See [spike/macos-tls/FINDINGS.md](spike/macos-tls/FINDINGS.md).
 2. ~~**Run S1.**~~ ✅ Done on CI — R-3 confirmed. See [spike/windows-schannel/FINDINGS.md](spike/windows-schannel/FINDINGS.md).
-3. **Start S2.** It depends on neither spike and unblocks both Track B and Track C.
+3. ~~**Start S2.**~~ ✅ Done, along with S3–S9 and the §63.2 slice.
 4. ~~**Fix `DESCRIPTION`**~~ ✅ Done.
+5. ~~**S11 · R API surface.**~~ ✅ Done 2026-09-08 — 11 of 13 §31.16 workflows.
+6. **Next: S13 (retry, middleware, hooks) or S14 (R transports).** Both are
+   unblocked by S11 now; S13 also needs S12, whose canary is still partial.
+   S13 closes the two workflows S11 could not run (retry) once it lands, and
+   S14 turns the mock transport seam into record/replay.
