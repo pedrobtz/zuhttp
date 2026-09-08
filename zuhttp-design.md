@@ -792,6 +792,23 @@ Use Winsock, Schannel, and the Windows certificate trust store.
 
 Benefits: no OpenSSL dependency, native enterprise trust, native certificate updates, Windows policy integration.
 
+**Delivered in S8 (2026-09-08).** `src/zu_tls_schannel.c`: SSPI for the
+protocol, `CertGetCertificateChain` + `CertVerifyCertificateChainPolicy`
+against the Windows certificate store for trust, with
+`SCH_CRED_MANUAL_CRED_VALIDATION` so the §13.1 split holds. Verified on CI:
+
+```text
+status 200 tls TLSv1.2 bytes 559
+expired    -> zu_tls_certificate_error
+wrong host -> zu_tls_hostname_error
+```
+
+Windows reports a precise `dwError`, so unlike macOS it needs no second
+evaluation to separate a bad name from a bad chain. **Scope is TLS 1.2**:
+`SCH_CREDENTIALS` is still absent from Rtools45/GCC 14.3 headers (R-3,
+re-confirmed 2026-09-08), and declaring a structure whose layout cannot be
+verified is a memory-safety bug rather than a compile error.
+
 **Schannel is required, not merely preferred — measured.** The §63.2 slice
 temporarily linked OpenSSL on every platform, and on Windows it builds and
 links cleanly under Rtools but cannot verify a single certificate:

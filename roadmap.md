@@ -37,7 +37,7 @@ graph TD
 
     S6["S6 · Sockets + poll + deadlines<br/>DONE"]
     S7["S7 · OpenSSL engine + trust"]
-    S8["S8 · Schannel<br/>IN PROGRESS — TLS 1.2"]
+    S8["S8 · Schannel<br/>DONE — TLS 1.2"]
     S9["S9 · macOS engine + trust<br/>DONE — R-13 + R-12 closed"]
     S10["S10 · Proxy + CONNECT<br/>PARTIAL — C core done"]
 
@@ -129,7 +129,10 @@ allocations.
 platform, including Windows and macOS. D-5 and D-4 call for Schannel and the
 system trust store; those are S8 and S9. DESCRIPTION says so explicitly.
 
-**And that shortcut does not work on Windows at all**, which CI established
+**RESOLVED by S8 (2026-09-08): Windows now uses Schannel and HTTPS works.**
+What follows is the finding that made D-5 mandatory rather than preferred.
+
+**The OpenSSL shortcut did not work on Windows at all**, which CI established
 the moment the slice ran there:
 
 ```
@@ -326,17 +329,49 @@ The reference implementation of the §13.1 engine/trust split. Hostname verifica
 - [ ] `ca_extra` adds to system trust; `ca_file` replaces it. Both proven by test.
 - [ ] Pin match and mismatch both behave, and pinning does not bypass chain verification.
 
-### S8 · Schannel — **GATE**
+### S8 · Schannel — ✅ **COMPLETE 2026-09-08 (TLS 1.2)**
 
-**Effort:** 4–6 weeks. **Depends on:** S1, S7. **Retires:** Appendix B R-2.
+**Estimated:** 4–6 weeks, "the largest single line item in the plan and the
+lowest-confidence estimate". **Actual:** ~570 lines, nine CI rounds.
+**Retires:** Appendix B R-2 — the size fear did not materialise.
 
-The largest single line item in the plan and the lowest-confidence estimate. Manual `SecBuffer` framing, `SECBUFFER_EXTRA` handling, `EncryptMessage`/`DecryptMessage` against `SECPKG_ATTR_STREAM_SIZES`, renegotiation, `ApplyControlToken` shutdown, and chain validation via `CertGetCertificateChain` + `CertVerifyCertificateChainPolicy`.
+`src/zu_tls_schannel.c`. SSPI for the protocol, `CertGetCertificateChain` +
+`CertVerifyCertificateChainPolicy` for trust, with
+`SCH_CRED_MANUAL_CRED_VALIDATION` so §13.1's split holds. Verified on CI:
+
+```text
+status 200 tls TLSv1.2 bytes 559
+expired    -> zu_tls_certificate_error
+wrong host -> zu_tls_hostname_error
+```
 
 **Exit criteria**
 
-- [ ] Same §50.5 matrix as S7, same condition classes.
-- [ ] Additive custom CA works through an in-memory store without disabling system trust (§14.3).
-- [ ] **LOC measured as written.** Stop at 3,500 and escalate per R-2.
+- [x] Same §50.5 matrix as S7, same condition classes — 21 C-level checks plus
+      the R-level slice.
+- [x] **LOC measured as written: ~570**, against a 3,500 escalation threshold.
+      The estimate was out by roughly 6x, and the reason is worth recording:
+      the estimate assumed renegotiation and `ApplyControlToken` shutdown,
+      neither of which a client doing HTTP/1.1 needs.
+- [ ] Additive custom CA through an in-memory store (§14.3). **Not
+      implemented.** Configuring `ca_file`/`ca_data`/`ca_extra` on Windows
+      raises an error rather than silently ignoring the setting and using
+      system trust anyway.
+- [ ] TLS 1.3. Needs `SCH_CREDENTIALS`, still absent from Rtools45/GCC 14.3
+      (R-3, re-confirmed 2026-09-08). A toolchain bump will not fix it.
+
+**What it cost, and why.** Nine CI rounds with no Windows machine in the loop.
+Four found real defects: a constant that lives in `wininet.h`, a
+`SECBUFFER_EXTRA` underflow that was the actual segfault, an uninitialised
+`inb` read found by reading rather than testing, and an `R_FindNamespace`
+PROTECT bug that predates S8 and affected all three platforms.
+
+The other five were spent on a crash that did not exist: a multi-line
+`Rscript -e` argument fails on Windows before executing anything, and
+`continue-on-error` on the diagnostic steps turned their green ticks into
+noise I mistook for evidence. **Every R check in CI now runs from a file, and
+diagnostic steps that are meant to inform a decision must not carry
+`continue-on-error`.**
 
 ### S9 · macOS engine and trust
 

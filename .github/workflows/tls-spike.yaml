@@ -398,11 +398,10 @@ jobs:
           ZU_TEST_TRACE: "1"
         run: make engine-sch CC="$(R CMD config CC)"
 
-      # The C harness passes at -O1 -std=c99 and the same request crashes inside
-      # R, which is built at -O2 -std=gnu2x. Rebuild the harness with R's OWN
-      # flags to separate the two candidate causes: if it crashes here it is
-      # undefined behaviour that optimisation exposes, and nothing to do with
-      # R; if it passes, the difference is R's process environment.
+      # Added while diagnosing, kept because it earns its place: the package is
+      # built at -O2 -std=gnu2x while ctest uses -O1 -std=c99, and a backend
+      # that only works at one of those is a backend with undefined behaviour
+      # in it.
       - name: Run the slice in C with R's compiler flags
         timeout-minutes: 10
         working-directory: ctest
