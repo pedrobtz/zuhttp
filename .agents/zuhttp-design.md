@@ -63,6 +63,7 @@ Firm decisions and open questions were previously indistinguishable in this docu
 | D-45 | The response sink argument is `path =`, never `file =` (which is a request BODY) | **Accepted** 2026-09-08 — S17 | 27, 31.6 |
 | D-46 | The body path lives in `zu_body.c`, not the engine, so it is mock-testable | **Accepted** 2026-09-08 — S17 | 27, 50.1 |
 | D-47 | A callback is caught on **error and interrupt only**, not on every condition | **Accepted** 2026-09-08 — S17 | 27.3 |
+| D-48 | Proxying is disabled with `proxy = FALSE`, **not** `NULL` (§31.9 owns NULL) | **Accepted** 2026-09-08 — S10 | 20.1, 31.9 |
 
 ---
 
@@ -1225,7 +1226,17 @@ followed redirect.
 
 The lowercase-only rule for `http_proxy` follows curl and exists because in CGI-like environments the `HTTP_Proxy` request header is mapped into the environment as `HTTP_PROXY` (the "httpoxy" class of bug). R is not usually a CGI host, but matching curl's rule costs nothing and avoids a class of surprise.
 
-An explicit `proxy =` argument or client setting always wins over the environment. `zu_client(proxy = NULL)` disables proxying entirely, distinctly from "not configured".
+An explicit `proxy =` argument or client setting always wins over the environment. Proxying is disabled with **`zu_client(proxy = FALSE)`**, distinctly from "not configured".
+
+**D-48 corrects this section.** It originally said `proxy = NULL` disables
+proxying — which collides head-on with §31.9 (D-35), where `NULL` means "reset
+to the package default" for every policy argument. The two cannot both hold:
+if the package default is "consult the environment", `NULL` cannot also mean
+"never proxy"; and if the package default were "never proxy", `http_proxy`
+would never be honoured, which is the premise of this whole section. Making
+`proxy` the one argument where `NULL` means something else would be exactly
+the inconsistency §31.9 exists to prevent, so the third state gets its own
+spelling: `FALSE`.
 
 #### 20.2 `NO_PROXY` matching
 
@@ -1256,6 +1267,20 @@ HTTP request
 ```
 
 The CONNECT response must be parsed with the same strictness as any other response (§18). A non-2xx CONNECT is a `zu_proxy_error` carrying the proxy's status and any body, which is frequently the only diagnostic a user gets in a corporate environment.
+
+**Implementation note (S10, complete 2026-09-08).** The proxy is resolved
+**per hop**, not once per request: a redirect may cross from a proxied host to
+a `NO_PROXY` one or the reverse, and reusing the first hop's decision would
+send the second hop the wrong way. That also gives §20.4's hardest guarantee
+for free — a credential cannot survive a redirect onto a direct host, because
+the branch that adds `Proxy-Authorization` is simply not reached when the new
+hop resolves to no proxy.
+
+After a successful CONNECT the tunnel must contain **nothing** beyond the
+response header block. Any trailing bytes would be origin TLS data the
+handshake has not read yet; a proxy that sends them has desynchronised the
+tunnel before it started, so this is refused rather than spliced into the
+handshake.
 
 #### 20.4 Credentials
 

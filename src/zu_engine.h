@@ -28,6 +28,7 @@
 #include "zu_net.h"
 #include "zu_pool.h"
 #include "zu_sink.h"
+#include "zu_proxy.h"
 
 /* A request the engine can perform. Headers are parallel arrays rather than a
  * zu_headers, so the R layer can pass them without building one — the engine
@@ -69,6 +70,20 @@ typedef struct {
      * whether a transfer is committed depends on what the caller does with
      * the return code, and only the caller knows. */
     zu_sink    *sink;
+
+    /* §20. `proxy` is an explicit override; NULL with proxy_set = 0 means
+     * "consult the environment" (§20.1). proxy_set = 1 with a NULL or empty
+     * `proxy` means proxying is DISABLED — deliberately distinct from "not
+     * configured", because a caller who wrote proxy = NULL wants a direct
+     * connection, not whatever http_proxy happens to say. */
+    const char *proxy;
+    int         proxy_set;
+
+    /* Environment seam (§20.1). NULL uses the real getenv(). Present so the
+     * proxy rules are testable against a table rather than by mutating the
+     * process environment, which is not thread-safe and leaks between
+     * tests. */
+    const zu_env *env;
 } zu_get_opts;
 
 void zu_get_opts_init(zu_get_opts *o);

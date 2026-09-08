@@ -19,7 +19,8 @@ zu_client(
   pool = zu_pool(),
   retry = NULL,
   middleware = NULL,
-  hooks = NULL
+  hooks = NULL,
+  proxy = NULL
 )
 }
 \arguments{
@@ -58,6 +59,14 @@ fresh connection for every request.}
 wrapping request execution (§31.13). The first is outermost.}
 
 \item{hooks}{Lifecycle observers from \code{\link[=zu_hooks]{zu_hooks()}}.}
+
+\item{proxy}{Proxy URL, e.g. \code{"http://proxy:3128"}. Leave unset to honour
+the environment (§20.1); pass \code{FALSE} to force a direct connection.
+\strong{Not \code{NULL}} — under the §31.9 merge rules \code{NULL} means "reset to the
+package default", which for a proxy is "consult the environment". \code{FALSE}
+is the only spelling that can mean "definitely do not proxy" without
+making this one argument an exception to a rule every other policy
+argument follows.}
 }
 \value{
 A \code{zu_client} object.

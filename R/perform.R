@@ -86,7 +86,8 @@ zu_transport_perform.zu_native_transport <- function(transport, req) {
                isTRUE(p$decode),
                req$pool,
                req$path,
-               req$callback)
+               req$callback,
+               p$proxy)
   structure(raw, class = "zu_response")
 }
 

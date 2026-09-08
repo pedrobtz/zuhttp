@@ -24,6 +24,7 @@ zu_get(
   retry = NULL,
   path = NULL,
   callback = NULL,
+  proxy = NULL,
   client = zu_default_client()
 )
 
@@ -41,6 +42,7 @@ zu_head(
   retry = NULL,
   path = NULL,
   callback = NULL,
+  proxy = NULL,
   client = zu_default_client()
 )
 
@@ -62,6 +64,7 @@ zu_post(
   retry = NULL,
   path = NULL,
   callback = NULL,
+  proxy = NULL,
   client = zu_default_client()
 )
 
@@ -83,6 +86,7 @@ zu_put(
   retry = NULL,
   path = NULL,
   callback = NULL,
+  proxy = NULL,
   client = zu_default_client()
 )
 
@@ -104,6 +108,7 @@ zu_patch(
   retry = NULL,
   path = NULL,
   callback = NULL,
+  proxy = NULL,
   client = zu_default_client()
 )
 
@@ -125,6 +130,7 @@ zu_delete(
   retry = NULL,
   path = NULL,
   callback = NULL,
+  proxy = NULL,
   client = zu_default_client()
 )
 }
@@ -165,6 +171,9 @@ request body comes from.}
 \item{callback}{A function of one argument called with each decoded chunk
 as it arrives (§27). Returning \code{FALSE} stops the transfer. See
 \code{\link[=zu_req_callback]{zu_req_callback()}} for what happens when it raises an error.}
+
+\item{proxy}{Proxy URL for this request, or \code{FALSE} for a direct
+connection. See \code{\link[=zu_client]{zu_client()}} for why disabling is \code{FALSE}, not \code{NULL}.}
 
 \item{client}{A \code{zu_client}. Always named.}
 

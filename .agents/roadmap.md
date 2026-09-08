@@ -2,7 +2,7 @@
 
 **Companion to:** [zuhttp-design.md](zuhttp-design.md)
 **Status:** Draft
-**Last updated:** 2026-09-08 · **Track D complete (S11–S14); S16, S17 complete; S12/S15 explicitly partial**
+**Last updated:** 2026-09-08 · **Tracks C and D complete but for S7/S9 cert matrices; S16, S17 complete; S12/S15 explicitly partial**
 **Total estimate:** 41–48 person-weeks (§64 of the design doc, plus spikes)
 
 ---
@@ -39,7 +39,7 @@ graph TD
     S7["S7 · OpenSSL engine + trust"]
     S8["S8 · Schannel<br/>DONE — TLS 1.2"]
     S9["S9 · macOS engine + trust<br/>DONE — R-13 + R-12 closed"]
-    S10["S10 · Proxy + CONNECT<br/>PARTIAL — C core done"]
+    S10["S10 · Proxy + CONNECT<br/>COMPLETE"]
 
     S11["S11 · R API surface<br/>COMPLETE — 11/13 workflows"]
     S12["S12 · Conditions + redaction<br/>PARTIAL — canary incomplete"]
@@ -386,7 +386,7 @@ Implements the S0-validated design: portable engine + `SecTrustEvaluateWithError
 - [ ] `SSL_VERIFY_PEER` set, with a test proving an invalid certificate aborts the handshake (F-3).
 - [ ] `zu_tls(revocation = TRUE)` works and is off by default (F-4).
 
-### S10 · Proxy and CONNECT
+### S10 · Proxy and CONNECT — ✅ **COMPLETE 2026-09-08**
 
 **Effort:** 2 weeks. **Depends on:** S7.
 
@@ -418,8 +418,28 @@ and cannot express "unset" reliably on Windows.
       this layer there is no code path that could add it to an origin request.
 - [x] `http_proxy` is honoured but `HTTP_PROXY` is ignored (httpoxy, §20.1).
 
-**Blocked:** absolute-form and CONNECT are built and unit-tested, but nothing
-drives them over a real socket yet — that is the request engine.
+**Unblocked and finished 2026-09-08.** The engine now drives it: the proxy is
+resolved per hop, plain HTTP goes out in absolute-form with
+`Proxy-Authorization`, HTTPS tunnels through CONNECT, and the §26.1 pool key
+carries proxy identity including credentials so two clients with different
+proxy credentials cannot share a tunnel.
+
+The deferred half of criterion 4 — *"provably never reaches an origin,
+including across a redirect"* — is now structural rather than asserted. The
+proxy is re-resolved for every hop, so a redirect onto a `NO_PROXY` host never
+reaches the branch that adds the header. `test-proxy.R` observes the actual
+bytes the engine sends by running a **real minimal proxy in a helper process**
+on loopback: that is the only way to assert "the request line was
+absolute-form" or "the credential was present, decoded, and confined to the
+proxy" rather than inferring it from a request having succeeded. It asserts
+the request line contains no `@` at all — neither the origin's userinfo nor
+the proxy's.
+
+`proxy = FALSE` disables proxying; **not `NULL`**, which §31.9 already owns.
+See D-48 and the correction in §20.1.
+
+Verified non-vacuously: disabling the absolute-form branch fails both the
+request-line and the credential test.
 
 ---
 

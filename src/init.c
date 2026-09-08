@@ -484,7 +484,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
                          SEXP header_values, SEXP body, SEXP timeout_ms,
                          SEXP max_redirects, SEXP verify, SEXP max_body,
                          SEXP user_agent, SEXP decode, SEXP pool,
-                         SEXP path, SEXP callback) {
+                         SEXP path, SEXP callback, SEXP proxy) {
     zu_get_opts o;
     zu_req_spec spec;
     cb_ctx cb;
@@ -546,6 +546,20 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
      * own connection, which is correct rather than merely tolerable. The R
      * layer re-creates the pool before the next call (§26.5). */
     o.pool = pool_ptr_get(pool);
+
+    /* §20.1 three states, and they are genuinely three. NULL means "consult
+     * the environment"; a string overrides it; FALSE disables proxying
+     * outright, which is not the same thing as being unconfigured — a caller
+     * who asked for a direct connection must not get whatever http_proxy
+     * happens to say. */
+    if (Rf_isString(proxy) && Rf_length(proxy) == 1 && STRING_ELT(proxy, 0) != NA_STRING) {
+        o.proxy     = Rf_translateCharUTF8(STRING_ELT(proxy, 0));
+        o.proxy_set = 1;
+    } else if (Rf_isLogical(proxy) && Rf_length(proxy) == 1 &&
+               LOGICAL(proxy)[0] == FALSE) {
+        o.proxy     = NULL;
+        o.proxy_set = 1;
+    }
 
     /* §27.1: a download goes to a temporary file beside the destination and
      * is renamed only once the body has arrived whole, so an interrupted or
@@ -674,7 +688,7 @@ static const R_CallMethodDef call_methods[] = {
     {"C_zu_redact_form",       (DL_FUNC) &C_zu_redact_form,       2},
     {"C_zu_is_secret_header",  (DL_FUNC) &C_zu_is_secret_header,  2},
     {"C_zu_is_secret_param",   (DL_FUNC) &C_zu_is_secret_param,   2},
-    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          14},
+    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          15},
     {"C_zu_pool_new",          (DL_FUNC) &C_zu_pool_new,          3},
     {"C_zu_pool_valid",        (DL_FUNC) &C_zu_pool_valid,        1},
     {"C_zu_pool_stats",        (DL_FUNC) &C_zu_pool_stats,        1},

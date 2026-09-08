@@ -33,7 +33,11 @@ zu_defaults <- function() {
     # Retrying is off by default (§33): attempts counts the FIRST try, so 1
     # means "no retrying". A client that silently replayed requests would be
     # the data-integrity bug §33 opens by warning about.
-    retry      = zu_retry(attempts = 1L)
+    retry      = zu_retry(attempts = 1L),
+    # §20.1: NULL is "consult the environment", which is what an unconfigured
+    # client must do. Disabling is FALSE — see D-48 and the note in
+    # zu_client()'s docs for why it cannot be NULL.
+    proxy      = NULL
   )
 }
 
@@ -79,6 +83,13 @@ collect_policy <- function(env = parent.frame()) {
 #' @param pool Connection reuse settings from [zu_pool()], or `NULL` to open a
 #'   fresh connection for every request.
 #' @param retry A [zu_retry()] policy. The default retries nothing.
+#' @param proxy Proxy URL, e.g. `"http://proxy:3128"`. Leave unset to honour
+#'   the environment (§20.1); pass `FALSE` to force a direct connection.
+#'   **Not `NULL`** — under the §31.9 merge rules `NULL` means "reset to the
+#'   package default", which for a proxy is "consult the environment". `FALSE`
+#'   is the only spelling that can mean "definitely do not proxy" without
+#'   making this one argument an exception to a rule every other policy
+#'   argument follows.
 #' @param middleware A function of `(req, next_fn)`, or a list of them,
 #'   wrapping request execution (§31.13). The first is outermost.
 #' @param hooks Lifecycle observers from [zu_hooks()].
@@ -112,7 +123,7 @@ zu_client <- function(base_url = NULL, headers = NULL, query = NULL,
                       max_body = NULL, user_agent = NULL, check = NULL,
                       decode = NULL, transport = zu_native_transport(),
                       pool = zu_pool(), retry = NULL, middleware = NULL,
-                      hooks = NULL) {
+                      hooks = NULL, proxy = NULL) {
   structure(
     list(
       base_url   = base_url,
@@ -126,6 +137,7 @@ zu_client <- function(base_url = NULL, headers = NULL, query = NULL,
       check      = check,
       decode     = decode,
       retry      = retry,
+      proxy      = proxy,
       transport  = transport,
       pool       = pool,
       # §31.13: NOT policy. Middleware and hooks are user-supplied behaviour
