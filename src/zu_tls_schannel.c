@@ -175,6 +175,18 @@ static zu_code verify_peer(sch_impl *t, const char *hostname,
 
 /* --- handshake ------------------------------------------------------------ */
 
+/* Keep the trailing `extra` bytes of t->enc and drop everything before them.
+ *
+ * SECBUFFER_EXTRA reports a COUNT, and the bytes it refers to are the tail of
+ * the buffer we handed in. Computing the source as (len - extra) without
+ * checking that extra <= len underflows size_t into a huge offset and reads
+ * wild memory — which is a segfault, not a wrong answer. */
+static void keep_trailing(sch_impl *t, size_t extra) {
+    if (extra == 0 || extra > t->enc.len) { zu_buf_reset(&t->enc); return; }
+    memmove(t->enc.data, t->enc.data + (t->enc.len - extra), extra);
+    t->enc.len = extra;
+}
+
 static zu_code do_handshake(sch_impl *t, const char *hostname,
                             zu_deadline d, zu_error *err) {
     SecBuffer  outb[1], inb[2];
@@ -204,7 +216,10 @@ static zu_code do_handshake(sch_impl *t, const char *hostname,
                                             req, 0, 0, NULL, 0,
                                             &t->ctx, &outd, &attrs, NULL);
             first = 0;
-            t->have_ctx = 1;
+            /* Claim the handle only if Schannel actually produced one. On a
+             * hard failure it may not have, and DeleteSecurityContext on an
+             * unset handle in the cleanup path is its own crash. */
+            if (ss == SEC_E_OK || ss == SEC_I_CONTINUE_NEEDED) t->have_ctx = 1;
             /* `inb` is deliberately NOT touched on this path, which is why the
              * SECBUFFER_EXTRA checks below key off used_input rather than
              * !first. Keying off `first` read uninitialised stack memory on
@@ -239,13 +254,10 @@ static zu_code do_handshake(sch_impl *t, const char *hostname,
 
         if (ss == SEC_E_OK) {
             /* Keep whatever arrived past the end of the handshake. */
-            if (used_input && inb[1].BufferType == SECBUFFER_EXTRA && inb[1].cbBuffer > 0) {
-                size_t extra = inb[1].cbBuffer;
-                memmove(t->enc.data, t->enc.data + (t->enc.len - extra), extra);
-                t->enc.len = extra;
-            } else {
+            if (used_input && inb[1].BufferType == SECBUFFER_EXTRA)
+                keep_trailing(t, inb[1].cbBuffer);
+            else
                 zu_buf_reset(&t->enc);
-            }
             return ZU_OK;
         }
 
@@ -254,13 +266,10 @@ static zu_code do_handshake(sch_impl *t, const char *hostname,
             zu_ssize n;
 
             if (ss == SEC_I_CONTINUE_NEEDED) {
-                if (used_input && inb[1].BufferType == SECBUFFER_EXTRA && inb[1].cbBuffer > 0) {
-                    size_t extra = inb[1].cbBuffer;
-                    memmove(t->enc.data, t->enc.data + (t->enc.len - extra), extra);
-                    t->enc.len = extra;
-                } else {
+                if (used_input && inb[1].BufferType == SECBUFFER_EXTRA)
+                    keep_trailing(t, inb[1].cbBuffer);
+                else
                     zu_buf_reset(&t->enc);
-                }
             }
             n = zu_stream_read(t->inner, chunk, sizeof chunk, d, err);
             if (n < 0) return err->code ? err->code : ZU_ERR_IO;
@@ -333,8 +342,7 @@ static zu_code decrypt_available(sch_impl *t, zu_error *err) {
         /* SECBUFFER_EXTRA points INTO t->enc, so the leftover is moved to the
          * front rather than copied out; anything else aliases freed storage. */
         if (extra_len > 0 && extra_len <= t->enc.len) {
-            memmove(t->enc.data, t->enc.data + (t->enc.len - extra_len), extra_len);
-            t->enc.len = extra_len;
+            keep_trailing(t, extra_len);
             continue;                       /* another whole record may follow */
         }
         zu_buf_reset(&t->enc);

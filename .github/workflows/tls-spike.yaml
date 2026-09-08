@@ -387,6 +387,17 @@ jobs:
           $CC -std=c99 -Wall -Wextra -c -Isrc -Isrc/vendor/picohttpparser \
               -o /tmp/sch.o src/zu_tls_schannel.c
 
+      # Run the slice in C BEFORE involving R. The previous attempt segfaulted
+      # inside Rscript, which reports exit 139 and nothing else; a crash here
+      # names the binary and the step, and the suite prints each case as it
+      # goes so the last line before a crash identifies it.
+      - name: Run the slice in C on Schannel
+        timeout-minutes: 10
+        working-directory: ctest
+        env:
+          ZU_TEST_TRACE: "1"
+        run: make engine-sch CC="$(R CMD config CC)"
+
       - name: Install and make a real HTTPS request
         timeout-minutes: 10
         env:

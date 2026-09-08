@@ -2,6 +2,11 @@
 
 **Run date:** 2026-09-07 (GitHub Actions, `windows-latest`)
 **Toolchain:** mingw-w64 11.0 via Rtools, R release, compiler taken from `R CMD config CC`
+**Re-confirmed:** 2026-09-08 on **Rtools45 / GCC 14.3.0** — still MISSING, at the
+default `_WIN32_WINNT=0x0601` *and* at `0x0A00`. This is not an artifact of an
+old mingw-w64; the declarations are absent in the current toolchain too, so the
+S8 decision to ship TLS 1.2 stands rather than being something a toolchain
+bump would resolve.
 **Artifacts:** [`probe.c`](probe.c), [`probe_struct.c`](probe_struct.c), workflow `.github/workflows/tls-spike.yaml`
 **Reproduce:** push to `develop`, or `gh workflow run tls-spike.yaml`
 

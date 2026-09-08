@@ -138,7 +138,20 @@ zu_engtest_st: $(STSRC) test_engine.c
 engine-st: zu_engtest_st
 	./zu_engtest_st
 
-clean:
-	rm -rf zu_ctest zu_ctest_asan zu_tlstest zu_engtest zu_engtest_st *.dSYM build build-asan *.o
+# The same slice on the Windows system stack (§13.4, D-5). Exists so a crash
+# in the Schannel backend reports a C location instead of taking an R process
+# down with it — there is no Windows machine in the loop, so CI is the only
+# debugger and it needs to say something useful.
+SCHSRC := $(subst $(SRC)/zu_tls_openssl.c,$(SRC)/zu_tls_schannel.c,$(ENGSRC))
 
-.PHONY: all run strict asan clean tls engine engine-st
+zu_engtest_sch: $(SCHSRC) test_engine.c
+	$(CC) $(BASE) $(URIFLAGS) -o $@ $(SCHSRC) test_engine.c \
+	      -lsecur32 -lcrypt32 -lz $(NETLIBS)
+
+engine-sch: zu_engtest_sch
+	./zu_engtest_sch
+
+clean:
+	rm -rf zu_ctest zu_ctest_asan zu_tlstest zu_engtest zu_engtest_st zu_engtest_sch *.dSYM build build-asan *.o
+
+.PHONY: all run strict asan clean tls engine engine-st engine-sch

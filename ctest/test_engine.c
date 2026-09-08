@@ -28,6 +28,7 @@ int main(void) {
     zu_code rc;
 
     printf("zuhttp vertical slice (design 63.2)\n\n");
+    setvbuf(stdout, NULL, _IONBF, 0);   /* a crash must not eat the last line */
     zu_get_opts_init(&o);
 
     ZU_CASE("HTTPS GET returns 200 with a body and a TLS version");
