@@ -463,6 +463,29 @@ jobs:
               --args "$RT" --vanilla --no-echo \
               -e 'library(zuhttp); zu_get("https://example.com")' 2>&1 | tail -70
 
+      # It did NOT crash under gdb: "Inferior 1 exited normally". Two ways that
+      # happens, and they need separating before anything else is worth trying.
+      #
+      #   1. gdb perturbs timing or heap layout and hides a real memory bug
+      #   2. the gdb run used Rterm.exe, and the crash is specific to Rscript
+      #
+      # This runs the identical code under Rterm WITHOUT gdb, then Rscript
+      # three times. Both are continue-on-error: this step is here to produce
+      # evidence, not to gate the job.
+      - name: R2c Rterm without gdb, and Rscript repeated
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          RT="$(R RHOME)/bin/x64/Rterm.exe"
+          echo "=== Rterm, no gdb ==="
+          "$RT" --vanilla --no-echo -e 'library(zuhttp); r <- zu_get("https://example.com"); cat("rterm status:", zu_resp_status(r), "\n")'
+          echo "rterm exit=$?"
+          for n in 1 2 3; do
+            echo "=== Rscript run $n ==="
+            Rscript --vanilla -e 'library(zuhttp); r <- zu_get("https://example.com"); cat("rscript status:", zu_resp_status(r), "\n")' || echo "  run $n exit=$?"
+          done
+
       - name: R3 one plain HTTPS request
         timeout-minutes: 5
         run: |
