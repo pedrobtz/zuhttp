@@ -15,6 +15,7 @@
 #include <R_ext/Rdynload.h>
 #include <R_ext/Visibility.h>
 
+
 #include "zu_error.h"
 #include "zu_redact.h"
 #include "zu_buffer.h"
@@ -187,7 +188,47 @@ static SEXP C_zu_is_secret_param(SEXP names, SEXP extra_params) {
     return out;
 }
 
+/* --- §25 cancellation ------------------------------------------------------
+ *
+ * §25.2 is the whole problem: R_CheckUserInterrupt() does not RETURN when an
+ * interrupt is pending, it longjmps past every C frame between it and the
+ * enclosing tryCatch — abandoning sockets, TLS contexts, zlib streams and
+ * buffers held in C locals.
+ *
+ * So the tick never calls it directly. R_ToplevelExec runs a function and
+ * returns FALSE if that function longjmped, catching the unwind at a frame
+ * where nothing of ours is live. The tick then returns 1, the poll loop in
+ * zu_net.c gives up, and the engine unwinds through its OWN error paths,
+ * closing the socket and freeing every buffer on the way out.
+ *
+ * That is §25.2's discipline (b) — no native allocation lives only in a C
+ * local across a checkpoint — enforced by never letting a longjmp cross one. */
+static void check_interrupt_inner(void *ignored) {
+    (void)ignored;
+    R_CheckUserInterrupt();
+}
+
+static int r_interrupt_tick(void *ctx) {
+    (void)ctx;
+#if defined(_WIN32)
+    /* §25.4: in Rgui and RStudio the interrupt is delivered through the event
+     * loop, so it is never observed unless the loop is pumped. */
+    R_ProcessEvents();
+#endif
+    return R_ToplevelExec(check_interrupt_inner, NULL) ? 0 : 1;
+}
+
 /* --- §63.2 the vertical slice --------------------------------------------- */
+
+static SEXP build_response(void *data);
+
+/* Runs whether build_response returned or longjmped (§25.2 mechanism (a)).
+ * `jump` is TRUE only on the unwind path; the work is identical either way,
+ * so it is deliberately not branched on. */
+static void free_result_on_unwind(void *data, Rboolean jump) {
+    (void)jump;
+    zu_result_free((zu_result *)data);
+}
 
 /* Raise the §34.1 condition for a zu_error by calling back into R. Building
  * the condition in R rather than in C keeps the class hierarchy in one place
@@ -243,7 +284,6 @@ static SEXP C_zu_get(SEXP url, SEXP timeout_ms, SEXP max_redirects,
     zu_error e;
     zu_code rc;
     const char *u;
-    SEXP out, nms, body;
 
     if (!Rf_isString(url) || Rf_length(url) != 1 || STRING_ELT(url, 0) == NA_STRING)
         Rf_error("url must be a single non-NA string");
@@ -257,15 +297,48 @@ static SEXP C_zu_get(SEXP url, SEXP timeout_ms, SEXP max_redirects,
     if (Rf_isString(user_agent) && Rf_length(user_agent) == 1)
         o.user_agent = Rf_translateCharUTF8(STRING_ELT(user_agent, 0));
 
+    /* §25.1: a checkpoint at most one tick apart, and never inside a blocking
+     * call. 100 ms is the design's ceiling. */
+    o.tick     = r_interrupt_tick;
+    o.tick_ctx = NULL;
+
     zu_error_clear(&e);
     rc = zu_engine_get(&r, u, &o, &e);
     if (rc != ZU_OK) {
+        /* Our tick returns 1 only for a pending user interrupt, so a
+         * cancellation reaching here is always that (§34.1 separates
+         * zu_interrupted_error from zu_cancelled_error because a person
+         * pressing Ctrl-C and a programmatic stop want different handling). */
+        if (rc == ZU_ERR_CANCELLED) {
+            zu_error err2 = e;
+            err2.code = ZU_ERR_INTERRUPTED;
+            snprintf(err2.message, sizeof err2.message,
+                     "request interrupted by the user");
+            raise_zu_error(&err2, u);
+            return R_NilValue;   /* not reached */
+        }
         /* No C resources are live here: zu_engine_get frees everything it
          * owns before returning non-OK, which is what makes it safe to raise
          * an R condition (and longjmp) from this point. */
         raise_zu_error(&e, u);
         return R_NilValue;   /* not reached */
     }
+
+    /* The continuation token must be NULL, not R_NilValue. R checks
+     * `cont == NULL` and allocates its own token in that case; R_NilValue is a
+     * perfectly valid SEXP, so it passes that check and is then used as a
+     * continuation it is not, which fails with "bad value" on every call. */
+    return R_UnwindProtect(build_response, &r, free_result_on_unwind, &r, NULL);
+}
+
+/* Everything below runs with `r` still owning C memory, and every R allocation
+ * here can longjmp on failure. R_UnwindProtect guarantees free_result_on_unwind
+ * runs either way — §25.2's mechanism (a), used to release promptly rather
+ * than at the next GC. */
+static SEXP build_response(void *data) {
+    zu_result *rp = (zu_result *)data;
+    zu_result r = *rp;
+    SEXP out, nms, body;
 
     body = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t)r.body.len));
     if (r.body.len) memcpy(RAW(body), r.body.data, r.body.len);
@@ -286,7 +359,6 @@ static SEXP C_zu_get(SEXP url, SEXP timeout_ms, SEXP max_redirects,
     SET_STRING_ELT(nms, 5, Rf_mkChar("redirects"));
     Rf_setAttrib(out, R_NamesSymbol, nms);
 
-    zu_result_free(&r);
     UNPROTECT(3);
     return out;
 }

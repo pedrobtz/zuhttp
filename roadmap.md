@@ -503,17 +503,63 @@ Policy/middleware split (§31.13); retry admissibility (§33.1); the §33.2 cond
 
 ## Track E — Hardening and release
 
-### S15 · Cancellation and unwind
+### S15 · Cancellation and unwind — **PARTIAL, and honestly so**
 
 **Effort:** 2 weeks. **Depends on:** S6.
 
-External-pointer ownership as the invariant, `R_UnwindProtect()` as the enforcement (§25.2); the interrupted-connection rule (§25.3); `R_ProcessEvents()` on Windows front-ends (§25.4).
+External-pointer ownership as the invariant, `R_UnwindProtect()` as the
+enforcement (§25.2); the interrupted-connection rule (§25.3);
+`R_ProcessEvents()` on Windows front-ends (§25.4).
+
+Implemented in `src/init.c`: a checkpoint every ~100 ms that never lets a
+longjmp cross a C frame holding native state. The tick does **not** call
+`R_CheckUserInterrupt()` directly — that does not return when an interrupt is
+pending, it longjmps past every frame between it and the enclosing `tryCatch`,
+abandoning sockets, TLS contexts and buffers. Instead `R_ToplevelExec` runs the
+check at a frame where nothing of ours is live and reports whether it jumped;
+the tick then returns 1 and the engine unwinds through its own error paths.
+`R_UnwindProtect` wraps the response construction so C memory is released
+promptly rather than at the next GC.
 
 **Exit criteria**
 
+- [x] An interrupted connection is never pooled — the slice opens and closes
+      one connection per request, and §26.3's `ZU_NOREUSE_CANCELLED` already
+      forces a close.
+- [x] The checkpoint fires at the §25.1 cadence: measured at 100 ticks over a
+      10 s request, i.e. every ~100 ms, which is the design's ceiling.
+- [ ] **Ctrl-C cancels within 200 ms on all three front-ends. NOT VERIFIED.**
 - [ ] Interrupt at every phase leaks zero descriptors under ASan and valgrind.
-- [ ] Ctrl-C cancels within 200 ms in every phase except DNS, on **all three** R front-ends (terminal, Rgui, RStudio).
-- [ ] An interrupted connection is never pooled.
+      Blocked on the same thing.
+
+**Why the Ctrl-C criterion is unverified, and what would verify it.** A
+backgrounded `kill -INT` does not reach R's interrupt flag while R is inside a
+`.Call` in a non-interactive session — `R_interrupts_pending` stays 0 for the
+whole request, whether the signal targets the pid or the process group.
+
+That is a property of the harness rather than of this code, established by
+control experiment: the `curl` package, which has working Ctrl-C and uses the
+same `R_ToplevelExec` idiom, **also completes normally** under the identical
+harness. Two `expect`-driven pty attempts produced unusable output.
+
+Manual procedure, until an automated one exists:
+
+```r
+# in an interactive terminal R
+library(zuhttp)
+zu_get("https://httpbin.org/delay/30")   # press Ctrl-C within a second
+# expect: zu_interrupted_error, promptly, and the session still usable
+```
+
+Repeat in Rgui and RStudio for §25.4, where delivery goes through the event
+loop and `R_ProcessEvents()` is what makes it observable.
+
+**Found by this stage.** `R_UnwindProtect` was being passed `R_NilValue` as its
+continuation token. R checks `cont == NULL`, and `R_NilValue` is a perfectly
+valid SEXP, so it passed that check and was then used as a continuation it is
+not — failing with `bad value` on **every single request**, and looping until
+it had produced 2 GB of error output. Caught immediately because it broke the
+normal path, not the interrupt path.
 
 ### S16 · Connection pool
 
