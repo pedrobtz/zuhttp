@@ -141,7 +141,14 @@ test_that("a followed redirect is an event, with its target", {
                              check = FALSE, timeout = 20, client = fresh()))
   skip_if(is.null(tr), "no trace")
   if ("redirect.followed" %in% tr$event) {
-    expect_match(tr$detail[tr$event == "redirect.followed"][[1]], "^https?://")
+    target <- tr$detail[tr$event == "redirect.followed"][[1]]
+    # validUTF8() first, and separately: the detail was once a pointer into
+    # headers the engine had already freed, and the three bytes of garbage
+    # that produced killed expect_match() inside testthat's own formatter
+    # rather than failing here. A dangling detail must read as a failed
+    # assertion about the target, not as a broken test run.
+    expect_true(validUTF8(target))
+    expect_match(target, "^https?://")
   } else {
     skip("github did not redirect on this request")
   }

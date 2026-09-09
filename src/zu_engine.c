@@ -750,7 +750,24 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
                 zu_buf_reset(&out->body);
                 zu_headers_free(&out->headers);
                 zu_headers_init(&out->headers);
-                zu_trace_add(o->trace, ZU_EV_REDIRECT_FOLLOWED, loc, (uint64_t)hops);
+                /* The target is rebuilt from the resolved URI, never from
+                 * `loc`. `loc` points into the headers freed two lines up, so
+                 * reading it here put three bytes of freed memory into the
+                 * §35.3 log; it is also the wrong value twice over, because a
+                 * relative Location is not a target and a Location carrying
+                 * userinfo would put credentials in a trace that zu_verbose()
+                 * prints. zu_uri_origin_string() drops userinfo (§42.1). */
+                {
+                    char target[192];
+                    int  k = 0;
+                    zu_uri_origin_string(&cur, target, sizeof target);
+                    k = (int)strlen(target);
+                    if (cur.path_query)
+                        snprintf(target + k, sizeof target - (size_t)k, "%s",
+                                 cur.path_query);
+                    zu_trace_add(o->trace, ZU_EV_REDIRECT_FOLLOWED, target,
+                                 (uint64_t)hops);
+                }
                 zu_proxy_free(&px);           /* re-resolved for the next hop */
                 continue;                     /* §19.5: the body never reaches the caller */
             }

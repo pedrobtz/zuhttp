@@ -65,6 +65,7 @@ Firm decisions and open questions were previously indistinguishable in this docu
 | D-47 | A callback is caught on **error and interrupt only**, not on every condition | **Accepted** 2026-09-08 — S17 | 27.3 |
 | D-48 | Proxying is disabled with `proxy = FALSE`, **not** `NULL` (§31.9 owns NULL) | **Accepted** 2026-09-08 — S10 | 20.1, 31.9 |
 | D-49 | `verify` and `ca_file` stay merged policy arguments; `zu_tls()` carries the rest | **Accepted** 2026-09-08 | 14.1, 31.9, 31.13 |
+| D-50 | `redirect.followed` carries the **resolved** target, rebuilt from the URI, not the raw `Location` header | **Accepted** 2026-09-09 | 35.3, 42.1 |
 
 ---
 
@@ -2976,6 +2977,8 @@ request.done
 Hooks are observability, and are kept separate from policy middleware (§31.13). They must not be able to modify the request — a hook that mutates is middleware wearing a disguise.
 
 **All hook payloads pass through the redaction filter in §42 before the handler sees them.** A trace handler that logs request headers must not be the mechanism by which a bearer token reaches a log file.
+
+`redirect.followed` carries the target as the engine resolved it — origin plus path, rebuilt from the `zu_uri` — and not the `Location` header as received (D-50). Three reasons, and the first was a live bug: the header string is owned by the response headers, which the engine frees before it moves to the next hop, so passing it through left a dangling pointer and the event reported freed memory. A relative `Location` is also not a target, and a `Location` carrying userinfo would route credentials into a log through the one payload that had no redaction step, contradicting the paragraph above. `zu_uri_origin_string()` omits userinfo per §42.1, so rebuilding is what makes the rule hold here.
 
 This can later support OpenTelemetry without coupling the C core to an observability framework.
 
