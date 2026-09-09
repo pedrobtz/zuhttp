@@ -307,12 +307,45 @@ test_that("the canary does not reach verbose output (§42.2, §42.4)", {
   expect_true(any(grepl("Authorization: <redacted>", trace, fixed = TRUE)))
 })
 
+test_that("the canary does not reach a §35.3 trace (§42.2, §42.4)", {
+  # The arm the verbose test above could not provide. That one runs over a
+  # mock transport, where there is no engine and so no §35.3 trace at all —
+  # so it passed while `trace = TRUE` printed the request URL, userinfo and
+  # secret parameters included, straight to the log. A trace is an egress in
+  # §42.2's table and had no redaction step until the policy was plumbed into
+  # the engine.
+  #
+  # This drives the real engine against a loopback origin, so both URL-bearing
+  # events are exercised: request.start from the URL the caller passed, and
+  # redirect.followed from the one the engine resolved.
+  with_redirect_origin(function(start, target) {
+    out <- textConnection("trace", "w", local = TRUE)
+    on.exit(try(close(out), silent = TRUE), add = TRUE)
+
+    r <- zu_get(paste0(start, "?access_token=", CANARY),
+                trace = TRUE, redirects = 1, check = FALSE, timeout = 20,
+                client = zu_client(hooks = zu_verbose(to = out), pool = NULL))
+    close(out)
+
+    tr <- zu_resp_trace(r)
+    expect_true("request.start" %in% tr$event)
+    expect_true("redirect.followed" %in% tr$event)   # both paths really ran
+    expect_no_canary(tr, "the §35.3 trace")
+    expect_false(any(grepl(CANARY, trace, fixed = TRUE)))
+
+    # ...and the trace is still useful: the URL survives, only its secret
+    # goes. Without this the arm would pass on an empty detail.
+    expect_true(all(grepl("access_token=<redacted>", tr$detail[
+      tr$event %in% c("request.start", "redirect.followed")], fixed = TRUE)))
+  }, target_query = paste0("?access_token=", CANARY))
+})
+
 test_that("every §42.2 egress now has a canary arm", {
   # §42.4 calls this "a regression class that reappears every time a new
   # output path is added", so the list is asserted rather than remembered.
   # A new egress means a new arm above and a new line here.
   covered <- c("printed request", "printed response", "condition payload",
                "hook payloads", "recordings", "zu_resp_url", "verbose output",
-               "zu_info")
-  expect_length(covered, 8L)
+               "zu_info", "§35.3 trace")
+  expect_length(covered, 9L)
 })

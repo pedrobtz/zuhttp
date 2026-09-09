@@ -575,6 +575,17 @@ one definition:
       to the canary at the same time, since it exists to be pasted into bug
       reports and a proxy URL routinely carries a credential.
 
+      **This arm was half true when it was ticked, and the missing half was
+      a live leak.** It ran over a mock transport, where there is no engine
+      and so no §35.3 event log at all — so it said nothing about
+      `zu_get(url, trace = TRUE)`, which printed the request URL through
+      `zu_verbose()` with its userinfo and `?access_token=` intact. "The
+      payload is redacted before the handler runs" was true of the four
+      HTTP-level hooks and false of the trace, which R reads from the
+      response rather than receiving. Closed by redacting in the engine
+      (D-51); the arm now drives the real engine against a loopback origin,
+      which is what makes it able to fail.
+
       **The R suite now has zero `skip()`s.**
 
       **Hook payloads joined the canary in S13.**
@@ -997,7 +1008,9 @@ it is wrong here: these events happen inside the connect and handshake paths,
 where an R error would longjmp past a half-built socket and a live TLS context.
 That is §27.3's hazard at six more call sites, and a trace does not need to be
 live to be useful — it is read after the request either way. The engine appends
-to a fixed-capacity log with no allocation; tracing off costs one NULL check.
+to a fixed-capacity log; tracing off costs one NULL check. Appending allocates
+only for the two URL-bearing events, which redact through §42 before the bytes
+land (D-51).
 
 **A phase that did not happen is NA, not 0.** A pooled connection has no dns
 or connect time and an `http://` request has no tls time; zero would claim

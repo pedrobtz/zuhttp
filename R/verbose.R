@@ -6,6 +6,14 @@
 # carry a credential — not because this file is careful, but because it never
 # receives one. A parallel logging path would have needed its own redaction,
 # which is the second implementation §42 opens by warning about.
+#
+# The §35.3 event log is the exception to "never receives one", and it was a
+# leak until D-51: those events are read off the response rather than handed
+# to a hook, so nothing on the R side had filtered them and
+# `zu_get(url, trace = TRUE)` printed the URL's userinfo and secret query
+# parameters here. The engine now redacts a URL as it enters the log, which
+# is the only place that can work — by the time R sees a trace, the detail is
+# already stored on the response object.
 
 #' Print a trace of each request
 #'
@@ -18,11 +26,15 @@
 #' @return A [zu_hooks()] object.
 #'
 #' @section Credentials:
-#' A trace cannot leak one. It is built on §35.3 hooks, whose payloads are
-#' redacted before any handler runs, so this function never sees a real
-#' `Authorization` header or a secret query parameter — there is nothing here
-#' to get right or wrong. That is why verbose logging is implemented as hooks
-#' rather than as its own path through the request.
+#' A trace cannot leak one, and in two different ways. The request and
+#' response lines come from §35.3 hooks, whose payloads are redacted before
+#' any handler runs, so this function never sees a real `Authorization` header
+#' — there is nothing here to get right or wrong, which is why verbose logging
+#' is implemented as hooks rather than as its own path through the request.
+#' The phase lines from `trace = TRUE` are different: they are read off the
+#' response, so the engine redacts each URL as it records it (§42.2, D-51). A
+#' traced URL therefore shows `?access_token=<redacted>` rather than the
+#' token, and userinfo is dropped entirely.
 #'
 #' @section Seeing the whole chain:
 #' Pair it with `trace = TRUE` on the request and the §35.3 phases appear —

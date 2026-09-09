@@ -452,7 +452,11 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
     zu_env_system(&sysenv);
     t_start = zu_now_ms();
     zu_result_init(out);
-    zu_trace_add(o ? o->trace : NULL, ZU_EV_REQUEST_START, url, 0);
+    /* Through zu_trace_add_url, not zu_trace_add: this is the caller's URL
+     * verbatim, so it is the one most likely to carry userinfo or a secret
+     * query parameter (§42.1). */
+    zu_trace_add_url(o ? o->trace : NULL, ZU_EV_REQUEST_START,
+                     o ? o->redact : NULL, url, 0);
     if (!o) { zu_get_opts_init(&defaults); o = &defaults; }
 
     /* §24.1: one deadline for the whole operation, redirects included. */
@@ -750,23 +754,20 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
                 zu_buf_reset(&out->body);
                 zu_headers_free(&out->headers);
                 zu_headers_init(&out->headers);
-                /* The target is rebuilt from the resolved URI, never from
-                 * `loc`. `loc` points into the headers freed two lines up, so
-                 * reading it here put three bytes of freed memory into the
-                 * §35.3 log; it is also the wrong value twice over, because a
-                 * relative Location is not a target and a Location carrying
-                 * userinfo would put credentials in a trace that zu_verbose()
-                 * prints. zu_uri_origin_string() drops userinfo (§42.1). */
-                {
-                    char target[192];
-                    int  k = 0;
-                    zu_uri_origin_string(&cur, target, sizeof target);
-                    k = (int)strlen(target);
-                    if (cur.path_query)
-                        snprintf(target + k, sizeof target - (size_t)k, "%s",
-                                 cur.path_query);
-                    zu_trace_add(o->trace, ZU_EV_REDIRECT_FOLLOWED, target,
-                                 (uint64_t)hops);
+                /* The target is rebuilt from the resolved URI, never taken
+                 * from `loc`: that points into the headers freed two lines
+                 * up, so reading it here reported freed memory. url_of() is
+                 * the same builder final_url uses, so the event and
+                 * zu_resp_url() cannot disagree about where the request went
+                 * — it brackets IPv6 hosts and keeps an explicit port, which
+                 * a hand-rolled origin string here got wrong both ways. It
+                 * allocates, hence the trace check: nobody pays for a target
+                 * nobody asked for. */
+                if (o->trace) {
+                    char *target = url_of(&cur);
+                    zu_trace_add_url(o->trace, ZU_EV_REDIRECT_FOLLOWED,
+                                     o->redact, target, (uint64_t)hops);
+                    zu_free(target);
                 }
                 zu_proxy_free(&px);           /* re-resolved for the next hop */
                 continue;                     /* §19.5: the body never reaches the caller */

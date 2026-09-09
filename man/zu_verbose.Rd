@@ -21,11 +21,15 @@ Returns hooks that log the request lifecycle, for
 }
 \section{Credentials}{
 
-A trace cannot leak one. It is built on §35.3 hooks, whose payloads are
-redacted before any handler runs, so this function never sees a real
-\code{Authorization} header or a secret query parameter — there is nothing here
-to get right or wrong. That is why verbose logging is implemented as hooks
-rather than as its own path through the request.
+A trace cannot leak one, and in two different ways. The request and
+response lines come from §35.3 hooks, whose payloads are redacted before
+any handler runs, so this function never sees a real \code{Authorization} header
+— there is nothing here to get right or wrong, which is why verbose logging
+is implemented as hooks rather than as its own path through the request.
+The phase lines from \code{trace = TRUE} are different: they are read off the
+response, so the engine redacts each URL as it records it (§42.2, D-51). A
+traced URL therefore shows \verb{?access_token=<redacted>} rather than the
+token, and userinfo is dropped entirely.
 }
 
 \section{Seeing the whole chain}{

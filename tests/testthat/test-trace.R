@@ -135,23 +135,24 @@ test_that("plain HTTP produces no TLS events", {
   expect_false("tls.done" %in% ev)
 })
 
-test_that("a followed redirect is an event, with its target", {
-  skip_unless_online()
-  tr <- zu_resp_trace(zu_get("http://github.com", trace = TRUE, redirects = 1,
-                             check = FALSE, timeout = 20, client = fresh()))
-  skip_if(is.null(tr), "no trace")
-  if ("redirect.followed" %in% tr$event) {
-    target <- tr$detail[tr$event == "redirect.followed"][[1]]
-    # validUTF8() first, and separately: the detail was once a pointer into
-    # headers the engine had already freed, and the three bytes of garbage
-    # that produced killed expect_match() inside testthat's own formatter
-    # rather than failing here. A dangling detail must read as a failed
-    # assertion about the target, not as a broken test run.
-    expect_true(validUTF8(target))
-    expect_match(target, "^https?://")
-  } else {
-    skip("github did not redirect on this request")
-  }
+test_that("a followed redirect is an event, with its target (§35.3)", {
+  with_redirect_origin(function(start, target) {
+    r  <- zu_get(start, trace = TRUE, redirects = 1, check = FALSE,
+                 timeout = 20, client = fresh(pool = NULL))
+    tr <- zu_resp_trace(r)
+    got <- tr$detail[tr$event == "redirect.followed"]
+
+    expect_length(got, 1L)
+    # Byte equality against the URL the response reports, not a shape test.
+    # The detail was once a pointer into headers the engine had already
+    # freed, and both "^https?://" and validUTF8() pass on plausible
+    # garbage; only "it is exactly where the request went" cannot be
+    # satisfied by freed memory. It also pins the two builders together, so
+    # the event and zu_resp_url() cannot drift apart.
+    expect_identical(got[[1]], target)
+    expect_identical(got[[1]], zu_resp_url(r))
+    expect_identical(zu_resp_status(r), 200L)
+  })
 })
 
 test_that("zu_verbose() narrates the phases when the request is traced", {

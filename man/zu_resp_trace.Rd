@@ -28,6 +28,15 @@ not need to be live to be useful, so the engine appends to a fixed log and
 R renders it afterwards. Tracing off costs one NULL check per event.
 }
 
+\section{Credentials}{
+
+The \code{detail} of a URL-bearing event is redacted by the engine as it is
+recorded (§42.2): userinfo is dropped and a secret query parameter reads
+\verb{<redacted>}. It has to happen there rather than here — the trace is stored
+on the response, so anything this function could filter would already have
+been written down.
+}
+
 \examples{
 r <- zu_get("https://example.com", trace = TRUE)
 zu_resp_trace(r)

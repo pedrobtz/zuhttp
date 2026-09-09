@@ -170,6 +170,13 @@ zu_resp_timings <- function(resp) {
 #' not need to be live to be useful, so the engine appends to a fixed log and
 #' R renders it afterwards. Tracing off costs one NULL check per event.
 #'
+#' @section Credentials:
+#' The `detail` of a URL-bearing event is redacted by the engine as it is
+#' recorded (§42.2): userinfo is dropped and a secret query parameter reads
+#' `<redacted>`. It has to happen there rather than here — the trace is stored
+#' on the response, so anything this function could filter would already have
+#' been written down.
+#'
 #' @seealso [zu_resp_timings()] for the summary, [zu_verbose()] for a printed
 #'   narration.
 #' @export

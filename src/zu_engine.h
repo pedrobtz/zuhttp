@@ -31,6 +31,7 @@
 #include "zu_proxy.h"
 #include "zu_tls.h"
 #include "zu_trace.h"
+#include "zu_redact.h"
 
 /* A request the engine can perform. Headers are parallel arrays rather than a
  * zu_headers, so the R layer can pass them without building one — the engine
@@ -103,6 +104,13 @@ typedef struct {
      * event — the reason the seam can sit in the connect and handshake paths
      * without anyone paying for it. */
     zu_trace   *trace;
+
+    /* §42. The policy the trace's URL events are redacted with, because the
+     * trace is an egress (§42.2) and a URL is what carries a credential into
+     * one. NULL means the §42.1 defaults, which is the safe reading of an
+     * un-set field: the caller's extra parameter names are an addition to
+     * that list and never a replacement for it. Borrowed, not owned. */
+    const zu_redact_policy *redact;
 } zu_get_opts;
 
 void zu_get_opts_init(zu_get_opts *o);

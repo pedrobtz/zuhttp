@@ -494,13 +494,14 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
                          SEXP max_redirects, SEXP verify, SEXP max_body,
                          SEXP user_agent, SEXP decode, SEXP pool,
                          SEXP path, SEXP callback, SEXP proxy, SEXP tls,
-                         SEXP trace) {
+                         SEXP trace, SEXP redact_params) {
     zu_get_opts o;
     zu_req_spec spec;
     cb_ctx cb;
     zu_sink cb_sink;
     zu_tls_config tlscfg;
     zu_trace tracebuf;
+    zu_redact_policy redact;
     zu_result r;
     zu_error e;
     zu_code rc;
@@ -615,6 +616,14 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
         /* One place names a replacement CA (§26.1's key reads it from here). */
         if (tlscfg.ca_file) o.ca_file = tlscfg.ca_file;
     }
+
+    /* §42. The engine redacts the URLs it traces, so the caller's extra
+     * parameter names have to reach it. Set unconditionally rather than only
+     * when tracing: a policy that depends on another option is one an added
+     * egress can silently miss. The R_alloc storage behind the lists lives
+     * until this .Call returns, which outlasts the engine call. */
+    policy_from(R_NilValue, redact_params, &redact);
+    o.redact = &redact;
 
     /* §35: opt-in. Without this the trace pointer stays NULL and every
      * zu_trace_add() in the connect, handshake and read paths is one branch. */
@@ -886,7 +895,7 @@ static const R_CallMethodDef call_methods[] = {
     {"C_zu_redact_form",       (DL_FUNC) &C_zu_redact_form,       2},
     {"C_zu_is_secret_header",  (DL_FUNC) &C_zu_is_secret_header,  2},
     {"C_zu_is_secret_param",   (DL_FUNC) &C_zu_is_secret_param,   2},
-    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          17},
+    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          18},
     {"C_zu_pool_new",          (DL_FUNC) &C_zu_pool_new,          3},
     {"C_zu_pool_valid",        (DL_FUNC) &C_zu_pool_valid,        1},
     {"C_zu_pool_stats",        (DL_FUNC) &C_zu_pool_stats,        1},

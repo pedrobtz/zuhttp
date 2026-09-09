@@ -65,7 +65,8 @@ Firm decisions and open questions were previously indistinguishable in this docu
 | D-47 | A callback is caught on **error and interrupt only**, not on every condition | **Accepted** 2026-09-08 — S17 | 27.3 |
 | D-48 | Proxying is disabled with `proxy = FALSE`, **not** `NULL` (§31.9 owns NULL) | **Accepted** 2026-09-08 — S10 | 20.1, 31.9 |
 | D-49 | `verify` and `ca_file` stay merged policy arguments; `zu_tls()` carries the rest | **Accepted** 2026-09-08 | 14.1, 31.9, 31.13 |
-| D-50 | `redirect.followed` carries the **resolved** target, rebuilt from the URI, not the raw `Location` header | **Accepted** 2026-09-09 | 35.3, 42.1 |
+| D-50 | `redirect.followed` carries the **resolved** target, built by the same `url_of()` as `final_url`, not the raw `Location` header | **Accepted** 2026-09-09 | 35.3, 42.1 |
+| D-51 | A URL enters the trace only through `zu_trace_add_url()`, which applies the §42 policy in C; the log's no-allocation rule yields to it | **Accepted** 2026-09-09 | 35.3, 35.4, 42.2 |
 
 ---
 
@@ -2978,13 +2979,19 @@ Hooks are observability, and are kept separate from policy middleware (§31.13).
 
 **All hook payloads pass through the redaction filter in §42 before the handler sees them.** A trace handler that logs request headers must not be the mechanism by which a bearer token reaches a log file.
 
-`redirect.followed` carries the target as the engine resolved it — origin plus path, rebuilt from the `zu_uri` — and not the `Location` header as received (D-50). Three reasons, and the first was a live bug: the header string is owned by the response headers, which the engine frees before it moves to the next hop, so passing it through left a dangling pointer and the event reported freed memory. A relative `Location` is also not a target, and a `Location` carrying userinfo would route credentials into a log through the one payload that had no redaction step, contradicting the paragraph above. `zu_uri_origin_string()` omits userinfo per §42.1, so rebuilding is what makes the rule hold here.
+`redirect.followed` carries the target as the engine resolved it, built by the same `url_of()` that produces `final_url`, and not the `Location` header as received (D-50). The header string is owned by the response headers, which the engine frees before it moves to the next hop, so passing it through left a dangling pointer and the event reported freed memory; a relative `Location` is also not a target. Sharing the builder with `final_url` is what stops the event and `zu_resp_url()` from disagreeing about where the request went.
+
+**The paragraph above is enforced, not assumed** (D-51). Two events carry a URL — `request.start` and `redirect.followed` — and a URL is what brings a credential into a log: userinfo, or a query parameter §42.1 names. Both go through `zu_trace_add_url()`, which redacts with the caller's policy before the bytes reach the fixed-width slot; `zu_trace_add()` with a raw URL is the bug that function exists to prevent. It shipped once, in the window between the §35 trace landing and this rule being written down: `zu_get(url, trace = TRUE)` on a URL with `?access_token=` printed the token through `zu_verbose()`, because the redaction the table promised had no implementation on that path. The R layer cannot be the place this is fixed — `zu_resp_trace()` returns the stored detail, so a credential that reached the slot is already in the response object.
+
+Redacting means `zu_trace_add_url()` allocates, since `zu_redact_url()` writes into a `zu_buffer`. Only those two events pay it, at most twice per hop, against a DNS lookup and a handshake; `body.chunk`, the event that fires per 16 KB, stays allocation-free.
 
 This can later support OpenTelemetry without coupling the C core to an observability framework.
 
 #### 35.4 Cost
 
 Hooks are off by default and compile to a NULL check when unregistered. §51 must measure the overhead of an enabled `body.chunk` hook on a large download, since that is the one event that fires per-chunk rather than per-request.
+
+The event log is fixed-capacity and appends without allocating, with one exception: the two URL-bearing events allocate to redact (§35.3, D-51). The NULL-trace check comes first in `zu_trace_add_url()`, so a request that is not traced still pays nothing.
 
 ### 36. Pluggable Transport
 

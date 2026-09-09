@@ -22,6 +22,7 @@ void suite_pool(void);
 void suite_proxy(void);
 void suite_redact(void);
 void suite_body(void);
+void suite_trace(void);
 
 int main(void) {
     zu_alloc_stats st;
@@ -44,6 +45,7 @@ int main(void) {
     ZU_SUITE(suite_proxy);
     ZU_SUITE(suite_redact);
     ZU_SUITE(suite_body);
+    ZU_SUITE(suite_trace);
 
     zu_alloc_stats_get(&st);
     printf("\n%d checks, %d failures\n", zu_test_checks, zu_test_fails);

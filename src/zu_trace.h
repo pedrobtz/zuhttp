@@ -14,14 +14,21 @@
  * call sites would multiply the risk for no gain, because a trace does not
  * need to be live to be useful — you read it after the request either way.
  *
- * So the engine appends to a fixed-capacity log with no allocation, and R
- * renders it afterwards. The cost when tracing is off is one NULL check.
+ * So the engine appends to a fixed-capacity log, and R renders it afterwards.
+ * The cost when tracing is off is one NULL check.
+ *
+ * REDACTED ON THE WAY IN. §42.2 lists a trace as an egress, and the log is
+ * stored on the response, so R cannot be where that is applied — a credential
+ * that reached the slot is already in the object. zu_trace_add_url() is
+ * therefore the only door a URL comes through (§35.3, D-51). Appending is
+ * allocation-free except there, where redaction needs a buffer.
  */
 #ifndef ZUHTTP_TRACE_H
 #define ZUHTTP_TRACE_H
 
 #include "zu_platform.h"
 #include "zu_time.h"
+#include "zu_redact.h"
 
 /* §35.3's event list. request.start and request.done bracket the whole
  * operation including retries and redirects; the rest are per hop. */
@@ -64,11 +71,22 @@ void zu_timings_init(zu_timings *t);
 
 #define ZU_TRACE_MAX 256
 
+/* Wide enough for a realistic redirect target, which is what pushed it past
+ * the 64 bytes it started at: an OAuth callback carries a state parameter and
+ * is routinely longer than that, and a URL cut short reads as a complete one.
+ * No width makes truncation impossible, so the marker below is what keeps the
+ * log honest; this only makes it rare. */
+#define ZU_TRACE_DETAIL 256
+
+/* What a truncated detail ends with. ASCII, because init.c hands this field
+ * straight to mkChar() in the native encoding. */
+#define ZU_TRACE_TRUNC "..."
+
 typedef struct {
     zu_event ev;
     long     at_ms;         /* since the operation started */
     uint64_t n;             /* bytes, or an event-specific count */
-    char     detail[64];
+    char     detail[ZU_TRACE_DETAIL];
 } zu_trace_entry;
 
 typedef struct {
@@ -81,8 +99,25 @@ typedef struct {
 void zu_trace_init(zu_trace *t);
 
 /* Append one event. NULL trace is a no-op, which is what makes the seam free
- * when nobody is looking. `detail` may be NULL. */
+ * when nobody is looking. `detail` may be NULL. A detail too long for the
+ * slot is truncated at a UTF-8 character boundary and marked; see the note on
+ * ZU_TRACE_DETAIL. */
 void zu_trace_add(zu_trace *t, zu_event e, const char *detail, uint64_t n);
+
+/* Append an event whose detail is a URL.
+ *
+ * §42.2 lists trace payloads as a redacted egress, and a URL is the payload
+ * that carries a credential: userinfo, or a query parameter §42.1 names. This
+ * is the ONLY way a URL may enter the log — zu_trace_add() with a raw one is
+ * the bug this exists to prevent, and it shipped once (a trace of
+ * `?access_token=...` printed the token). `p` may be NULL, meaning the §42.1
+ * defaults.
+ *
+ * Unlike zu_trace_add() this allocates, because zu_redact_url() writes into a
+ * zu_buffer. Only the two URL-bearing events pay it, never body.chunk, so the
+ * per-chunk path §35.4 cares about is still allocation-free. */
+void zu_trace_add_url(zu_trace *t, zu_event e, const zu_redact_policy *p,
+                      const char *url, uint64_t n);
 
 /* Milliseconds since the trace started, for filling zu_timings. */
 long zu_trace_elapsed(const zu_trace *t);

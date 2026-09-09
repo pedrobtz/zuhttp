@@ -89,7 +89,11 @@ zu_transport_perform.zu_native_transport <- function(transport, req) {
                req$callback,
                p$proxy,
                check_tls(p$tls),
-               isTRUE(req$trace))
+               isTRUE(req$trace),
+               # §42.1's configurable parameter list, for the URLs the engine
+               # traces. The engine redacts them itself (§42.2) rather than
+               # handing R something to remember to clean.
+               zu_redact_opt("zuhttp.redact_params"))
   structure(raw, class = "zu_response")
 }
 
