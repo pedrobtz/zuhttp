@@ -117,6 +117,7 @@ ENGSRC := $(SRC)/zu_alloc.c $(SRC)/zu_buffer.c $(SRC)/zu_error.c \
           $(SRC)/zu_inflate.c $(SRC)/zu_tls.c $(SRC)/zu_tls_openssl.c \
           $(SRC)/zu_engine.c $(SRC)/zu_fork.c $(SRC)/zu_pool.c \
           $(SRC)/zu_sink.c $(SRC)/zu_body.c $(SRC)/zu_proxy.c $(SRC)/zu_trace.c \
+          $(SRC)/zu_redact.c \
           $(VENDOR)/picohttpparser.c \
           $(URIDIR)/UriParse.c $(URIDIR)/UriParseBase.c $(URIDIR)/UriResolve.c \
           $(URIDIR)/UriRecompose.c $(URIDIR)/UriCommon.c $(URIDIR)/UriMemory.c \

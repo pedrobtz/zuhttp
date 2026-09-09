@@ -34,8 +34,10 @@ zu_resp_timings(resp)
 \code{zu_resp_status()} an integer; \code{zu_resp_ok()} a logical;
 \code{zu_resp_headers()} a named character vector; \code{zu_resp_header()} a
 character vector, length 0 when the header is absent and longer than 1
-when it repeats; \code{zu_resp_url()} the final URL after redirects, with any
-credentials removed (§42); \code{zu_resp_method()} the method actually sent,
+when it repeats; \code{zu_resp_url()} the final URL after redirects, with
+credentials removed (§42.1: userinfo dropped, and a secret query
+parameter shown as \verb{<redacted>} — see the Credentials section);
+\code{zu_resp_method()} the method actually sent,
 which a 303 may have rewritten to \code{GET}; \code{zu_resp_timings()} §35.1's nine
 measurements — seven phase durations in seconds, then two byte counts.
 \code{NA} for a phase that did not happen, which a pooled connection and a
@@ -44,6 +46,19 @@ plain http:// request both produce.
 \description{
 Response accessors
 }
+\section{Credentials}{
+
+\code{zu_resp_url()} is an egress, so it applies the §42.1 policy in full: a URL
+that went out as \code{?access_token=SECRET} comes back as
+\verb{?access_token=<redacted>}, and userinfo is dropped entirely. Redaction
+happens in the engine as the URL is recorded, not here, so \code{resp$url} holds
+the redacted string too — there is no unredacted copy to reach for. That is
+deliberate: after a redirect chain the final URL is the one most likely to
+carry a short-lived token, and a value that exists only to be pasted into a
+log should not be the one that leaks. The original request URL, which the
+caller already has, is unaffected.
+}
+
 \examples{
 r <- zu_response(200L, c("Set-Cookie" = "a=1", "Set-Cookie" = "b=2"))
 zu_resp_header(r, "set-cookie")

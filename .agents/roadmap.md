@@ -586,6 +586,16 @@ one definition:
       (D-51); the arm now drives the real engine against a loopback origin,
       which is what makes it able to fail.
 
+      **A second entry in the same list was never written at all.**
+      `zu_resp_url` has been in the covered vector since S11 with no arm
+      behind it — the nearest one exercises `zu_redact_url()`, the function,
+      not the accessor. It would have failed: the final URL was built by a
+      function that omits userinfo, so "credential-free" covered half of
+      §42.1 and a `?access_token=` came back live (D-52). Two entries out of
+      one list, one vacuous and one absent, under a comment that says a new
+      egress means a new arm and a new line here. The list is what needs a
+      guard, not the egresses.
+
       **The R suite now has zero `skip()`s.**
 
       **Hook payloads joined the canary in S13.**

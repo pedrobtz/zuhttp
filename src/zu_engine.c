@@ -89,6 +89,34 @@ done:
     return out;
 }
 
+/* The same URL, with §42's policy applied — what a caller is allowed to see.
+ *
+ * url_of() drops userinfo because it never builds it, which used to be the
+ * whole of `final_url`'s "credential-free". It is not: §42.1 counts a query
+ * parameter named `access_token` as a credential too, and one came straight
+ * back out of zu_resp_url(). The redaction belongs here rather than in R
+ * because init.c stores this string ON the response, so a value redacted at
+ * the accessor would still be reachable through `resp$url`.
+ *
+ * NULL policy means the §42.1 defaults, as everywhere else: an unset policy
+ * must mean "the defaults" and never "no redaction". */
+static char *redacted_url_of(const zu_uri *u, const zu_redact_policy *p) {
+    zu_redact_policy dflt;
+    zu_buffer b;
+    const char *s = NULL;
+    char *raw, *out = NULL;
+
+    raw = url_of(u);
+    if (!raw) return NULL;
+    if (!p) { zu_redact_policy_init(&dflt); p = &dflt; }
+    if (!zu_buf_init(&b, 128, 8192)) { zu_free(raw); return NULL; }
+    if (zu_redact_url(p, raw, strlen(raw), &b) && zu_buf_cstr(&b, &s))
+        out = dup_str(s);
+    zu_buf_free(&b);
+    zu_free(raw);
+    return out;                       /* NULL feeds the caller's NOMEM path */
+}
+
 /* Open the transport for one hop: TCP, then TLS when the scheme says so. */
 /* --- §26.1 pool key ------------------------------------------------------
  *
@@ -789,7 +817,7 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
     out->timings.total = (long)(zu_now_ms() - t_start);
     zu_trace_add(o->trace, ZU_EV_REQUEST_DONE, NULL, (uint64_t)out->status);
 
-    out->final_url = url_of(&cur);
+    out->final_url = redacted_url_of(&cur, o->redact);
     zu_uri_free(&cur);
     if (!out->final_url) { zu_result_free(out); return ZU_ERR_NOMEM; }
     return ZU_OK;

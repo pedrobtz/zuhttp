@@ -150,6 +150,9 @@ test_that("a followed redirect is an event, with its target (§35.3)", {
     # satisfied by freed memory. It also pins the two builders together, so
     # the event and zu_resp_url() cannot drift apart.
     expect_identical(got[[1]], target)
+    # Both renderings of the same hop. This URL has no secret in it, so the
+    # equality holds trivially; test-redact.R asserts it again on a URL that
+    # does, which is where it constrains anything.
     expect_identical(got[[1]], zu_resp_url(r))
     expect_identical(zu_resp_status(r), 200L)
   })

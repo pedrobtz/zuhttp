@@ -67,6 +67,7 @@ Firm decisions and open questions were previously indistinguishable in this docu
 | D-49 | `verify` and `ca_file` stay merged policy arguments; `zu_tls()` carries the rest | **Accepted** 2026-09-08 | 14.1, 31.9, 31.13 |
 | D-50 | `redirect.followed` carries the **resolved** target, built by the same `url_of()` as `final_url`, not the raw `Location` header | **Accepted** 2026-09-09 | 35.3, 42.1 |
 | D-51 | A URL enters the trace only through `zu_trace_add_url()`, which applies the §42 policy in C; the log's no-allocation rule yields to it | **Accepted** 2026-09-09 | 35.3, 35.4, 42.2 |
+| D-52 | `final_url` is redacted in the engine, so `zu_resp_url()` applies the whole of §42.1 and not just its userinfo clause | **Accepted** 2026-09-09 | 42.1, 42.2, 20.4 |
 
 ---
 
@@ -3263,10 +3264,14 @@ trade against mangling text, and is tested in both directions.
 | Condition messages and payloads (§34.2) | yes |
 | Trace and hook payloads (§35.3) | yes |
 | Record/replay serialization (§37) | yes |
-| `zu_resp_url()` | yes — userinfo stripped |
+| `zu_resp_url()` | yes — userinfo removed, secret parameters replaced (D-52) |
 | Verbose/debug transport logging | yes |
 
 The single exception is explicit user retrieval: `zu_req_headers(req)` returns real values, because the user asking for their own header by name is not an accidental disclosure. That asymmetry must be documented.
+
+`zu_resp_url()` is **not** that exception, and the row above used to read "userinfo stripped" as though it were half of one (D-52). It described the implementation rather than the rule: `url_of()` builds the final URL without userinfo because it never had it, so nothing was applying §42.1's other clause and `?access_token=` came back live from an accessor §20.4 already described as credential-free. The redaction happens in the engine, not in the accessor, because the string is stored on the response — redacting on the way out would leave the real one reachable through `resp$url`.
+
+The cost is real and is the intended one: the unredacted final URL of a redirect chain is then recoverable from nowhere. Userinfo has always been unrecoverable for the same reason, and §42.3's "must still be executable" constrains a *request*, which this is not.
 
 #### 42.3 Implementation constraint
 

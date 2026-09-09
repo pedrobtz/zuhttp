@@ -119,7 +119,11 @@ typedef struct {
     int        status;
     zu_headers headers;
     zu_buffer  body;             /* decoded */
-    char      *final_url;        /* after redirects, credential-free */
+    /* After redirects, and redacted with zu_get_opts.redact (§42.1): userinfo
+     * is gone and a secret query parameter reads <redacted>. Credential-free
+     * is the field's contract, not a side effect of how it is built — it used
+     * to be the latter, and a token in the query came back out of it. */
+    char      *final_url;
     char      *tls_version;      /* NULL for http:// */
     char      *tls_cipher;
     int        redirects;

@@ -62,6 +62,17 @@ test_that("a URL that does not parse is still redacted", {
   expect_false(grepl("user", out, fixed = TRUE))
 })
 
+test_that("redacting an already-redacted URL is stable", {
+  # record.R redacts a response URL the engine has already redacted (§42.2),
+  # so a second pass has to be a no-op. It is, and nothing said so — a
+  # redactor that re-escaped its own marker would corrupt every cassette.
+  u    <- "https://user:pw@h/x?access_token=SECRET&page=2"
+  once <- zu_redact_url(u)
+  expect_false(grepl("SECRET", once, fixed = TRUE))
+  expect_false(grepl("pw", once, fixed = TRUE))
+  expect_identical(zu_redact_url(once), once)
+})
+
 test_that("the default header list matches §42.1", {
   expect_true(all(zu_is_secret_header(c(
     "Authorization", "proxy-authorization", "Cookie", "Set-Cookie",
@@ -337,6 +348,31 @@ test_that("the canary does not reach a §35.3 trace (§42.2, §42.4)", {
     # goes. Without this the arm would pass on an empty detail.
     expect_true(all(grepl("access_token=<redacted>", tr$detail[
       tr$event %in% c("request.start", "redirect.followed")], fixed = TRUE)))
+  }, target_query = paste0("?access_token=", CANARY))
+})
+
+test_that("the canary does not reach zu_resp_url() (§42.2, §42.4)", {
+  # Named in the covered vector below since S11 and never actually written.
+  # The nearest arm tests zu_redact_url(), the function, not the accessor —
+  # and this one would have failed: url_of() omits userinfo, so
+  # "credential-free" held for half of §42.1 while a ?access_token= came
+  # straight back out of the response.
+  with_redirect_origin(function(start, target) {
+    r <- zu_get(paste0(start, "?access_token=", CANARY),
+                trace = TRUE, redirects = 1, check = FALSE, timeout = 20,
+                client = zu_client(pool = NULL))
+    u  <- zu_resp_url(r)
+    tr <- zu_resp_trace(r)
+
+    expect_no_canary(u, "zu_resp_url()")
+    # ...on a URL that is otherwise intact, or an empty string would pass.
+    expect_true(grepl("access_token=<redacted>", u, fixed = TRUE))
+    expect_true(grepl("/final", u, fixed = TRUE))
+
+    # The final URL and the event that recorded arriving at it are the same
+    # string, secret and all. They share a builder in C, and this is what
+    # keeps the two renderings from drifting now that both are redacted.
+    expect_identical(u, tr$detail[tr$event == "redirect.followed"][[1]])
   }, target_query = paste0("?access_token=", CANARY))
 })
 
