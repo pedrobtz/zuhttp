@@ -7,13 +7,6 @@
 client_pool <- function(...) zuhttp:::client_pool(...)
 pool_valid  <- function(ptr) .Call(zuhttp:::C_zu_pool_valid, ptr)
 
-skip_unless_online <- function() {
-  testthat::skip_on_cran()
-  if (!identical(Sys.getenv("ZU_TEST_NETWORK"), "1"))
-    testthat::skip("set ZU_TEST_NETWORK=1 to run network tests")
-  testthat::skip_if_offline()
-}
-
 # --- configuration -------------------------------------------------------
 
 test_that("zu_pool() validates its arguments and carries §26.2's defaults", {

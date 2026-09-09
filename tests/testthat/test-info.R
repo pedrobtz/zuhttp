@@ -164,10 +164,7 @@ test_that("retries and redirects are counted, not guessed", {
 })
 
 test_that("connection metadata is real over a live connection", {
-  skip_on_cran()
-  if (!identical(Sys.getenv("ZU_TEST_NETWORK"), "1"))
-    skip("set ZU_TEST_NETWORK=1 to run network tests")
-  skip_if_offline()
+  skip_unless_online()
 
   api <- zu_client()
   r <- zu_get("https://example.com", client = api)

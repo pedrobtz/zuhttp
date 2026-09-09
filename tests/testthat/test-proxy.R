@@ -23,8 +23,7 @@ test_that("proxy = FALSE forces a direct connection, NULL consults the env", {
 })
 
 test_that("a bogus proxy in the environment is actually used, and FALSE escapes it", {
-  testthat::skip_on_cran()
-  testthat::skip_if_offline()
+  skip_unless_online()
   old <- Sys.getenv("http_proxy", unset = NA)
   on.exit(if (is.na(old)) Sys.unsetenv("http_proxy") else
             Sys.setenv(http_proxy = old), add = TRUE)
@@ -38,8 +37,7 @@ test_that("a bogus proxy in the environment is actually used, and FALSE escapes 
 })
 
 test_that("NO_PROXY takes a host out of the proxy's path", {
-  testthat::skip_on_cran()
-  testthat::skip_if_offline()
+  skip_unless_online()
   old_p <- Sys.getenv("http_proxy", unset = NA)
   old_n <- Sys.getenv("no_proxy", unset = NA)
   on.exit({

@@ -12,13 +12,6 @@
 # the same mistake as the DNS lookup inside the "offline" C suite: the
 # deterministic job must stay deterministic. The network-enabled job in
 # tls-spike.yaml sets ZU_TEST_NETWORK=1.
-skip_unless_online <- function() {
-  testthat::skip_on_cran()
-  if (!identical(Sys.getenv("ZU_TEST_NETWORK"), "1"))
-    testthat::skip("set ZU_TEST_NETWORK=1 to run network tests")
-  testthat::skip_if_offline()
-}
-
 test_that("a plain HTTPS GET returns a usable response", {
   skip_unless_online()
   r <- zu_get("https://example.com")

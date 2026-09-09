@@ -12,13 +12,6 @@
 # setup is not.
 fresh <- function(...) zu_client(...)
 
-skip_unless_online <- function() {
-  testthat::skip_on_cran()
-  if (!identical(Sys.getenv("ZU_TEST_NETWORK"), "1"))
-    testthat::skip("set ZU_TEST_NETWORK=1 to run network tests")
-  testthat::skip_if_offline()
-}
-
 # --- offline -------------------------------------------------------------
 
 test_that("tracing is off by default", {

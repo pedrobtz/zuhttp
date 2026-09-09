@@ -6,13 +6,6 @@
 # the backend, that ca_file and ca_extra genuinely differ, and that the §26.1
 # pool key keeps connections with different TLS settings apart.
 
-skip_unless_online <- function() {
-  testthat::skip_on_cran()
-  if (!identical(Sys.getenv("ZU_TEST_NETWORK"), "1"))
-    testthat::skip("set ZU_TEST_NETWORK=1 to run network tests")
-  testthat::skip_if_offline()
-}
-
 # A CA that is real, correctly formed, and trusts nothing on the internet.
 # That is what distinguishes "adds to" from "replaces": with it added, a
 # public host still validates; with it substituted, the same host must not.

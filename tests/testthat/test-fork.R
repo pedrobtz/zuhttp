@@ -28,7 +28,7 @@ skip_unless_forked_https_is_testable <- function() {
   if (!identical(zu_tls_backend(), "securetransport"))
     testthat::skip("guard lives in the Secure Transport backend")
   testthat::skip_if_not_installed("parallel")
-  testthat::skip_if_offline()
+  if (!zu_have_network()) testthat::skip("no network")
 }
 
 test_that("HTTPS in a forked child raises zu_fork_error and does not kill the worker", {

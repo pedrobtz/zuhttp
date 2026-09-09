@@ -13,13 +13,6 @@
 # the interrupt class is distinct from a programmatic cancel, and a request
 # still completes with the checkpoint installed.
 
-skip_unless_online <- function() {
-  testthat::skip_on_cran()
-  if (!identical(Sys.getenv("ZU_TEST_NETWORK"), "1"))
-    testthat::skip("set ZU_TEST_NETWORK=1 to run network tests")
-  testthat::skip_if_offline()
-}
-
 test_that("a request completes with the interrupt checkpoint installed", {
   skip_unless_online()
   # The checkpoint runs every ~100ms for the life of the request (§25.1). If

@@ -98,10 +98,7 @@ test_that("6. streaming download", {
   # §31.16 workflow 6, unblocked by S17. The workflow is "fetch something too
   # big to hold", so what it has to demonstrate is that the body reached the
   # disk WITHOUT passing through memory — not merely that a file appeared.
-  testthat::skip_on_cran()
-  if (!identical(Sys.getenv("ZU_TEST_NETWORK"), "1"))
-    testthat::skip("set ZU_TEST_NETWORK=1 to run network tests")
-  testthat::skip_if_offline()
+  skip_unless_online()
 
   d <- tempfile(); dir.create(d); on.exit(unlink(d, recursive = TRUE), add = TRUE)
   f <- file.path(d, "download.bin")

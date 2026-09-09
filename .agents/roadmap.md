@@ -1059,6 +1059,25 @@ test it *less* than curl tests its equivalent.
 
 ---
 
+**Fixed on the way in, 2026-09-09 — the suite could not run at all without
+`curl`.** Every network gate ended in `testthat::skip_if_offline()`, which
+calls `rlang::check_installed("curl")` and therefore *errors* rather than
+skips when that package is absent. `curl` is not in Suggests, so on a machine
+without it `R CMD check` fails — an S19 blocker — and the suite of a package
+whose first line is "zero hard R dependencies" was consulting another HTTP
+client to decide whether to run. Two tests in `test-proxy.R` failed rather
+than skipped; the rest were masked only because their `skip_if_offline()` sat
+behind a `ZU_TEST_NETWORK` skip that fired first.
+
+Those two were also the one place gated on `skip_on_cran()` alone — the exact
+mistake the §50 note warns about, since `rcmdcheck` sets `NOT_CRAN` and every
+check would then reach example.com. The gate is now one definition in
+`helper-net.R` instead of six identical copies plus three inlined ones, and
+its probe is base R: deliberately not zuhttp, because a broken zuhttp must
+fail its own network tests rather than quietly skip them.
+
+---
+
 #### Group A · TLS negatives against a public corpus
 
 We use **4 of badssl.com's ~30 endpoints**. Each item below was probed live on
