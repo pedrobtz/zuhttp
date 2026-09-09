@@ -2,7 +2,7 @@
 
 **Companion to:** [zuhttp-design.md](zuhttp-design.md)
 **Status:** Draft
-**Last updated:** 2026-09-08 · **Tracks C and D complete but for the S7/S9 cert matrices; S12, S16, S17 complete; S15 explicitly partial**
+**Last updated:** 2026-09-09 · **Tracks C and D complete but for the S7/S9 cert matrices; S12, S16, S17 complete; S15 explicitly partial. Two TODO items queued: the test-framework hardening plan and the Mbed TLS spike.**
 **Total estimate:** 41–48 person-weeks (§64 of the design doc, plus spikes)
 
 ---
@@ -1018,6 +1018,184 @@ Also worth recording: the first draft of the tests failed because the
 **default client pools**, so a test that ran earlier left a warm connection and
 the next request correctly skipped the phases being measured. The pooling was
 right; sharing a client between tests that measure connection setup was not.
+
+### S-unassigned · Test-framework hardening — 📋 **TODO**
+
+**Raised 2026-09-09**, from measuring this suite against R `curl` 8.0.0 (source
+fetched from CRAN) and against what `requests` does. Twelve items in four
+groups. None of them is a new feature; every one closes a claim the project
+already makes and does not currently guard.
+
+**What the comparison actually showed.** Per line of code we own, this suite is
+broader than curl's — 229 `test_that()` blocks against 79, an offline C suite
+curl has no equivalent of, and nine fuzz targets against zero. That is not
+diligence, it is consequence: curl is a thin binding and delegates HTTP framing
+and TLS to libcurl, which has its own suite and continuous OSS-Fuzz. We own
+that code, so we must test it. The gaps below are where we own something and
+test it *less* than curl tests its equivalent.
+
+---
+
+#### Group A · TLS negatives against a public corpus
+
+We use **4 of badssl.com's ~30 endpoints**. Each item below was probed live on
+2026-09-09 and produced the class stated, so these are transcriptions of
+observed behaviour and not predictions. All belong in `test-certs.R` alongside
+the §50.5 matrix, network-gated.
+
+- [ ] **A1. Revocation, both ways.** `revoked.badssl.com` is **accepted (200)**
+      under the default policy and raises `zu_tls_certificate_error` with
+      `zu_tls(revocation = TRUE)`.
+
+      This is the highest-value item in the plan. §14.5's entire argument rests
+      on S0's measurement that the platforms do **not** check revocation by
+      default — the section exists because an earlier draft claimed they did
+      and that claim was false. Nothing in the suite guards it. If the
+      revocation plumbing broke tomorrow the only signal would be a design
+      document. Two requests, two assertions.
+      *Serves: S9 criterion 4 (`zu_tls(revocation = TRUE)` works and is off by
+      default, F-4).*
+
+- [ ] **A2. Protocol floor.** `tls-v1-0.badssl.com:1010` and
+      `tls-v1-1.badssl.com:1011` → `zu_tls_handshake_error`.
+
+- [ ] **A3. Weak cryptography refused.** `rc4.badssl.com` and
+      `dh1024.badssl.com` → `zu_tls_handshake_error`.
+
+      Worth having precisely because **we do not choose the cipher list** — the
+      platform does. A test is the only mechanism by which we would notice a
+      future macOS or Windows starting to accept RC4. Nothing else in the
+      suite would.
+
+- [ ] **A4. Malformed and weakly-signed certificates.**
+      `sha1-intermediate.badssl.com` and `no-common-name.badssl.com` →
+      `zu_tls_certificate_error`.
+
+- [ ] **A5. Document a platform difference rather than assume uniformity.**
+      `incomplete-chain.badssl.com` returns **200** on Secure Transport, which
+      completes the chain by fetching the missing intermediate via AIA. That is
+      not a bug and not universal. Assert the observed behaviour per backend
+      and record it — it is exactly the "works on my machine" asymmetry §14.5
+      warns about, and the §50.5 matrix cannot see it because a locally
+      generated chain is always complete.
+
+**Why public hosts here and locally generated certs in §50.5.** They answer
+different questions. The local matrix proves our *trust evaluation* is correct
+against certificates we control, deterministically and offline. badssl proves
+the *platform's* protocol and cipher policy is what we believe, against
+certificates and configurations we could not produce locally. Neither replaces
+the other, and only the second can catch a platform changing under us.
+
+---
+
+#### Group B · Resource lifecycle — a dimension with zero coverage
+
+`grep 'gc()' tests/` returns nothing. curl ships `test-gc.R` asserting
+`total_handles() == 0` after collection; we have an external pointer with a
+finalizer and no test that it ever runs. New file, `test-lifecycle.R`.
+
+- [ ] **B1. The pool finalizer runs.** Build a client, make a request, drop the
+      reference, `gc()`, and assert the pool is freed and its connections
+      closed. Non-vacuity: with the finalizer unregistered the descriptor count
+      does not fall.
+      *Serves: §26.4's requirement that the PID guard run "in every finalizer",
+      which is currently asserted only in C.*
+
+- [ ] **B2. A finalizer in a forked child must not close the parent's socket.**
+      §29 rule 3 states this as a hazard and nothing tests it. A child's GC
+      running on an inherited external pointer is the exact case.
+      *Serves: S16 §26.4, the half not covered by the mclapply test.*
+
+---
+
+#### Group C · Timeouts — currently asserted only synthetically
+
+`grep zu_timeout_error tests/` finds one hit and it constructs the condition
+with `zu_condition()`. **No request in this suite has ever timed out.**
+
+- [ ] **C1. A timeout fires.** `/delay/5` with `timeout = 1` →
+      `zu_timeout_error`, in under ~2 s.
+- [ ] **C2. A slow response inside the budget succeeds.** `/delay/1` with
+      `timeout = 10` → 200. The pair matters: C1 alone is satisfied by a client
+      that times out unconditionally.
+
+      These two land **before** §24's phase timeouts (connect/tls/read/write/
+      pool), which are the largest open item in the core. Building the phase
+      model against tests that already pass is how the model gets verified
+      rather than merely written.
+
+---
+
+#### Group D · Infrastructure
+
+- [ ] **D1. `ZU_HTTPBIN_URL`, and a local httpbin in CI.**
+
+      Today `httpbin.org` is reached from 11 call sites across `test-network.R`
+      and `ctest/test_engine.c`, on every push, from the `slice-r` job on both
+      Linux and macOS. It is the one third-party dependency that can redden CI
+      without a code change.
+
+      **Design decision: one env var, not a flag and not a second workflow.**
+      A separate opt-in workflow would run those tests in one place while the
+      existing job kept calling out to the internet — coverage added, flake not
+      removed, and two paths to keep in sync.
+
+      **And a binary, not a container.** GitHub Actions service containers run
+      on Linux runners only; macOS runners have no Docker daemon. A
+      docker-based httpbin would cover Linux and leave macOS — the Secure
+      Transport platform, the one we most want covered — still on the public
+      instance. `go install github.com/mccutchen/go-httpbin/v2/cmd/go-httpbin`
+      works identically on every runner, since Go is preinstalled on all of
+      them.
+
+      Shape: `httpbin(path)` helper defaulting to `https://httpbin.org`;
+      `getenv` in `test_engine.c` for the same variable; CI starts the binary
+      and sets it. Unset locally, nothing changes.
+
+      Caveat to accept knowingly: go-httpbin is a reimplementation. It is
+      faithful for our five endpoints (`/gzip`, `/post`, `/status/404`,
+      `/headers`, `/stream/3`), all of which are echo-shaped. `requests` made
+      the same trade with `pytest-httpbin`.
+
+- [ ] **D2. `dash -n` on `configure`, `configure.win` and `cleanup`** in the
+      source-package-hygiene job.
+
+      `R CMD check` emits `A complete check needs the 'checkbashisms' script`,
+      which is a check that **did not run**, not a problem found. `checkbashisms`
+      is absent both locally and in CI, so S19's "POSIX `sh` configure"
+      requirement is currently unverified. Verified by hand on 2026-09-09 —
+      all three parse clean under dash and `configure` runs correctly under it —
+      but nothing enforces it, so the next edit gets no signal. Ubuntu runners
+      ship dash; three lines.
+
+- [ ] **D3. `tests/spelling.R` + `inst/WORDLIST`**, as curl ships. Catches
+      documentation typos in CI. Cheap, and this package has a great deal of
+      prose.
+
+---
+
+#### Ordering, and why
+
+1. **A1** first. Highest value per line in the plan, and it guards a measured
+   claim the design leans on heavily.
+2. **D1** next. It is the only item that *removes* an existing failure mode
+   rather than adding coverage, and everything in Group C depends on a reliable
+   `/delay` endpoint.
+3. **C1–C2**, so §24's phase timeouts have something to be built against.
+4. **A2–A5**, mechanical once A1 establishes the pattern.
+5. **B1–B2**, the dimension with no coverage at all — deliberately not first,
+   because it needs the most new machinery.
+6. **D2, D3**, small and independent; do them whenever.
+
+#### Explicit non-goals
+
+- **Not** a general move away from public hosts. Group A *wants* the real
+  internet: the whole point is catching a platform change we could not
+  reproduce locally.
+- **Not** a rewrite of the §50.5 local matrix. Groups A and §50.5 answer
+  different questions and both stay.
+- **Not** S18's 24 h soak or S20's usability test. Those need wall-clock time
+  and people; nothing here is blocked on them.
 
 ### S-unassigned · Spike: Mbed TLS as the macOS portable engine — 📋 **TODO**
 
