@@ -97,9 +97,13 @@ OPENSSL_CFLAGS := -I$(OPENSSL_PREFIX)/include
 OPENSSL_LIBS   := -L$(OPENSSL_PREFIX)/lib -lssl -lcrypto
 endif
 
+# zu_net.c emits §35.3 trace events, so it needs zu_trace.c, which redacts
+# URLs and so needs zu_redact.c (D-51). Neither is here because this binary
+# tests TLS; they are here because the link demands them.
 TLSSRC := $(SRC)/zu_alloc.c $(SRC)/zu_buffer.c $(SRC)/zu_error.c \
           $(SRC)/zu_time.c $(SRC)/zu_stream.c $(SRC)/zu_net.c \
-          $(SRC)/zu_tls.c $(SRC)/zu_tls_openssl.c
+          $(SRC)/zu_tls.c $(SRC)/zu_tls_openssl.c \
+          $(SRC)/zu_trace.c $(SRC)/zu_redact.c $(SRC)/zu_headers.c
 
 zu_tlstest: $(TLSSRC) test_tls.c
 	$(CC) $(CFLAGS) $(OPENSSL_CFLAGS) -o $@ $(TLSSRC) test_tls.c \

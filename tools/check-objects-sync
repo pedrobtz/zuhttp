@@ -1,0 +1,42 @@
+#!/bin/sh
+# src/Makevars.in and src/Makevars.win.in carry the same OBJECTS list, and
+# nothing about the build makes them agree.
+#
+# This exists because they did not. zu_sink.o and zu_body.o (S17) and
+# zu_trace.o (§35) were added to the Unix list only, so the package failed to
+# link on Windows — undefined references to zu_sink_finish, zu_sink_free and
+# zu_event_name — for two stages. No local build catches it: a maintainer on
+# macOS or Linux never compiles the other list.
+#
+# @TLS_OBJ@ is the one legitimate difference: ./configure substitutes the
+# backend object per platform.
+set -eu
+cd "$(dirname "$0")/.."
+
+objs() {
+    sed -n '/^OBJECTS/,/^$/p' "$1" \
+        | tr ' \\' '\n\n' \
+        | sed -e 's/^OBJECTS=//' -e 's/^OBJECTS *= *//' \
+        | grep '\.o$' \
+        | grep -v '@TLS_OBJ@' \
+        | sort -u
+}
+
+a=$(objs src/Makevars.in)
+b=$(objs src/Makevars.win.in)
+
+if [ "$a" = "$b" ]; then
+    echo "OBJECTS lists agree ($(echo "$a" | wc -l | tr -d ' ') objects)"
+    exit 0
+fi
+
+echo "src/Makevars.in and src/Makevars.win.in disagree:" >&2
+echo "$a" > /tmp/zu-objs-unix.$$
+echo "$b" > /tmp/zu-objs-win.$$
+comm -23 /tmp/zu-objs-unix.$$ /tmp/zu-objs-win.$$ | sed 's/^/  only in Makevars.in:     /' >&2
+comm -13 /tmp/zu-objs-unix.$$ /tmp/zu-objs-win.$$ | sed 's/^/  only in Makevars.win.in: /' >&2
+rm -f /tmp/zu-objs-unix.$$ /tmp/zu-objs-win.$$
+echo "" >&2
+echo "A source file added to one list and not the other links on the" >&2
+echo "maintainer's platform and fails on the other." >&2
+exit 1

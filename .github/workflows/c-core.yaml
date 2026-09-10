@@ -56,6 +56,14 @@ jobs:
         if: runner.os == 'Linux'
         run: ./tools/check-feature-macros
 
+      # The two OBJECTS lists drifted for two stages and nothing noticed: a
+      # maintainer on macOS or Linux never compiles the Windows one, so the
+      # package simply failed to link there. Cheap to check, and the failure
+      # it prevents is "does not build on a supported platform".
+      - name: OBJECTS lists agree between Makevars.in and Makevars.win.in
+        if: runner.os == 'Linux'
+        run: ./tools/check-objects-sync
+
       - name: Compiler identity
         working-directory: ctest
         run: |

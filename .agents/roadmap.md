@@ -1517,6 +1517,26 @@ redaction. Record/replay ships too, which §59 had placed in Phase 3.
       requests and two assertions, it guards a §14.5 security claim that has
       no guard at all, and it closes S9's fourth exit criterion.
 
+### Found while getting there
+
+Two CI jobs were red and had been since the first push of this batch, because
+`make -C ctest strict` and the R suites are not the whole of what CI runs.
+
+* **The package did not link on Windows.** `src/Makevars.win.in` was missing
+  `zu_sink.o`, `zu_body.o` and `zu_trace.o` — S17's and §35's files reached the
+  Unix list only. Nobody working on macOS or Linux ever compiles the other
+  list, so it went unnoticed for two stages. `tools/check-objects-sync` now
+  compares them in `c-core.yaml`, and was confirmed to fail when one entry is
+  removed.
+* **`src/zu_sink.c` had no feature-test preamble**, which `c-core.yaml`
+  enforces in a step separate from the build. Same class as the two failures
+  `tools/check-feature-macros` was written for, one of which was silent.
+* **`ctest`'s `tls` and engine targets did not link** what `zu_net.c` and
+  `zu_trace.c` now call.
+
+Each was pre-existing rather than introduced by the release work, and each was
+invisible to the commands in CLAUDE.md's list.
+
 ### Where the checks stand at the tag
 
 `R CMD check` on the built tarball: **Status: OK** — no errors, warnings or

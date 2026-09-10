@@ -1,7 +1,9 @@
 # GENERATED FROM src/Makevars.in BY ./configure -- DO NOT EDIT src/Makevars
 # Vendored code lives in an isolated directory (design §48), and R does not
 # compile src/ subdirectories automatically, so OBJECTS is listed explicitly.
-# Every new source file must be added here.
+# Every new source file must be added here -- AND in src/Makevars.win.in, which
+# is the same list for Windows. See the note there: the two drifted, and
+# tools/check-objects-sync now compares them.
 
 # URI_NO_UNICODE / URI_STATIC_BUILD are required by the vendored uriparser
 # subset; see src/vendor/uriparser/VENDOR. src/zu_uriparser.h sets them too,

@@ -1,7 +1,11 @@
 # GENERATED FROM src/Makevars.win.in BY ./configure -- DO NOT EDIT src/Makevars
 # Vendored code lives in an isolated directory (design §48), and R does not
 # compile src/ subdirectories automatically, so OBJECTS is listed explicitly.
-# Every new source file must be added here.
+# Every new source file must be added here -- AND in src/Makevars.in, which is
+# the same list for Unix. Nothing about the build makes the two agree, so
+# tools/check-objects-sync compares them in CI; it exists because zu_sink.o,
+# zu_body.o and zu_trace.o reached only the Unix list, and the package then
+# failed to link on Windows for two stages without anyone noticing.
 
 # URI_NO_UNICODE / URI_STATIC_BUILD are required by the vendored uriparser
 # subset; see src/vendor/uriparser/VENDOR. src/zu_uriparser.h sets them too,
@@ -33,6 +37,9 @@ OBJECTS = init.o \
           zu_engine.o \
           zu_fork.o \
           zu_pool.o \
+          zu_sink.o \
+          zu_body.o \
+          zu_trace.o \
           zu_proxy.o \
           zu_redact.o \
           vendor/uriparser/UriParse.o \
