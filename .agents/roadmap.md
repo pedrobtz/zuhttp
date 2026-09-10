@@ -1534,8 +1534,18 @@ Two CI jobs were red and had been since the first push of this batch, because
 * **`ctest`'s `tls` and engine targets did not link** what `zu_net.c` and
   `zu_trace.c` now call.
 
+* **A test asserted a premise that is false on Windows.** `test-info.R` set
+  `http_proxy` and `HTTP_PROXY` to different values to exercise §20.1's
+  httpoxy rule. Windows environment variables are case-insensitive, so those
+  are one variable there and the second simply overwrites the first. Split and
+  guarded. Nothing is lost on Windows: httpoxy is a CGI-environment bug, and
+  `getenv("http_proxy")` finds the value whatever case it was set in, so
+  proxying still works — there is just no second variable to ignore.
+
 Each was pre-existing rather than introduced by the release work, and each was
-invisible to the commands in CLAUDE.md's list.
+invisible to the commands in CLAUDE.md's list. Three of the four were only
+reachable on a platform the maintainer does not develop on, which is the
+argument for the CI matrix stated as a bill.
 
 ### Where the checks stand at the tag
 

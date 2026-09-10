@@ -47,22 +47,44 @@ test_that("§31.3's claim holds: the default client's configuration is visible",
   expect_match(out, "statuses returned", fixed = TRUE)
 })
 
-test_that("the proxy environment is reported, including the ignored one", {
-  saved <- Sys.getenv(c("http_proxy", "HTTP_PROXY", "no_proxy"), unset = NA)
+test_that("the proxy environment is reported", {
+  saved <- Sys.getenv(c("http_proxy", "no_proxy"), unset = NA)
   on.exit({
     for (n in names(saved))
       if (is.na(saved[[n]])) Sys.unsetenv(n) else do.call(Sys.setenv, setNames(list(saved[[n]]), n))
   }, add = TRUE)
 
-  Sys.setenv(http_proxy = "http://corp:3128", HTTP_PROXY = "http://attacker:80",
-             no_proxy = "internal.test")
+  Sys.setenv(http_proxy = "http://corp:3128", no_proxy = "internal.test")
   i <- zu_info()
   expect_identical(unname(i$proxy_env$set[["http_proxy"]]), "http://corp:3128")
   expect_identical(unname(i$proxy_env$set[["no_proxy"]]), "internal.test")
+})
 
-  # §20.1's httpoxy rule is invisible otherwise: a user whose HTTP_PROXY is
-  # set and ignored sees a request that "should" be proxied and is not, with
-  # nothing anywhere saying why.
+test_that("an ignored uppercase HTTP_PROXY is reported (§20.1, httpoxy)", {
+  # Split from the test above and guarded, because the premise is not
+  # portable: Windows environment variables are case-insensitive, so
+  # http_proxy and HTTP_PROXY are ONE variable there. Setting both simply
+  # overwrites, and the situation this reports cannot arise — which is why
+  # asserting it failed on Windows for two stages.
+  #
+  # Nothing is lost on Windows. httpoxy is a CGI-environment bug, and
+  # getenv("http_proxy") finds the value whatever case it was set in, so
+  # proxying still works; there is just no second variable to ignore.
+  if (.Platform$OS.type == "windows")
+    skip("environment variables are case-insensitive here, so the two names are one variable")
+
+  saved <- Sys.getenv(c("http_proxy", "HTTP_PROXY"), unset = NA)
+  on.exit({
+    for (n in names(saved))
+      if (is.na(saved[[n]])) Sys.unsetenv(n) else do.call(Sys.setenv, setNames(list(saved[[n]]), n))
+  }, add = TRUE)
+
+  Sys.setenv(http_proxy = "http://corp:3128", HTTP_PROXY = "http://attacker:80")
+  i <- zu_info()
+
+  # §20.1's rule is invisible otherwise: a user whose HTTP_PROXY is set and
+  # ignored sees a request that "should" be proxied and is not, with nothing
+  # anywhere saying why.
   expect_true(i$proxy_env$ignored_uppercase_http_proxy)
   out <- paste(capture.output(print(i)), collapse = "\n")
   expect_match(out, "deliberately IGNORED", fixed = TRUE)
