@@ -68,6 +68,7 @@ Firm decisions and open questions were previously indistinguishable in this docu
 | D-50 | `redirect.followed` carries the **resolved** target, built by the same `url_of()` as `final_url`, not the raw `Location` header | **Accepted** 2026-09-09 | 35.3, 42.1 |
 | D-51 | A URL enters the trace only through `zu_trace_add_url()`, which applies the §42 policy in C; the log's no-allocation rule yields to it | **Accepted** 2026-09-09 | 35.3, 35.4, 42.2 |
 | D-52 | `final_url` is redacted in the engine, so `zu_resp_url()` applies the whole of §42.1 and not just its userinfo clause | **Accepted** 2026-09-09 | 42.1, 42.2, 20.4 |
+| D-53 | The response sink is single: `path` and `callback` are mutually exclusive, and a committed `path` is readable back as `zu_resp_path()` | **Accepted** 2026-09-10 | 27.1, 31.2 |
 
 ---
 
@@ -1688,6 +1689,10 @@ Large responses must not require whole-body allocation.
 #### 27.1 Sinks and limits
 
 `max_body_bytes` (§40) applies to every sink including `file` — an unbounded download to disk is still a denial-of-service vector, just against a different resource. The file sink writes to a temporary file in the same directory as the destination and renames on success, so an interrupted or failed download never leaves a truncated file at the target path.
+
+**An existing destination is replaced, at the rename and not before** (D-53). That is the useful half of the same guarantee: a download that fails leaves whatever was already at `path` untouched, because nothing touches `path` until the body has arrived whole. `rename()` refuses to replace on Windows, so the target is removed immediately before it; the window that opens is accepted, since the caller asked for the file to be replaced and the alternative (`MoveFileEx`) is not reachable through C89 stdio.
+
+**One sink per response.** `path` and `callback` are mutually exclusive, refused where the request is resolved so that both API levels and either ordering give the same answer. They were not: the C layer picked the callback when both were set and discarded the path silently, so a caller who asked for both got no file and no diagnostic.
 
 #### 27.2 Calling back into R
 

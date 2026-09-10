@@ -176,8 +176,11 @@ client's; \code{NULL} inherits it (§31.9).}
 \item{path}{Write the response body to this file instead of holding it in
 memory (§27). The download is written beside the destination and renamed
 on success, so a failed or interrupted transfer never leaves a truncated
-file at \code{path}. Note the asymmetry with \code{file}, which is a request \emph{body}
-source (§31.6): \code{path} is where the response goes, \code{file} is where a
+file at \code{path}. An existing file at \code{path} is \strong{replaced}, and only once
+the body has arrived whole. Mutually exclusive with \code{callback}: a
+response body has one destination. Note the asymmetry with \code{file}, which
+is a request \emph{body} source (§31.6): \code{path} is where the response goes,
+\code{file} is where a
 request body comes from.}
 
 \item{callback}{A function of one argument called with each decoded chunk
@@ -219,6 +222,16 @@ client default (§31.9). Omitting it inherits the client's.
 \dontrun{
 zu_get("https://api.example.com/search", query = list(q = "HTTP", limit = 20))
 zu_post("https://api.example.com/users", json = list(name = "Alice"))
+
+# Download straight to disk: the body never passes through memory, and the
+# file appears at its destination only once it has arrived whole.
+r <- zu_get("https://example.com/big.bin", path = "big.bin")
+zu_resp_path(r)                       # "big.bin"
+zu_resp_header(r, "content-type")     # the response is still a response
+
+# A failed request leaves nothing behind, so this raises rather than
+# writing a file containing the 404 page.
+zu_get("https://example.com/missing", path = "out.bin", check = TRUE)
 }
 }
 \seealso{

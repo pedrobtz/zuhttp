@@ -43,7 +43,10 @@ zu_response <- function(status = 200L, headers = NULL, body = raw(),
 #'   when it repeats; `zu_resp_url()` the final URL after redirects, with
 #'   credentials removed (§42.1: userinfo dropped, and a secret query
 #'   parameter shown as `<redacted>` — see the Credentials section);
-#'   `zu_resp_method()` the method actually sent,
+#'   `zu_resp_path()` the file the body was written to, or `NULL` when it was
+#'   not written to one — a response replayed from a cassette or produced by
+#'   [zu_mock_transport()] has no file, so it reports `NULL` even if the
+#'   request asked for a `path`; `zu_resp_method()` the method actually sent,
 #'   which a 303 may have rewritten to `GET`; `zu_resp_timings()` §35.1's nine
 #'   measurements — seven phase durations in seconds, then two byte counts.
 #'   `NA` for a phase that did not happen, which a pooled connection and a
@@ -68,6 +71,10 @@ NULL
 #' @rdname zu_resp
 #' @export
 zu_resp_status <- function(resp) resp$status
+
+#' @rdname zu_resp
+#' @export
+zu_resp_path <- function(resp) resp$path
 
 #' @rdname zu_resp
 #' @export

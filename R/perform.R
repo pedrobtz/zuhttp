@@ -94,6 +94,12 @@ zu_transport_perform.zu_native_transport <- function(transport, req) {
                # traces. The engine redacts them itself (§42.2) rather than
                # handing R something to remember to clean.
                zu_redact_opt("zuhttp.redact_params"))
+  # §27.1: by here the sink has been committed, so the destination is a fact
+  # about this response rather than something that was merely asked for. Set
+  # in the transport and not in zu_perform() because only a transport that
+  # actually wrote the file can honestly claim one — a mock or a cassette
+  # replay did not, and must keep reporting NULL.
+  if (!is.null(req$path)) raw$path <- req$path
   structure(raw, class = "zu_response")
 }
 
@@ -179,6 +185,16 @@ resolve_request <- function(req, client) {
   if (!is.numeric(policy$max_body) || length(policy$max_body) != 1L ||
       is.na(policy$max_body) || policy$max_body < 1)
     stop("`max_body` must be at least 1 byte", call. = FALSE)
+
+  # §27: a response body has one destination. init.c picks the callback when
+  # both are set, so a caller who passed both got no file and no warning — the
+  # download simply did not happen. Refused here rather than in zu_req_path()
+  # and zu_req_callback(), so the pipeline and the one-shot form give the same
+  # answer, and so the order the two were set in cannot change it.
+  if (!is.null(req$path) && !is.null(req$callback))
+    stop("`path` and `callback` are mutually exclusive: a response body has ",
+         "one destination. Write to the file and read it back, or take the ",
+         "chunks and write them yourself.", call. = FALSE)
 
   req$url      <- url_with_query(url, merge_query(client$query, req$query))
   req$query    <- NULL          # folded into the URL; one representation

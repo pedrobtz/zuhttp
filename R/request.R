@@ -56,6 +56,11 @@ zu_request <- function(method, url) {
 #' within a filesystem, and a temporary directory on another mount turns the
 #' commit into a copy that can itself fail halfway.
 #'
+#' An existing file at `path` is **replaced**, and only at that final step —
+#' so a download that fails leaves whatever was already there untouched.
+#' Setting both this and [zu_req_callback()] is an error, raised when the
+#' request is performed: a response body has one destination.
+#'
 #' @param req A `zu_request`.
 #' @param path Destination path.
 #' @return The request, modified.

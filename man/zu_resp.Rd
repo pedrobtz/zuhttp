@@ -3,6 +3,7 @@
 \name{zu_resp}
 \alias{zu_resp}
 \alias{zu_resp_status}
+\alias{zu_resp_path}
 \alias{zu_resp_ok}
 \alias{zu_resp_headers}
 \alias{zu_resp_header}
@@ -12,6 +13,8 @@
 \title{Response accessors}
 \usage{
 zu_resp_status(resp)
+
+zu_resp_path(resp)
 
 zu_resp_ok(resp)
 
@@ -37,7 +40,10 @@ character vector, length 0 when the header is absent and longer than 1
 when it repeats; \code{zu_resp_url()} the final URL after redirects, with
 credentials removed (§42.1: userinfo dropped, and a secret query
 parameter shown as \verb{<redacted>} — see the Credentials section);
-\code{zu_resp_method()} the method actually sent,
+\code{zu_resp_path()} the file the body was written to, or \code{NULL} when it was
+not written to one — a response replayed from a cassette or produced by
+\code{\link[=zu_mock_transport]{zu_mock_transport()}} has no file, so it reports \code{NULL} even if the
+request asked for a \code{path}; \code{zu_resp_method()} the method actually sent,
 which a 303 may have rewritten to \code{GET}; \code{zu_resp_timings()} §35.1's nine
 measurements — seven phase durations in seconds, then two byte counts.
 \code{NA} for a phase that did not happen, which a pooled connection and a

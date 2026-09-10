@@ -24,6 +24,11 @@ leaves a truncated file where the caller will find it and trust it.
 The same directory, rather than \code{tempdir()}: \code{rename()} is atomic only
 within a filesystem, and a temporary directory on another mount turns the
 commit into a copy that can itself fail halfway.
+
+An existing file at \code{path} is \strong{replaced}, and only at that final step —
+so a download that fails leaves whatever was already there untouched.
+Setting both this and \code{\link[=zu_req_callback]{zu_req_callback()}} is an error, raised when the
+request is performed: a response body has one destination.
 }
 \examples{
 req <- zu_req_path(zu_request("GET", "https://x.test/big.bin"),
