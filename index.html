@@ -74,26 +74,65 @@
 <div class="sourceCode" id="cb1"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># install.packages("remotes")</span></span>
 <span><span class="fu">remotes</span><span class="fu">::</span><span class="fu">install_github</span><span class="op">(</span><span class="st">"pedrobtz/zuhttp"</span><span class="op">)</span></span></code></pre></div>
+<p>Every example below is a real request against a public API, and the <code>#&gt;</code> lines are what it actually returns.</p>
 <div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/pedrobtz/zuhttp" class="external-link">zuhttp</a></span><span class="op">)</span></span>
 <span></span>
-<span><span class="va">r</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="st">"https://api.example.com/search"</span>, query <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>q <span class="op">=</span> <span class="st">"HTTP"</span>, limit <span class="op">=</span> <span class="fl">20</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="va">r</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="st">"https://ipwho.is/8.8.8.8"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/zu_resp.html">zu_resp_status</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span></span>
-<span><span class="fu"><a href="reference/zu_resp_json.html">zu_resp_json</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] 200</span></span>
+<span><span class="fu"><a href="reference/zu_resp_json.html">zu_resp_json</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span><span class="op">$</span><span class="va">country</span></span>
+<span><span class="co">#&gt; [1] "United States"</span></span>
 <span></span>
-<span><span class="fu"><a href="reference/zu_methods.html">zu_post</a></span><span class="op">(</span><span class="st">"https://api.example.com/users"</span>, json <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>name <span class="op">=</span> <span class="st">"Alice"</span>, active <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co"># Query parameters are encoded for you.</span></span>
+<span><span class="va">r</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="st">"https://ipwho.is/8.8.8.8"</span>, query <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>fields <span class="op">=</span> <span class="st">"ip,country,city"</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="fu"><a href="reference/zu_resp.html">zu_resp_url</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] "https://ipwho.is/8.8.8.8?fields=ip%2Ccountry%2Ccity"</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/utils/str.html" class="external-link">str</a></span><span class="op">(</span><span class="fu"><a href="reference/zu_resp_json.html">zu_resp_json</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">#&gt; List of 3</span></span>
+<span><span class="co">#&gt;  $ ip     : chr "8.8.8.8"</span></span>
+<span><span class="co">#&gt;  $ country: chr "United States"</span></span>
+<span><span class="co">#&gt;  $ city   : chr "San Jose"</span></span>
 <span></span>
-<span><span class="co"># Straight to disk: the body never passes through memory, and the file</span></span>
-<span><span class="co"># appears at its destination only once it has arrived whole.</span></span>
-<span><span class="fu"><a href="reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="st">"https://example.com/big.bin"</span>, path <span class="op">=</span> <span class="st">"big.bin"</span><span class="op">)</span></span></code></pre></div>
-<p>A client carries defaults; a request overrides them.</p>
+<span><span class="co"># `json =` serialises the body and sets Content-Type, unless you set it.</span></span>
+<span><span class="va">r</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/zu_methods.html">zu_post</a></span><span class="op">(</span><span class="st">"https://postman-echo.com/post"</span>, json <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>name <span class="op">=</span> <span class="st">"Alice"</span>, active <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/utils/str.html" class="external-link">str</a></span><span class="op">(</span><span class="fu"><a href="reference/zu_resp_json.html">zu_resp_json</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span><span class="op">$</span><span class="va">data</span><span class="op">)</span></span>
+<span><span class="co">#&gt; List of 2</span></span>
+<span><span class="co">#&gt;  $ name  : chr "Alice"</span></span>
+<span><span class="co">#&gt;  $ active: logi TRUE</span></span></code></pre></div>
+<p>Straight to disk: the body never passes through memory, and the file appears at its destination only once it has arrived whole.</p>
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">api</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/zu_client.html">zu_client</a></span><span class="op">(</span></span>
-<span>  base_url <span class="op">=</span> <span class="st">"https://api.example.com"</span>,</span>
-<span>  headers  <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>Authorization <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste</a></span><span class="op">(</span><span class="st">"Bearer"</span>, <span class="fu"><a href="https://rdrr.io/r/base/Sys.getenv.html" class="external-link">Sys.getenv</a></span><span class="op">(</span><span class="st">"API_TOKEN"</span><span class="op">)</span><span class="op">)</span><span class="op">)</span>,</span>
+<code class="sourceCode R"><span><span class="va">r</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="st">"https://raw.githubusercontent.com/pedrobtz/zuhttp/main/README.md"</span>,</span>
+<span>            path <span class="op">=</span> <span class="st">"README-copy.md"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="reference/zu_resp.html">zu_resp_path</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] "README-copy.md"</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="fu"><a href="reference/zu_resp_raw.html">zu_resp_raw</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] 0   # it went to the file, not through memory</span></span></code></pre></div>
+<p>A client carries defaults; a request overrides them. Connections are reused across requests to the same origin.</p>
+<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">gh</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/zu_client.html">zu_client</a></span><span class="op">(</span></span>
+<span>  base_url <span class="op">=</span> <span class="st">"https://api.github.com"</span>,</span>
+<span>  headers  <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span></span>
+<span>    Accept <span class="op">=</span> <span class="st">"application/vnd.github+json"</span></span>
+<span>    <span class="co"># , Authorization = paste("Bearer", Sys.getenv("GITHUB_PAT"))</span></span>
+<span>  <span class="op">)</span>,</span>
 <span>  retry    <span class="op">=</span> <span class="fu"><a href="reference/zu_retry.html">zu_retry</a></span><span class="op">(</span><span class="fl">3</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
-<span><span class="fu"><a href="reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="st">"/users/7"</span>, client <span class="op">=</span> <span class="va">api</span><span class="op">)</span></span></code></pre></div>
+<span></span>
+<span><span class="fu"><a href="reference/zu_resp_json.html">zu_resp_json</a></span><span class="op">(</span><span class="fu"><a href="reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="st">"/repos/pedrobtz/zuhttp"</span>, client <span class="op">=</span> <span class="va">gh</span><span class="op">)</span><span class="op">)</span><span class="op">$</span><span class="va">language</span></span>
+<span><span class="co">#&gt; [1] "C"</span></span>
+<span></span>
+<span><span class="fu"><a href="reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="st">"/repos/pedrobtz/zuhttp"</span>, client <span class="op">=</span> <span class="va">gh</span><span class="op">)</span>      <span class="co"># second request, same origin</span></span>
+<span><span class="fu"><a href="reference/zu_pool_stats.html">zu_pool_stats</a></span><span class="op">(</span><span class="va">gh</span><span class="op">)</span><span class="op">[[</span><span class="st">"hits"</span><span class="op">]</span><span class="op">]</span></span>
+<span><span class="co">#&gt; [1] 1</span></span></code></pre></div>
+<p>A failed request raises, and what it raises is a condition you match by class rather than by parsing a message.</p>
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/conditions.html" class="external-link">tryCatch</a></span><span class="op">(</span></span>
+<span>  <span class="fu"><a href="reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="st">"/repos/pedrobtz/no-such-repo"</span>, client <span class="op">=</span> <span class="va">gh</span><span class="op">)</span>,</span>
+<span>  zu_http_client_error <span class="op">=</span> <span class="kw">function</span><span class="op">(</span><span class="va">e</span><span class="op">)</span> <span class="fu"><a href="reference/zu_resp.html">zu_resp_status</a></span><span class="op">(</span><span class="va">e</span><span class="op">$</span><span class="va">response</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] 404</span></span></code></pre></div>
+<p><code><a href="reference/zu_resp_json.html">zu_resp_json()</a></code> uses <code>jsonlite</code> when it is installed, and says so plainly when it is not — everything else here, including sending a JSON body you have already encoded, works with no packages at all.</p>
 <div class="section level2">
 <h2 id="why-this-rather-than-curl">Why this rather than <code>curl</code>
 <a class="anchor" aria-label="anchor" href="#why-this-rather-than-curl"></a>
