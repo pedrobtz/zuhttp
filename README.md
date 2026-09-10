@@ -17,30 +17,83 @@ Zero hard R dependencies.
 remotes::install_github("pedrobtz/zuhttp")
 ```
 
+Every example below is a real request against a public API, and the `#>` lines
+are what it actually returns.
+
 ```r
 library(zuhttp)
 
-r <- zu_get("https://api.example.com/search", query = list(q = "HTTP", limit = 20))
+r <- zu_get("https://ipwho.is/8.8.8.8")
 zu_resp_status(r)
-zu_resp_json(r)
+#> [1] 200
+zu_resp_json(r)$country
+#> [1] "United States"
 
-zu_post("https://api.example.com/users", json = list(name = "Alice", active = TRUE))
+# Query parameters are encoded for you.
+r <- zu_get("https://ipwho.is/8.8.8.8", query = list(fields = "ip,country,city"))
+zu_resp_url(r)
+#> [1] "https://ipwho.is/8.8.8.8?fields=ip%2Ccountry%2Ccity"
+str(zu_resp_json(r))
+#> List of 3
+#>  $ ip     : chr "8.8.8.8"
+#>  $ country: chr "United States"
+#>  $ city   : chr "San Jose"
 
-# Straight to disk: the body never passes through memory, and the file
-# appears at its destination only once it has arrived whole.
-zu_get("https://example.com/big.bin", path = "big.bin")
+# `json =` serialises the body and sets Content-Type, unless you set it.
+r <- zu_post("https://postman-echo.com/post", json = list(name = "Alice", active = TRUE))
+str(zu_resp_json(r)$data)
+#> List of 2
+#>  $ name  : chr "Alice"
+#>  $ active: logi TRUE
 ```
 
-A client carries defaults; a request overrides them.
+Straight to disk: the body never passes through memory, and the file appears at
+its destination only once it has arrived whole.
 
 ```r
-api <- zu_client(
-  base_url = "https://api.example.com",
-  headers  = c(Authorization = paste("Bearer", Sys.getenv("API_TOKEN"))),
+r <- zu_get("https://raw.githubusercontent.com/pedrobtz/zuhttp/main/README.md",
+            path = "README-copy.md")
+zu_resp_path(r)
+#> [1] "README-copy.md"
+length(zu_resp_raw(r))
+#> [1] 0   # it went to the file, not through memory
+```
+
+A client carries defaults; a request overrides them. Connections are reused
+across requests to the same origin.
+
+```r
+gh <- zu_client(
+  base_url = "https://api.github.com",
+  headers  = c(
+    Accept = "application/vnd.github+json"
+    # , Authorization = paste("Bearer", Sys.getenv("GITHUB_PAT"))
+  ),
   retry    = zu_retry(3)
 )
-zu_get("/users/7", client = api)
+
+zu_resp_json(zu_get("/repos/pedrobtz/zuhttp", client = gh))$language
+#> [1] "C"
+
+zu_get("/repos/pedrobtz/zuhttp", client = gh)      # second request, same origin
+zu_pool_stats(gh)[["hits"]]
+#> [1] 1
 ```
+
+A failed request raises, and what it raises is a condition you match by class
+rather than by parsing a message.
+
+```r
+tryCatch(
+  zu_get("/repos/pedrobtz/no-such-repo", client = gh),
+  zu_http_client_error = function(e) zu_resp_status(e$response)
+)
+#> [1] 404
+```
+
+`zu_resp_json()` uses `jsonlite` when it is installed, and says so plainly when
+it is not — everything else here, including sending a JSON body you have
+already encoded, works with no packages at all.
 
 ## Why this rather than `curl`
 
