@@ -1,0 +1,27 @@
+#!/bin/sh
+# Refresh the vendored picohttpparser (design §48).
+#
+#   tools/update-picohttpparser [commit-ish]
+#
+# Records the exact commit in src/vendor/picohttpparser/VENDOR so that
+# exposure to an upstream advisory can be assessed in minutes (§46.2).
+set -eu
+REPO=https://github.com/h2o/picohttpparser
+DEST=src/vendor/picohttpparser
+REF=${1:-master}
+
+[ -d "$DEST" ] || { echo "run from the package root" >&2; exit 1; }
+
+COMMIT=$(curl -sS "https://api.github.com/repos/h2o/picohttpparser/commits/$REF" \
+         | sed -n 's/^  "sha": "\(.*\)",$/\1/p' | head -1)
+[ -n "$COMMIT" ] || { echo "could not resolve $REF" >&2; exit 1; }
+
+echo "updating picohttpparser to $COMMIT"
+for f in picohttpparser.c picohttpparser.h; do
+    curl -sSL "https://raw.githubusercontent.com/h2o/picohttpparser/$COMMIT/$f" -o "$DEST/$f"
+done
+sed -n '1,26p' "$DEST/picohttpparser.h" > "$DEST/LICENSE"
+sed -i.bak "s|^Commit:.*|Commit:     $COMMIT|;s|^Retrieved:.*|Retrieved:  $(date -u +%Y-%m-%d)|" "$DEST/VENDOR"
+rm -f "$DEST/VENDOR.bak"
+
+echo "done. Now run: (cd ctest && make strict) && R CMD check"

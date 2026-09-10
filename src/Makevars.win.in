@@ -1,0 +1,53 @@
+# GENERATED FROM src/Makevars.win.in BY ./configure -- DO NOT EDIT src/Makevars
+# Vendored code lives in an isolated directory (design §48), and R does not
+# compile src/ subdirectories automatically, so OBJECTS is listed explicitly.
+# Every new source file must be added here -- AND in src/Makevars.in, which is
+# the same list for Unix. Nothing about the build makes the two agree, so
+# tools/check-objects-sync compares them in CI; it exists because zu_sink.o,
+# zu_body.o and zu_trace.o reached only the Unix list, and the package then
+# failed to link on Windows for two stages without anyone noticing.
+
+# URI_NO_UNICODE / URI_STATIC_BUILD are required by the vendored uriparser
+# subset; see src/vendor/uriparser/VENDOR. src/zu_uriparser.h sets them too,
+# so our own translation units stay correct even if this line is edited.
+PKG_CPPFLAGS = -I. -Ivendor/picohttpparser -Ivendor/uriparser \
+               -DURI_NO_UNICODE -DURI_STATIC_BUILD @SSL_CFLAGS@
+
+# @-substituted by ./configure, which locates OpenSSL. System zlib is
+# decision D-7 and is present everywhere R runs.
+PKG_LIBS = @SSL_LIBS@ -lz
+
+OBJECTS = init.o \
+          zu_alloc.o \
+          zu_buffer.o \
+          zu_error.o \
+          zu_time.o \
+          zu_stream.o \
+          zu_mock_stream.o \
+          zu_headers.o \
+          zu_request.o \
+          zu_framing.o \
+          zu_response.o \
+          zu_uri.o \
+          zu_redirect.o \
+          zu_inflate.o \
+          zu_net.o \
+          zu_tls.o \
+          @TLS_OBJ@ \
+          zu_engine.o \
+          zu_fork.o \
+          zu_pool.o \
+          zu_sink.o \
+          zu_body.o \
+          zu_trace.o \
+          zu_proxy.o \
+          zu_redact.o \
+          vendor/uriparser/UriParse.o \
+          vendor/uriparser/UriParseBase.o \
+          vendor/uriparser/UriResolve.o \
+          vendor/uriparser/UriRecompose.o \
+          vendor/uriparser/UriCommon.o \
+          vendor/uriparser/UriMemory.o \
+          vendor/uriparser/UriIp4.o \
+          vendor/uriparser/UriIp4Base.o \
+          vendor/picohttpparser/picohttpparser.o

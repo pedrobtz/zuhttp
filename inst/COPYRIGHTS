@@ -1,0 +1,33 @@
+zuhttp bundles third-party source. Their copyright holders and licenses are
+recorded here as required by CRAN policy (design §49.2).
+
+--------------------------------------------------------------------------
+picohttpparser
+  Files:      src/vendor/picohttpparser/
+  Upstream:   https://github.com/h2o/picohttpparser
+  Commit:     f4d94b48b31e0abae029ebeafcfd9ca0680ede58
+  Copyright:  (c) 2009-2014 Kazuho Oku, Tokuhiro Matsuno, Daisuke Murase,
+                            Shigeo Mitsunari
+  License:    MIT or Perl (dual); used here under MIT.
+              Full text: src/vendor/picohttpparser/LICENSE
+--------------------------------------------------------------------------
+uriparser (partial: parse / resolve / recompose only)
+  Files:      src/vendor/uriparser/
+  Upstream:   https://github.com/uriparser/uriparser
+  Version:    uriparser-0.9.8
+  Copyright:  (c) 2007 Weijia Song, Sebastian Pipping
+  License:    BSD-3-Clause.
+              Full text: src/vendor/uriparser/LICENSE
+  Note:       Only the RFC 3986 parse/resolve/recompose closure is bundled;
+              the normalisation, query, escaping, compare, shorten and file
+              modules are not. src/vendor/uriparser/VENDOR lists exactly what
+              is included and why. UriConfig.h in that directory is written by
+              zuhttp, not by the uriparser authors: upstream generates it from
+              a build-system template that zuhttp does not run.
+--------------------------------------------------------------------------
+
+System libraries linked but NOT distributed with this package:
+  OpenSSL   (Linux/Unix TLS)      Apache-2.0 (3.x) / OpenSSL+SSLeay (1.1.1)
+  zlib      (all platforms)       zlib license
+  Schannel, CryptoAPI (Windows)   part of the operating system
+  Security.framework (macOS)      part of the operating system

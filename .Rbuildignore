@@ -1,7 +1,14 @@
 ^zuhttp\.Rproj$
 ^\.Rproj\.user$
-^zuhttp-design\.md$
-^roadmap\.md$
+^\.agents$
+^CLAUDE\.md$
 ^spike$
 ^fuzz$
 ^\.github$
+^ctest$
+^tools$
+# R CMD build drops src/*.o by default but NOT objects in subdirectories, so a
+# prior `R CMD INSTALL .` leaves the vendored objects in the source tarball and
+# --as-cran reports "Object files/libraries should not be included in a source
+# package". Caught by --as-cran, not by a plain check.
+^src/vendor/.*\.(o|so|dll|a)$

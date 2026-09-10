@@ -1,1 +1,41 @@
 .Rproj.user
+
+# R package build artifacts
+*.tar.gz
+*.Rcheck/
+src/*.o
+src/*.so
+src/*.dll
+src/vendor/**/*.o
+
+# ctest binaries — committed by mistake in 5510a4e, untracked since.
+ctest/zu_ctest
+ctest/zu_ctest_asan
+ctest/zu_tlstest
+ctest/zu_engtest
+ctest/build/
+ctest/build-asan/
+*.dSYM/
+
+# fuzz binaries and artifacts (the corpus IS tracked — it is the regression suite)
+fuzz/fuzz_response
+fuzz/fuzz_chunked
+fuzz/fuzz_headers
+fuzz/fuzz_uri
+fuzz/fuzz_redirect
+fuzz/fuzz_inflate
+fuzz/replay_*
+!fuzz/replay_main.c
+fuzz/crash-*
+fuzz/leak-*
+fuzz/timeout-*
+
+# spike binaries
+spike/**/tmp/
+spike/macos-tls/tls_spike
+spike/macos-tls/fork_trust_test
+spike/windows-schannel/*.exe
+spike/macos-engine/st_probe
+src/Makevars
+src/Makevars.win
+ctest/zu_engtest_st

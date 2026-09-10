@@ -1,6 +1,6 @@
 # zuhttp Design Document
 
-**Status:** Draft — macOS TLS spike complete (GO); Windows unvalidated  
+**Status:** Draft — macOS spike GO (S0); Windows headers probed (S1, R-3 confirmed)  
 **Target:** R package / CRAN-compatible source package  
 **Primary implementation language:** C  
 **Primary protocol scope:** HTTP/1.1 over HTTP and HTTPS  
@@ -19,14 +19,14 @@ Firm decisions and open questions were previously indistinguishable in this docu
 | D-1 | R prefix `zu_`, response accessors `zu_resp_`, C macros `ZUHTTP_` | **Accepted** | 1.1 |
 | D-2 | No `zuhttp` export may collide with an httr2 export | **Accepted** | 1.1, 5 |
 | D-3 | Separate TLS protocol engine from trust evaluation | **Accepted** | 13.1 |
-| D-4 | macOS: portable engine + `SecTrustEvaluateWithError` for Keychain trust | **Accepted** — validated by S0 | 13.2 |
-| D-5 | Windows: Schannel for both engine and trust | **Accepted, effort unquantified** | 13.4 |
+| D-4 | macOS: **Secure Transport** engine + `SecTrustEvaluateWithError` Keychain trust | **Accepted** — R-13 resolved, S9 | 13.2 |
+| D-5 | Windows: Schannel for both engine and trust | **Accepted** — required, not preferred (§13.4) | 13.4 |
 | D-6 | Unix: system OpenSSL for both | **Accepted** | 13.5 |
 | D-7 | Link system zlib; do not vendor miniz | **Accepted** | 21.1 |
 | D-8 | Send `Accept-Encoding: gzip` by default; decode transparently | **Accepted** | 21.2 |
 | D-9 | `zu_resp_raw()` returns decoded bytes | **Accepted** | 21.2, 31.7 |
-| D-10 | HTTP parser: picohttpparser vs llhttp | **Open** | 8.1, A.3 |
-| D-11 | URI: vendor uriparser vs project-owned RFC 3986 parser | **Open** | 8.2 |
+| D-10 | HTTP parser: **picohttpparser** (vendored, commit f4d94b4) | **Accepted** 2026-09-07 | 8.1, A.3 |
+| D-11 | URI: vendor a SUBSET of uriparser (parse/resolve/recompose only) | **Accepted** | 8.2 |
 | D-12 | `ca_file`/`ca_data` REPLACE system trust; `ca_extra` adds to it | **Accepted** | 14.2 |
 | D-13 | Certificate pinning supported; no custom OCSP/CRL | **Accepted** | 14.4, 14.5 |
 | D-31 | Revocation checking **off by default**, opt-in via `zu_tls(revocation=)` | **Accepted** — S0 F-4 | 14.5 |
@@ -48,6 +48,27 @@ Firm decisions and open questions were previously indistinguishable in this docu
 | D-28 | Own tests use a `zu_stream` mock, not the R transport mock | **Accepted** | 50.1 |
 | D-29 | Concurrency, if built, integrates with `later`; no bespoke event loop | **Proposed** | 30.2 |
 | D-30 | DNS is not interruptible in v1; documented limitation | **Accepted** | 8.4, 25.4 |
+| D-33 | `check = TRUE` by default: a 4xx/5xx raises; `check = FALSE` returns it | **Accepted** 2026-09-08 — S11 | 31.14 |
+| D-34 | `base_url` is JOINED textually, not resolved per RFC 3986 | **Accepted** 2026-09-08 — S11 | 31.3 |
+| D-35 | Three-state policy merge: absent inherits, `NULL` resets, value overrides | **Accepted** 2026-09-08 — S11 | 31.9 |
+| D-36 | The live pool hangs off the client as an **attribute environment**, not as a list element | **Accepted** 2026-09-08 — S16 | 26.5 |
+| D-37 | Pooling is **on by default** for a client; `zu_client(pool = NULL)` opts out | **Accepted** 2026-09-08 — S16 | 26.2 |
+| D-38 | `zu_pool_stats()` is exported, so reuse is observable rather than merely claimed | **Accepted** 2026-09-08 — S16 | 26.2 |
+| D-39 | §42.1's default secret-parameter list extended for the cassette egress | **Accepted** 2026-09-08 — S14 | 42.1, 37 |
+| D-40 | A cassette's match key is computed from the **redacted** request | **Accepted** 2026-09-08 — S14 | 37 |
+| D-41 | Cassettes are written **uncompressed**, so a byte-level canary means something | **Accepted** 2026-09-08 — S14 | 37, 42.4 |
+| D-42 | Retrying is **off by default** (`attempts = 1`); `retry` is a merged policy field | **Accepted** 2026-09-08 — S13 | 33, 31.9 |
+| D-43 | Retry admissibility is decided **once**, before the first attempt | **Accepted** 2026-09-08 — S13 | 33.1 |
+| D-44 | The retry loop sits **inside** middleware: middleware sees one logical request | **Accepted** 2026-09-08 — S13 | 31.13 |
+| D-45 | The response sink argument is `path =`, never `file =` (which is a request BODY) | **Accepted** 2026-09-08 — S17 | 27, 31.6 |
+| D-46 | The body path lives in `zu_body.c`, not the engine, so it is mock-testable | **Accepted** 2026-09-08 — S17 | 27, 50.1 |
+| D-47 | A callback is caught on **error and interrupt only**, not on every condition | **Accepted** 2026-09-08 — S17 | 27.3 |
+| D-48 | Proxying is disabled with `proxy = FALSE`, **not** `NULL` (§31.9 owns NULL) | **Accepted** 2026-09-08 — S10 | 20.1, 31.9 |
+| D-49 | `verify` and `ca_file` stay merged policy arguments; `zu_tls()` carries the rest | **Accepted** 2026-09-08 | 14.1, 31.9, 31.13 |
+| D-50 | `redirect.followed` carries the **resolved** target, built by the same `url_of()` as `final_url`, not the raw `Location` header | **Accepted** 2026-09-09 | 35.3, 42.1 |
+| D-51 | A URL enters the trace only through `zu_trace_add_url()`, which applies the §42 policy in C; the log's no-allocation rule yields to it | **Accepted** 2026-09-09 | 35.3, 35.4, 42.2 |
+| D-52 | `final_url` is redacted in the engine, so `zu_resp_url()` applies the whole of §42.1 and not just its userinfo clause | **Accepted** 2026-09-09 | 42.1, 42.2, 20.4 |
+| D-53 | The response sink is single: `path` and `callback` are mutually exclusive, and a committed `path` is readable back as `zu_resp_path()` | **Accepted** 2026-09-10 | 27.1, 31.2 |
 
 ---
 
@@ -74,7 +95,7 @@ The project is deliberately **not** a reimplementation of libcurl. Its competiti
 The intended architecture combines a small amount of `zuhttp` C code with a few focused dependencies:
 
 - **HTTP/1.1 response parsing** — parser choice open between picohttpparser and llhttp; see Appendix A.3.
-- **URI parsing** — vendored `uriparser`, or a project-owned RFC 3986 parser; see §8.2.
+- **URI parsing** — a vendored subset of `uriparser` (parse/resolve/recompose), wrapped by a zuhttp policy layer; see §8.2.
 - **zlib** (system, not vendored) for gzip/deflate response decompression; see §21.
 - **TLS**, split into a protocol engine and a trust evaluator; see §13.
 
@@ -288,7 +309,7 @@ This must be stated plainly rather than left for the reader to infer:
        +-------------------+------------------+
        |                                      |
    URI handling                           HTTP parser
-   (§8.2, open)                          (§8.1, open)
+   (§8.2, decided)                       (§8.1, decided)
        |                                      |
        +-------------------+------------------+
                            |
@@ -340,17 +361,21 @@ Every vendored line counts against the size budget in §51 and becomes a fuzz ta
 
 | Component | Role | Est. LOC | Status |
 |---|---|---|---|
-| HTTP parser | response parsing, chunked decoding | 0.7k–10k | **Open** — Appendix A.3 |
-| URI parser | RFC 3986 parse + relative resolution | 0.6k–15k | **Open** — §8.2 |
+| picohttpparser | response parsing, chunked decoding | **0.8k** (measured) | **Decided** — §8.1 |
+| URI parser | RFC 3986 parse + relative resolution | 3.9k | **Decided** — uriparser subset, §8.2 |
 | zlib | gzip/deflate | 0 (system) | **Decided** — §21 |
 | TLS engine + trust | see §13 | 4k–6k | **Blocked on spike** — §13 |
 | Project-owned engine | framing, pool, redirects, proxy, R glue | 5k–8k | Estimate |
 
-#### 8.1 HTTP parser
+#### 8.1 HTTP parser — **picohttpparser** (D-10, decided)
 
-The choice between **picohttpparser** and **llhttp** is not settled; Appendix A.3 re-runs it on fair terms. The decision hinges on a point that the original framing missed: picohttpparser makes *no framing decisions*, so every rule in §18 — `Content-Length`/`Transfer-Encoding` conflicts, duplicate `Content-Length`, chunk-size overflow — is code this project writes and must fuzz itself. llhttp enforces those rules already and is continuously exercised by the Node ecosystem.
+**Decision: vendor picohttpparser** (`src/vendor/picohttpparser/`, upstream commit `f4d94b4`, 803 LOC, MIT).
 
-Whichever is chosen:
+Appendix A.3 argued that llhttp was favoured *because* picohttpparser makes no framing decisions, leaving ~800–1,200 lines of security-critical strictness code for this project to write and fuzz. That argument was answered by building the strictness layer first: `src/zu_framing.c` implements every §18.1 rule with a test per row, and `zu_headers` re-validates every field independently of what the parser accepted. The cost A.3 warned about is now incurred, tested, and bounded, which removes its main objection while keeping picohttpparser's size advantage.
+
+The consequence must be stated plainly and kept visible: **picohttpparser rejects no smuggling attempt on our behalf.** Anything §18.1 does not catch, nothing does.
+
+Given that:
 
 - `zuhttp` must not expose the parser type in any public or semi-public interface.
 - A wrapper translates parser output into internal `zu_*` structures.
@@ -360,29 +385,95 @@ If picohttpparser is chosen, note two properties that shape the buffering design
 
 #### 8.2 URI parser
 
+**Decided (D-11): vendor a SUBSET of `uriparser` 0.9.8.** The parse / resolve /
+recompose closure only — eight `.c` files, ~3.9k code lines — plus a zuhttp
+policy layer in `zu_uri.c`. See `src/vendor/uriparser/VENDOR` for the file list
+and `tools/update-uriparser` for the refresh procedure.
+
 What a client actually needs from RFC 3986 is narrow:
 
 - absolute URI parsing,
 - relative-reference resolution for `Location` (RFC 3986 §5),
 - IPv6 literal handling,
-- scheme/host/port/path/query decomposition,
-- percent-encoding normalization for the paths and queries this library constructs.
+- scheme/host/port/path/query decomposition.
 
-**vendoring `uriparser` costs roughly 15k LOC — more than the entire rest of the HTTP core.** It is BSD-3-Clause and well tested, but it is a general-purpose library with a text-range API that this project would wrap anyway, and once vendored it must be fuzzed and security-tracked as project surface (§43, §48). A project-owned parser covering the five bullets above is on the order of 600 lines.
+The earlier estimate in this section — "vendoring `uriparser` costs roughly 15k
+LOC, more than the entire rest of the HTTP core" — was measuring the whole
+distribution, including its test suite and command-line tool. The library
+sources are 7.9k lines, and the closure this project needs is **~3.9k code
+lines (7.0k including license headers and doxygen)**. That is still six times a
+project-owned parser's estimated ~600 lines, so the trade is real; it is just
+much narrower than recorded.
+
+Three things settled it:
+
+1. **The excluded modules are where the bugs were.** Six of uriparser's eight
+   historical CVEs are in files the subset does not vendor:
+   `UriQuery.c` (CVE-2024-34402, CVE-2024-34403, CVE-2018-19198,
+   CVE-2018-19199) and `UriNormalize.c` (CVE-2021-46141, CVE-2021-46142).
+   Two are in retained files (CVE-2018-19200 in `UriCommon.c`, CVE-2018-20721
+   in `UriParse.c`). This is structural rather than lucky: the excluded modules
+   *build* strings — allocating, sizing and concatenating — while the retained
+   ones mostly *scan* a caller-owned buffer and record ranges into it.
+   Allocation arithmetic is where the overflow bugs live.
+
+2. **It integrates with our allocator.** `UriMemoryManager` routes every
+   parser allocation through `zu_alloc`, so the OOM injection of §50.1 and the
+   leak accounting in `zu_alloc_stats` cover the parser rather than stopping at
+   its edge. Measured: 226 allocations over the resolve path, and **0 of 400
+   OOM injection points leaked**, under ASan and UBSan.
+
+3. **A hand-written parser would need the same policy layer anyway.** RFC 3986
+   is a grammar, not a client policy, and the security-relevant decisions are
+   in the policy layer either way (see below). Writing our own would have
+   bought ~3.3k fewer vendored lines at the cost of owning the grammar, which
+   is the part with a 17-year public bug record to learn from.
+
+**The policy layer is where the security decisions live.** `zu_uri.c` rejects
+what a grammar accepts but an HTTP client must not:
+
+| Input | RFC 3986 | zuhttp |
+|---|---|---|
+| `http://h:65536/` | valid (`port = DIGIT*`) | **rejected** — would truncate to 0 in `uint16_t` |
+| `http://h:0443/` | valid | accepted, port `443` (numeric compare, per RFC 6454) |
+| `https://example.com../` | valid | **rejected** — empty DNS label |
+| `http://[v7.xyz]/` | valid (IPvFuture, §3.2.2) | **rejected** — nothing to resolve, and it admits `;` `*` `:` into the host |
+| `https://example.com./` | valid | accepted, root dot stripped so origins compare equal |
+| `ftp://h/`, `file:///`, `mailto:` | valid | **rejected** — not an HTTP request target |
+| embedded `NUL` | n/a | **rejected** — truncates `getaddrinfo()` and the request line differently |
+| fragment | valid | dropped; never sent (RFC 7230 §5.3) |
+
+uriparser is correspondingly *stricter* than a browser where that helps: a
+space, tab, newline or backslash in the authority is a syntax error, and
+`https://good.com@evil.com/` yields `host = evil.com`, `userinfo = good.com` —
+the origin-confusion case that governs whether credentials survive a redirect
+(§19.2).
+
+**Percent-encoding in a supplied path is preserved verbatim, not normalised.**
+This reverses the fifth bullet of the original list. Rewriting a request target
+can change what the origin server resolves; neither curl nor httr2 normalises
+it either. Normalisation applies only to query strings *this library*
+constructs, below. Dropping that requirement is also what lets `UriNormalize.c`
+stay out of the subset.
 
 Neither option provides IDN/punycode; non-ASCII hostnames are rejected outright (§4).
 
-This is a genuine trade — correctness insurance versus the size budget — and the prototype should implement against a thin internal interface so the decision can be deferred and measured:
+The flat struct remains the boundary, so the parser stays replaceable:
 
 ```c
 typedef struct {
-    char    *scheme;
-    char    *host;
-    char    *path_query;
-    uint16_t port;
+    char    *scheme;      /* lowercased */
+    char    *host;        /* lowercased; IPv6 literals without brackets */
+    char    *path_query;  /* origin-form target, always starting "/" */
+    char    *userinfo;    /* credentials, moved out of the URL (§20.4) */
+    uint16_t port;        /* explicit or scheme default */
     int      is_https;
+    int      port_explicit;
 } zu_uri;
 ```
+
+Nothing above `zu_uri.h` sees a uriparser type; `src/zu_uriparser.h` is the
+only file that includes `<uriparser/Uri.h>`.
 
 **Query encoding must be specified, not inherited.** `zu_query()` builds `application/x-www-form-urlencoded` pairs: space encodes as `%20` (not `+`), and every character outside RFC 3986 `unreserved` is percent-encoded. Values are encoded from UTF-8 bytes. Callers who need different semantics build the query string themselves.
 
@@ -517,7 +608,7 @@ zuhttp/
 │   ├── zu_proxy.c
 │   ├── zu_pool.c          §26, incl. PID guard
 │   ├── zu_timeout.c
-│   ├── zu_uri.c           §8.2, if project-owned
+│   ├── zu_uri.c           §8.2, policy layer over the uriparser subset
 │   ├── zu_error.c
 │   ├── zu_buffer.c
 │   │
@@ -537,9 +628,11 @@ zuhttp/
 │   ├── mock/
 │   │   └── stream_mock.c      §50.1 — canned bytes through the real engine
 │   │
-│   └── vendor/                contents depend on D-10 and D-11
-│       ├── <http parser>/
-│       └── <uri parser>/      absent if zu_uri.c is used
+│   ├── Makevars / Makevars.win   explicit OBJECTS: R does not compile
+│   │                             src/ subdirectories automatically
+│   └── vendor/
+│       ├── picohttpparser/    D-10, decided; VENDOR records the commit
+│       └── uriparser/        D-11: parse/resolve/recompose subset only
 │
 ├── inst/
 │   └── COPYRIGHTS             §49.2 — required for vendored code
@@ -609,7 +702,7 @@ rather than through protocol breadth.
 
 ### 13. TLS Architecture
 
-**Status: validated.** The S0 spike (`spike/macos-tls/`, [FINDINGS.md](spike/macos-tls/FINDINGS.md)) confirmed this design on macOS 26.6.2 / OpenSSL 3.6.3: TLS 1.3 negotiated, chain evaluated against the system Keychain, driven entirely from a caller-owned non-blocking `poll()` loop with no dispatch queue. **Appendix B R-1 is retired.** The spike also produced four findings that changed this section and §14.5, §26.4 — see F-1 and F-5 below.
+**Status: validated.** The S0 spike (`spike/macos-tls/`, [FINDINGS.md](../spike/macos-tls/FINDINGS.md)) confirmed this design on macOS 26.6.2 / OpenSSL 3.6.3: TLS 1.3 negotiated, chain evaluated against the system Keychain, driven entirely from a caller-owned non-blocking `poll()` loop with no dispatch queue. **Appendix B R-1 is retired.** The spike also produced four findings that changed this section and §14.5, §26.4 — see F-1 and F-5 below.
 
 #### 13.1 Separate the protocol engine from trust evaluation
 
@@ -643,6 +736,35 @@ int zu_trust_evaluate(
 ```
 
 #### 13.2 Why macOS forces this
+
+**Resolved (R-13, 2026-09-08): Secure Transport for the engine, `SecTrust` for
+trust.** The measurements are in `spike/macos-engine/FINDINGS.md`; the summary
+is that macOS offers no option satisfying all of this project's constraints:
+
+| | TLS 1.3 | Caller-owned socket (§9) | Bundles crypto |
+|---|---|---|---|
+| Secure Transport | **no — 1.2 ceiling** | yes | no |
+| Network.framework | yes | **no — owns the socket** | no |
+| Static OpenSSL | yes | yes | **yes — 4.64 MB** |
+
+Network.framework is disqualified on architecture, not preference:
+`nw_connection` is created from an endpoint with no API to adopt an existing
+descriptor, so it cannot run TLS over a socket we already established — which
+is exactly what §20.3 proxy CONNECT is. Static OpenSSL is CRAN-viable (the
+`openssl` package ships 5.3 MB the same way) but bundles the cryptography
+library that §2 exists to avoid.
+
+So macOS ships **TLS 1.2 as its ceiling**, and that is a stated, documented
+limitation rather than an oversight. The resulting shared object is 0.17 MB
+and links only `Security.framework`.
+
+**The cost is protocol version; the benefit is everything else.** Trust still
+comes from the system Keychain, so enterprise roots, inspection proxies and
+OS-managed certificate updates all work — that is the half of §13.1 users
+actually feel. And because Apple has deprecated Secure Transport (87 markers
+in the SDK), §62 must carry the contingency: if it is removed, D-4 reopens
+with only two options, and neither is free.
+
 
 §8.3 of the previous draft asked for Keychain trust, modern non-deprecated APIs, and no bundled OpenSSL, while §25 and §29 require a synchronous, single-threaded, poll-driven design with no background threads touching R. **Those requirements are not jointly satisfiable with either Apple TLS API:**
 
@@ -691,6 +813,41 @@ Use Winsock, Schannel, and the Windows certificate trust store.
 
 Benefits: no OpenSSL dependency, native enterprise trust, native certificate updates, Windows policy integration.
 
+**Delivered in S8 (2026-09-08).** `src/zu_tls_schannel.c`: SSPI for the
+protocol, `CertGetCertificateChain` + `CertVerifyCertificateChainPolicy`
+against the Windows certificate store for trust, with
+`SCH_CRED_MANUAL_CRED_VALIDATION` so the §13.1 split holds. Verified on CI:
+
+```text
+status 200 tls TLSv1.2 bytes 559
+expired    -> zu_tls_certificate_error
+wrong host -> zu_tls_hostname_error
+```
+
+Windows reports a precise `dwError`, so unlike macOS it needs no second
+evaluation to separate a bad name from a bad chain. **Scope is TLS 1.2**:
+`SCH_CREDENTIALS` is still absent from Rtools45/GCC 14.3 headers (R-3,
+re-confirmed 2026-09-08), and declaring a structure whose layout cannot be
+verified is a memory-safety bug rather than a compile error.
+
+**Schannel is required, not merely preferred — measured.** The §63.2 slice
+temporarily linked OpenSSL on every platform, and on Windows it builds and
+links cleanly under Rtools but cannot verify a single certificate:
+
+```text
+Error in zu_get("https://example.com") :
+  certificate verification failed for 'example.com':
+  unable to get local issuer certificate
+```
+
+OpenSSL on Windows looks for a CA bundle at a path compiled into the library,
+which does not exist there, and it does not consult the Windows certificate
+store. There are no trust anchors at all. The alternatives to Schannel are
+therefore shipping a certificate bundle — which §2 rejects outright, since
+avoiding one is a stated reason the project exists — or reading the Windows
+store manually and feeding it to OpenSSL, which is most of the Schannel work
+with none of the benefits. D-5 is confirmed.
+
 Requirements: SNI, hostname verification, chain validation, TLS 1.2+, TLS 1.3 where the platform supports it, custom CA support that does not undermine native trust (§14.3).
 
 **Effort warning.** Schannel is not a drop-in. A correct client requires the `AcquireCredentialsHandle` / `InitializeSecurityContext` loop with manual `SecBuffer` framing, `SECBUFFER_EXTRA` handling, `SEC_I_CONTINUE_NEEDED` and `SEC_E_INCOMPLETE_MESSAGE` state, `EncryptMessage`/`DecryptMessage` against `SECPKG_ATTR_STREAM_SIZES`, renegotiation, graceful shutdown via `ApplyControlToken`, and manual chain policy validation. Realistically **1,500–2,500 lines of security-critical code** — a material fraction of the entire size budget, and the single largest line item in §64.
@@ -698,7 +855,7 @@ Requirements: SNI, hostname verification, chain validation, TLS 1.2+, TLS 1.3 wh
 Two specific hazards:
 
 - TLS 1.3 requires `SCH_CREDENTIALS` (Windows 10 1809+); the older `SCHANNEL_CRED` path caps at TLS 1.2.
-- **mingw-w64's SDK headers have historically lagged on these structures.** The build may need to declare `SCH_CREDENTIALS` and related types itself, guarded by version checks. This must be verified against the actual Rtools toolchain early — see §62 and Appendix B, R-3.
+- **Measured (S1, 2026-09-07):** Rtools' mingw-w64 11.0 `schannel.h` does **not** declare `SCH_CREDENTIALS` or `TLS_PARAMETERS`, and raising the target to `_WIN32_WINNT=0x0A00` does not help — it is an incomplete header, not a version gate. See [spike/windows-schannel/FINDINGS.md](../spike/windows-schannel/FINDINGS.md).
 
 #### 13.5 Unix/Linux
 
@@ -721,11 +878,17 @@ trust           = "system"
 `zuhttp` must never default to disabling verification, and must not offer a single "insecure" switch that disables both peer and hostname checking without naming what it turns off.
 
 ```r
-zu_request(
-  "https://example.com",
-  tls = zu_tls(verify = TRUE, ca = "system")
-)
+zu_get("https://example.com", tls = zu_tls(ca_extra = "corporate-root.pem"))
 ```
+
+**D-49 corrects this section's example.** `verify` is *not* a `zu_tls()`
+field. It is already a merged policy argument (§31.9) on both the client and
+the request, and `ca_file` likewise; putting either inside `zu_tls()` as well
+would give "is this connection verified?" two answers, which is the "it cannot
+be both" mistake §31.13 names for `retry`. `zu_tls()` carries what has no
+other home: `ca_extra`, `pins`, `revocation` and `min_version`. The engine
+takes the trust configuration from `zu_tls()` and then lets the two policy
+arguments win, so there is exactly one authority for each field.
 
 #### 14.2 Custom CA semantics
 
@@ -758,6 +921,14 @@ SecTrustSetAnchorCertificatesOnly(trust, replace ? true : false);   /* false => 
 Proven by test: with a locally generated CA supplied additively, a public host still validates through system trust; with the same CA supplied as a replacement, the public host is correctly rejected. Both `ca_extra` and `ca_file` semantics are therefore implementable and distinguishable.
 
 This also gives §50.5 a way to test custom-CA handling **without modifying the developer's or CI machine's Keychain**, which removes the main obstacle noted in §62 Q11.
+
+**Reachable from R as of 2026-09-08.** Until then none of §14 was: `grep
+'ca_file|ca_extra|zu_tls(' R/` returned nothing, so every semantic this
+section defines was implemented in C and unreachable. `test-tls.R` now states
+the paragraph above as a test — the *same* locally generated CA supplied both
+ways, so the only variable is which argument it went to: `ca_extra` and a
+public host still validates, `ca_file` and the same host is rejected with
+`zu_tls_certificate_error`.
 
 #### 14.4 Certificate pinning
 
@@ -1035,9 +1206,31 @@ These are chain-wide, not per-hop — otherwise a redirect chain multiplies ever
 
 #### 19.5 Interaction with sinks
 
-**Redirect response bodies must never reach the caller's sink.** A `zu_get(url, file = "out.bin")` that follows two redirects must write only the final 200 body to `out.bin`. Intermediate bodies are read to completion (so the connection stays poolable) into a discard sink, subject to a small cap; a redirect response with a body larger than `max_redirect_body` closes the connection instead of draining it.
+**Redirect response bodies must never reach the caller's sink.** A `zu_get(url, path = "out.bin")` that follows two redirects must write only the final 200 body to `out.bin`. (This section originally wrote `file =`; D-45 renamed it, because §31.6 gives `file =` to the request *body* and one argument name cannot mean both directions.) Intermediate bodies are read to completion (so the connection stays poolable) into a discard sink, subject to a small cap; a redirect response with a body larger than `max_redirect_body` closes the connection instead of draining it.
 
-Relative `Location` values are resolved against the *current* request URL per RFC 3986 §5 (§8.2).
+#### 19.6 Resolving the `Location` header
+
+Relative `Location` values are resolved against the *current* request URL per
+RFC 3986 §5 — that is, against the URL of the request that produced this
+response, not against the original one. `zu_uri_resolve()` implements it
+(§8.2).
+
+Three rules that are not obvious from RFC 3986 alone:
+
+- **Strict mode.** Resolution uses RFC 3986 §5.2.2 strict semantics, so an
+  absolute `Location` with the same scheme as the base is *not* folded into the
+  base. The non-strict variant exists only for legacy parsers.
+- **A `Location` is a byte range, not a C string.** It points into the response
+  buffer and is not NUL-terminated, so the parser is called with an explicit
+  end pointer. Anything that scans for a terminator here reads other headers.
+- **Resolution must not carry credentials.** The base is rebuilt as text
+  *without* its userinfo before resolution, so the result never inherits
+  credentials through the round-trip. Whether the redirect target may keep them
+  is §19.2's decision, and §19.2 works on the struct.
+
+The result is re-validated by the full §8.2 policy layer: a `Location` of
+`ftp://…`, `//host:65536/`, or one containing a NUL is a `zu_url_error`, not a
+followed redirect.
 
 ### 20. Proxy Support
 
@@ -1052,7 +1245,17 @@ Relative `Location` values are resolved against the *current* request URL per RF
 
 The lowercase-only rule for `http_proxy` follows curl and exists because in CGI-like environments the `HTTP_Proxy` request header is mapped into the environment as `HTTP_PROXY` (the "httpoxy" class of bug). R is not usually a CGI host, but matching curl's rule costs nothing and avoids a class of surprise.
 
-An explicit `proxy =` argument or client setting always wins over the environment. `zu_client(proxy = NULL)` disables proxying entirely, distinctly from "not configured".
+An explicit `proxy =` argument or client setting always wins over the environment. Proxying is disabled with **`zu_client(proxy = FALSE)`**, distinctly from "not configured".
+
+**D-48 corrects this section.** It originally said `proxy = NULL` disables
+proxying — which collides head-on with §31.9 (D-35), where `NULL` means "reset
+to the package default" for every policy argument. The two cannot both hold:
+if the package default is "consult the environment", `NULL` cannot also mean
+"never proxy"; and if the package default were "never proxy", `http_proxy`
+would never be honoured, which is the premise of this whole section. Making
+`proxy` the one argument where `NULL` means something else would be exactly
+the inconsistency §31.9 exists to prevent, so the third state gets its own
+spelling: `FALSE`.
 
 #### 20.2 `NO_PROXY` matching
 
@@ -1083,6 +1286,20 @@ HTTP request
 ```
 
 The CONNECT response must be parsed with the same strictness as any other response (§18). A non-2xx CONNECT is a `zu_proxy_error` carrying the proxy's status and any body, which is frequently the only diagnostic a user gets in a corporate environment.
+
+**Implementation note (S10, complete 2026-09-08).** The proxy is resolved
+**per hop**, not once per request: a redirect may cross from a proxied host to
+a `NO_PROXY` one or the reverse, and reusing the first hop's decision would
+send the second hop the wrong way. That also gives §20.4's hardest guarantee
+for free — a credential cannot survive a redirect onto a direct host, because
+the branch that adds `Proxy-Authorization` is simply not reached when the new
+hop resolves to no proxy.
+
+After a successful CONNECT the tunnel must contain **nothing** beyond the
+response header block. Any trailing bytes would be origin TLS data the
+handshake has not read yet; a proxy that sends them has desynchronised the
+tunnel before it started, so this is refused rather than spliced into the
+handshake.
 
 #### 20.4 Credentials
 
@@ -1165,6 +1382,19 @@ If added later, it should be a high-level request-body encoder, not embedded in 
 ## Part 5 — Runtime Model
 
 ### 24. Timeout Model
+
+**Implementation note: `zu_now_ms()` must have no silent fallback.** An early
+version returned 0 when no monotonic source was visible, commented "caller's
+deadlines degrade to never". That is not a degradation but a total failure:
+every timeout stops firing and the first operation that waits for one blocks
+forever. On glibc it was reachable by accident, because `-std=c99` hides
+`CLOCK_MONOTONIC` unless `_POSIX_C_SOURCE` is set before any system header —
+and it survived six commits because a constant clock still satisfies
+"monotonic", so the test suite passed while the Linux CI jobs hung.
+
+A platform with no monotonic clock must now fail to BUILD, the suite asserts
+that the clock *advances* rather than only that it never decreases, and
+`tools/check-feature-macros` guards the whole class in CI.
 
 Structured timeout semantics are a key differentiator, so the semantics must be exact rather than suggestive.
 
@@ -1295,6 +1525,14 @@ TLS configuration must be compared by value, not by pointer identity, or two cli
 - global limit,
 - stale-connection detection: a pooled socket that is readable before a request is written has been closed or has unread data, and is discarded.
 
+The last rule needs a liveness probe that the §9 stream interface did not
+originally have, so `readable(timeout_ms)` is part of the vtable: `poll()` for
+`POLLIN` on TCP, `SSL_pending()` before delegating on TLS, scripted on the
+mock. It must never consume a byte — a probe that read would corrupt the next
+response on a connection that turned out to be healthy. A backend that cannot
+answer returns -1, which is treated as "unknown", not as "safe to reuse"; the
+idle timeout remains the backstop for that case.
+
 Initial defaults are conservative.
 
 ```r
@@ -1369,9 +1607,31 @@ Error: zuhttp cannot make HTTPS requests in a forked process on macOS.
 
 `PSOCK` clusters and `plan("multisession")` are safe because they `exec` fresh R processes.
 
-Turning a SIGSEGV into a named condition is the whole mitigation. It does not make forked HTTPS work; it makes the limitation diagnosable. **Until it exists, `zuhttp` has a worse macOS fork failure mode than `curl`** — a crash rather than an error — and §6.1 must say so.
+Turning a SIGSEGV into a named condition is the whole mitigation. It does not make forked HTTPS work; it makes the limitation diagnosable. **Until it exists, `zuhttp` has a worse macOS fork failure mode than `curl`** — a crash rather than an error — and §6.1 must say so. *(It exists as of 2026-09-08; §6.1 now describes an error, which is accurate.)*
 
 `pthread_atfork()` is not sufficient and is unavailable on Windows; the PID check is the portable mechanism and must run on every pool acquisition and every trust evaluation.
+
+**Implementation note (S16, complete 2026-09-08).** The guard is
+`zu_fork.{h,c}`, deliberately not a member of `zu_pool`: the two hazards share
+one mechanism but only hazard 1 is about connections. `zu_pool` calls it on
+every acquire, every release and in `zu_pool_free` — which is what the R
+external-pointer finalizer runs, satisfying §29's rule 3. `zu_fork_message()`
+holds the single canonical wording above so the C error, the R condition and
+the documentation cannot drift.
+
+Both hazards are now closed and tested from R:
+
+- **hazard 1** by `test-pool.R`, which forks a pooled client under
+  `mclapply()` over plain HTTP and asserts each child reports
+  `forks_detected = 1`, `discarded_fork = 1` and `hits = 0` while the
+  parent's own connection survives and is reused afterwards;
+- **hazard 2** by `test-fork.R` and the `tools/ci-fork-guard.R` gate, over
+  HTTPS on Secure Transport.
+
+Hazard 1 is deliberately tested over **http://** on macOS: hazard 2 aborts the
+child before hazard 1 can be observed there, so testing hazard 1 over HTTPS
+would assert nothing about connections. That is not a gap — it is the only
+ordering in which each hazard's own mechanism is what the test measures.
 
 #### 26.5 Serialization and session lifetime
 
@@ -1382,6 +1642,33 @@ Required behavior:
 - The external pointer is tagged, and a restored (null) pointer is detected on first use.
 - A client whose pool pointer is dead **lazily re-creates** its pool from the retained configuration rather than erroring. Configuration is plain R data and survives serialization; connections do not.
 - This is what makes §31.1 Principle 6's "value-like semantics" claim actually true across sessions.
+
+**How this landed (S16, D-36).** The client's *value* — the list a user prints,
+copies and serializes — holds only the pool's **configuration**, which is plain
+R data. The live pool hangs off the object as an attribute environment
+(`attr(client, "pool_state")`), created empty by `zu_client()` and filled on
+the first request. Putting the external pointer in the list itself was the
+obvious first move and is wrong: the list is the client's identity, so a
+pointer in it would print, would compare unequal between two otherwise
+identical clients, and would make `zu_client_update()` produce a value that
+differs from its parent in a field the user never set.
+
+Detection is by asking the pointer, not by tracking history: `C_zu_pool_valid`
+checks that the external pointer carries our tag *and* a non-NULL address. A
+restored pointer satisfies the first and fails the second, so "never built"
+and "did not survive `readRDS()`" collapse into one branch with one answer —
+build one now. A third case joins them for free: pool settings changed by
+`zu_client_update()` after a pool was already live, which must rebuild rather
+than silently keep the old policy.
+
+Copies made by `zu_client_update()` **share** the parent's environment, and so
+its pool. That is safe by construction rather than by care: the §26.1 key
+discriminates on scheme, host, port, proxy identity and the whole TLS
+configuration, so a derived client with `verify = FALSE` cannot draw a
+connection that was established with verification on. Proving that is what
+`test-pool.R`'s key tests are for, and they assert the **miss** count as well
+as the hit count — asserting only "no reuse happened" would pass just as
+happily with pooling switched off entirely.
 
 ### 27. Streaming Model
 
@@ -1402,6 +1689,19 @@ Large responses must not require whole-body allocation.
 #### 27.1 Sinks and limits
 
 `max_body_bytes` (§40) applies to every sink including `file` — an unbounded download to disk is still a denial-of-service vector, just against a different resource. The file sink writes to a temporary file in the same directory as the destination and renames on success, so an interrupted or failed download never leaves a truncated file at the target path.
+
+**A non-2xx response still writes.** The sink is committed by the engine, which
+sees a completed HTTP transaction; `check` is an R-level policy that runs after
+it (§31.2). So `zu_get(url, path = f, check = TRUE)` against a 404 raises *and*
+leaves the error page at `f`. That is a deliberate consequence of where the two
+live and not an oversight, but it is the one part of §27.1 that surprises
+people, because "failed request" and "failed transfer" are not the same event.
+A caller for whom the destination matters passes `check = FALSE` and renames on
+success.
+
+**An existing destination is replaced, at the rename and not before** (D-53). That is the useful half of the same guarantee: a download that fails leaves whatever was already at `path` untouched, because nothing touches `path` until the body has arrived whole. `rename()` refuses to replace on Windows, so the target is removed immediately before it; the window that opens is accepted, since the caller asked for the file to be replaced and the alternative (`MoveFileEx`) is not reachable through C89 stdio.
+
+**One sink per response.** `path` and `callback` are mutually exclusive, refused where the request is resolved so that both API levels and either ordering give the same answer. They were not: the C layer picked the callback when both were set and discarded the path silently, so a caller who asked for both got no file and no diagnostic.
 
 #### 27.2 Calling back into R
 
@@ -1427,6 +1727,55 @@ A streaming callback runs arbitrary R code, which may call `zu_get()` again — 
 #### 27.5 R connections as sinks
 
 R connections are convenient but go through R's own buffering and may not be performant enough for high-throughput streaming (§62). The connection sink must therefore be implemented in terms of the same `zu_body_sink` contract, so it can be benchmarked against, and swapped for, the raw file sink without touching the engine.
+
+#### 27.6 How this landed (S17)
+
+`zu_sink` is §27's `zu_body_sink` write function plus a **lifecycle** —
+finish/abort/destroy — because §27.1's atomicity is not expressible in a write
+callback alone. The file sink writes beside its destination and renames on
+finish; abort and a plain destroy both unlink. A sink that is dropped without
+finishing therefore leaves nothing behind, which is the property §27.1 asks
+for stated as an invariant rather than as a code path.
+
+**D-45, the argument is `path =`.** §19.5 originally wrote
+`zu_get(url, file = "out.bin")` while §31.6 gave `file =` to the request body.
+One name cannot mean "where the response goes" on GET and "where the request
+comes from" on POST; `path` is the response destination on every verb.
+
+**D-46, the body path is its own translation unit.** `zu_body.c` holds the
+decode-and-deliver loop, split out of the engine so the offline suite can
+drive it: the guarantee under test is "memory does not grow with the body",
+and proving that needs a 100 MB response, which is exactly what you cannot ask
+a real server for on every CI run. Both decompression and delivery are now
+incremental — before S17 the body was accumulated whole and then inflated
+whole, so a 100 MB gzip response cost the compressed size plus the decoded
+size resident.
+
+Measured, with a control: 100 MiB streamed to a discard sink grows peak RSS by
+**0 KiB**, the same 100 MiB to a file by **0 KiB**, and the same 100 MiB into a
+memory sink by **~100 MB**. The third case is not decoration — without it the
+first two are unfalsifiable, since "RSS did not grow" is also what a broken
+measurement reports.
+
+**D-47, catch error and interrupt, not every condition.** §27.3 says to invoke
+the callback through `R_tryCatch()` and catch "a condition". Catching the
+`condition` class outright is too broad and actively wrong: `warning()` and
+`message()` signal and then invoke a restart to continue, so they never unwind
+past C and never threaten the socket — swallowing them would turn an
+informational message inside a callback into a fatal transport error. testthat
+signals its expectations the same way, so `expect_true()` inside a callback
+was being caught and re-signalled as an error, which is how this was found.
+Errors and interrupts are the two that longjmp, and they are the two to
+intercept.
+
+**§27.2's sentinel is resolved in the engine, not above it.** A callback
+returning `FALSE` stops the transfer cleanly, so the caller still receives
+their response — which means the engine has to keep building the result. By
+the time an error has propagated out of `zu_engine_perform()` the result is
+already torn down, so the "stopped" flag is read where the reuse decision is
+made: `rc` becomes `ZU_OK` and the reason becomes `ZU_NOREUSE_CANCELLED`,
+since the body was not read to its end and the framing position is unknown
+(§26.3).
 
 ### 28. Request Body Sources
 
@@ -1534,6 +1883,8 @@ The synchronous `zu_perform()` remains the primary API and must never be impleme
 - Request multiplexing over a single connection. That is HTTP/2 (§60).
 
 Whether asynchronous concurrency belongs in this package at all remains an open question (§62); a strong case exists for leaving it to a higher layer.
+
+**Not in v0.1.0** (roadmap, 2026-09-10). Deferred to v0.1.1 rather than cut, because the question above is unanswered: a first release that shipped a concurrency API would answer it by accident. `zu_perform()` stays the whole API meanwhile, and callers who need parallelism use a PSOCK cluster or `future::plan("multisession")` — never a forked plan, for the §26.4 reason.
 
 ## Part 6 — R API
 
@@ -1770,6 +2121,17 @@ api |> zu_client_get("/users")
 The client owns the connection pool, so reuse is both an ergonomic and performance feature.
 
 A one-shot call without an explicit client uses a package-managed default client and pool. That default is PID-guarded (§26.4), is configurable through `zu_set_default_client()`, and is reported by `zu_info()` so its configuration is never invisible.
+
+##### `base_url` is joined, not resolved (D-34)
+
+A request path is **concatenated** to `base_url`, not resolved against it in the RFC 3986 sense:
+
+```r
+zu_client(base_url = "https://api.example.com/v1")
+zu_get("/users", client = api)      # -> https://api.example.com/v1/users
+```
+
+RFC 3986 resolution would produce `https://api.example.com/users`, silently discarding the `/v1` the caller set the base URL for. That behaviour is the single most reported surprise in libraries that resolve here, and nobody who writes `base_url = ".../v1"` means it. Resolution against the *response* URL — redirects, `Location` — remains strict RFC 3986 in C (§19), where the RFC's semantics are the correct ones; this rule applies only to the base_url/path join. An absolute request URL ignores `base_url` entirely.
 
 ---
 
@@ -2050,6 +2412,10 @@ zu_get("/slow", timeout = NULL, client = api)   # package default, not api's 30s
 
 Both forms must be documented next to the merge table, since "how do I turn this off" is the first question the merge rules provoke.
 
+##### Three states, not two (D-35)
+
+Implementing the `NULL` rule requires the merge to distinguish **argument absent**, **argument supplied as `NULL`**, and **argument supplied with a value** — two states are not enough, because "absent" inherits the client's value and "`NULL`" does not. The R layer reads absence with `missing()` in the calling frame and carries an explicit reset sentinel through composition, since an R list cannot hold a `NULL` element as a value.
+
 ---
 
 #### 31.10 Derived clients
@@ -2247,6 +2613,8 @@ res <- zu_get(url)
 ```
 
 uses a configurable default HTTP-status policy.
+
+**The default is `check = TRUE` (D-33).** A 4xx raises `zu_http_client_error`, a 5xx raises `zu_http_server_error`, and both inherit `zu_http_status_error` and `zu_error` (§34.1). An unchecked status that flows on as data is the error most likely to reach a user's data rather than their console, and R's own idiom — `stop()` on failure — is the one R users expect. `zu_resp_ok()` and `zu_resp_status()` still describe any response, and the policy is per-client as well as per-request.
 
 Users can always opt into raw response semantics:
 
@@ -2452,6 +2820,42 @@ The stale-connection case is important and is why it is exempt from the attempt 
 
 Every retry emits a `before_retry` hook event (§35) carrying attempt number, the triggering condition, and the computed delay. A retry that is never surfaced is a latency mystery for whoever debugs it later.
 
+#### 33.5 How this landed (S13)
+
+The layer is R, above the transport, because a retry re-runs the whole
+transport call — including a mock or a cassette, which is what makes every
+retry test in the suite offline.
+
+**D-42, off by default.** `retry` is a policy field carrying
+`zu_retry(attempts = 1)`, so it takes part in §31.9's three-state merge and
+`retry = NULL` resets to "no retrying" rather than to the client's setting.
+§33 opens by warning that a client which silently replays a POST is a
+data-integrity bug; the default has to be the safe one, and `attempts` counts
+the first try so `1` reads as "no retrying" without arithmetic.
+
+**D-43, admissibility is decided once**, before the first attempt, not
+re-derived per failure. Whether a request may be replayed is a property of the
+request, and re-asking inside the loop invites a path where it answers
+differently on attempt three than on attempt one. The same reasoning makes
+`zu_body_not_replayable` fire eagerly: a caller who asked for retries on a
+body that cannot be replayed has a bug, and surfacing it only on the first
+failure would make that bug intermittent.
+
+**D-44, the retry loop is inside middleware.** `middleware = list(a, b)` wraps
+one *logical* request, not each attempt — `a` is entered once even when three
+attempts are made. The alternative (middleware inside the loop) would make a
+signing middleware re-sign per attempt, which sounds harmless until a
+signature carries a nonce.
+
+**On the interruptible sleep.** An early draft had an `interrupt_pending()`
+checkpoint in the sleep loop that always returned `FALSE`. It read as a
+mechanism and was not one. Ctrl-C responsiveness comes from `Sys.sleep()`,
+which R implements as an interruptible wait on every platform; the slice loop
+exists for the **deadline**, so a budget that expires during a long backoff
+cuts the wait short instead of being noticed after it. §25's checkpoint
+language applies to the C read loop, not here, and conflating the two produced
+a stub that made this function look more careful than it was.
+
 ### 34. Error Model
 
 Avoid exposing raw platform or TLS codes as the primary API.
@@ -2469,6 +2873,7 @@ zu_error  (inherits: error, condition)
 │   ├── zu_tls_handshake_error
 │   └── zu_tls_pin_error
 ├── zu_http_parse_error
+├── zu_url_error                  (the URL itself does not parse or is unusable)
 ├── zu_proxy_error
 │   └── zu_proxy_auth_error
 ├── zu_redirect_error
@@ -2591,11 +2996,19 @@ Hooks are observability, and are kept separate from policy middleware (§31.13).
 
 **All hook payloads pass through the redaction filter in §42 before the handler sees them.** A trace handler that logs request headers must not be the mechanism by which a bearer token reaches a log file.
 
+`redirect.followed` carries the target as the engine resolved it, built by the same `url_of()` that produces `final_url`, and not the `Location` header as received (D-50). The header string is owned by the response headers, which the engine frees before it moves to the next hop, so passing it through left a dangling pointer and the event reported freed memory; a relative `Location` is also not a target. Sharing the builder with `final_url` is what stops the event and `zu_resp_url()` from disagreeing about where the request went.
+
+**The paragraph above is enforced, not assumed** (D-51). Two events carry a URL — `request.start` and `redirect.followed` — and a URL is what brings a credential into a log: userinfo, or a query parameter §42.1 names. Both go through `zu_trace_add_url()`, which redacts with the caller's policy before the bytes reach the fixed-width slot; `zu_trace_add()` with a raw URL is the bug that function exists to prevent. It shipped once, in the window between the §35 trace landing and this rule being written down: `zu_get(url, trace = TRUE)` on a URL with `?access_token=` printed the token through `zu_verbose()`, because the redaction the table promised had no implementation on that path. The R layer cannot be the place this is fixed — `zu_resp_trace()` returns the stored detail, so a credential that reached the slot is already in the response object.
+
+Redacting means `zu_trace_add_url()` allocates, since `zu_redact_url()` writes into a `zu_buffer`. Only those two events pay it, at most twice per hop, against a DNS lookup and a handshake; `body.chunk`, the event that fires per 16 KB, stays allocation-free.
+
 This can later support OpenTelemetry without coupling the C core to an observability framework.
 
 #### 35.4 Cost
 
 Hooks are off by default and compile to a NULL check when unregistered. §51 must measure the overhead of an enabled `body.chunk` hook on a large download, since that is the one event that fires per-chunk rather than per-request.
+
+The event log is fixed-capacity and appends without allocating, with one exception: the two URL-bearing events allocate to redact (§35.3, D-51). The NULL-trace check comes first in `zu_trace_add_url()`, so a request that is not traced still pays nothing.
 
 ### 36. Pluggable Transport
 
@@ -2664,6 +3077,54 @@ Sensitive headers must be redacted:
 - Cookie.
 - Proxy-Authorization.
 - API-key patterns where configurable.
+
+#### 37.1 How this landed (S14)
+
+`zu_cassette_transport(dir, name, mode)` with `mode` one of `"auto"` (record a
+miss, replay a hit), `"replay"` (never perform; error on a miss) and
+`"record"` (always perform; overwrite). A cassette is one uncompressed `.rds`
+holding a list of interactions, under `tempdir()` by default so nothing is
+written outside the session unless asked.
+
+Three decisions, each a trap avoided rather than a taste:
+
+**D-39 — the §42.1 default parameter list grew.** It was `access_token`,
+`api_key`, `signature`, `sig` — tuned for console output. A cassette is the
+one egress that outlives the session and reaches version control, and a form
+body of `client_secret=…` or `password=…` was being written in plaintext. The
+list now also carries `apikey`, `client_secret`, `password`, `passwd`, `pwd`,
+`secret`, `token`, `refresh_token`, `id_token`, `private_key`, `auth_token`
+and `session_token`. Extending the *shared* policy rather than special-casing
+cassettes is what keeps §42's "one policy at every egress" true: the same
+names are now redacted in URLs, printed objects and conditions too.
+
+Matching is exact and case-insensitive, which is what makes the bare names
+safe: `token` does not redact `page_token`, and `api_key` does not redact
+`api_key_id`. That property is asserted directly, because it is the whole
+argument for including short names.
+
+**D-40 — the match key is computed from the redacted request.** The obvious
+design keys on the real URL and stores only a hash, but a hash of a URL whose
+shape is known is brute-forceable, and "we only stored the hash" is precisely
+how credentials leak from fixtures. Keying on `method + redacted URL +
+redacted body` means the index cannot carry a secret. It also gives the
+behaviour a test wants: two requests differing only in their credential
+collapse to one interaction, so rotating a token does not invalidate a
+recorded suite. Headers are deliberately **not** part of the key — they vary
+with client configuration in ways that do not change what a server would
+reply, and including them makes cassettes miss for reasons the test author
+cannot see.
+
+**D-41 — cassettes are uncompressed.** A compressed cassette would hide a
+plaintext credential from a byte-level scan, so the §42.4 canary would pass
+while the leak stood. The canary greps the file itself, so the file has to be
+greppable. This is a case where the cheaper representation makes the test
+dishonest rather than merely larger.
+
+Mock matching (§37's first half) is `zu_stub(response, method, url, regex,
+headers, body, times)`, ANDed, with an omitted criterion matching anything.
+`zu_mock_transport()` still accepts a bare function, which is the form §36
+documents.
 
 ### 38. Authentication Scope
 
@@ -2794,6 +3255,22 @@ By default:
 
 Redacted values render as `<redacted>`, never as a truncated prefix — a prefix is enough to confirm a guess.
 
+**Two implementation constraints that fall out of "it must work on a URL that
+did not parse":**
+
+- The redactor does not use the URI parser, because the malformed URL is
+  precisely the one an error message is about.
+- The scheme is therefore matched by hand, and must be **anchored** at the
+  start and match RFC 3986 `scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )`.
+  Scanning for `://` anywhere causes ordinary text to be treated as
+  scheme + authority and its content deleted — silently removing text from a
+  diagnostic is worse than not redacting it.
+
+**Known gap:** a credential-bearing URL nested inside a query *value*
+(`?next=http://u:pw@host/`) is not descended into. The mitigation is the
+parameter list — naming `next` replaces the whole value. This is a deliberate
+trade against mangling text, and is tested in both directions.
+
 #### 42.2 Where it applies
 
 | Egress | Redacted |
@@ -2803,10 +3280,14 @@ Redacted values render as `<redacted>`, never as a truncated prefix — a prefix
 | Condition messages and payloads (§34.2) | yes |
 | Trace and hook payloads (§35.3) | yes |
 | Record/replay serialization (§37) | yes |
-| `zu_resp_url()` | yes — userinfo stripped |
+| `zu_resp_url()` | yes — userinfo removed, secret parameters replaced (D-52) |
 | Verbose/debug transport logging | yes |
 
 The single exception is explicit user retrieval: `zu_req_headers(req)` returns real values, because the user asking for their own header by name is not an accidental disclosure. That asymmetry must be documented.
+
+`zu_resp_url()` is **not** that exception, and the row above used to read "userinfo stripped" as though it were half of one (D-52). It described the implementation rather than the rule: `url_of()` builds the final URL without userinfo because it never had it, so nothing was applying §42.1's other clause and `?access_token=` came back live from an accessor §20.4 already described as credential-free. The redaction happens in the engine, not in the accessor, because the string is stored on the response — redacting on the way out would leave the real one reachable through `resp$url`.
+
+The cost is real and is the intended one: the unredacted final URL of a redirect chain is then recoverable from nowhere. Userinfo has always been unrecoverable for the same reason, and §42.3's "must still be executable" constrains a *request*, which this is not.
 
 #### 42.3 Implementation constraint
 
@@ -2840,6 +3321,20 @@ Sanitizers:
 - ASan.
 - UBSan.
 - MSan where feasible.
+
+Each harness must build **two** ways from one source file: against libFuzzer,
+and against a plain driver that feeds corpus files in. The second needs no
+special toolchain, which is what lets the checked-in corpus act as a
+regression suite on every platform — including Windows under Rtools, where
+libFuzzer does not exist. A crash found once anywhere then becomes a seed that
+can never come back anywhere.
+
+**Only curated seeds belong in the repository.** A 45-second run per target
+grew the corpus to ~29,000 files, and `-merge=1` minimisation still left
+11,914 files and 47 MB. Every committed seed should be a real protocol sample,
+a specific attack this document names, or a regression input for a bug that
+was actually found — something a reviewer can read. Soak-grown corpora belong
+in CI artifacts.
 
 CI should periodically fuzz using corpus seeds.
 
@@ -2953,9 +3448,28 @@ zuhttp: could not find OpenSSL headers (openssl/ssl.h).
 
 A matching `cleanup` script removes generated files. If autoconf is used, `configure.ac` ships in the tarball and the generated `configure` is committed.
 
-#### 47.4 Windows toolchain risk
+#### 47.4 Windows toolchain: TLS 1.3 structures are missing from Rtools
 
-The Schannel headers required for TLS 1.3 (`SCH_CREDENTIALS`) may be missing or outdated in the mingw-w64 SDK that Rtools ships. **This must be verified against the actual Rtools toolchain in the first week of the Windows spike**, not discovered during the first CRAN submission. If they are absent, the structures are declared locally behind a version guard, which is ugly but tractable. See Appendix B, R-3.
+**Measured, not assumed.** The S1 probe (`spike/windows-schannel/`, run on GitHub Actions with the compiler from `R CMD config CC`) found:
+
+| Symbol | Kind | Present under Rtools mingw-w64 11.0 |
+|---|---|---|
+| `SCH_CREDENTIALS_VERSION`, `SCH_USE_STRONG_CRYPTO`, `SP_PROT_TLS1_3_CLIENT` | macros | **yes** |
+| `SCH_CREDENTIALS`, `TLS_PARAMETERS` | **typedefs** | **no** |
+| `SCHANNEL_CRED_VERSION`, `SP_PROT_TLS1_2_CLIENT`, `UNISP_NAME_A` | TLS 1.2 path | yes |
+| `CERT_CHAIN_POLICY_SSL`, `CERT_STORE_PROV_MEMORY` | chain validation | yes |
+
+`InitSecurityInterfaceA()` returns non-NULL and `CertOpenStore(CERT_STORE_PROV_MEMORY, ...)` succeeds, so SSPI and CryptoAPI genuinely link and run — the Windows plan in §13.4 and §14.3 is otherwise sound.
+
+The split result is the important part. **It is not a version gate**: `-D_WIN32_WINNT=0x0A00 -DNTDDI_VERSION=0x0A000000` does not make the typedefs appear. mingw-w64 11.0's `schannel.h` was partially updated for TLS 1.3 — the manifest constants landed, the structure definitions did not.
+
+Options, in preference order:
+
+1. **Declare `SCH_CREDENTIALS` and `TLS_PARAMETERS` locally**, guarded so they compile away if a future Rtools ships them. Roughly 30 lines, and because the constants already exist there is no constant table to keep in sync. **Requires ABI verification against a real Windows 10+ target before it can be trusted** — a wrong structure layout passed to `AcquireCredentialsHandle` is a memory-safety bug, not a compile error.
+2. **Ship Windows TLS 1.2-only for v1.** Safe, cheap, and leaves Windows one protocol version behind the other platforms.
+3. Require a newer mingw-w64 than Rtools ships — not viable, since CRAN builds with Rtools.
+
+Take option 1, falling back to option 2 if the ABI cannot be verified confidently. Either way this is bounded work on the TLS 1.3 path only; nothing else about the Windows backend is blocked.
 
 `src/Makevars.win` handles Windows; `configure` plus `src/Makevars.in` handles Unix.
 
@@ -3020,7 +3534,7 @@ Current candidates and their licenses:
 |---|---|---|
 | picohttpparser | MIT | if chosen (A.3) |
 | llhttp | MIT | if chosen (A.3) |
-| uriparser | BSD-3-Clause | if chosen (§8.2) |
+| uriparser (subset) | BSD-3-Clause | yes — §8.2, inst/COPYRIGHTS |
 | zlib | zlib license | **no** — system-linked |
 | miniz | MIT | only under `--with-bundled-zlib` |
 
@@ -3143,6 +3657,24 @@ These are the numbers the §63 prototype is judged against:
 | Total C, vendored + owned | ≤ 25,000 LOC | > 40,000 LOC |
 | Source tarball | ≤ 2 MB | > 5 MB |
 | Cold compile time, one core | ≤ 90 s | > 180 s |
+
+**Measured 2026-09-07, after S7 and D-11** (code lines, excluding blank and
+comment-only lines; the LOC rows only — the runtime rows need the §63
+prototype, which does not exist yet):
+
+| Metric | Measured | Target | Status |
+|---|---|---|---|
+| Project-owned C | 2,601 | ≤ 8,000 | 33% of budget |
+| Vendored: picohttpparser | 598 | — | |
+| Vendored: uriparser subset | 3,869 | — | |
+| **Total C** | **7,068** | ≤ 25,000 | 28% of budget |
+
+Counting raw lines instead — which is what a reviewer actually reads, license
+headers and doxygen included — gives 11,459, still under the *code-line*
+budget. The two vendored components together are 63% of the total C, which is
+the number to watch: it is the code this project does not own but must still
+security-track (§46.2, §48). Both remaining backends (Schannel S8, macOS S9)
+add project-owned lines only.
 
 Exceeding an abort threshold is not a bug to be fixed later; it is a signal that the architecture is not delivering the advantage the project exists to provide, and it should trigger the reconsideration in Appendix B.
 
@@ -3386,10 +3918,11 @@ Questions that the drafting process has already answered are recorded in the Dec
 |---|---|---|
 | ~~1~~ | ~~Can the §13.1 engine/trust split work on macOS from a synchronous poll loop?~~ **ANSWERED: yes.** S0, 2026-09-07. | — |
 | 1a | **Which portable TLS engine on macOS is viable for CRAN binary builds?** S0 used Homebrew OpenSSL; CRAN needs a static engine from the recipes toolchain or an alternative. Now the top macOS unknown. | S4 |
-| 2 | Does the Rtools mingw-w64 SDK expose `SCH_CREDENTIALS` and the TLS 1.3 Schannel path, or must they be declared locally? | Windows toolchain probe, §47.4 |
+| ~~2~~ | ~~Does the Rtools mingw-w64 SDK expose `SCH_CREDENTIALS`?~~ **ANSWERED: no.** S1, 2026-09-07. Must be declared locally (§47.4). | — |
+| 2a | **Is a locally declared `SCH_CREDENTIALS` ABI-correct against a real Windows 10+ target?** Until verified, Windows TLS 1.3 is not safe to ship. | S3 |
 | 3 | What is the realistic line count of the Schannel backend, and does it fit the §51.3 budget? | Windows spike, §63.1 |
-| 4 | picohttpparser or llhttp, measured on total LOC including the strictness layer this project would otherwise write? | Appendix A.3, decided against the prototype |
-| 5 | Vendor `uriparser` (~15k LOC) or write a ~600-line project-owned RFC 3986 parser? | §8.2, decided against the §51.3 budget |
+| ~~4~~ | ~~picohttpparser or llhttp?~~ **ANSWERED: picohttpparser**, 2026-09-07, after the strictness layer was built and tested independently. | — |
+| ~~5~~ | ~~Vendor `uriparser` (~15k LOC) or write a ~600-line parser?~~ **ANSWERED: a 3.9k-line subset**, 2026-09-07. The 15k figure measured the whole distribution; six of eight historical CVEs are in the excluded files (§8.2). | — |
 
 #### 62.2 Important — answer before 1.0
 
@@ -3441,13 +3974,13 @@ zu_get()
  |
 C request builder
  |
-URI handling (either D-11 option)
+URI handling (§8.2 subset + policy layer)
  |
 TCP
  |
 TLS engine + trust evaluator (§13.1)
  |
-HTTP parser (either D-10 option)
+HTTP parser (picohttpparser, D-10)
  |
 memory body
  |
@@ -3456,9 +3989,18 @@ R raw vector
 
 Capabilities: GET only, HTTPS, certificate verification, one redirect, `Content-Length`, chunked decoding, total timeout, Ctrl-C, memory response.
 
-#### 63.3 Build both open options
+#### 63.3 Build both open options — DONE
 
-D-10 (parser) and D-11 (URI) are open, and the prototype is where they are decided. Implement the slice against thin internal interfaces so that both alternatives can be swapped in, and measure each on total auditable LOC, throughput, and pass rate against the §50.3 malformed corpus. Deciding these by argument rather than measurement is how the size budget gets blown.
+D-10 (parser) and D-11 (URI) are both decided: picohttpparser, and a
+parse/resolve/recompose subset of uriparser. Both were settled the way this
+section prescribes — build the decision-independent part first, then measure.
+For D-10 that meant writing `zu_framing.c` before choosing a parser, which
+removed the main objection to picohttpparser (that it makes no framing
+decisions — it does not, and framing is ours regardless). For D-11 it meant
+writing `zu_uri.h` and `zu_redirect.c` against the flat struct first, so only
+§19.6 was ever blocked, and then deriving the vendor subset by linking rather
+than by argument. The LOC figure that had been carried in §8.2 for two drafts
+(15k) turned out to be measuring the wrong thing by a factor of four.
 
 #### 63.4 Measure, then decide
 
@@ -3599,11 +4141,19 @@ The LOC gap narrows to roughly 6,000 vendored lines, in exchange for moving the 
 
 The counter-arguments for picohttpparser remain real: 6,000 vendored lines is 6,000 lines against the §51.3 budget; zero-copy parsing genuinely is faster; and llhttp's callback model interacts less cleanly with a poll loop that may deliver partial reads.
 
-#### Decision
+#### Decision: picohttpparser (2026-09-07)
 
-**Open. Resolved by the prototype (§62.1, Q4).** Build against a thin internal parser interface so that both can be implemented and measured on: total auditable LOC, throughput on the §51.2 benchmarks, and pass rate against the §50.3 malformed corpus.
+**Resolved, and on a basis the comparison above did not anticipate.** The strictness layer was built *before* the parser was chosen: `zu_framing.c` implements every §18.1 rule with a test per row, and the header store re-validates every field regardless of what the parser accepted. The 800–1,200 lines this table treats as picohttpparser's hidden cost are written, tested under ASan/UBSan, and will be fuzzed at S18.
 
-The default assumption has changed from "start with picohttpparser" to "llhttp unless the prototype shows it costs materially more than the numbers above suggest" — because the strictness code is the risk, and llhttp is the option where someone else has already been fuzzing it for a decade.
+With that cost already paid and verified, the remaining comparison is 803 vendored LOC against roughly 8,000, for a parser whose only remaining job is splitting a status line and a header block. picohttpparser wins on the §51.3 budget.
+
+What this project gives up, and must keep visible:
+
+- No upstream fuzzing of the framing rules. Ours are the only ones. §43 must treat `zu_framing.c` as the primary target, not a secondary one.
+- h2o's repository is effectively frozen, so no upstream security response should be expected. §46.2's dependency watch applies with full force.
+- The contiguous-header-block requirement stands: `max_header_bytes` bounds both the allocation and the repeated scan.
+
+Revisit only if the framing layer proves harder to keep correct than this decision assumed.
 
 ### A.4 Vendored Mbed TLS
 
@@ -3640,10 +4190,11 @@ Ordered by expected impact. Each risk has an owner-facing mitigation and an expl
 | ID | Risk | L | I | Mitigation | Kill / rescope trigger |
 |---|---|---|---|---|---|
 | ~~R-1~~ | ~~**macOS TLS dead end.**~~ **RETIRED 2026-09-07** by the S0 spike: OpenSSL engine + `SecTrustEvaluateWithError` works with TLS 1.3, Keychain trust, and a caller-owned poll loop. | — | — | — | — |
-| **R-12** | **macOS forked HTTPS crashes.** Security.framework's `trustd` XPC connection does not survive `fork()`; a child calling it after the parent segfaults (S0 F-5). `mclapply` + HTTPS is a very common R pattern. | **High** | **High** | PID guard on the trust evaluator raising a named condition instead of dying (§26.4); document `PSOCK`/`multisession` as the supported path | Cannot reliably detect the forked state before the crash → macOS HTTPS must be documented as unsupported under forked parallelism |
-| **R-13** | **No CRAN-viable macOS TLS engine.** S0 linked Homebrew OpenSSL; CRAN macOS binaries need a static engine from the recipes toolchain or an alternative (§62.1). | Medium | High | Resolve during S4 before committing to the macOS backend | No acceptable engine → fall back to TLS 1.2-only Secure Transport, or drop macOS |
+| ~~**R-12**~~ | ~~macOS forked HTTPS crashes~~ — **MITIGATED 2026-09-08 (S9).** The trust evaluator now carries the §26.4 PID guard, so a forked child raises `zu_fork_error` instead of dying. Verified end to end: `mclapply` + HTTPS after a parent request returns the condition from every child and the session survives; `tests/testthat/test-fork.R` asserts it and `tools/ci-fork-guard.R` runs it in CI as a regression test against a SIGSEGV, failing on a *skip* as well as on a failure. Non-vacuity demonstrated 2026-09-08 by disabling the guard branch, which reproduces F-5 verbatim (`caught segfault, address 0x110`). S16's corresponding exit criterion is ticked. | — | — | Done | Residual: forked HTTPS still does not WORK on macOS, it only fails diagnosably. `PSOCK` / `multisession` remain the supported path. |
+| **R-15** | **Apple may remove Secure Transport.** It is deprecated (87 markers in the current SDK) and is now zuhttp's macOS engine (D-4). Removal would leave only two options, both of which fail a project constraint: Network.framework cannot do §20.3 CONNECT, static OpenSSL bundles 4.64 MB of cryptography. | Low | **High** | Track Apple's SDK each release; keep the §13.1 split so only the engine half would change. **A Mbed TLS spike is on the roadmap (2026-09-08)**: R-13 evaluated static OpenSSL and Network.framework but never Mbed TLS, so "all alternatives fail a constraint" is unestablished | Ship static OpenSSL on macOS and amend §2 to drop the no-bundled-crypto claim |
+| ~~**R-13**~~ | ~~No CRAN-viable macOS TLS engine.~~ **RETIRED 2026-09-08.** Secure Transport + SecTrust ships with nothing bundled (0.17 MB `.so`), at a **TLS 1.2 ceiling**. Static OpenSSL was viable but costs 4.64 MB of bundled cryptography; Network.framework has TLS 1.3 but cannot run over a caller-owned socket, so it fails §20.3. See `spike/macos-engine/FINDINGS.md`. | — | — | Done | Residual: Apple may remove Secure Transport — see R-15 |
 | **R-2** | **Schannel overrun.** 1,500–2,500 lines of security-critical code, low-confidence estimate (§13.4, §64). | High | High | Time-box the spike; measure LOC against §51.3 early | Schannel backend exceeds 3,500 LOC or 8 weeks → reconsider a portable engine + `CertGetCertificateChain` trust on Windows too |
-| **R-3** | **Rtools header gaps.** mingw-w64 SDK may lack `SCH_CREDENTIALS`, blocking TLS 1.3 (§47.4). | Medium | Medium | Probe in week 1; declare structs locally behind version guards | Cannot link at all on Rtools → Windows TLS 1.2 only for v1, documented |
+| **R-3** | **CONFIRMED 2026-09-07 (S1).** Rtools mingw-w64 11.0 lacks the `SCH_CREDENTIALS` / `TLS_PARAMETERS` typedefs; not a version gate (§47.4). Blocks TLS 1.3 on Windows only. | **Certain** | Medium | Declare the two structures locally behind a feature guard; the constants already exist. **ABI must be verified on a real Win10+ target** — a wrong layout into `AcquireCredentialsHandle` is a memory-safety bug, not a compile error | ABI cannot be verified confidently → ship Windows TLS 1.2-only for v1, documented |
 | **R-4** | **Size budget blown.** Vendored dependencies plus three backends exceed the auditability claim that justifies the project (§51.3). | Medium | High | Hard thresholds in §51.3; parser and URI decisions made against them | > 40k total LOC or > 12k project-owned → the "small and auditable" positioning is false; revise §1 and §6 publicly or stop |
 | **R-5** | **Security defect in own TLS glue or framing.** A memory-safety or verification bug in code with no upstream to inherit fixes from. | Medium | **Very high** | §43 fuzzing, §44 static analysis, §45 external review, strict §18.1 | A verification-bypass class bug found post-release → mandatory external audit before any further release |
 | **R-6** | **Bus factor.** Single maintainer for a security-critical package that other packages depend on (§46.3). | High | High | Recruit a second maintainer with CRAN rights before 1.0; document the risk in README | No second maintainer at 1.0 → ship 1.0 labelled experimental, or do not encourage dependents |

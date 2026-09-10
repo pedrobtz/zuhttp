@@ -1,0 +1,463 @@
+# Cross-platform TLS feasibility spikes (zuhttp roadmap Track A).
+#
+# This is deliberately SEPARATE from R-CMD-check.yaml:
+#   - it makes real network connections, which CRAN checks must never do
+#   - it answers architecture gates, not package correctness
+#
+# S0 (macOS) is already GO locally; this keeps it honest on a clean runner.
+# S1 (Windows) is answered HERE — it needs an Rtools toolchain, which is
+# exactly what the R-CMD-check runners provide.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  workflow_dispatch:
+
+name: tls-spike.yaml
+
+permissions: read-all
+
+# Superseded runs are cancelled: with several pushes in a row the only
+# answer that matters is the newest one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# A push to `develop` while PR #1 is open fires BOTH `push` and
+# `pull_request`, which ran every job twice and saturated the queue. Same-repo
+# PRs are already covered by the push run, so their jobs are skipped; a PR
+# from a fork still runs, because a fork produces no push event here.
+
+jobs:
+  # ---------------------------------------------------------------
+  # S0 — macOS: OpenSSL engine + SecTrustEvaluateWithError (Keychain)
+  # ---------------------------------------------------------------
+  macos-s0:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: macos-latest
+    name: S0 macOS (engine + Keychain trust)
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install OpenSSL 3
+        run: brew install openssl@3
+
+      - name: Environment
+        run: |
+          sw_vers
+          clang --version | head -2
+          xcrun --show-sdk-version
+          "$(brew --prefix openssl@3)/bin/openssl" version
+
+      - name: Does Secure Transport know TLS 1.3?  (finding F-1)
+        run: |
+          ST="$(xcrun --show-sdk-path)/System/Library/Frameworks/Security.framework/Headers/SecureTransport.h"
+          echo "Searching for kTLSProtocol13 in $ST"
+          if grep -q 'kTLSProtocol13' "$ST"; then
+            echo "::warning::kTLSProtocol13 FOUND — finding F-1 no longer holds, revisit design 13.2"
+          else
+            echo "kTLSProtocol13 absent — confirms F-1: Secure Transport fallback is TLS 1.2-only"
+          fi
+
+      - name: Run S0 spike matrix
+        working-directory: spike/macos-tls
+        env:
+          PKG_CONFIG_PATH: /opt/homebrew/opt/openssl@3/lib/pkgconfig:/usr/local/opt/openssl@3/lib/pkgconfig
+        run: |
+          make
+          ./run.sh
+
+      - name: Is SecTrust fork-safe?  (finding F-5)
+        working-directory: spike/macos-tls
+        continue-on-error: true
+        run: |
+          make fork_trust_test
+          "$(brew --prefix openssl@3)/bin/openssl" x509 -in tmp/ca.pem -outform DER -out tmp/ca.der
+          echo "A. parent uses Security, then forks (expect: child killed):"
+          ./fork_trust_test tmp/ca.der || true
+          echo
+          echo "B. parent does not, then forks (expect: child survives):"
+          ./fork_trust_test tmp/ca.der --no-parent-eval || true
+
+  # ---------------------------------------------------------------
+  # S1 — Windows: does the Rtools mingw-w64 SDK expose SCH_CREDENTIALS?
+  #      This is the gate that cannot be answered on a Mac.
+  # ---------------------------------------------------------------
+  windows-s1:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: windows-latest
+    name: S1 Windows (Rtools Schannel headers)
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+
+      # Gives us Rtools, i.e. the *exact* toolchain R uses to build packages.
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
+      - name: Toolchain identity
+        working-directory: spike/windows-schannel
+        run: |
+          echo "R CC     : $(R CMD config CC)"
+          echo "R CFLAGS : $(R CMD config CFLAGS)"
+          $(R CMD config CC) --version | head -2
+
+      - name: Probe A — macro-level report (always compiles)
+        working-directory: spike/windows-schannel
+        run: |
+          CC=$(R CMD config CC)
+          $CC -O1 -o probe.exe probe.c -lsecur32 -lcrypt32 -lws2_32
+          ./probe.exe
+
+      - name: Probe B — does SCH_CREDENTIALS exist at the default target?
+        working-directory: spike/windows-schannel
+        run: |
+          CC=$(R CMD config CC)
+          if $CC -fsyntax-only probe_struct.c 2> struct_err.txt; then
+            echo "SCH_CREDENTIALS: PRESENT at the toolchain's default _WIN32_WINNT."
+          else
+            echo "SCH_CREDENTIALS: MISSING at the toolchain's default _WIN32_WINNT."
+            echo "--- compiler output (first 5 lines) ---"
+            head -5 struct_err.txt
+          fi
+
+      # mingw-w64 gates the TLS 1.3 Schannel declarations behind
+      # _WIN32_WINNT >= 0x0A00. Rtools defaults to 0x0601 (Windows 7), so
+      # "missing" may mean "not requested" rather than "not shipped".
+      # This is the probe that actually decides R-3.
+      - name: Probe C — retry with _WIN32_WINNT=0x0A00  (gate for R-3)
+        working-directory: spike/windows-schannel
+        run: |
+          CC=$(R CMD config CC)
+          echo "Retrying with -D_WIN32_WINNT=0x0A00 -DNTDDI_VERSION=0x0A000000"
+          if $CC -fsyntax-only -D_WIN32_WINNT=0x0A00 -DNTDDI_VERSION=0x0A000000 \
+                 probe_struct.c 2> struct_err_win10.txt; then
+            echo
+            echo "SCH_CREDENTIALS: PRESENT once the target is raised to Windows 10."
+            echo "::notice::S1 verdict: Rtools DOES ship the TLS 1.3 Schannel declarations; they are gated behind _WIN32_WINNT>=0x0A00. Fix is a compile flag, not local struct declarations. R-3 downgraded."
+            $CC -O1 -D_WIN32_WINNT=0x0A00 -DNTDDI_VERSION=0x0A000000 \
+                -o probe_win10.exe probe.c -lsecur32 -lcrypt32 -lws2_32
+            echo
+            echo "--- full report at _WIN32_WINNT=0x0A00 ---"
+            ./probe_win10.exe
+          else
+            echo
+            echo "SCH_CREDENTIALS: STILL MISSING even at _WIN32_WINNT=0x0A00."
+            echo "--- compiler output ---"
+            cat struct_err_win10.txt
+            echo "::warning::S1 verdict: Rtools genuinely lacks SCH_CREDENTIALS. zuhttp must declare it locally (design 47.4) or ship Windows TLS 1.2-only. R-3 confirmed."
+          fi
+
+  # ---------------------------------------------------------------
+  # S7 — the OpenSSL engine against real endpoints.
+  #      Network-dependent by nature, which is why it lives here and not in
+  #      c-core.yaml: that suite must stay deterministic and offline.
+  # ---------------------------------------------------------------
+  tls-engine:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ${{ matrix.os }}
+    name: S7 TLS engine (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install OpenSSL
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y libssl-dev
+          else
+            brew install openssl@3
+          fi
+
+      - name: Build and run the TLS engine tests
+        working-directory: ctest
+        env:
+          PKG_CONFIG_PATH: /opt/homebrew/opt/openssl@3/lib/pkgconfig:/usr/local/opt/openssl@3/lib/pkgconfig
+        run: make tls
+
+  # ---------------------------------------------------------------
+  # S7 preflight — Linux: are the system TLS/zlib dev packages there?
+  #      The Linux engine does not exist yet; this checks its premise.
+  # ---------------------------------------------------------------
+  linux-preflight:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    name: S7 preflight Linux (system OpenSSL + zlib)
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install declared SystemRequirements
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev zlib1g-dev
+
+      - name: Versions and default trust paths
+        run: |
+          openssl version -a
+          pkg-config --modversion openssl libssl libcrypto zlib
+          echo "OpenSSL default verify paths:"
+          openssl version -d
+
+      - name: Compile-and-link probe against system OpenSSL and zlib
+        run: |
+          cat > preflight.c <<'EOF'
+          #include <openssl/ssl.h>
+          #include <openssl/x509v3.h>
+          #include <zlib.h>
+          #include <stdio.h>
+          int main(void) {
+              printf("OpenSSL headers : %s\n", OPENSSL_VERSION_TEXT);
+              printf("OpenSSL runtime : %s\n", OpenSSL_version(OPENSSL_VERSION));
+              printf("zlib            : %s\n", zlibVersion());
+              SSL_CTX *c = SSL_CTX_new(TLS_client_method());
+              if (!c) { printf("SSL_CTX_new FAILED\n"); return 1; }
+              /* design 13.5: hostname verification must use the library, never a hand-rolled compare */
+              SSL *s = SSL_new(c);
+              int ok = SSL_set1_host(s, "example.com");
+              printf("SSL_set1_host   : %s\n", ok ? "available" : "FAILED");
+              /* design 21.1: gzip auto-detection via inflateInit2(15+32) */
+              z_stream z; memset(&z, 0, sizeof z);
+              printf("inflateInit2    : %s\n", inflateInit2(&z, 15 + 32) == Z_OK ? "ok (gzip auto-detect)" : "FAILED");
+              inflateEnd(&z); SSL_free(s); SSL_CTX_free(c);
+              return 0;
+          }
+          EOF
+          sed -i '1i #include <string.h>' preflight.c
+          cc -O1 -Wall -o preflight preflight.c $(pkg-config --cflags --libs openssl zlib)
+          ./preflight
+
+  # The parts of the C core that need a resolver or a peer, kept OUT of
+  # c-core.yaml so that suite stays deterministic and offline.
+  net-online:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ${{ matrix.os }}
+    name: C core, network-dependent (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run the suite with the DNS assertions enabled
+        timeout-minutes: 5
+        working-directory: ctest
+        env:
+          ZU_TEST_DNS: "1"
+        run: make run
+
+  # The §63.2 vertical slice, from R. Network-dependent, so it is here rather
+  # than in R-CMD-check.yaml, which must stay deterministic — the same split
+  # as c-core.yaml vs the net-online job above.
+  slice-r:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ${{ matrix.os }}
+    name: 63.2 slice from R (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install OpenSSL
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y libssl-dev
+          else
+            brew install openssl@3
+          fi
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::testthat, any::curl
+
+      - name: Install and run the slice
+        timeout-minutes: 10
+        env:
+          ZU_TEST_NETWORK: "1"
+          NOT_CRAN: "true"
+          PKG_CONFIG_PATH: /opt/homebrew/opt/openssl@3/lib/pkgconfig:/usr/local/opt/openssl@3/lib/pkgconfig
+        run: |
+          R CMD INSTALL .
+          Rscript -e 'library(testthat); library(zuhttp);
+            r <- test_dir("tests/testthat", reporter="summary", stop_on_failure=TRUE)'
+
+  # The same slice at the C level, without R in the picture at all (§11).
+  slice-c:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ${{ matrix.os }}
+    name: 63.2 slice in C (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install OpenSSL
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y libssl-dev
+          else
+            brew install openssl@3
+          fi
+      - name: Build and run
+        timeout-minutes: 10
+        working-directory: ctest
+        env:
+          PKG_CONFIG_PATH: /opt/homebrew/opt/openssl@3/lib/pkgconfig:/usr/local/opt/openssl@3/lib/pkgconfig
+        run: make engine
+
+  # S9 — the macOS system stack: Secure Transport engine + SecTrust trust.
+  # Needs no OpenSSL at all, which is the point (§2, R-13).
+  slice-sectransport:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: macos-latest
+    name: S9 macOS system TLS (Secure Transport + SecTrust)
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build and run the slice on the system stack
+        timeout-minutes: 10
+        working-directory: ctest
+        run: make engine-st
+
+      # D-32 / R-12: HTTPS after fork() must raise a named condition, never
+      # take the worker down. S0 measured the unmitigated case as SIGSEGV, so
+      # this is a regression test against a crash and must run on macOS.
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::testthat
+
+      # The assertions live in tests/testthat/test-fork.R, not inline here.
+      # Two reasons: this repo requires every CI R check to run FROM A FILE
+      # (an `Rscript -e` with a multi-line argument dies on Windows before it
+      # executes anything, which cost five rounds in S8), and a check that
+      # only exists in a workflow is invisible to anyone running the suite
+      # locally. The file skips itself unless it is on macOS, on the Secure
+      # Transport backend, and online — so it is inert everywhere else.
+      - name: Install and check the fork guard (R-12)
+        timeout-minutes: 10
+        env:
+          NOT_CRAN: "true"
+          ZU_TEST_NETWORK: "1"
+        run: |
+          R CMD INSTALL .
+          Rscript tools/ci-fork-guard.R
+
+  # S8 — Windows on Schannel. This is the only place it can be built or run:
+  # there is no Windows machine in the loop, so CI is the compiler.
+  slice-schannel:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: windows-latest
+    name: S8 Windows system TLS (Schannel)
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
+      # Compile the backend on its own first. A syntax or type error here is
+      # far easier to read than the same error inside R CMD INSTALL.
+      - name: Compile the Schannel backend standalone
+        timeout-minutes: 5
+        run: |
+          CC=$(R CMD config CC)
+          echo "compiler: $CC"
+          $CC --version | head -1
+          $CC -std=c99 -Wall -Wextra -c -Isrc -Isrc/vendor/picohttpparser \
+              -o /tmp/sch.o src/zu_tls_schannel.c
+
+      # Run the slice in C BEFORE involving R. The previous attempt segfaulted
+      # inside Rscript, which reports exit 139 and nothing else; a crash here
+      # names the binary and the step, and the suite prints each case as it
+      # goes so the last line before a crash identifies it.
+      - name: Run the slice in C on Schannel
+        timeout-minutes: 10
+        working-directory: ctest
+        env:
+          ZU_TEST_TRACE: "1"
+        run: make engine-sch CC="$(R CMD config CC)"
+
+      # Added while diagnosing, kept because it earns its place: the package is
+      # built at -O2 -std=gnu2x while ctest uses -O1 -std=c99, and a backend
+      # that only works at one of those is a backend with undefined behaviour
+      # in it.
+      - name: Run the slice in C with R's compiler flags
+        timeout-minutes: 10
+        working-directory: ctest
+        env:
+          ZU_TEST_TRACE: "1"
+        run: |
+          make clean
+          make engine-sch CC="$(R CMD config CC)" \
+               BASE="-std=gnu2x -O2 -Wall -mfpmath=sse -msse2 -mstackrealign -I../src -I../src/vendor/picohttpparser -I../src/vendor/uriparser -I."
+          echo "exit=$?"
+
+      - name: Install
+        timeout-minutes: 10
+        run: R CMD INSTALL .
+
+      # Split into one step per operation. The previous attempt segfaulted with
+      # ZERO output — even a stderr write before library() never appeared — so
+      # progress printing inside one Rscript cannot be trusted here. Step
+      # boundaries are reported by the runner itself and cannot be lost.
+      - name: R1 load the package
+        timeout-minutes: 3
+        run: Rscript --vanilla -e 'library(zuhttp); cat("loaded\n")'
+
+      - name: R2 backend identity
+        timeout-minutes: 3
+        run: Rscript --vanilla -e 'library(zuhttp); cat("backend:", zu_tls_backend(), "\n"); stopifnot(identical(zu_tls_backend(), "schannel"))'
+
+      # Every R check below runs from a FILE, never from a multi-line
+      # `Rscript -e`. On this runner a -e argument containing newlines
+      # segfaults before any of the script executes, which is why three
+      # earlier steps "crashed" with no output while the identical code on one
+      # line succeeded four times in a row. That was an artefact of how I
+      # wrote the step, not a defect in the package.
+      - name: R3 the slice from R, run from a file
+        timeout-minutes: 10
+        run: |
+          cat > check.R <<'RS'
+          library(zuhttp)
+          stopifnot(identical(zu_tls_backend(), "schannel"))
+
+          r <- zu_get("https://example.com")
+          cat("status", zu_resp_status(r), "tls", r$tls_version,
+              "bytes", length(zu_resp_raw(r)), "\n")
+          stopifnot(zu_resp_status(r) == 200L)
+          stopifnot(grepl("Example Domain", zu_resp_text(r), fixed = TRUE))
+          stopifnot(identical(r$tls_version, "TLSv1.2"))
+
+          # The whole point of D-5: Windows has trust anchors again.
+          e <- tryCatch(zu_get("https://expired.badssl.com/"),
+                        zu_tls_error = function(e) e)
+          cat("expired ->", class(e)[1], "|", conditionMessage(e), "\n")
+          stopifnot(inherits(e, "zu_tls_certificate_error"))
+
+          e2 <- tryCatch(zu_get("https://wrong.host.badssl.com/"),
+                         zu_tls_error = function(e) e)
+          cat("wrong host ->", class(e2)[1], "\n")
+          stopifnot(inherits(e2, "zu_tls_hostname_error"))
+
+          cat("S8: Windows HTTPS works, and bad certificates are rejected\n")
+          RS
+          Rscript --vanilla check.R
+

@@ -1,6 +1,6 @@
 /*
  * zuhttp — Stage S0: macOS TLS feasibility spike
- * See roadmap.md (S0) and zuhttp-design.md §13.2, Appendix B R-1.
+ * See .agents/roadmap.md (S0) and .agents/zuhttp-design.md §13.2, Appendix B R-1.
  *
  * Question this program answers:
  *

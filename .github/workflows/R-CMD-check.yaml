@@ -1,0 +1,126 @@
+# Workflow derived from https://github.com/r-lib/actions/tree/v2/examples
+# Need help debugging build failures? Start at https://github.com/r-lib/actions#where-to-find-help
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+
+name: R-CMD-check.yaml
+
+permissions: read-all
+
+# Superseded runs are cancelled: with several pushes in a row the only
+# answer that matters is the newest one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# A push to `develop` with PR #1 open fires both `push` and `pull_request`,
+# which ran every job twice and saturated the queue. Same-repo PRs are already
+# covered by the push run, so skip them; PRs from a fork still run, because
+# those have no push event here.
+
+jobs:
+  R-CMD-check:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ${{ matrix.config.os }}
+
+    name: ${{ matrix.config.os }} (${{ matrix.config.r }})
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - {os: macos-latest,   r: 'release'}
+          - {os: windows-latest, r: 'release'}
+          - {os: ubuntu-latest,   r: 'devel', http-user-agent: 'release'}
+          - {os: ubuntu-latest,   r: 'release'}
+          - {os: ubuntu-latest,   r: 'oldrel-1'}
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: yes
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: r-lib/actions/setup-pandoc@v2
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: ${{ matrix.config.r }}
+          http-user-agent: ${{ matrix.config.http-user-agent }}
+
+      # git cannot represent the executable bit in a Windows working tree, so
+      # R CMD build reports "did not have execute permissions: corrected" for
+      # configure and cleanup on every Windows run. It is harmless — R fixes it
+      # itself, and the tarball CRAN builds on Linux has the right bits — but it
+      # is noise competing with real warnings. This may not silence it: R's
+      # check uses file.access(mode = 1), whose behaviour on Windows is
+      # documented as unreliable. If the warning persists, it is intrinsic to
+      # building a source package on Windows and should simply be ignored.
+      - name: Restore executable bits (Windows checkout)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: chmod +x configure configure.win cleanup
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::rcmdcheck
+          needs: check
+
+      - uses: r-lib/actions/check-r-package@v2
+        with:
+          upload-snapshots: true
+          build_args: 'c("--no-manual","--compact-vignettes=gs+qpdf")'
+
+  # A fresh CI checkout has no stray object files, so it cannot see the failure
+  # mode this guards: `R CMD INSTALL .` compiles src/ in place, and
+  # `R CMD build` drops src/*.o but NOT objects in subdirectories, so the
+  # vendored .o files end up in the tarball and --as-cran reports "Object
+  # files/libraries should not be included in a source package".
+  #
+  # This reproduces the maintainer's sequence deliberately: install first, then
+  # build, then assert the tarball is clean.
+  source-package-hygiene:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    name: Source package hygiene (--as-cran)
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          needs: check
+
+      - name: Install in place, so objects are left in src/
+        run: R CMD INSTALL .
+
+      - name: Build and assert no compiled artefacts ship
+        run: |
+          stray=$(find src -name '*.o' | wc -l)
+          echo "stray objects on disk after INSTALL: $stray"
+          if [ "$stray" -eq 0 ]; then
+            echo "::error::the guard is vacuous — INSTALL left no objects to catch"
+            exit 1
+          fi
+          R CMD build .
+          shipped=$(tar tzf zuhttp_*.tar.gz | grep -cE '\.(o|so|dll|a)$' || true)
+          echo "compiled artefacts inside the tarball: $shipped"
+          if [ "$shipped" -ne 0 ]; then
+            echo "::error::compiled artefacts are in the source tarball; see .Rbuildignore"
+            tar tzf zuhttp_*.tar.gz | grep -E '\.(o|so|dll|a)$'
+            exit 1
+          fi
+
+      - name: R CMD check --as-cran
+        run: |
+          R CMD check --as-cran --no-manual zuhttp_*.tar.gz || true
+          # "New submission" and the dev version string are expected; anything
+          # else is not.
+          if grep -E '^(WARNING|ERROR)' zuhttp.Rcheck/00check.log; then exit 1; fi
+          grep -c 'NOTE' zuhttp.Rcheck/00check.log || true

@@ -1,0 +1,138 @@
+# Standalone tests for the zuhttp C core (design §50.1, roadmap S2).
+#
+# These link no R headers, so a failure here means the core itself is broken
+# rather than the R packaging. They run on all three target platforms because
+# the core contains the portability layer (zu_platform.h) and the monotonic
+# clock shims (zu_time.c), which are exactly the code most likely to differ.
+#
+# Windows compiles with the toolchain R itself uses (`R CMD config CC`), so a
+# green run here means the core builds under Rtools, not merely under some gcc.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  workflow_dispatch:
+
+name: c-core.yaml
+
+permissions: read-all
+
+# Superseded runs are cancelled: with several pushes in a row the only
+# answer that matters is the newest one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# A push to `develop` with PR #1 open fires both `push` and `pull_request`,
+# which ran every job twice and saturated the queue. Same-repo PRs are already
+# covered by the push run, so skip them; PRs from a fork still run, because
+# those have no push event here.
+
+jobs:
+  ctest:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ${{ matrix.os }}
+    name: C core (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+
+      # Windows needs Rtools for the compiler R builds packages with.
+      - uses: r-lib/actions/setup-r@v2
+        if: runner.os == 'Windows'
+        with:
+          r-version: release
+
+      # This class has bitten twice and the second instance did not fail to
+      # build — it compiled, passed the tests, and hung. See the script.
+      - name: Feature-test macros present where POSIX headers are used
+        if: runner.os == 'Linux'
+        run: ./tools/check-feature-macros
+
+      # The two OBJECTS lists drifted for two stages and nothing noticed: a
+      # maintainer on macOS or Linux never compiles the Windows one, so the
+      # package simply failed to link there. Cheap to check, and the failure
+      # it prevents is "does not build on a supported platform".
+      - name: OBJECTS lists agree between Makevars.in and Makevars.win.in
+        if: runner.os == 'Linux'
+        run: ./tools/check-objects-sync
+
+      - name: Compiler identity
+        working-directory: ctest
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            echo "using the R toolchain: $(R CMD config CC)"
+            $(R CMD config CC) --version | head -2
+          else
+            ${CC:-cc} --version | head -2
+          fi
+
+      # -Werror with -Wconversion/-Wsign-conversion/-Wshadow/-Wvla.
+      # Design §44: warnings are errors in project-owned code.
+      #
+      # timeout-minutes is deliberate. A test that blocks used to sit for the
+      # job's full default budget while reporting nothing, which is how a DNS
+      # lookup inside the "deterministic and offline" suite went unnoticed
+      # across several commits. The suite runs in well under a minute; if it
+      # has not finished in five, it is hung and the log should say so.
+      - name: Build and run (warnings as errors)
+        timeout-minutes: 5
+        working-directory: ctest
+        env:
+          ZU_TEST_TRACE: "1"     # so a hang names the exact case, not just the suite
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            make strict CC="$(R CMD config CC)"
+          else
+            make strict
+          fi
+
+      - name: ASan + UBSan
+        if: runner.os != 'Windows'
+        timeout-minutes: 10
+        working-directory: ctest
+        env:
+          ZU_TEST_TRACE: "1"
+        run: make asan
+
+      # zuhttp vendors only part of uriparser (design §8.2). Calling into an
+      # excluded module is otherwise a bare "undefined symbol" at link time;
+      # this says what actually went wrong. The excluded set is a security
+      # argument — six of eight historical CVEs live there — so widening it
+      # is a decision, not a build fix.
+      - name: No calls into non-vendored uriparser modules
+        if: runner.os == 'Linux'
+        run: |
+          if grep -rnE 'uriNormalizeSyntax|uriMakeOwner|uriComposeQuery|uriEscape|uriUnescape|uriEqualsUri|uriRemoveBaseUri|uriUriStringToFilename|uriFilenameToUriString|uriDissectQuery' \
+                 src --include='zu_*.c' --include='zu_*.h'; then
+            echo "::error::the above call a uriparser module zuhttp does not vendor (src/vendor/uriparser/VENDOR)"
+            exit 1
+          fi
+          echo "ok: no calls into excluded uriparser modules"
+
+  # A leak or a wild write here is a release blocker (§45), so run the same
+  # suite under valgrind where it is cheap to do so.
+  valgrind:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    name: C core (valgrind)
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install valgrind
+        run: sudo apt-get update && sudo apt-get install -y valgrind
+      - name: Run under valgrind
+        timeout-minutes: 20
+        working-directory: ctest
+        env:
+          ZU_TEST_TRACE: "1"
+        run: |
+          make zu_ctest
+          valgrind --error-exitcode=1 --leak-check=full --show-leak-kinds=all \
+                   --errors-for-leak-kinds=definite,indirect ./zu_ctest

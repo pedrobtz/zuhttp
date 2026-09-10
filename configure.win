@@ -1,0 +1,62 @@
+#!/bin/sh
+# Windows: Schannel + the Windows certificate store (§13.4, D-5).
+#
+# Not a preference. The §63.2 slice measured OpenSSL on Windows building and
+# linking cleanly under Rtools and then failing to verify ANY certificate,
+# because OpenSSL looks for a CA bundle at a compiled-in path that does not
+# exist there and never consults the Windows certificate store. The
+# alternatives are shipping a certificate bundle, which §2 rejects, or reading
+# the Windows store by hand and feeding it to OpenSSL.
+#
+# Scope is TLS 1.2 (SCHANNEL_CRED). TLS 1.3 needs SCH_CREDENTIALS, which
+# Rtools' mingw-w64 headers do not declare — risk R-3, spike S1.
+set -eu
+
+: "${R_HOME:=$(R RHOME)}"
+CC=$("${R_HOME}/bin/R" CMD config CC)
+CFLAGS=$("${R_HOME}/bin/R" CMD config CFLAGS)
+
+TLS_OBJ="zu_tls_schannel.o"
+SSL_CFLAGS=""
+SSL_LIBS="-lsecur32 -lcrypt32 -lws2_32"
+
+# Prove the SSPI and CryptoAPI entry points link before writing Makevars, the
+# same way ./configure proves OpenSSL does. S1 confirmed they do under Rtools;
+# this catches a future toolchain where they do not.
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+cat > "$tmp/t.c" <<'CEOF'
+#define SECURITY_WIN32
+#include <windows.h>
+#include <wincrypt.h>
+#include <schannel.h>
+#include <sspi.h>
+int main(void) {
+    SCHANNEL_CRED sc;
+    HCERTSTORE st;
+    memset(&sc, 0, sizeof sc);
+    sc.dwVersion = SCHANNEL_CRED_VERSION;
+    sc.grbitEnabledProtocols = SP_PROT_TLS1_2_CLIENT;
+    sc.dwFlags = SCH_CRED_MANUAL_CRED_VALIDATION | SCH_USE_STRONG_CRYPTO;
+    if (InitSecurityInterfaceA() == 0) return 1;
+    st = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, 0, NULL);
+    if (!st) return 1;
+    CertCloseStore(st, 0);
+    (void)&CertVerifyCertificateChainPolicy;
+    (void)UNISP_NAME_A;
+    return 0;
+}
+CEOF
+# shellcheck disable=SC2086
+if ! $CC $CFLAGS -o "$tmp/t.exe" "$tmp/t.c" $SSL_LIBS >/dev/null 2>&1; then
+    echo "configure.win: Schannel/CryptoAPI did not link with this toolchain." >&2
+    echo "configure.win: CC=$CC LIBS=$SSL_LIBS" >&2
+    exit 1
+fi
+echo "configure.win: TLS backend = Schannel + Windows certificate store"
+echo "configure.win: NOTE Windows ships TLS 1.2; TLS 1.3 needs SCH_CREDENTIALS (R-3)"
+
+sed -e "s|@SSL_CFLAGS@|$SSL_CFLAGS|g" \
+    -e "s|@SSL_LIBS@|$SSL_LIBS|g" \
+    -e "s|@TLS_OBJ@|$TLS_OBJ|g" \
+    src/Makevars.win.in > src/Makevars.win
+echo "configure.win: wrote src/Makevars.win (TLS object: $TLS_OBJ)"
