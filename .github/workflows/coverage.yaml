@@ -1,0 +1,42 @@
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+
+name: coverage.yaml
+
+# The reusable workflow commits .github/badges/coverage.svg back to the branch
+# on a push, so the caller has to grant write. It guards that step with
+# `if: github.event_name == 'push'` itself, so a pull request gets the job
+# summary and commits nothing.
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Same-repo pull requests are already covered by the push run; without this
+  # a push to `develop` with a PR open fires both and two runs race to commit
+  # the same badge. Forked PRs still run, because those produce no push event
+  # here (and cannot write the badge anyway).
+  #
+  # WHAT THIS NUMBER MEANS, because it is lower than the suite deserves and
+  # the gap is structural rather than a gap in testing:
+  #
+  #   covr instruments the package and runs the R tests. It therefore sees
+  #   src/ compiled into the R package, but NOT the two suites that actually
+  #   exercise the C core — ctest's 1500 offline checks against a mock stream,
+  #   and the nine fuzz targets. Measured locally: R/ 87.6%, src/ 54.2%,
+  #   overall 59.7%, and src/ carries 6005 of the 6958 expressions, so the C
+  #   figure sets the headline almost by itself.
+  #
+  #   Read it as "how much of the C core the R suite reaches", which is a real
+  #   question, and not as this package's test coverage. c-core.yaml and
+  #   fuzz.yaml are where the rest lives.
+  coverage:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    uses: pedrobtz/r-actions/.github/workflows/coverage.yml@v1
+    permissions:
+      contents: write
