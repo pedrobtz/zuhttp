@@ -4,7 +4,7 @@
 [![R-CMD-check](https://github.com/pedrobtz/zuhttp/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pedrobtz/zuhttp/actions/workflows/R-CMD-check.yaml)
 [![c-core](https://github.com/pedrobtz/zuhttp/actions/workflows/c-core.yaml/badge.svg)](https://github.com/pedrobtz/zuhttp/actions/workflows/c-core.yaml)
 [![fuzz](https://github.com/pedrobtz/zuhttp/actions/workflows/fuzz.yaml/badge.svg)](https://github.com/pedrobtz/zuhttp/actions/workflows/fuzz.yaml)
-![coverage](https://raw.githubusercontent.com/pedrobtz/zuhttp/develop/.github/badges/coverage.svg)
+![coverage](https://raw.githubusercontent.com/pedrobtz/zuhttp/main/.github/badges/coverage.svg)
 <!-- badges: end -->
 
 A minimal HTTP/1.1 client for R that uses **each platform's own TLS stack and
