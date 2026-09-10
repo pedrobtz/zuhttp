@@ -28,13 +28,26 @@ jobs:
   #   covr instruments the package and runs the R tests. It therefore sees
   #   src/ compiled into the R package, but NOT the two suites that actually
   #   exercise the C core — ctest's 1500 offline checks against a mock stream,
-  #   and the nine fuzz targets. Measured locally: R/ 87.6%, src/ 54.2%,
-  #   overall 59.7%, and src/ carries 6005 of the 6958 expressions, so the C
-  #   figure sets the headline almost by itself.
+  #   and the nine fuzz targets. src/ carries about 6000 of roughly 7000
+  #   expressions, so the C figure sets the headline almost by itself.
   #
   #   Read it as "how much of the C core the R suite reaches", which is a real
   #   question, and not as this package's test coverage. c-core.yaml and
   #   fuzz.yaml are where the rest lives.
+  #
+  #   TWO THINGS MOVE IT, so compare like with like before reading a change as
+  #   progress or regression:
+  #
+  #   * The backend. This job runs on Linux and so compiles zu_tls_openssl.c;
+  #     a macOS run compiles zu_tls_sectransport.c instead. Same suite,
+  #     different denominator — 54.2% here against 46.3% measured on macOS.
+  #   * NOT_CRAN. covr never sets it (nothing in the covr namespace mentions
+  #     it), so skip_on_cran() fires and every loopback test — proxy,
+  #     download, and the origin-backed trace and redact arms — is skipped.
+  #     On macOS that cost 13.4 points, 46.3% against 59.7%, almost all of it
+  #     in src/. The reusable workflow takes no inputs and a reusable workflow
+  #     does not inherit caller env, so this repo cannot set it: closing that
+  #     gap means an input, or an env block, in pedrobtz/r-actions.
   coverage:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     uses: pedrobtz/r-actions/.github/workflows/coverage.yml@v1
