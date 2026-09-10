@@ -158,10 +158,15 @@ test_that("revocation is off by default: a revoked certificate is accepted (§14
 
 test_that("zu_tls(revocation = TRUE) changes the outcome for a revoked host", {
   skip_unless_online()
+  # The PARENT class, not zu_tls_certificate_error: the subclass differs by
+  # backend and asserting one of them made this fail on Linux CI. Secure
+  # Transport reports a certificate error; OpenSSL aborts the handshake, since
+  # its CRL check fails before the chain is judged. What both must agree on is
+  # that the request does not succeed.
   expect_error(
     zu_get("https://revoked.badssl.com", timeout = 20,
            tls = zu_tls(revocation = TRUE)),
-    class = "zu_tls_certificate_error")
+    class = "zu_tls_error")
 })
 
 test_that("a revocation failure is ABOUT revocation (S9 criterion 4)", {

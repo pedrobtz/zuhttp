@@ -1,3 +1,17 @@
+/* zu_sink.c uses unistd.h for the temp-file path, so it needs the same
+ * feature-test preamble as zu_net.c and zu_time.c: -std=c99 defines
+ * __STRICT_ANSI__, which makes glibc hide POSIX declarations. tools/check-
+ * feature-macros enforces this, and the rule exists because the class has
+ * bitten twice — once silently, when zu_now_ms() returned 0 forever on Linux
+ * and no deadline expired. MUST precede every system header. */
+#if !defined(_WIN32)
+#  if defined(__APPLE__)
+#    define _DARWIN_C_SOURCE
+#  else
+#    define _POSIX_C_SOURCE 200112L
+#  endif
+#endif
+
 #include "zu_sink.h"
 #include "zu_alloc.h"
 #include "zu_fork.h"   /* zu_pid_current, for a temp name unique across processes */

@@ -350,6 +350,16 @@ The reference implementation of the §13.1 engine/trust split. Hostname verifica
       which argument it went to: `ca_extra` and a public host still
       validates; `ca_file` and the same host is rejected. That is §14.3's
       claim stated as a test rather than as prose.
+- [ ] **`zu_tls(revocation = TRUE)` is unusable on this backend.** Found by
+      CI 2026-09-10, not by review: `zu_tls_openssl.c` sets
+      `X509_V_FLAG_CRL_CHECK | CRL_CHECK_ALL` and configures no CRL source,
+      and OpenSSL neither downloads CRLs nor performs OCSP — so the flag
+      fails *every* chain, valid ones included, with "certificate verify
+      failed". It fails closed rather than accepting a revoked certificate,
+      so it is not a security hole; it is a documented option that cannot do
+      what it says. The suite now skips the affected arms naming this
+      criterion, and `?zuhttp_tls` and the README say so. Fixing it means a
+      CRL source or OCSP, which is a design question §14.5 has not answered.
 - [ ] Pin match and mismatch both behave, and pinning does not bypass chain
       verification. **Reachable from R as of 2026-09-08** (`zu_tls(pins = )`),
       and asserted to never silently do nothing: a build either enforces the

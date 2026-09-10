@@ -74,7 +74,7 @@ the platform's TLS stack instead of shipping one.
 | No certificate pinning | macOS | Security.framework will not yield the SubjectPublicKeyInfo without hand-parsing DER. Pinning raises rather than silently comparing the wrong bytes. |
 | No additive custom CA | Windows | `ca_extra` is not yet implemented on Schannel. `ca_file` (replace) works everywhere. |
 | HTTPS in a forked child fails | macOS | The system trust evaluator does not survive `fork()`. Raises `zu_fork_error` instead of killing the worker. Use a `PSOCK` cluster or `future::plan("multisession")`. `?zuhttp_fork` |
-| Revocation off by default | all | No platform checks revocation by default; `zuhttp` documents that rather than implying otherwise. `zu_tls(revocation = TRUE)` opts in. |
+| Revocation off by default, and opting in is backend-dependent | all | No platform checks revocation by default. `zu_tls(revocation = TRUE)` opts in, but on OpenSSL it currently fails *every* chain (a CRL check with no CRL source), and on macOS it also rejects valid certificates from CAs that no longer answer revocation queries. `?zuhttp_tls` |
 | No parallel or async requests | all | One request at a time. Parallelism is the caller's, via a non-forking plan. |
 | Ctrl-C timing unverified | all | Cancellation works; the 200 ms bound is not yet measured on every front-end. |
 

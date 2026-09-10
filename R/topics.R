@@ -109,8 +109,22 @@ NULL
 #' @section Revocation:
 #' Off by default, on every platform, because none of them checks revocation
 #' by default and pretending otherwise would misrepresent what verification
-#' means here. `zu_tls(revocation = TRUE)` turns it on where the platform
-#' supports it.
+#' means here.
+#'
+#' `zu_tls(revocation = TRUE)` opts in, and what that buys you is
+#' backend-dependent in a way worth knowing before you rely on it:
+#'
+#' * **OpenSSL: do not use it yet.** The flag sets `X509_V_FLAG_CRL_CHECK`
+#'   with no CRL source configured, and OpenSSL neither downloads CRLs nor
+#'   performs OCSP on its own — so every chain fails to verify, including
+#'   valid ones. It fails closed rather than silently accepting a revoked
+#'   certificate, but it is not usable as a revocation check.
+#' * **macOS:** it works, in that revoked certificates are rejected — but so
+#'   are valid certificates from CAs that no longer answer revocation queries.
+#'   Let's Encrypt retired OCSP, so a large share of the web fails under it.
+#'
+#' Both are recorded rather than papered over, and both are why revocation is
+#' not merely off by default but is a setting to reach for deliberately.
 #'
 #' @seealso [zu_tls()] for the settings, [zu_tls_backend()] for what this
 #'   build linked, [zu_info()] for the whole configuration at once.
