@@ -423,7 +423,13 @@ Implements the S0-validated design: portable engine + `SecTrustEvaluateWithError
       rather than pretending.
 - [ ] **A CRAN-viable engine is identified and building** (R-13). Homebrew OpenSSL is not an answer; this is the stage's real risk, not the TLS code.
 - [ ] `SSL_VERIFY_PEER` set, with a test proving an invalid certificate aborts the handshake (F-3).
-- [ ] `zu_tls(revocation = TRUE)` works and is off by default (F-4).
+- [ ] `zu_tls(revocation = TRUE)` works and is off by default (F-4). **Half
+      closed 2026-09-10** (test-hardening A1): "off by default" is asserted
+      against `revoked.badssl.com`, and the flag demonstrably changes the
+      outcome. "Works" is not shown and cannot be shown against badssl.com on
+      this backend — a valid certificate from the same CA fails identically,
+      because Let's Encrypt no longer answers revocation queries. Needs a
+      locally generated revoked certificate, alongside the §50.5 matrix.
 
 ### S10 · Proxy and CONNECT — ✅ **COMPLETE 2026-09-08**
 
@@ -1085,9 +1091,27 @@ We use **4 of badssl.com's ~30 endpoints**. Each item below was probed live on
 observed behaviour and not predictions. All belong in `test-certs.R` alongside
 the §50.5 matrix, network-gated.
 
-- [ ] **A1. Revocation, both ways.** `revoked.badssl.com` is **accepted (200)**
+- [x] **A1. Revocation, both ways** — **partially closed 2026-09-10, and the
+      specification above was wrong.** `revoked.badssl.com` is accepted (200)
       under the default policy and raises `zu_tls_certificate_error` with
-      `zu_tls(revocation = TRUE)`.
+      `zu_tls(revocation = TRUE)`. Both are asserted in `test-certs.R`.
+
+      **"Two requests, two assertions" would have been a vacuous test.**
+      Measured on Secure Transport: a *valid* `badssl.com` certificate also
+      fails under `revocation = TRUE`, with the identical error as the revoked
+      one — both Let's Encrypt, both "certificates do not meet pinning
+      requirements". Let's Encrypt has retired OCSP, so a policy demanding a
+      positive revocation answer cannot get one and fails the chain closed.
+      The revoked host's failure is therefore not evidence that revocation is
+      detected, and a test asserting it would have passed whether or not the
+      feature worked.
+
+      A third arm takes a same-CA valid certificate as a control and asserts
+      the asymmetry only when that control passes; on this backend it does
+      not, so the arm `skip()`s naming S9 criterion 4. The gap reads as a gap.
+      Closing it needs a revoked certificate from a CA that still answers
+      revocation queries — a local one, as §50.5 already does for the rest of
+      the matrix.
 
       This is the highest-value item in the plan. §14.5's entire argument rests
       on S0's measurement that the platforms do **not** check revocation by
@@ -1455,25 +1479,47 @@ redaction. Record/replay ships too, which §59 had placed in Phase 3.
 
 ### Exit criteria
 
-- [ ] `?zu_resp_trace`'s example no longer reaches example.com. It runs
-      unguarded today, so every `R CMD check` — including a user's — depends on
-      a third party. The same class as the proxy tests fixed in `8d37cd7`.
-- [ ] `?zuhttp_fork` and `?zuhttp_tls` exist. Both are cited in *shipped
-      output* — the fork guard's error message, `configure`, and the Secure
-      Transport backend's TLS 1.3 refusal — and neither resolves. §26.4 calls
-      turning the fork segfault into a diagnosable error "the whole
-      mitigation", which is half-defeated when the pointer goes nowhere.
-- [ ] `?zu_get` no longer claims a failed request writes no file. It does: a
-      404 with `path` set commits the body and then raises, replacing whatever
-      was there. Introduced in `cb61dd9` and measured false the next day.
-- [ ] `README.md`, stating the §6.1 platform limitations and the §46.3
-      bus-factor risk. Nothing currently displays the coverage badge either.
-- [ ] `NEWS.md` with a first entry.
-- [ ] `DESCRIPTION` reads `Version: 0.1.0`.
-- [ ] **A1 from the test-hardening plan** — revocation asserted in both
-      directions. Not release scaffolding, and taken anyway: it is two
+- [x] `?zu_resp_trace`'s example no longer reaches example.com. **Done
+      2026-09-10**, `\dontrun{}` — a trace comes from the engine, so no mock
+      can stand in for it. It was the only unguarded one: seven other man
+      pages mention a URL while driving `zu_mock_transport()`.
+- [x] `?zuhttp_fork` and `?zuhttp_tls` exist. **Done 2026-09-10** in
+      `R/topics.R`, written as topics rather than folded into `?zu_client`
+      because a cross-reference has to resolve to the name it names. Both
+      carry the measured detail rather than a summary: fork-*after-use* and
+      the two distinct hazards; the per-backend TLS ceiling, pinning refusal,
+      `ca_file` vs `ca_extra`, and revocation.
+- [x] `?zu_get` no longer claims a failed request writes no file. **Done
+      2026-09-10.** Corrected in three places, because the distinction is
+      "failed transfer" against "failed request" and §27.1 only ever covered
+      the first: `?zu_get`'s example and `path` argument, `?zu_req_path`, and
+      §27.1 itself.
+- [x] `README.md`. **Done 2026-09-10**, with §6.1's "when curl is the better
+      choice" list intact and the seven known limitations as a table, each
+      named as a consequence of using the platform's TLS stack rather than as
+      an open defect. The §46.3 bus-factor risk is stated under Security.
+- [x] `NEWS.md` with a first entry. **Done 2026-09-10**, including what is
+      deliberately *not* in the release.
+- [x] `DESCRIPTION` reads `Version: 0.1.0`. **Done 2026-09-10.**
+- [x] **A1 from the test-hardening plan** — revocation asserted in both
+      directions. **Done 2026-09-10**, and it found that the plan's own
+      wording described a vacuous test; see A1 for what a control changed. Not release scaffolding, and taken anyway: it is two
       requests and two assertions, it guards a §14.5 security claim that has
       no guard at all, and it closes S9's fourth exit criterion.
+
+### Where the checks stand at the tag
+
+`R CMD check` on the built tarball: **Status: OK** — no errors, warnings or
+notes, with examples and tests running. `--as-cran` adds two NOTEs, both
+expected and neither a defect: "New submission", and the `#pragma` suppressing
+Secure Transport's ~44 deprecation warnings in `zu_tls_sectransport.c`. That
+pragma is D-4's deliberate choice — the file's own comment sets out why a NOTE
+beats the WARNING that either alternative produces — and R-15 tracks the
+underlying deprecation. Tarball 261 KB against S19's 2 MB ceiling, with no
+compiled artefacts in it.
+
+C core: 1500 checks, 0 failures, allocations balanced, clean under ASan and
+UBSan. R suite green offline, at `NOT_CRAN=true`, and with `ZU_TEST_NETWORK=1`.
 
 ### Limitations this release documents rather than fixes
 

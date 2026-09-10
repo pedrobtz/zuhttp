@@ -26,7 +26,10 @@ within a filesystem, and a temporary directory on another mount turns the
 commit into a copy that can itself fail halfway.
 
 An existing file at \code{path} is \strong{replaced}, and only at that final step —
-so a download that fails leaves whatever was already there untouched.
+so a download that fails leaves whatever was already there untouched. A
+non-2xx response is not a failed download, though: the server sent a body
+and it is written like any other, so a 404 page replaces the file and
+\code{zu_resp_check()} raises after the fact rather than instead of it.
 Setting both this and \code{\link[=zu_req_callback]{zu_req_callback()}} is an error, raised when the
 request is performed: a response body has one destination.
 }

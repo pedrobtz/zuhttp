@@ -38,8 +38,13 @@ been written down.
 }
 
 \examples{
+# A trace comes from the engine, so there is nothing a mock can stand in
+# for here — hence \dontrun{}. An example that reaches a third party is
+# one that fails in every offline R CMD check, the user's included.
+\dontrun{
 r <- zu_get("https://example.com", trace = TRUE)
 zu_resp_trace(r)
+}
 }
 \seealso{
 \code{\link[=zu_resp_timings]{zu_resp_timings()}} for the summary, \code{\link[=zu_verbose]{zu_verbose()}} for a printed

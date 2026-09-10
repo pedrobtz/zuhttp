@@ -139,3 +139,57 @@ test_that("verify = FALSE warns, every time, and names what it turns off", {
                    "certificate AND hostname")
   })
 })
+
+# --- §14.5 revocation (test-hardening A1) ---------------------------------
+#
+# §14.5's whole argument rests on one measured fact: the platforms do NOT
+# check revocation by default. The section exists because an earlier draft
+# claimed they did and that claim was false — so of everything in this file,
+# this is the claim with the most riding on a test and, until now, the least.
+
+test_that("revocation is off by default: a revoked certificate is accepted (§14.5)", {
+  skip_unless_online()
+  # Not a bug and not an endorsement — it is what the platform does, and what
+  # §14.5 documents. If a future macOS or OpenSSL started checking by default
+  # this fails, which is exactly when the section needs rewriting.
+  r <- zu_get("https://revoked.badssl.com", timeout = 20)
+  expect_identical(zu_resp_status(r), 200L)
+})
+
+test_that("zu_tls(revocation = TRUE) changes the outcome for a revoked host", {
+  skip_unless_online()
+  expect_error(
+    zu_get("https://revoked.badssl.com", timeout = 20,
+           tls = zu_tls(revocation = TRUE)),
+    class = "zu_tls_certificate_error")
+})
+
+test_that("a revocation failure is ABOUT revocation (S9 criterion 4)", {
+  skip_unless_online()
+  # The arm above is not evidence that revocation checking works, and writing
+  # it without this one would have been the vacuous pass §50 keeps warning
+  # about. Measured 2026-09-10 on Secure Transport: a VALID badssl.com
+  # certificate fails under revocation = TRUE with the identical error as the
+  # revoked one — both Let's Encrypt, both "certificates do not meet pinning
+  # requirements". Let's Encrypt retired OCSP, so a policy that demands a
+  # positive revocation answer cannot get one and fails closed on the whole
+  # chain. The revoked host's failure therefore proves nothing about
+  # revocation on that backend.
+  #
+  # So the control comes first, and decides whether there is a test here at
+  # all: a same-CA valid certificate must PASS before the revoked one failing
+  # means anything.
+  tls <- zu_tls(revocation = TRUE)
+  control <- tryCatch(zu_get("https://badssl.com", timeout = 20, tls = tls),
+                      error = function(e) e)
+  if (inherits(control, "condition"))
+    skip(paste0("no usable control: a valid badssl.com certificate also fails ",
+                "under revocation = TRUE on this backend (", zu_tls_backend(),
+                "), so the revoked host proves nothing. S9 criterion 4 stays ",
+                "open until a CA that still answers revocation queries is used."))
+
+  expect_identical(zu_resp_status(control), 200L)
+  expect_error(
+    zu_get("https://revoked.badssl.com", timeout = 20, tls = tls),
+    class = "zu_tls_certificate_error")
+})

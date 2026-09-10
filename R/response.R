@@ -201,8 +201,13 @@ zu_resp_timings <- function(resp) {
 #'   narration.
 #' @export
 #' @examples
+#' # A trace comes from the engine, so there is nothing a mock can stand in
+#' # for here — hence \dontrun{}. An example that reaches a third party is
+#' # one that fails in every offline R CMD check, the user's included.
+#' \dontrun{
 #' r <- zu_get("https://example.com", trace = TRUE)
 #' zu_resp_trace(r)
+#' }
 zu_resp_trace <- function(resp) {
   tr <- resp$trace
   if (is.null(tr)) return(NULL)

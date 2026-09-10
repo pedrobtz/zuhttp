@@ -1690,6 +1690,15 @@ Large responses must not require whole-body allocation.
 
 `max_body_bytes` (§40) applies to every sink including `file` — an unbounded download to disk is still a denial-of-service vector, just against a different resource. The file sink writes to a temporary file in the same directory as the destination and renames on success, so an interrupted or failed download never leaves a truncated file at the target path.
 
+**A non-2xx response still writes.** The sink is committed by the engine, which
+sees a completed HTTP transaction; `check` is an R-level policy that runs after
+it (§31.2). So `zu_get(url, path = f, check = TRUE)` against a 404 raises *and*
+leaves the error page at `f`. That is a deliberate consequence of where the two
+live and not an oversight, but it is the one part of §27.1 that surprises
+people, because "failed request" and "failed transfer" are not the same event.
+A caller for whom the destination matters passes `check = FALSE` and renames on
+success.
+
 **An existing destination is replaced, at the rename and not before** (D-53). That is the useful half of the same guarantee: a download that fails leaves whatever was already at `path` untouched, because nothing touches `path` until the body has arrived whole. `rename()` refuses to replace on Windows, so the target is removed immediately before it; the window that opens is accepted, since the caller asked for the file to be replaced and the alternative (`MoveFileEx`) is not reachable through C89 stdio.
 
 **One sink per response.** `path` and `callback` are mutually exclusive, refused where the request is resolved so that both API levels and either ordering give the same answer. They were not: the C layer picked the callback when both were set and discarded the path silently, so a caller who asked for both got no file and no diagnostic.

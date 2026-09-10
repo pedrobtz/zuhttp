@@ -177,8 +177,12 @@ client's; \code{NULL} inherits it (§31.9).}
 memory (§27). The download is written beside the destination and renamed
 on success, so a failed or interrupted transfer never leaves a truncated
 file at \code{path}. An existing file at \code{path} is \strong{replaced}, and only once
-the body has arrived whole. Mutually exclusive with \code{callback}: a
-response body has one destination. Note the asymmetry with \code{file}, which
+the body has arrived whole. Note what that does and does not cover: a
+\emph{transfer} that fails leaves the old file untouched, but a request that
+completes with a non-2xx status is a successful transfer of an error
+page, so a 404 body is written and does replace it — \code{check} raises
+afterwards, too late to prevent that. Mutually exclusive with
+\code{callback}: a response body has one destination. Note the asymmetry with \code{file}, which
 is a request \emph{body} source (§31.6): \code{path} is where the response goes,
 \code{file} is where a
 request body comes from.}
@@ -229,9 +233,12 @@ r <- zu_get("https://example.com/big.bin", path = "big.bin")
 zu_resp_path(r)                       # "big.bin"
 zu_resp_header(r, "content-type")     # the response is still a response
 
-# A failed request leaves nothing behind, so this raises rather than
-# writing a file containing the 404 page.
-zu_get("https://example.com/missing", path = "out.bin", check = TRUE)
+# A non-2xx body is still a body: this raises AND leaves the 404 page at
+# out.bin, replacing whatever was there. §27.1's atomicity covers a failed
+# transfer, and a 404 is a successful transfer of an error page. Check
+# first if the destination matters.
+r <- zu_get("https://example.com/missing", path = "out.bin", check = FALSE)
+if (zu_resp_ok(r)) file.rename("out.bin", "wanted.bin")
 }
 }
 \seealso{
