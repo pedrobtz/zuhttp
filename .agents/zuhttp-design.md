@@ -1875,6 +1875,8 @@ The synchronous `zu_perform()` remains the primary API and must never be impleme
 
 Whether asynchronous concurrency belongs in this package at all remains an open question (§62); a strong case exists for leaving it to a higher layer.
 
+**Not in v0.1.0** (roadmap, 2026-09-10). Deferred to v0.1.1 rather than cut, because the question above is unanswered: a first release that shipped a concurrency API would answer it by accident. `zu_perform()` stays the whole API meanwhile, and callers who need parallelism use a PSOCK cluster or `future::plan("multisession")` — never a forked plan, for the §26.4 reason.
+
 ## Part 6 — R API
 
 ### 31. Functional R API Design

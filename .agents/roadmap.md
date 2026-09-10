@@ -1415,6 +1415,79 @@ Cuts 6 and 7 are listed because they are real options, not because they are good
 
 ---
 
+## Release scope: v0.1.0 — decided 2026-09-10
+
+**A GitHub release, not a CRAN submission.** The distinction is the whole
+decision, and it follows from S9: R-13 — "a CRAN-viable engine is identified
+and building" — is still open, so a CRAN submission would commit the package
+to Secure Transport on macOS while §9.1 records that backend as deprecated by
+Apple and capped at TLS 1.2. Shipping on GitHub first puts the package in front
+of real users, which is what will actually establish how urgent R-13 is;
+submitting first would answer that question by making it irreversible.
+
+S19 is therefore deferred whole. `--as-cran` cleanliness stays a goal — the
+`source-package-hygiene` job already enforces part of it on every push — but it
+is not a gate on this tag.
+
+**What reframed the scope:** §57's MVP is complete and so is most of §58's
+Phase 2, so v0.1.0 is not short of features. What it lacks is release
+scaffolding and a handful of documentation defects, all of them small.
+
+### What ships
+
+Everything already built: the six verbs; redirects with the §19.1 rewrite
+table and §19.2 stripping; gzip/deflate under §21.4's limits; the full §24
+timeout model including total-across-chain; system-trust verification on all
+three backends; memory, file and callback sinks; the §26 connection pool;
+retry, middleware and hooks; the mock and cassette transports; §35.1 timings
+and the §35.3 event trace; `zu_info()`; §34 structured conditions; and §42
+redaction. Record/replay ships too, which §59 had placed in Phase 3.
+
+### What is deferred, and where to
+
+| Deferred | To | Why |
+|---|---|---|
+| §30 async / parallel requests | v0.1.1 | §62's open question 15 — whether concurrency belongs in this package at all — is unanswered, and D-29 commits any implementation to a `later` integration that deserves its own design pass. Additive, so deferring breaks nothing. |
+| R connection sinks (§27.5) | v0.1.1 | §58 item, never built. `path` and `callback` cover the workloads in scope. |
+| Client certificates | v0.1.1 | §58 item, never built. No user has asked. |
+| Brotli, zstd, Unix sockets, native system proxy, OpenTelemetry | unscheduled | §59, "add only if justified". None is. |
+| HTTP/2 | §60 | Requires its own design decision, not a release slot. |
+
+### Exit criteria
+
+- [ ] `?zu_resp_trace`'s example no longer reaches example.com. It runs
+      unguarded today, so every `R CMD check` — including a user's — depends on
+      a third party. The same class as the proxy tests fixed in `8d37cd7`.
+- [ ] `?zuhttp_fork` and `?zuhttp_tls` exist. Both are cited in *shipped
+      output* — the fork guard's error message, `configure`, and the Secure
+      Transport backend's TLS 1.3 refusal — and neither resolves. §26.4 calls
+      turning the fork segfault into a diagnosable error "the whole
+      mitigation", which is half-defeated when the pointer goes nowhere.
+- [ ] `?zu_get` no longer claims a failed request writes no file. It does: a
+      404 with `path` set commits the body and then raises, replacing whatever
+      was there. Introduced in `cb61dd9` and measured false the next day.
+- [ ] `README.md`, stating the §6.1 platform limitations and the §46.3
+      bus-factor risk. Nothing currently displays the coverage badge either.
+- [ ] `NEWS.md` with a first entry.
+- [ ] `DESCRIPTION` reads `Version: 0.1.0`.
+- [ ] **A1 from the test-hardening plan** — revocation asserted in both
+      directions. Not release scaffolding, and taken anyway: it is two
+      requests and two assertions, it guards a §14.5 security claim that has
+      no guard at all, and it closes S9's fourth exit criterion.
+
+### Limitations this release documents rather than fixes
+
+macOS tops out at TLS 1.2, refuses to pin, and raises `zu_fork_error` for
+HTTPS in a forked child (S9 partial). Windows is TLS 1.2 only and has no
+additive custom CA (S8 partial). Ctrl-C's 200 ms bound is unverified (S15).
+There are no parallel requests (§30). Revocation is off by default (§14.5).
+
+Each is a documented limit and not a defect, but they belong in the README
+rather than only in this file — a user's first encounter with any of them
+should be prose, not an error message.
+
+---
+
 ## What 1.0 means
 
 1.0 is the version at which other packages may depend on `zuhttp` without reservation. It requires **all** of:
@@ -1453,8 +1526,15 @@ That last item is the honest test of the whole project. `zuhttp` exists on the p
    **All 13 §31.16 workflows now pass**, and the whole R suite has exactly one
    `skip()` left: S12's verbose-logging egress, which needs §35 event hooks to
    have something to trace.
-10. **Next: Track E's unfinished stages** — S18's 24h fuzz soak, then S19
-    (CRAN packaging), S20 (documentation) and S21 (security review → 1.0).
+10. ~~**Next: Track E's unfinished stages.**~~ Superseded 2026-09-10 by the
+    v0.1.0 release scope above. S19 (CRAN packaging) is deferred whole with
+    the CRAN submission itself; S18's 24 h soak stays a pre-1.0 run, not a
+    pre-0.1.0 one. What v0.1.0 needs from S20 is the README and the two help
+    topics its own error messages already reference, not the whole stage.
+
+11. **Next: the seven v0.1.0 exit criteria.** Six are documentation or
+    scaffolding; the seventh (A1, revocation) is the only one that adds a
+    test, and it closes an S9 criterion on the way past.
 
    Still open and not blockers: the mermaid graph marks **S9** DONE with all
    four criteria unticked, and **S7** has no marker with 0 of 3. Rule 2 makes
