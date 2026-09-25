@@ -1,6 +1,8 @@
+> **Superseded 2026-09-25 by edition 2** — [`../roadmap.md`](../roadmap.md). Kept verbatim as the record of how 0.1.0 was built; only relative links were adjusted for the move. Its stages S0–S21 and U1–U6 map to work packages W1–W19 in the new roadmap's "Edition 1 stage map".
+
 # zuhttp Roadmap to 1.0
 
-**Companion to:** [zuhttp-design.md](zuhttp-design.md)
+**Companion to:** [zuhttp-design.md](zuhttp-design-v1.md)
 **Status:** Draft
 **Last updated:** 2026-09-25 (review merged with its amends; see "Amends before merge" at the end) · **v0.1.0 shipped 2026-09-10 as a GitHub release; no `v0.1.0` tag exists yet. Complete: S0–S5, S10–S14, S16, S17, U1, U4–U6. Partial: S6, S7, S8, S9, S15, S18, S20. Not started: S19 (deferred), S21, U2 (except A1), U3.**
 **Total estimate:** 41–48 person-weeks (§64 of the design doc, plus spikes)
@@ -167,7 +169,7 @@ These gate the architecture. They are days of work and must happen **first**. Bu
 **Retired:** Appendix B R-1, the project's highest risk.
 **Answered:** Decision D-4 — **Accepted**.
 **Actual effort:** under 1 day (estimated 1 week).
-**Artifacts:** [`spike/macos-tls/`](../spike/macos-tls/) — [FINDINGS.md](../spike/macos-tls/FINDINGS.md), 16/16 assertions via `make test`.
+**Artifacts:** [`spike/macos-tls/`](../../spike/macos-tls/) — [FINDINGS.md](../../spike/macos-tls/FINDINGS.md), 16/16 assertions via `make test`.
 
 Build ~200 lines that:
 
@@ -202,7 +204,7 @@ Build ~200 lines that:
 
 **Outcome:** Appendix B R-3 confirmed, not retired.
 **Actual effort:** ran on CI; no Windows machine needed.
-**Artifacts:** [`spike/windows-schannel/`](../spike/windows-schannel/) — [FINDINGS.md](../spike/windows-schannel/FINDINGS.md), job `windows-s1` in `tls-spike.yaml`.
+**Artifacts:** [`spike/windows-schannel/`](../../spike/windows-schannel/) — [FINDINGS.md](../../spike/windows-schannel/FINDINGS.md), job `windows-s1` in `tls-spike.yaml`.
 
 **Exit criteria**
 
@@ -1694,8 +1696,8 @@ That last item is the honest test of the whole project. `zuhttp` exists on the p
 
 ## Immediate next actions
 
-1. ~~**Run S0.**~~ ✅ Done — verdict GO. See [spike/macos-tls/FINDINGS.md](../spike/macos-tls/FINDINGS.md).
-2. ~~**Run S1.**~~ ✅ Done on CI — R-3 confirmed. See [spike/windows-schannel/FINDINGS.md](../spike/windows-schannel/FINDINGS.md).
+1. ~~**Run S0.**~~ ✅ Done — verdict GO. See [spike/macos-tls/FINDINGS.md](../../spike/macos-tls/FINDINGS.md).
+2. ~~**Run S1.**~~ ✅ Done on CI — R-3 confirmed. See [spike/windows-schannel/FINDINGS.md](../../spike/windows-schannel/FINDINGS.md).
 3. ~~**Start S2.**~~ ✅ Done, along with S3–S9 and the §63.2 slice.
 4. ~~**Fix `DESCRIPTION`**~~ ✅ Done.
 5. ~~**S11 · R API surface.**~~ ✅ Done 2026-09-08 — 11 of 13 §31.16 workflows.

@@ -1,3 +1,5 @@
+> **Superseded 2026-09-25 by edition 2** — [`../zuhttp-design.md`](../zuhttp-design.md). Kept verbatim as the record of how 0.1.0 was built; only relative links were adjusted for the move. Section numbers are the same in both editions, so a `§n.m` citation resolves in either.
+
 # zuhttp Design Document
 
 **Status:** Draft — macOS spike GO (S0); Windows headers probed (S1, R-3 confirmed)  
@@ -802,7 +804,7 @@ rather than through protocol breadth.
 
 ### 13. TLS Architecture
 
-**Status: validated.** The S0 spike (`spike/macos-tls/`, [FINDINGS.md](../spike/macos-tls/FINDINGS.md)) confirmed this design on macOS 26.6.2 / OpenSSL 3.6.3: TLS 1.3 negotiated, chain evaluated against the system Keychain, driven entirely from a caller-owned non-blocking `poll()` loop with no dispatch queue. **Appendix B R-1 is retired.** The spike also produced four findings that changed this section and §14.5, §26.4 — see F-1 and F-5 below.
+**Status: validated.** The S0 spike (`spike/macos-tls/`, [FINDINGS.md](../../spike/macos-tls/FINDINGS.md)) confirmed this design on macOS 26.6.2 / OpenSSL 3.6.3: TLS 1.3 negotiated, chain evaluated against the system Keychain, driven entirely from a caller-owned non-blocking `poll()` loop with no dispatch queue. **Appendix B R-1 is retired.** The spike also produced four findings that changed this section and §14.5, §26.4 — see F-1 and F-5 below.
 
 #### 13.1 Separate the protocol engine from trust evaluation
 
@@ -955,7 +957,7 @@ Requirements: SNI, hostname verification, chain validation, TLS 1.2+, TLS 1.3 wh
 Two specific hazards:
 
 - TLS 1.3 requires `SCH_CREDENTIALS` (Windows 10 1809+); the older `SCHANNEL_CRED` path caps at TLS 1.2.
-- **Measured (S1, 2026-09-07):** Rtools' mingw-w64 11.0 `schannel.h` does **not** declare `SCH_CREDENTIALS` or `TLS_PARAMETERS`, and raising the target to `_WIN32_WINNT=0x0A00` does not help — it is an incomplete header, not a version gate. See [spike/windows-schannel/FINDINGS.md](../spike/windows-schannel/FINDINGS.md).
+- **Measured (S1, 2026-09-07):** Rtools' mingw-w64 11.0 `schannel.h` does **not** declare `SCH_CREDENTIALS` or `TLS_PARAMETERS`, and raising the target to `_WIN32_WINNT=0x0A00` does not help — it is an incomplete header, not a version gate. See [spike/windows-schannel/FINDINGS.md](../../spike/windows-schannel/FINDINGS.md).
 
 #### 13.5 Unix/Linux
 
