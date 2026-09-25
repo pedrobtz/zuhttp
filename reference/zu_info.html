@@ -64,7 +64,9 @@ is configured to do, and what the environment says about proxies.</p>
     <h2>Value</h2>
     <p>A <code>zu_info</code> list, printed as a report. Fields: <code>version</code>, <code>http</code>,
 <code>tls_backend</code>, <code>trust</code>, <code>tls_available</code>, <code>revocation_default</code>,
-<code>compression</code>, <code>ipv6</code>, <code>proxy_env</code> and <code>default_client</code>.</p>
+<code>tls_capabilities</code> (the <code><a href="zu_tls.html">zu_tls()</a></code> settings this backend honours, from
+<code>"pins"</code>, <code>"tls13"</code>, <code>"ca_file"</code>, <code>"ca_extra"</code> and <code>"revocation"</code>; the
+others raise <code>zu_tls_unsupported_error</code>), <code>compression</code>, <code>ipv6</code>, <code>proxy_env</code> and <code>default_client</code>.</p>
     </div>
     <div id="why-the-tls-engine-and-the-trust-store-are-listed-separately">
     <h2>Why the TLS engine and the trust store are listed separately</h2>
@@ -85,6 +87,7 @@ when a certificate works in a browser and not here.</p>
 <span class="r-out co"><span class="r-pr">#&gt;</span> TLS backend:        openssl</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Trust:              OpenSSL system defaults</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Revocation:         off by default</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> zu_tls() supports:  pins, tls13, ca_file, ca_extra</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Compression:        gzip, deflate</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> IPv6:               yes</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> </span>

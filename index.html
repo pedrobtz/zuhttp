@@ -152,7 +152,7 @@
 <div class="section level2">
 <h2 id="known-limitations">Known limitations<a class="anchor" aria-label="anchor" href="#known-limitations"></a>
 </h2>
-<p>These are documented limits, not open defects. Each is a consequence of using the platform’s TLS stack instead of shipping one.</p>
+<p>These are documented limits, not open defects. Most are a consequence of using the platform’s TLS stack instead of shipping one. <code><a href="reference/zu_info.html">zu_info()</a></code> reports which <code><a href="reference/zu_tls.html">zu_tls()</a></code> settings this build supports; a setting it cannot honour raises before any connection is made, never downgrades.</p>
 <table class="table">
 <colgroup>
 <col width="33%">
@@ -173,14 +173,13 @@
 </tr>
 <tr>
 <td>No certificate pinning</td>
-<td>macOS</td>
-<td>Security.framework will not yield the SubjectPublicKeyInfo without hand-parsing DER. Pinning raises rather than silently comparing the wrong bytes.</td>
+<td>macOS, Windows</td>
+<td>Pinning needs the leaf’s SubjectPublicKeyInfo: Security.framework will not yield it without hand-parsing DER, and the Schannel path is not written yet. <code>zu_tls(pins = )</code> <strong>raises</strong> <code>zu_tls_unsupported_error</code> rather than connecting unpinned. OpenSSL pins.</td>
 </tr>
 <tr>
-<td>No additive custom CA</td>
+<td>No custom CA</td>
 <td>Windows</td>
-<td>
-<code>ca_extra</code> is not yet implemented on Schannel. <code>ca_file</code> (replace) works everywhere.</td>
+<td>Neither <code>ca_file</code> (replace) nor <code>ca_extra</code> (add) is implemented on Schannel yet. Both <strong>raise</strong> rather than falling back to the Windows store. They work on macOS and OpenSSL.</td>
 </tr>
 <tr>
 <td>HTTPS in a forked child fails</td>
@@ -191,7 +190,7 @@
 <tr>
 <td>Revocation off by default, and opting in is backend-dependent</td>
 <td>all</td>
-<td>No platform checks revocation by default. <code>zu_tls(revocation = TRUE)</code> opts in, but on OpenSSL it currently fails <em>every</em> chain (a CRL check with no CRL source), and on macOS it also rejects valid certificates from CAs that no longer answer revocation queries. <code><a href="reference/zuhttp_tls.html">?zuhttp_tls</a></code>
+<td>No platform checks revocation by default. <code>zu_tls(revocation = TRUE)</code> opts in on macOS and Windows; macOS also rejects valid certificates from CAs that no longer answer revocation queries. On OpenSSL, which has no CRL or OCSP source, it <strong>raises</strong> rather than failing every chain. <code><a href="reference/zuhttp_tls.html">?zuhttp_tls</a></code>
 </td>
 </tr>
 <tr>
@@ -200,9 +199,21 @@
 <td>One request at a time. Parallelism is the caller’s, via a non-forking plan.</td>
 </tr>
 <tr>
+<td>Only a total timeout</td>
+<td>all</td>
+<td>
+<code>timeout</code> bounds the whole request, redirects and retries included. There are no separate connect, first-byte or inactivity timeouts yet.</td>
+</tr>
+<tr>
+<td>DNS ignores <code>timeout</code> and Ctrl-C</td>
+<td>all</td>
+<td>Name resolution calls the system resolver synchronously (<code>getaddrinfo</code>), so a stalled resolver can hold R until it gives up. Every later phase is bounded. <code><a href="reference/zuhttp_tls.html">?zuhttp_tls</a></code>
+</td>
+</tr>
+<tr>
 <td>Ctrl-C timing unverified</td>
 <td>all</td>
-<td>Cancellation works; the 200 ms bound is not yet measured on every front-end.</td>
+<td>Cancellation works once a request is past DNS; the 200 ms bound is not yet measured on every front-end.</td>
 </tr>
 </tbody>
 </table>

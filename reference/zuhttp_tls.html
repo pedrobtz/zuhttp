@@ -61,6 +61,19 @@ install time and reported by <code><a href="zu_tls_backend.html">zu_tls_backend(
 <table class="table table"><tr><td><strong>Platform</strong></td><td><strong>Engine</strong></td><td><strong>Trust store</strong></td></tr><tr><td>Windows</td><td>Schannel</td><td>the system certificate stores</td></tr><tr><td>macOS</td><td>Secure Transport</td><td>Keychain, via <code>SecTrustEvaluateWithError</code></td></tr><tr><td>elsewhere</td><td>system OpenSSL</td><td>the system CA directory</td></tr></table><p>The consequence worth knowing is that behaviour is not uniform, because the
 platforms are not. What follows is what actually differs.</p>
     </div>
+    <div id="refused-never-downgraded">
+    <h2>Refused, never downgraded</h2>
+
+
+<p>Every <code><a href="zu_tls.html">zu_tls()</a></code> setting is a request for a stronger connection. When the
+linked backend cannot honour one, the request raises
+<code>zu_tls_unsupported_error</code> (a <code>zu_tls_error</code>) <strong>before any network I/O</strong>,
+rather than connecting without it. <code>zu_info()$tls_capabilities</code> lists what
+this build honours:</p>
+<table class="table table"><tr><td><strong>Setting</strong></td><td><strong>OpenSSL</strong></td><td><strong>macOS</strong></td><td><strong>Windows</strong></td></tr><tr><td><code>pins</code></td><td>yes</td><td>refused</td><td>refused</td></tr><tr><td><code>min_version = 13</code></td><td>yes</td><td>refused</td><td>refused</td></tr><tr><td><code>ca_file</code></td><td>yes</td><td>yes</td><td>refused</td></tr><tr><td><code>ca_extra</code></td><td>yes</td><td>yes</td><td>refused</td></tr><tr><td><code>revocation = TRUE</code></td><td>refused</td><td>yes, with caveats</td><td>yes</td></tr></table><p>A refusal is <code>zu_tls_unsupported_error</code>; a pin that does not match is
+<code>zu_tls_pin_error</code>. The two are different classes so that "this backend
+cannot pin" is never mistaken for "the pin was checked and failed".</p>
+    </div>
     <div id="maximum-tls-version">
     <h2>Maximum TLS version</h2>
 
@@ -76,11 +89,12 @@ highest version both ends support; it is the <em>floor</em> that cannot be raise
     <h2>Certificate pinning</h2>
 
 
-<p><code><a href="zu_tls.html">zu_tls()</a></code>'s <code>pins</code> works on OpenSSL and Schannel. On macOS it raises:
+<p><code><a href="zu_tls.html">zu_tls()</a></code>'s <code>pins</code> works on <strong>OpenSSL only</strong>. On macOS,
 Security.framework will not hand over the SubjectPublicKeyInfo without
-hand-parsing DER, and a pin that silently compares the wrong bytes is worse
-than no pin. A pinned request either enforces the pin or raises
-<code>zu_tls_pin_error</code>; it never quietly succeeds unpinned.</p>
+hand-parsing DER; on Windows the CryptoAPI path is not written yet. Both
+refuse, because a pin that silently compares the wrong bytes is worse than
+no pin. A pinned request either enforces the pin or raises; it never quietly
+succeeds unpinned.</p>
     </div>
     <div id="custom-certificate-authorities">
     <h2>Custom certificate authorities</h2>
@@ -89,7 +103,8 @@ than no pin. A pinned request either enforces the pin or raises
 <p><code>ca_file</code> <strong>replaces</strong> the system trust store; <code>ca_extra</code> <strong>adds</strong> to it.
 The distinction is deliberate and is the usual source of confusion — with
 <code>ca_file</code> set, a public certificate that verified a moment ago will not.
-Additive trust is not yet implemented on Schannel.</p>
+<strong>Neither is implemented on Windows yet</strong>: Schannel refuses both, rather
+than verifying against the Windows store and ignoring the file.</p>
     </div>
     <div id="revocation">
     <h2>Revocation</h2>
@@ -99,16 +114,28 @@ Additive trust is not yet implemented on Schannel.</p>
 by default and pretending otherwise would misrepresent what verification
 means here.</p>
 <p><code>zu_tls(revocation = TRUE)</code> opts in, and what that buys you is
-backend-dependent in a way worth knowing before you rely on it:</p><ul><li><p><strong>OpenSSL: do not use it yet.</strong> The flag sets <code>X509_V_FLAG_CRL_CHECK</code>
-with no CRL source configured, and OpenSSL neither downloads CRLs nor
-performs OCSP on its own — so every chain fails to verify, including
-valid ones. It fails closed rather than silently accepting a revoked
-certificate, but it is not usable as a revocation check.</p></li>
+backend-dependent in a way worth knowing before you rely on it:</p><ul><li><p><strong>OpenSSL: refused.</strong> OpenSSL neither downloads CRLs nor performs OCSP on
+its own, so a CRL check with no CRL source fails <em>every</em> chain, valid
+ones included. Rather than offer a flag that means "no connection will
+ever succeed", this backend raises <code>zu_tls_unsupported_error</code>.</p></li>
 <li><p><strong>macOS:</strong> it works, in that revoked certificates are rejected — but so
 are valid certificates from CAs that no longer answer revocation queries.
 Let's Encrypt retired OCSP, so a large share of the web fails under it.</p></li>
-</ul><p>Both are recorded rather than papered over, and both are why revocation is
-not merely off by default but is a setting to reach for deliberately.</p>
+<li><p><strong>Windows:</strong> Schannel checks the chain, excluding the root, through the
+platform's own revocation machinery.</p></li>
+</ul><p>Both caveats are recorded rather than papered over, and both are why
+revocation is not merely off by default but is a setting to reach for
+deliberately.</p>
+    </div>
+    <div id="name-resolution-is-not-bounded">
+    <h2>Name resolution is not bounded</h2>
+
+
+<p>DNS resolution uses the system resolver (<code>getaddrinfo()</code>), which is
+synchronous. <strong>Neither <code>timeout</code> nor Ctrl-C interrupts it</strong>, so a host whose
+resolver stalls can hold R for as long as the resolver takes — on a
+misconfigured network, minutes. Every later phase (connect, handshake,
+response) is bounded by both.</p>
     </div>
     <div id="see-also">
     <h2>See also</h2>

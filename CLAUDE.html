@@ -56,23 +56,23 @@
 <th>What it is</th>
 <th>When to read it</th>
 </tr></thead><tbody><tr><td><a href=".agents/zuhttp-design.html"><code>.agents/zuhttp-design.md</code></a></td>
-<td>The design. ~65 numbered sections, a Decision Register (D-1…D-35), and a risk register (R-1…R-15).</td>
+<td>The design. ~65 numbered sections, a Decision Register (D-1…D-56), and a risk register (R-1…R-15; R-14 is unused).</td>
 <td>Before changing behaviour. Cite the section, e.g. §31.9.</td>
 </tr><tr><td><a href=".agents/roadmap.html"><code>.agents/roadmap.md</code></a></td>
-<td>Stages S0–S21, each with exit criteria and current status.</td>
+<td>Stages S0–S21 with exit criteria, and six sections no stage owned (U1–U6). Each carries a <code>**Status:**</code> line; status never goes in a heading, because issues link the anchors.</td>
 <td>Before starting work, to see what stage owns it.</td>
 </tr></tbody></table><p><strong>Read the relevant section before implementing.</strong> Nearly every non-obvious choice in this codebase is already decided and justified there; the design is the specification, not a summary written after the fact. When work resolves a question the design left open, write the decision back into it — a new <code>D-nn</code> row plus the prose — in the same commit as the code.</p>
 </div>
 <div class="section level2">
 <h2 id="commands">Commands<a class="anchor" aria-label="anchor" href="#commands"></a></h2>
-<div class="sourceCode" id="cb1"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="co"># C core — no R, no network, no TLS. 1240 checks against a mock stream.</span></span>
+<div class="sourceCode" id="cb1"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="co"># C core — no R, no network, no TLS. 1541 checks against a mock stream.</span></span>
 <span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest strict          <span class="co"># warnings-as-errors; the one to run by default</span></span>
 <span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest asan            <span class="co"># ASan + UBSan</span></span>
 <span id="cb1-4"><a href="#cb1-4" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest engine-st       <span class="co"># live engine over macOS Secure Transport (network)</span></span>
 <span id="cb1-5"><a href="#cb1-5" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest engine          <span class="co"># same, over OpenSSL</span></span>
 <span id="cb1-6"><a href="#cb1-6" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest tls             <span class="co"># OpenSSL backend only (network)</span></span>
 <span id="cb1-7"><a href="#cb1-7" tabindex="-1"></a></span>
-<span id="cb1-8"><a href="#cb1-8" tabindex="-1"></a><span class="co"># Fuzzing — 8 targets, each buildable two ways</span></span>
+<span id="cb1-8"><a href="#cb1-8" tabindex="-1"></a><span class="co"># Fuzzing — 9 targets, each buildable two ways</span></span>
 <span id="cb1-9"><a href="#cb1-9" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> fuzz replay-run       <span class="co"># corpus replay, needs no clang; a regression suite</span></span>
 <span id="cb1-10"><a href="#cb1-10" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> fuzz replay-asan      <span class="co"># the same corpus under ASan + UBSan</span></span>
 <span id="cb1-11"><a href="#cb1-11" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> fuzz fuzz-run         <span class="co"># libFuzzer, needs clang</span></span>
@@ -82,11 +82,13 @@
 <span id="cb1-15"><a href="#cb1-15" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'testthat::test_local()'</span>                     <span class="co"># offline</span></span>
 <span id="cb1-16"><a href="#cb1-16" tabindex="-1"></a><span class="va">ZU_TEST_NETWORK</span><span class="op">=</span>1 <span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'testthat::test_local()'</span>   <span class="co"># + the network suite</span></span>
 <span id="cb1-17"><a href="#cb1-17" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'roxygen2::roxygenise()'</span>                     <span class="co"># after touching roxygen blocks</span></span>
-<span id="cb1-18"><a href="#cb1-18" tabindex="-1"></a></span>
-<span id="cb1-19"><a href="#cb1-19" tabindex="-1"></a><span class="co"># What CI actually runs for the R suite — reproduce THIS before claiming green,</span></span>
-<span id="cb1-20"><a href="#cb1-20" tabindex="-1"></a><span class="co"># because it differs from R CMD check in ways that have bitten before.</span></span>
-<span id="cb1-21"><a href="#cb1-21" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'library(testthat); library(zuhttp);</span></span>
-<span id="cb1-22"><a href="#cb1-22" tabindex="-1"></a><span class="st">  test_dir("tests/testthat", reporter="summary", stop_on_failure=TRUE)'</span></span></code></pre></div>
+<span id="cb1-18"><a href="#cb1-18" tabindex="-1"></a><span class="ex">./tools/check-vendor-licenses</span>                           <span class="co"># after a re-vendor</span></span>
+<span id="cb1-19"><a href="#cb1-19" tabindex="-1"></a></span>
+<span id="cb1-20"><a href="#cb1-20" tabindex="-1"></a><span class="co"># What CI actually runs for the R suite — reproduce THIS before claiming green,</span></span>
+<span id="cb1-21"><a href="#cb1-21" tabindex="-1"></a><span class="co"># because it differs from R CMD check in ways that have bitten before.</span></span>
+<span id="cb1-22"><a href="#cb1-22" tabindex="-1"></a><span class="ex">Rscript</span> tools/ci-run-tests.R</span></code></pre></div>
+<p><strong>A pull request from a branch of this repository gets no CI.</strong> Every job skips on same-repository <code>pull_request</code> events and <code>push</code> fires only on <code>main</code>/<code>develop</code>. Before merging, dispatch the workflows on the branch:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="cf">for</span> w <span class="kw">in</span> R-CMD-check c-core fuzz tls-spike<span class="kw">;</span> <span class="cf">do</span> <span class="ex">gh</span> workflow run <span class="va">$w</span>.yaml <span class="at">--ref</span> <span class="op">&lt;</span>branch<span class="op">&gt;</span><span class="kw">;</span> <span class="cf">done</span></span></code></pre></div>
 <p>Network tests are gated on <code>ZU_TEST_NETWORK=1</code>, not on <code>NOT_CRAN</code> — <code>rcmdcheck</code> sets <code>NOT_CRAN</code>, so gating on it alone would make every check depend on example.com and badssl.com.</p>
 </div>
 <div class="section level2">
@@ -99,8 +101,11 @@
 R/              the public API; see .agents/zuhttp-design.md §31
 ctest/          C tests. zu_ctest is offline; the engine/tls binaries are not.
 fuzz/           libFuzzer harnesses + a portable replay driver, and the corpus
-tools/          update-uriparser, update-picohttpparser, check-feature-macros
-.github/        4 workflows: R-CMD-check, c-core, fuzz, tls-spike</code></pre>
+tools/          update-uriparser, update-picohttpparser, check-feature-macros,
+                check-objects-sync, check-vendor-licenses, ci-fork-guard.R,
+                ci-run-tests.R
+.github/        6 workflows: R-CMD-check, c-core, fuzz, tls-spike (the network
+                and per-backend jobs, despite the name), coverage, pkgdown</code></pre>
 <p><code>configure</code> / <code>configure.win</code> pick the TLS backend and substitute <code>@SSL_CFLAGS@</code> / <code>@SSL_LIBS@</code> / <code>@TLS_OBJ@</code> into <code>src/Makevars{,.win}</code>.</p>
 </div>
 <div class="section level2">
@@ -116,12 +121,18 @@ tools/          update-uriparser, update-picohttpparser, check-feature-macros
 <li>
 <strong>Every R check in CI runs from a file, never <code>Rscript -e</code> with a multi-line argument</strong> — that form dies on Windows before executing anything, and cost five debugging rounds in S8. Diagnostic steps must not carry <code>continue-on-error</code>, which turns a failing step into a green tick.</li>
 <li>
+<strong>Refuse, never downgrade (D-56).</strong> A <code><a href="reference/zu_tls.html">zu_tls()</a></code> setting the backend cannot honour raises <code>zu_tls_unsupported_error</code> before any I/O. What a backend supports is its <code>zu_tls_backend_caps()</code> mask in C; tests read it through <code>zu_info()$tls_capabilities</code> / <code>skip_unless_tls_supports()</code>, never from a table of backend names.</li>
+<li>
 <strong>Credentials never reach an egress.</strong> Redaction happens in the formatting layer, so a redacted request stays executable (§42.3). The canary tests in <code>test-redact.R</code> are the guard.</li>
 <li>Comments explain <em>why</em>, and cite the design section. The codebase assumes a reader who wants the reasoning, not a narration of the code.</li>
 </ul></div>
 <div class="section level2">
+<h2 id="the-zu-family">The <code>zu*</code> family<a class="anchor" aria-label="anchor" href="#the-zu-family"></a></h2>
+<p><code>zukomp</code>, <code>zucrypt</code>, <code>zuxml</code> and <code>zuxlsx</code> are siblings, and three of them name <code>zuhttp</code> as a consumer. In 0.x it consumes none of them: compression is system zlib (D-7), pin digests come from each TLS backend, and <code>zuxml</code> could at most be a <code>Suggests</code>. Design §5.1 (D-54) records this and carries the family table shared by all five repositories. One practical consequence: the internal C prefix <code>zu_</code>/<code>ZU_</code> is <code>zukomp</code>’s public ABI namespace and already collides with <code>zukomp.h</code> (<code>ZU_OK</code>, <code>zu_buffer</code>), so do not add new <code>zu_</code> C names that a <code>zukomp</code> header could also declare (#15).</p>
+</div>
+<div class="section level2">
 <h2 id="current-state">Current state<a class="anchor" aria-label="anchor" href="#current-state"></a></h2>
-<p>S0–S17 are complete or explicitly partial. Track D (S11–S14) is complete, as are S16 and S17; all 13 §31.16 workflows pass. S16 closed R-12, so forked HTTPS on macOS now raises <code>zu_fork_error</code> rather than killing the worker. The roadmap’s status markers and per-stage exit criteria are authoritative — check them rather than inferring status from the code, and note that its mermaid graph is stale for S7 and S9.</p>
+<p>v0.1.0 shipped on 2026-09-10 as a GitHub release, and no <code>v0.1.0</code> tag exists yet. Complete: S0–S5, S10–S14, S16, S17, U1, U4–U6; all 13 §31.16 workflows pass. Partial: S6 (no phase timeouts, #13), S7, S8, S9, S15, S18, S20. Not started: S19 (deferred with the CRAN submission), S21, U2 except A1, and U3. S16 closed R-12, so forked HTTPS on macOS now raises <code>zu_fork_error</code> rather than killing the worker. The roadmap’s per-stage exit criteria are authoritative — check them rather than inferring status from the code — and the two issues that gated the tag (#12, #14) closed with the review’s merge on 2026-09-25 — see its “Amends before merge” section.</p>
 </div>
 </div>
 
