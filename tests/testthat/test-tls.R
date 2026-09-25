@@ -64,6 +64,8 @@ test_that("the printed form says `replaces` and `adds to` (§14.2)", {
 
 test_that("ca_extra ADDS to system trust and ca_file REPLACES it", {
   skip_unless_online()
+  skip_unless_tls_supports("ca_extra")
+  skip_unless_tls_supports("ca_file")
   ca <- local_ca()
 
   # §14.3's claim, stated as a test: "with a locally generated CA supplied
@@ -88,55 +90,100 @@ test_that("revocation is off by default (§14.5)", {
 test_that("revocation = TRUE does not break ordinary verification (§14.5)", {
   skip_unless_online()
   # Turning it on should cost latency, which is the documented reason it is
-  # not the default — not the ability to connect at all.
-  if (identical(zu_tls_backend(), "openssl"))
-    skip(paste0("zu_tls(revocation = TRUE) is unusable on this backend: ",
-                "zu_tls_openssl.c sets X509_V_FLAG_CRL_CHECK|CRL_CHECK_ALL ",
-                "with no CRL source configured, and OpenSSL neither fetches ",
-                "CRLs nor performs OCSP, so EVERY chain fails with ",
-                "'certificate verify failed'. Measured on CI 2026-09-10. ",
-                "S7 owns the fix; until then the flag fails closed on ",
-                "everything rather than checking revocation."))
+  # not the default — not the ability to connect at all. OpenSSL refuses the
+  # flag outright (no CRL or OCSP source, #6); that is asserted offline below.
+  skip_unless_tls_supports("revocation")
   expect_identical(
     zu_resp_status(zu_get("https://example.com", tls = zu_tls(revocation = TRUE))),
     200L)
 })
 
-test_that("a TLS version a backend cannot reach is refused, never downgraded", {
+# --- D-56: refused, never downgraded (offline) ------------------------------
+#
+# One config per setting some backend cannot honour. The ones this backend
+# honours must pass check_tls(); the ones it does not must raise
+# zu_tls_unsupported_error. Every backend has at least one of each today, so
+# neither half is empty on any CI leg.
+
+unsupported_cases <- function() {
+  pem <- tempfile(fileext = ".pem"); writeLines("", pem)
+  list(
+    pins       = zu_tls(pins = "sha256//YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg="),
+    tls13      = zu_tls(min_version = 13),
+    ca_file    = zu_tls(ca_file = pem),
+    ca_extra   = zu_tls(ca_extra = pem),
+    revocation = zu_tls(revocation = TRUE)
+  )
+}
+
+test_that("zu_info() reports the zu_tls() capabilities from C", {
+  caps <- zu_info()$tls_capabilities
+  expect_type(caps, "character")
+  expect_true(all(caps %in% names(unsupported_cases())))
+  # Pinned to what each backend's zu_tls_backend_caps() says, so a change to a
+  # backend's support has to be made here on purpose.
+  expected <- switch(zu_tls_backend(),
+    openssl         = c("pins", "tls13", "ca_file", "ca_extra"),
+    securetransport = c("ca_file", "ca_extra", "revocation"),
+    schannel        = "revocation",
+    character())
+  expect_setequal(caps, expected)
+})
+
+test_that("a setting the backend cannot honour is refused; one it can is not", {
+  cases <- unsupported_cases()
+  caps <- zu_info()$tls_capabilities
+  refused <- setdiff(names(cases), caps)
+  expect_gt(length(refused), 0L)   # the refusal half is never empty
+  for (nm in names(cases)) {
+    e <- tryCatch(zuhttp:::check_tls(cases[[nm]]), condition = function(e) e)
+    if (nm %in% caps) {
+      expect_false(inherits(e, "condition"), info = nm)
+    } else {
+      expect_s3_class(e, "zu_tls_unsupported_error")
+      expect_s3_class(e, "zu_tls_error")
+      # Never the mismatch class: "cannot pin" and "pin did not match" must
+      # stay distinguishable (#12).
+      expect_false(inherits(e, "zu_tls_pin_error"), info = nm)
+      expect_false(isTRUE(e$retryable), info = nm)
+      expect_match(conditionMessage(e), zu_tls_backend(), fixed = TRUE, info = nm)
+    }
+  }
+})
+
+test_that("the refusal happens before any network I/O", {
+  # A reserved .invalid name: if the refusal were not wired into the request
+  # path, this would reach getaddrinfo and raise zu_dns_error instead. The
+  # class tells the two apart, which is what makes this non-vacuous.
+  cases <- unsupported_cases()
+  refused <- setdiff(names(cases), zu_info()$tls_capabilities)
+  for (nm in refused) {
+    e <- tryCatch(zu_get("https://zuhttp-test.invalid/", tls = cases[[nm]]),
+                  condition = function(e) e)
+    expect_s3_class(e, "zu_tls_unsupported_error")
+    expect_false(inherits(e, "zu_dns_error"), info = nm)
+  }
+})
+
+test_that("min_version = 12 works everywhere (§14.1)", {
   skip_unless_online()
-  if (!identical(zu_tls_backend(), "securetransport"))
-    skip("this backend's ceiling is not TLS 1.2")
-
-  # S0 finding F-1: Secure Transport has no kTLSProtocol13. Quietly giving the
-  # caller 1.2 when they asked for 1.3 would be silently weakening a security
-  # setting, which is worse than failing.
-  e <- tryCatch(zu_get("https://example.com", tls = zu_tls(min_version = 13)),
-                condition = function(e) e)
-  expect_s3_class(e, "zu_tls_error")
-  expect_match(conditionMessage(e), "1.3", fixed = TRUE)
-  expect_match(conditionMessage(e), "macOS", fixed = TRUE)
-
   expect_identical(
     zu_resp_status(zu_get("https://example.com", tls = zu_tls(min_version = 12))), 200L)
 })
 
-test_that("pinning either works or refuses; it never silently does nothing", {
+test_that("a wrong pin against a public host is a pin mismatch (§14.4)", {
   skip_unless_online()
+  # Where pinning is refused, the offline tests above cover it. Here the pin is
+  # really compared, so the class must be the mismatch one and never the
+  # refusal: accepting any zu_tls_error is how this test used to pass on
+  # Windows, which never compared a pin at all (#12).
+  skip_unless_tls_supports("pins")
   e <- tryCatch(
     zu_get("https://example.com",
            tls = zu_tls(pins = "sha256//YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg=")),
     condition = function(e) e)
-
-  if (identical(zu_tls_backend(), "securetransport")) {
-    # A documented refusal (§14.4): Security.framework will not yield the
-    # SubjectPublicKeyInfo without hand-parsing DER, and a pin that checks the
-    # wrong bytes is worse than no pin. The one outcome that must never happen
-    # is a 200 — that would mean the pin was accepted and ignored.
-    expect_s3_class(e, "zu_tls_pin_error")
-  } else {
-    # Elsewhere the pin is real, and this one does not match example.com.
-    expect_s3_class(e, "zu_tls_error")
-  }
+  expect_s3_class(e, "zu_tls_pin_error")
+  expect_false(inherits(e, "zu_tls_unsupported_error"))
   expect_false(inherits(e, "zu_response"))
 })
 
@@ -144,6 +191,7 @@ test_that("pinning either works or refuses; it never silently does nothing", {
 
 test_that("a connection is never shared across a TLS-config difference", {
   skip_unless_online()
+  skip_unless_tls_supports("ca_extra")
   ca <- local_ca()
 
   api <- zu_client()
@@ -170,6 +218,9 @@ test_that("a connection is never shared across a TLS-config difference", {
 
 test_that("a pinned request is never served over an unpinned connection", {
   skip_unless_online()
+  # Where pins are refused the request fails before the pool is consulted, so
+  # this would pass without exercising the key.
+  skip_unless_tls_supports("pins")
   # The sharpest statement of why §26.1 calls a coarse key a security bug, and
   # what it looks like when it bites. Dropping the TLS fields from the key
   # makes this test return 200: the pinned request draws the connection the
@@ -189,7 +240,7 @@ test_that("a pinned request is never served over an unpinned connection", {
   # all — a SUCCESSFUL response here means the connection was reused and the
   # pin was silently skipped.
   expect_false(inherits(r, "zu_response"))
-  expect_s3_class(r, "zu_tls_error")
+  expect_s3_class(r, "zu_tls_pin_error")
   expect_identical(zu_pool_stats(api)[["hits"]], 0)
 })
 
@@ -198,7 +249,7 @@ test_that("revocation and min_version are part of the key too", {
   api <- zu_client()
   # min_version rather than revocation as the distinguishing field: both are
   # in the key, and only this one can complete a request on every backend
-  # (see the revocation test above for why OpenSSL cannot).
+  # (OpenSSL refuses revocation = TRUE, D-56).
   expect_identical(zu_resp_status(zu_get("https://example.com", client = api)), 200L)
   expect_identical(
     zu_resp_status(zu_get("https://example.com", tls = zu_tls(min_version = 12),

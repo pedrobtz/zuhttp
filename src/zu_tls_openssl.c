@@ -27,6 +27,15 @@
 const char *zu_tls_backend_name(void) { return "openssl"; }
 int         zu_tls_available(void)    { return 1; }
 
+/* No ZU_TLS_CAP_REVOCATION: X509_V_FLAG_CRL_CHECK needs a CRL source and
+ * OpenSSL neither fetches CRLs nor does OCSP on its own, so setting the flag
+ * failed every chain (measured on CI 2026-09-10, #6). Refused instead (D-56)
+ * until §14.5 settles on a source — OCSP stapling is the likely one. */
+unsigned zu_tls_backend_caps(void) {
+    return ZU_TLS_CAP_PINS | ZU_TLS_CAP_TLS13 |
+           ZU_TLS_CAP_CA_FILE | ZU_TLS_CAP_CA_EXTRA;
+}
+
 typedef struct {
     SSL_CTX   *ctx;
     SSL       *ssl;
@@ -36,7 +45,12 @@ typedef struct {
     zu_tls_info info;
     const zu_tls_config *cfg;
     char       hostname[256];
-    int        pin_ok;
+    /* Set only when the pin comparison RAN and failed. "Not matched" is not
+     * the same as "mismatched": verify_cb returns before comparing when the
+     * chain itself fails, and reading an unset flag as a mismatch reported
+     * every chain failure on a pinned request as zu_tls_pin_error (§14.6;
+     * found by the §50.5 pin-over-untrusted-chain row, 2026-09-25). */
+    int        pin_mismatch;
 } tls_impl;
 
 static void ssl_err_string(char *out, size_t cap) {
@@ -114,10 +128,9 @@ static int verify_cb(X509_STORE_CTX *sctx, void *arg) {
     if (t->cfg && t->cfg->n_pins > 0) {
         X509 *leaf = X509_STORE_CTX_get0_cert(sctx);
         if (!leaf || !pin_matches(leaf, t->cfg->pins, t->cfg->n_pins)) {
-            t->pin_ok = 0;
+            t->pin_mismatch = 1;
             return 0;                 /* §14.4: in addition to, not instead of */
         }
-        t->pin_ok = 1;
     }
     return 1;
 }
@@ -178,11 +191,8 @@ static zu_code configure_trust(tls_impl *t, const zu_tls_config *cfg, zu_error *
         }
     }
 
-    if (cfg->revocation) {
-        /* §14.5: opt-in only. OpenSSL checks nothing by default. */
-        X509_VERIFY_PARAM *p = SSL_CTX_get0_param(t->ctx);
-        X509_VERIFY_PARAM_set_flags(p, X509_V_FLAG_CRL_CHECK | X509_V_FLAG_CRL_CHECK_ALL);
-    }
+    /* §14.5 revocation: refused by zu_tls_config_check() before we get here,
+     * because this backend has no CRL or OCSP source (see caps above). */
     return ZU_OK;
 }
 
@@ -294,6 +304,9 @@ zu_code zu_tls_connect(zu_stream **out, zu_stream *inner, const char *hostname,
     if (!out || !inner || !hostname) return ZU_ERR_PARSE;
     *out = NULL;
     if (!cfg) { zu_tls_config_init(&def); cfg = &def; }
+    rc = zu_tls_config_check(cfg, zu_tls_backend_caps(), zu_tls_backend_name(), err);
+    if (rc != ZU_OK) return rc;
+    rc = ZU_ERR_TLS;
 
     s = (zu_stream *)zu_calloc(1, sizeof *s);
     t = (tls_impl *)zu_calloc(1, sizeof *t);
@@ -386,7 +399,7 @@ zu_code zu_tls_connect(zu_stream **out, zu_stream *inner, const char *hostname,
             long v = SSL_get_verify_result(t->ssl);
             char eb[192];
             ssl_err_string(eb, sizeof eb);
-            if (cfg->n_pins > 0 && !t->pin_ok) {
+            if (t->pin_mismatch) {
                 zu_error_set(err, ZU_ERR_TLS_PIN, ZU_PHASE_TLS,
                              "certificate public key does not match any configured pin");
                 rc = ZU_ERR_TLS_PIN;

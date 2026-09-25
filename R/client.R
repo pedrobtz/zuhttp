@@ -72,7 +72,8 @@ collect_policy <- function(env = parent.frame()) {
 #'   works. Joining is textual, not RFC 3986 resolution: see Details.
 #' @param headers Named character vector of default headers.
 #' @param query Named list of default query parameters.
-#' @param timeout Total seconds for a request, redirects included.
+#' @param timeout Total seconds for a request, redirects included. DNS resolution is not
+#'   bounded by it (nor by Ctrl-C); see [zuhttp_tls].
 #' @param redirects Maximum redirects to follow. `0` returns the 3xx itself.
 #' @param verify Verify the certificate and hostname. Leave this `TRUE`.
 #' @param max_body Maximum decoded body size in bytes.

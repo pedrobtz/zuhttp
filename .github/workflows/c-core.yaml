@@ -64,6 +64,13 @@ jobs:
         if: runner.os == 'Linux'
         run: ./tools/check-objects-sync
 
+      # MIT and BSD-3-Clause both require the licence text to travel with
+      # binaries, and R installs only inst/ — so the installed copies must
+      # match the vendored ones after every re-vendor (#52).
+      - name: Installed licence texts match the vendored ones
+        if: runner.os == 'Linux'
+        run: ./tools/check-vendor-licenses
+
       - name: Compiler identity
         working-directory: ctest
         run: |

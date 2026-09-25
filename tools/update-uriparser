@@ -32,6 +32,9 @@ PUBH="Uri.h UriBase.h UriDefsConfig.h UriDefsAnsi.h UriIp4.h"
 for f in $CFILES $HFILES; do cp "$SRC/src/$f" "$DEST/$f"; done
 for f in $PUBH; do cp "$SRC/include/uriparser/$f" "$DEST/uriparser/$f"; done
 cp "$SRC/COPYING" "$DEST/LICENSE"
+# R installs only inst/, so this is the copy an installed package carries
+# (#52). tools/check-vendor-licenses fails CI if the two ever differ.
+cp "$DEST/LICENSE" inst/licenses/uriparser-LICENSE
 # UriConfig.h is zuhttp-authored on purpose; upstream generates it. Not copied.
 
 sed -i.bak "s|^Version:.*|Version:    uriparser-$VER (release tarball)|;\

@@ -32,7 +32,8 @@ works. Joining is textual, not RFC 3986 resolution: see Details.}
 
 \item{query}{Named list of default query parameters.}
 
-\item{timeout}{Total seconds for a request, redirects included.}
+\item{timeout}{Total seconds for a request, redirects included. DNS resolution is not
+bounded by it (nor by Ctrl-C); see \link{zuhttp_tls}.}
 
 \item{redirects}{Maximum redirects to follow. \code{0} returns the 3xx itself.}
 

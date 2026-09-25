@@ -9,7 +9,8 @@ picohttpparser
   Copyright:  (c) 2009-2014 Kazuho Oku, Tokuhiro Matsuno, Daisuke Murase,
                             Shigeo Mitsunari
   License:    MIT or Perl (dual); used here under MIT.
-              Full text: src/vendor/picohttpparser/LICENSE
+              Full text: licenses/picohttpparser-LICENSE in the installed
+              package (inst/licenses/ in the source)
 --------------------------------------------------------------------------
 uriparser (partial: parse / resolve / recompose only)
   Files:      src/vendor/uriparser/
@@ -17,7 +18,8 @@ uriparser (partial: parse / resolve / recompose only)
   Version:    uriparser-0.9.8
   Copyright:  (c) 2007 Weijia Song, Sebastian Pipping
   License:    BSD-3-Clause.
-              Full text: src/vendor/uriparser/LICENSE
+              Full text: licenses/uriparser-LICENSE in the installed
+              package (inst/licenses/ in the source)
   Note:       Only the RFC 3986 parse/resolve/recompose closure is bundled;
               the normalisation, query, escaping, compare, shorten and file
               modules are not. src/vendor/uriparser/VENDOR lists exactly what

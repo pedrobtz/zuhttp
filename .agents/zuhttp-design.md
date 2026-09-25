@@ -6,7 +6,7 @@
 **Primary protocol scope:** HTTP/1.1 over HTTP and HTTPS  
 **TLS strategy:** Native/system trust; protocol engine per platform (§13.1)  
 **Estimated effort to 1.0:** 9–11 person-months (§64)  
-**Last updated:** 2026-09-07 (S0 findings folded in)
+**Last updated:** 2026-09-25 (D-54 and D-55 accepted with the review; D-56 added — backend refusals get their own class and happen before any I/O; §14.2, §14.4, §14.5, §34.1, §39, §49.2 updated)
 
 ---
 
@@ -19,7 +19,7 @@ Firm decisions and open questions were previously indistinguishable in this docu
 | D-1 | R prefix `zu_`, response accessors `zu_resp_`, C macros `ZUHTTP_` | **Accepted** | 1.1 |
 | D-2 | No `zuhttp` export may collide with an httr2 export | **Accepted** | 1.1, 5 |
 | D-3 | Separate TLS protocol engine from trust evaluation | **Accepted** | 13.1 |
-| D-4 | macOS: **Secure Transport** engine + `SecTrustEvaluateWithError` Keychain trust | **Accepted** — R-13 resolved, S9 | 13.2 |
+| D-4 | macOS: **Secure Transport** engine + `SecTrustEvaluateWithError` Keychain trust | **Accepted** — R-13 resolved, S9; R-15 open (#16) | 13.2 |
 | D-5 | Windows: Schannel for both engine and trust | **Accepted** — required, not preferred (§13.4) | 13.4 |
 | D-6 | Unix: system OpenSSL for both | **Accepted** | 13.5 |
 | D-7 | Link system zlib; do not vendor miniz | **Accepted** | 21.1 |
@@ -64,11 +64,14 @@ Firm decisions and open questions were previously indistinguishable in this docu
 | D-46 | The body path lives in `zu_body.c`, not the engine, so it is mock-testable | **Accepted** 2026-09-08 — S17 | 27, 50.1 |
 | D-47 | A callback is caught on **error and interrupt only**, not on every condition | **Accepted** 2026-09-08 — S17 | 27.3 |
 | D-48 | Proxying is disabled with `proxy = FALSE`, **not** `NULL` (§31.9 owns NULL) | **Accepted** 2026-09-08 — S10 | 20.1, 31.9 |
-| D-49 | `verify` and `ca_file` stay merged policy arguments; `zu_tls()` carries the rest | **Accepted** 2026-09-08 | 14.1, 31.9, 31.13 |
+| D-49 | `verify` stays a merged policy argument; `zu_tls()` carries `ca_file`, `ca_extra`, `pins`, `revocation` and `min_version` (row corrected 2026-09-22 to what shipped) | **Accepted** 2026-09-08 | 14.1, 31.9, 31.13 |
 | D-50 | `redirect.followed` carries the **resolved** target, built by the same `url_of()` as `final_url`, not the raw `Location` header | **Accepted** 2026-09-09 | 35.3, 42.1 |
 | D-51 | A URL enters the trace only through `zu_trace_add_url()`, which applies the §42 policy in C; the log's no-allocation rule yields to it | **Accepted** 2026-09-09 | 35.3, 35.4, 42.2 |
 | D-52 | `final_url` is redacted in the engine, so `zu_resp_url()` applies the whole of §42.1 and not just its userinfo clause | **Accepted** 2026-09-09 | 42.1, 42.2, 20.4 |
 | D-53 | The response sink is single: `path` and `callback` are mutually exclusive, and a committed `path` is readable back as `zu_resp_path()` | **Accepted** 2026-09-10 | 27.1, 31.2 |
+| D-54 | `zuhttp` consumes no `zu*` sibling in 0.x: compression stays on system zlib (D-7), pin digests come from the TLS backend (OpenSSL today; macOS and Windows once #4 and #12 land), `zuxml` is at most a `Suggests` for a future `zu_resp_xml()`; internal C identifiers move off `zu_`/`ZU_`, which is `zukomp`'s public ABI namespace (#15) | **Accepted** 2026-09-25 (review merged, #20) | 5.1, 14.4, 21.1, 54 |
+| D-55 | Features deferred from 0.1.0 target **0.2.0**; 0.1.x releases are fixes only | **Accepted** 2026-09-25 (review merged, #20) | 57–59 |
+| D-56 | A `zu_tls()` setting the linked backend cannot honour raises **`zu_tls_unsupported_error`** (child of `zu_tls_error`, not retryable) **before any network I/O**; each backend declares a capability mask in C (`zu_tls_backend_caps()`), one shared `zu_tls_config_check()` applies it in both the R request path and `zu_tls_connect()`, and `zu_info()$tls_capabilities` reports it. OpenSSL refuses `revocation = TRUE` under this rule | **Accepted** 2026-09-25 (#6, #12) | 14.2, 14.4, 14.5, 34.1, 39 |
 
 ---
 
@@ -94,7 +97,7 @@ The project is deliberately **not** a reimplementation of libcurl. Its competiti
 
 The intended architecture combines a small amount of `zuhttp` C code with a few focused dependencies:
 
-- **HTTP/1.1 response parsing** — parser choice open between picohttpparser and llhttp; see Appendix A.3.
+- **HTTP/1.1 response parsing** — picohttpparser, vendored (D-10, decided 2026-09-07); see §8.1 and Appendix A.3.
 - **URI parsing** — a vendored subset of `uriparser` (parse/resolve/recompose), wrapped by a zuhttp policy layer; see §8.2.
 - **zlib** (system, not vendored) for gzip/deflate response decompression; see §21.
 - **TLS**, split into a protocol engine and a trust evaluator; see §13.
@@ -247,6 +250,103 @@ What `zuhttp` *can* control is being a good backend candidate: a coherent reques
 At the same time, `httr2` should be treated as the **R-native ergonomic baseline** for request composition. The public API should preserve the strengths of functional request transformation and an explicit execution boundary, while also providing a lower-friction one-shot API inspired by Requests/HTTPX and a reusable-client model inspired by HTTPX/reqwest.
 
 Because both packages will often be attached in the same session, `zuhttp` must not mask any httr2 export. See §1.1.
+
+#### 5.1 Relationship to the `zu*` family (D-54)
+
+**Accepted 2026-09-25**, when the review (#20) merged.
+`zukomp`, `zucrypt` and `zuxml` each name `zuhttp` as a consumer. In 0.x it
+consumes none of them, and each boundary is decided here rather than left
+pending in a sibling's roadmap:
+
+- **Compression — system zlib (D-7).** `zuhttp` already requires a system TLS
+  stack, so zlib adds no new class of dependency, and it is the inflate the
+  operating system already ships and patches.
+  `Imports: zukomp` would end "no hard R dependencies" and tie `zuhttp`'s CRAN
+  submission to `zukomp`'s. Revisit only when a `zukomp` satellite for `br` or
+  `zstd` exists and a user needs it; adoption would then be table mode
+  (`Imports` + `LinkingTo` + `importFrom`) through one isolated translation
+  unit.
+- **Cryptography — the backend's own.** Pin digests (§14.4) come from the TLS
+  backend: OpenSSL's `EVP_sha256` today, and the platform's own SHA-256 on
+  macOS and Windows once #4 and #12 land. What blocks those two is extracting
+  the SubjectPublicKeyInfo, not hashing it, so no `zucrypt` call is needed. If
+  the R-15 decision (#16) vendors Mbed TLS, it pins the same TF-PSA-Crypto
+  manifest row as `zucrypt` and builds a private copy with hidden symbols
+  (`zucrypt` design §10).
+- **XML — optional.** A future `zu_resp_xml()` would use `zuxml` through
+  `Suggests`, as D-25 does for `jsonlite`. Streaming XML from C is out of
+  scope.
+- **Names.** `zu_`/`ZU_` in C is `zukomp`'s public ABI namespace, and two names
+  already collide: `ZU_OK` (`src/zu_error.h`) and `zu_buffer`
+  (`src/zu_buffer.h`) are both declared in `zukomp.h` too. `zukomp` may add
+  `zu_*` names in any minor release, so internal C identifiers move off that
+  prefix and non-R symbols are hidden (#15). The R prefix `zu_` (D-1) and the
+  `zu_*` condition classes stay; whether conditions also inherit a
+  family-style `zuhttp_error` root is #19.
+
+The table below is shared with the four sibling repositories.
+
+##### Position in the `zu*` family (reviewed 2026-09-22)
+
+This table is identical in all five repositories' design documents. Change it in all five
+together, or not at all.
+
+| | zukomp | zuxml | zucrypt | zuxlsx | zuhttp |
+|---|---|---|---|---|---|
+| Role | provider | provider | provider | consumer | standalone |
+| R prefix | `komp_` | `xml_` | `crypt_` | `read_xlsx()`, `xlsx_` | `zu_` |
+| Info function | `komp_info()` | `zuxml_info()` | `crypt_info()` | `zuxlsx_native()` ([zuxlsx#46](https://github.com/pedrobtz/zuxlsx/issues/46)) | `zu_info()` |
+| Root condition class | `zukomp_error` | `zuxml_error` | `zucrypt_error` | `zuxlsx_error` | `zu_error` ([zuhttp#19](https://github.com/pedrobtz/zuhttp/issues/19)) |
+| Public C prefix | `zu_` / `ZU_` | `zux_` / `ZUX_` | `zuc_` / `ZUC_` | none | none — but the internal C code uses `zu_` and collides with `zukomp.h` ([zuhttp#15](https://github.com/pedrobtz/zuhttp/issues/15)) |
+| Registered table | `zukomp_get_api(version)` via `zukomp-r.h` | `zuxml_api_v2` via `ZUXML_DEFINE_API_GET` in `zuxml.h` ([zuxml#36](https://github.com/pedrobtz/zuxml/issues/36)) | `zucrypt_get_api(version)` via `zucrypt-r.h` | — | — |
+| Table consumers today | none (fixture `tools/zukomptest`) | none (no fixture) | none (fixture `tests/consumer/zucrypttest`) | — | — |
+| Static archive | `lib${R_ARCH}/libzukomp.a` + `miniz.h` | `lib/libzuxml.a` + `expat.h`, `expat_external.h` | `lib/libzucrypt.a` + `zucrypt.h` | — | — |
+| Archive consumers today | zuxlsx (miniz ZIP reader only); fixture `tools/zukomplink` | zuxlsx (xlsxio); fixture `tools/zuxmltest` | none; zuxlsx 0.2.0 agile decryption ([zuxlsx#22](https://github.com/pedrobtz/zuxlsx/issues/22)); no fixture package ([zucrypt#32](https://github.com/pedrobtz/zucrypt/issues/32)) | — | — |
+| Upstream licence installed | `licenses/miniz-LICENSE` | no ([zuxml#42](https://github.com/pedrobtz/zuxml/issues/42)) | no ([zucrypt#33](https://github.com/pedrobtz/zucrypt/issues/33)) | Expat's and miniz's in `inst/licenses/`; xlsxio's not ([zuxlsx#62](https://github.com/pedrobtz/zuxlsx/issues/62)) | no: vendored picohttpparser and uriparser ([zuhttp#52](https://github.com/pedrobtz/zuhttp/issues/52)); zlib and TLS are system libraries |
+| Symbols hidden (`$(C_VISIBILITY)`) | no ([zukomp#34](https://github.com/pedrobtz/zukomp/issues/34)) | no ([zuxml#39](https://github.com/pedrobtz/zuxml/issues/39)) | yes, audited | no | no ([zuhttp#15](https://github.com/pedrobtz/zuhttp/issues/15)) |
+| r-actions pin | commit, v1.7.0 | mostly floating `@v1` ([zuxml#39](https://github.com/pedrobtz/zuxml/issues/39)) | commit, v1.9.0 | not used ([zuxlsx#44](https://github.com/pedrobtz/zuxlsx/issues/44)) | coverage only, `@v1` ([zuhttp#18](https://github.com/pedrobtz/zuhttp/issues/18)) |
+| `Depends: R` | 4.0 | 4.1 | 4.1 | 4.1 | 3.5 |
+
+*zuhttp-only note, 2026-09-25: the "Upstream licence installed" cell for zuhttp is stale — both texts are installed since #52 closed. The table is left as it is in the other four repositories, per the rule above, until the next five-repository change.*
+
+**Relationships, as decided rather than as hoped:**
+
+- **zuhttp consumes no sibling in 0.x.** Compression is system zlib (zuhttp D-7, accepted
+  2026-09-07). Pin digests come from the TLS backend: OpenSSL computes them today, and
+  macOS and Windows refuse pins until SubjectPublicKeyInfo extraction lands
+  ([zuhttp#4](https://github.com/pedrobtz/zuhttp/issues/4), [zuhttp#12](https://github.com/pedrobtz/zuhttp/issues/12)). zuxml could at most
+  be a `Suggests:` for a future `zu_resp_xml()`. So zukomp's criterion 11 is deferred beyond 0.1.0
+  ([zukomp#32](https://github.com/pedrobtz/zukomp/issues/32)), and zucrypt's hope of a
+  table-mode consumer in zuhttp ([zucrypt#14](https://github.com/pedrobtz/zucrypt/issues/14))
+  has no taker today.
+- **zuxlsx is the only real consumer in the family**, and it consumes archives only: zuxml's
+  Expat and zukomp's miniz ZIP reader now, and zucrypt's primitives for agile decryption in
+  0.2.0. None of zukomp's codec registry, stream driver or `max_output`/`max_ratio` limits
+  reaches zuxlsx. Standard (ECB) encryption is out of scope there, so zucrypt's ECB has no
+  consumer ([zucrypt#29](https://github.com/pedrobtz/zucrypt/issues/29)).
+- **No sibling uses any registered table.** All three tables are proven only by fixtures (or,
+  for zuxml, not at all). That is an argument for keeping each table small and marked as the
+  part most likely to change before a first consumer exists.
+- **An archive fix reaches a consumer only when the consumer is rebuilt.** A security bump
+  in Expat, miniz or TF-PSA-Crypto therefore means re-releasing zuxlsx too
+  ([zuxlsx#15](https://github.com/pedrobtz/zuxlsx/issues/15)).
+
+**Convergence targets** (each tracked where the change has to happen):
+
+- Archives install under `lib${R_ARCH}`, with the upstream licence under `licenses/` and every
+  `file.copy()` checked, as zukomp does ([zuxml#42](https://github.com/pedrobtz/zuxml/issues/42),
+  [zucrypt#33](https://github.com/pedrobtz/zucrypt/issues/33)).
+- Table resolvers follow `zukomp-r.h`: a pure-C99 `<pkg>.h` with an R-only `<pkg>-r.h`, a
+  union cast of `DL_FUNC`, lazy resolution, and NULL on a version mismatch.
+- Only `R_init_<pkg>` is exported from each shared object.
+- Each consumer shape has one fixture package under `tools/` that runs on all three OSes.
+  A plain `main()` does not count ([zucrypt#32](https://github.com/pedrobtz/zucrypt/issues/32)).
+- Providers that zuxlsx tracks at `@main` build zuxlsx in CI
+  ([zukomp#35](https://github.com/pedrobtz/zukomp/issues/35), [zuxml#39](https://github.com/pedrobtz/zuxml/issues/39)).
+- `main` carries a `.9000` development version between releases, so a consumer can test a
+  version instead of probing for files.
+- **CRAN order:** zuxml and zukomp first, then zuxlsx 0.1.0. zucrypt must reach CRAN before
+  zuxlsx 0.2.0 (decryption). zuhttp is independent.
 
 ### 6. Comparison with R curl
 
@@ -716,7 +816,7 @@ Only the second needs to be native for `zuhttp` to deliver on "native system tru
 | Platform | Protocol engine | Trust evaluation |
 |---|---|---|
 | Windows | Schannel | built in (`CertGetCertificateChain` + `CertVerifyCertificateChainPolicy`) |
-| macOS | OpenSSL-family engine | `SecTrustEvaluateWithError` against the system Keychain |
+| macOS | Secure Transport (D-4, S9; TLS 1.2 ceiling, deprecated — R-15, #16). S0 validated an OpenSSL engine here | `SecTrustEvaluateWithError` against the system Keychain |
 | Linux/Unix | system OpenSSL | OpenSSL default verify paths |
 
 The trust evaluator is a separate internal interface from the engine, so a platform can mix them:
@@ -783,7 +883,7 @@ loop     checkpoints=3  longest_block=12934us  (tick=100ms)
 
 **The fallback is worse than this document previously assumed.** Secure Transport has no `kTLSProtocol13` — the enum in SDK 26.5 stops at `kTLSProtocol12`, and against a server offering 1.3 it negotiates 1.2. Falling back therefore means shipping a **TLS 1.2-only** macOS backend, not merely a deprecated one. It remains a fallback of last resort with a sunset trigger, but it is not equivalent and must not be treated as such.
 
-**Open on this path (§62.1):** the spike linked Homebrew OpenSSL. CRAN macOS binaries need a static OpenSSL from the recipes toolchain, or another portable engine. That is now the top unresolved question for macOS.
+**Answered on this path (R-13, S9, 2026-09-08):** the spike linked Homebrew OpenSSL, which CRAN macOS binaries cannot rely on. The engine question is answered at the top of this section: Secure Transport. What remains open is R-15, Apple removing it (#16).
 
 #### 13.2.1 Trust evaluation is not fork-safe
 
@@ -883,12 +983,16 @@ zu_get("https://example.com", tls = zu_tls(ca_extra = "corporate-root.pem"))
 
 **D-49 corrects this section's example.** `verify` is *not* a `zu_tls()`
 field. It is already a merged policy argument (§31.9) on both the client and
-the request, and `ca_file` likewise; putting either inside `zu_tls()` as well
-would give "is this connection verified?" two answers, which is the "it cannot
-be both" mistake §31.13 names for `retry`. `zu_tls()` carries what has no
-other home: `ca_extra`, `pins`, `revocation` and `min_version`. The engine
-takes the trust configuration from `zu_tls()` and then lets the two policy
-arguments win, so there is exactly one authority for each field.
+the request; putting it inside `zu_tls()` as well would give "is this
+connection verified?" two answers, which is the "it cannot be both" mistake
+§31.13 names for `retry`. `zu_tls()` carries the trust configuration:
+`ca_file`, `ca_extra`, `pins`, `revocation` and `min_version`.
+
+**Corrected 2026-09-22 (review).** This paragraph used to say `ca_file` was a
+merged policy argument too, with the engine letting it win over `zu_tls()`.
+That is not what shipped: `ca_file` is an argument of `zu_tls()` only
+(`R/tls.R`), and no client or request argument sets it. It still has exactly
+one authority, which is the property D-49 exists for.
 
 #### 14.2 Custom CA semantics
 
@@ -910,6 +1014,8 @@ Both forms must be documented with the word "replaces" or "adds to" in the first
 #### 14.3 Custom CAs and native trust stores
 
 Additive trust is straightforward with OpenSSL (`X509_STORE_add_cert`). On Windows it requires building a temporary in-memory store with `CertOpenStore(CERT_STORE_PROV_MEMORY, ...)`, adding the extra roots, and passing it to `CertGetCertificateChain` as an additional store so that the system chain engine is still consulted. The engine/trust split in §13.1 keeps this confined to the trust evaluator.
+
+**Not implemented on Windows (0.1.0).** The Schannel backend refuses `ca_file` and `ca_extra` alike with `zu_tls_unsupported_error` (D-56), before any connection, rather than fall back to system trust (#5).
 
 **On macOS this is confirmed working (S0, F-6):**
 
@@ -935,8 +1041,10 @@ public host still validates, `ca_file` and the same host is rejected with
 Support public-key pinning:
 
 ```r
-zu_tls(pinned_public_key = "sha256//YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg=")
+zu_tls(pins = "sha256//YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg=")
 ```
+
+**Status (0.1.0, reviewed 2026-09-22): OpenSSL only.** `src/zu_tls_openssl.c` hashes the leaf's DER `SubjectPublicKeyInfo`. Secure Transport and Schannel both refuse pins rather than pin: macOS for want of the SubjectPublicKeyInfo (#4), Windows because it is not written yet (#12). Since D-56 (2026-09-25) the refusal is `zu_tls_unsupported_error`, raised before any connection; it used to be `zu_tls_pin_error`, the mismatch class, which is how the R pin test passed on Windows without a pin ever being compared. `?zuhttp_tls` said Schannel pinned; corrected with D-56. The argument is `pins =`; `pinned_public_key =` was this section's draft name.
 
 Pinning is cheap to implement (hash the leaf `SubjectPublicKeyInfo` in the verify callback, compare against the pin set), and it is high-value for exactly the API-client workloads this package targets. It fits the "secure defaults" story better than several items currently in §3.2. Pinning is checked **in addition to**, never instead of, chain and hostname verification.
 
@@ -967,7 +1075,7 @@ Exposed as:
 zu_tls(revocation = TRUE)   # documents both the latency cost and the uninterruptible fetch
 ```
 
-OpenSSL does not check revocation by default either. Windows/Schannel behavior must be measured in S3 rather than assumed. **Whatever the three platforms do, `zu_info()` (§39) must report the effective revocation policy**, because this is exactly the kind of silent asymmetry that produces "it works on my machine" bug reports.
+OpenSSL does not check revocation by default either, and it cannot check it on request without a revocation source: `X509_V_FLAG_CRL_CHECK` with no CRL loaded failed *every* chain (measured on CI 2026-09-10). **Since D-56, OpenSSL refuses `revocation = TRUE` with `zu_tls_unsupported_error`** rather than offer a flag that means "no connection succeeds" (#6). The honest implementation, when one is chosen, is OCSP stapling — the server supplies the response, so no fetch runs inside the handshake — and it is an open design question, not a fix. Windows/Schannel behavior (`CERT_CHAIN_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT`) must be measured rather than assumed; it still has not been. **Whatever the three platforms do, `zu_info()` (§39) must report the effective revocation policy**, because this is exactly the kind of silent asymmetry that produces "it works on my machine" bug reports.
 
 OCSP stapling verification may be added later on the engine path; `zuhttp` performing its own OCSP fetching remains out of scope.
 
@@ -1382,6 +1490,8 @@ If added later, it should be a high-level request-body encoder, not embedded in 
 ## Part 5 — Runtime Model
 
 ### 24. Timeout Model
+
+**Status (0.1.0, reviewed 2026-09-22): `total` only.** It is set by `timeout =` on the verbs and the client, and by `zu_req_timeout(req, total)`. The default is 30 s (`R/client.R`), not §24.5's 300. The §24.1 phase timeouts, their inactivity semantics and `zu_timeout()` do not exist (#13). DNS resolution is not bounded by `total` at all (§8.4, #14).
 
 **Implementation note: `zu_now_ms()` must have no silent fallback.** An early
 version returned 0 when no monotonic source was visible, commented "caller's
@@ -2864,6 +2974,8 @@ Avoid exposing raw platform or TLS codes as the primary API.
 
 ```text
 zu_error  (inherits: error, condition)
+├── zu_memory_error               (an allocation failed)
+├── zu_overflow_error             (a size computation would overflow)
 ├── zu_dns_error
 ├── zu_connect_error
 ├── zu_timeout_error
@@ -2871,7 +2983,8 @@ zu_error  (inherits: error, condition)
 │   ├── zu_tls_certificate_error
 │   ├── zu_tls_hostname_error
 │   ├── zu_tls_handshake_error
-│   └── zu_tls_pin_error
+│   ├── zu_tls_pin_error          (the pin was compared and did not match)
+│   └── zu_tls_unsupported_error  (D-56: the backend cannot honour a zu_tls() setting)
 ├── zu_http_parse_error
 ├── zu_url_error                  (the URL itself does not parse or is unusable)
 ├── zu_proxy_error
@@ -2881,12 +2994,16 @@ zu_error  (inherits: error, condition)
 ├── zu_body_limit_error
 ├── zu_body_decode_error
 ├── zu_body_not_replayable
+├── zu_fork_error                 (§26.4 hazard 2: HTTPS in a forked child on macOS)
+├── zu_io_error                   (a transport read or write failed)
 ├── zu_http_status_error          (a valid response with an error status)
 │   ├── zu_http_client_error      (4xx)
 │   └── zu_http_server_error      (5xx)
 └── zu_cancelled_error
     └── zu_interrupted_error      (user interrupt specifically)
 ```
+
+*(`zu_memory_error`, `zu_overflow_error`, `zu_fork_error` and `zu_io_error` added 2026-09-22 from `src/zu_error.c`, which is the one definition; this tree had lagged it. All four are direct children of `zu_error`.)*
 
 Every class inherits from `error` and `condition` so that base R `tryCatch()` works without any additional package.
 
@@ -3166,6 +3283,8 @@ Compression: gzip, deflate
 IPv6: yes
 Proxy: yes
 ```
+
+*(2026-09-25, D-56: `zu_info()` also carries `tls_capabilities`, the `zu_tls()` settings the linked backend honours — any of `pins`, `tls13`, `ca_file`, `ca_extra`, `revocation`. It is read from the backend's own mask in C, not from a table in R.)*
 
 Unix:
 
@@ -3528,13 +3647,15 @@ This is a CRAN requirement, not a courtesy, and it is a frequent cause of resubm
 - `inst/COPYRIGHTS` records, per component: name, upstream URL, version/commit, license identifier, and the full license text.
 - `LICENSE.note` summarises the aggregate licensing situation for a human reader.
 
-Current candidates and their licenses:
+*(2026-09-25, #52: R installs only `inst/`, so the texts in `src/vendor/*/LICENSE` never reached an installed package. They are now copied to `inst/licenses/`, `inst/COPYRIGHTS` points there rather than carrying them inline, `tools/update-*` write both copies, and `tools/check-vendor-licenses` fails CI if they differ. `LICENSE.note` exists.)*
+
+Components considered and their licenses:
 
 | Component | License | Vendored? |
 |---|---|---|
-| picohttpparser | MIT | if chosen (A.3) |
-| llhttp | MIT | if chosen (A.3) |
-| uriparser (subset) | BSD-3-Clause | yes — §8.2, inst/COPYRIGHTS |
+| picohttpparser | MIT | yes — D-10, inst/COPYRIGHTS; text installed as `licenses/picohttpparser-LICENSE` (#52) |
+| llhttp | MIT | no — not chosen (D-10, A.3) |
+| uriparser (subset) | BSD-3-Clause | yes — §8.2, inst/COPYRIGHTS; text installed as `licenses/uriparser-LICENSE` (#52) |
 | zlib | zlib license | **no** — system-linked |
 | miniz | MIT | only under `--with-bundled-zlib` |
 
@@ -3917,10 +4038,10 @@ Questions that the drafting process has already answered are recorded in the Dec
 | # | Question | Resolved by |
 |---|---|---|
 | ~~1~~ | ~~Can the §13.1 engine/trust split work on macOS from a synchronous poll loop?~~ **ANSWERED: yes.** S0, 2026-09-07. | — |
-| 1a | **Which portable TLS engine on macOS is viable for CRAN binary builds?** S0 used Homebrew OpenSSL; CRAN needs a static engine from the recipes toolchain or an alternative. Now the top macOS unknown. | S4 |
+| ~~1a~~ | ~~**Which portable TLS engine on macOS is viable for CRAN binary builds?**~~ **ANSWERED: Secure Transport**, S9, 2026-09-08 (R-13 retired). Whether it stays viable is R-15 (#16). | — |
 | ~~2~~ | ~~Does the Rtools mingw-w64 SDK expose `SCH_CREDENTIALS`?~~ **ANSWERED: no.** S1, 2026-09-07. Must be declared locally (§47.4). | — |
-| 2a | **Is a locally declared `SCH_CREDENTIALS` ABI-correct against a real Windows 10+ target?** Until verified, Windows TLS 1.3 is not safe to ship. | S3 |
-| 3 | What is the realistic line count of the Schannel backend, and does it fit the §51.3 budget? | Windows spike, §63.1 |
+| 2a | **Is a locally declared `SCH_CREDENTIALS` ABI-correct against a real Windows 10+ target?** Until verified, Windows TLS 1.3 is not safe to ship. Not attempted: S8 shipped TLS 1.2. | S8, R-3 (#17) |
+| ~~3~~ | ~~What is the realistic line count of the Schannel backend, and does it fit the §51.3 budget?~~ **ANSWERED: ~570 lines** as written, S8, 2026-09-08. | — |
 | ~~4~~ | ~~picohttpparser or llhttp?~~ **ANSWERED: picohttpparser**, 2026-09-07, after the strictness layer was built and tested independently. | — |
 | ~~5~~ | ~~Vendor `uriparser` (~15k LOC) or write a ~600-line parser?~~ **ANSWERED: a 3.9k-line subset**, 2026-09-07. The 15k figure measured the whole distribution; six of eight historical CVEs are in the excluded files (§8.2). | — |
 
@@ -4193,7 +4314,7 @@ Ordered by expected impact. Each risk has an owner-facing mitigation and an expl
 | ~~**R-12**~~ | ~~macOS forked HTTPS crashes~~ — **MITIGATED 2026-09-08 (S9).** The trust evaluator now carries the §26.4 PID guard, so a forked child raises `zu_fork_error` instead of dying. Verified end to end: `mclapply` + HTTPS after a parent request returns the condition from every child and the session survives; `tests/testthat/test-fork.R` asserts it and `tools/ci-fork-guard.R` runs it in CI as a regression test against a SIGSEGV, failing on a *skip* as well as on a failure. Non-vacuity demonstrated 2026-09-08 by disabling the guard branch, which reproduces F-5 verbatim (`caught segfault, address 0x110`). S16's corresponding exit criterion is ticked. | — | — | Done | Residual: forked HTTPS still does not WORK on macOS, it only fails diagnosably. `PSOCK` / `multisession` remain the supported path. |
 | **R-15** | **Apple may remove Secure Transport.** It is deprecated (87 markers in the current SDK) and is now zuhttp's macOS engine (D-4). Removal would leave only two options, both of which fail a project constraint: Network.framework cannot do §20.3 CONNECT, static OpenSSL bundles 4.64 MB of cryptography. | Low | **High** | Track Apple's SDK each release; keep the §13.1 split so only the engine half would change. **A Mbed TLS spike is on the roadmap (2026-09-08)**: R-13 evaluated static OpenSSL and Network.framework but never Mbed TLS, so "all alternatives fail a constraint" is unestablished | Ship static OpenSSL on macOS and amend §2 to drop the no-bundled-crypto claim |
 | ~~**R-13**~~ | ~~No CRAN-viable macOS TLS engine.~~ **RETIRED 2026-09-08.** Secure Transport + SecTrust ships with nothing bundled (0.17 MB `.so`), at a **TLS 1.2 ceiling**. Static OpenSSL was viable but costs 4.64 MB of bundled cryptography; Network.framework has TLS 1.3 but cannot run over a caller-owned socket, so it fails §20.3. See `spike/macos-engine/FINDINGS.md`. | — | — | Done | Residual: Apple may remove Secure Transport — see R-15 |
-| **R-2** | **Schannel overrun.** 1,500–2,500 lines of security-critical code, low-confidence estimate (§13.4, §64). | High | High | Time-box the spike; measure LOC against §51.3 early | Schannel backend exceeds 3,500 LOC or 8 weeks → reconsider a portable engine + `CertGetCertificateChain` trust on Windows too |
+| **R-2** | **Schannel overrun.** 1,500–2,500 lines of security-critical code, low-confidence estimate (§13.4, §64). **Did not materialise (S8, 2026-09-08):** ~570 lines as written, against the 3,500-line trigger; the ratings below are the original estimate. | High | High | Time-box the spike; measure LOC against §51.3 early | Schannel backend exceeds 3,500 LOC or 8 weeks → reconsider a portable engine + `CertGetCertificateChain` trust on Windows too |
 | **R-3** | **CONFIRMED 2026-09-07 (S1).** Rtools mingw-w64 11.0 lacks the `SCH_CREDENTIALS` / `TLS_PARAMETERS` typedefs; not a version gate (§47.4). Blocks TLS 1.3 on Windows only. | **Certain** | Medium | Declare the two structures locally behind a feature guard; the constants already exist. **ABI must be verified on a real Win10+ target** — a wrong layout into `AcquireCredentialsHandle` is a memory-safety bug, not a compile error | ABI cannot be verified confidently → ship Windows TLS 1.2-only for v1, documented |
 | **R-4** | **Size budget blown.** Vendored dependencies plus three backends exceed the auditability claim that justifies the project (§51.3). | Medium | High | Hard thresholds in §51.3; parser and URI decisions made against them | > 40k total LOC or > 12k project-owned → the "small and auditable" positioning is false; revise §1 and §6 publicly or stop |
 | **R-5** | **Security defect in own TLS glue or framing.** A memory-safety or verification bug in code with no upstream to inherit fixes from. | Medium | **Very high** | §43 fuzzing, §44 static analysis, §45 external review, strict §18.1 | A verification-bypass class bug found post-release → mandatory external audit before any further release |

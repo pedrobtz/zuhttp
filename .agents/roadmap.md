@@ -2,7 +2,7 @@
 
 **Companion to:** [zuhttp-design.md](zuhttp-design.md)
 **Status:** Draft
-**Last updated:** 2026-09-09 · **Tracks C and D complete but for the S7/S9 cert matrices; S12, S16, S17 complete; S15 explicitly partial. Two TODO items queued: the test-framework hardening plan and the Mbed TLS spike.**
+**Last updated:** 2026-09-25 (review merged with its amends; see "Amends before merge" at the end) · **v0.1.0 shipped 2026-09-10 as a GitHub release; no `v0.1.0` tag exists yet. Complete: S0–S5, S10–S14, S16, S17, U1, U4–U6. Partial: S6, S7, S8, S9, S15, S18, S20. Not started: S19 (deferred), S21, U2 (except A1), U3.**
 **Total estimate:** 41–48 person-weeks (§64 of the design doc, plus spikes)
 
 ---
@@ -15,11 +15,12 @@ Every stage below is **independently completable and independently verifiable**.
 
 That constraint is what makes the plan parallelisable and what makes a stalled stage survivable. It is achievable here because of one architectural property: **the `zu_stream` interface (§9) sits between the HTTP engine and the network.** The entire HTTP engine — parsing, framing, redirects, decompression, pooling logic — can be built and fully tested against a mock stream feeding canned bytes, with no sockets and no TLS. That decouples Track B from Track C completely, and it is the single most valuable structural decision for delivery speed.
 
-Three rules govern the whole plan:
+Four rules govern the whole plan:
 
 1. **Spikes before slices.** Stages S0 and S1 answer go/no-go questions and cost days. Everything else is speculative until they land.
 2. **A stage is done when its exit criteria pass in CI**, not when the code is written.
 3. **No stage may be "mostly done".** A half-finished stage blocks its dependents exactly as much as an unstarted one, but hides it.
+4. **Status never goes in a heading.** It goes on a `**Status:**` line directly under it. GitHub issues link to these sections by anchor, and GitHub computes an anchor from the heading text, so a heading that changes with its status breaks every link to it. *(Added 2026-09-22. The six sections no stage owned were headed `S-unassigned` until then; they are U1–U6, in the order they appear.)*
 
 ---
 
@@ -35,24 +36,24 @@ graph TD
     S4["S4 · URI + redirects<br/>DONE"]
     S5["S5 · Content encoding<br/>DONE"]
 
-    S6["S6 · Sockets + poll + deadlines<br/>DONE"]
-    S7["S7 · OpenSSL engine + trust"]
-    S8["S8 · Schannel<br/>DONE — TLS 1.2"]
-    S9["S9 · macOS engine + trust<br/>DONE — R-13 + R-12 closed"]
+    S6["S6 · Sockets + poll + deadlines<br/>PARTIAL — no inactivity or phase timers"]
+    S7["S7 · OpenSSL engine + trust<br/>PARTIAL — 1/4"]
+    S8["S8 · Schannel<br/>PARTIAL — TLS 1.2, no custom CA"]
+    S9["S9 · macOS engine + trust<br/>PARTIAL — 0/4; R-13 + R-12 closed"]
     S10["S10 · Proxy + CONNECT<br/>COMPLETE"]
 
-    S11["S11 · R API surface<br/>COMPLETE — 11/13 workflows"]
+    S11["S11 · R API surface<br/>COMPLETE — 13/13 workflows"]
     S12["S12 · Conditions + redaction<br/>COMPLETE"]
     S13["S13 · Retry, middleware, hooks<br/>COMPLETE"]
     S14["S14 · R transports<br/>COMPLETE — mock + cassettes"]
 
-    S15["S15 · Cancellation + unwind"]
+    S15["S15 · Cancellation + unwind<br/>PARTIAL"]
     S16["S16 · Pool + fork/session safety<br/>COMPLETE — R-12 closed"]
     S17["S17 · Streaming sinks<br/>COMPLETE"]
 
-    S18["S18 · Fuzzing + sanitizers + CI<br/>PARTIAL — 8 targets"]
-    S19["S19 · CRAN packaging"]
-    S20["S20 · Documentation"]
+    S18["S18 · Fuzzing + sanitizers + CI<br/>PARTIAL — 9 targets"]
+    S19["S19 · CRAN packaging<br/>DEFERRED"]
+    S20["S20 · Documentation<br/>PARTIAL"]
     S21["S21 · Security review → 1.0"]
 
     S0 --> S9
@@ -98,7 +99,9 @@ Tracks B and D are the two that can absorb a second contributor with no coordina
 
 ---
 
-## The §63.2 vertical slice — ✅ **COMPLETE**
+## The §63.2 vertical slice
+
+**Status:** ✅ complete.
 
 Before Track D proper, the pieces were wired together end to end, because
 everything up to this point had been proven correct **separately** and never
@@ -157,7 +160,9 @@ DESCRIPTION and `?zu_get` both say so.
 
 These gate the architecture. They are days of work and must happen **first**. Building engine code before S0 answers is not wasted (Track B is TLS-agnostic), but building any TLS code before it is.
 
-### S0 · macOS TLS spike — ✅ **COMPLETE 2026-09-07 · verdict: GO**
+### S0 · macOS TLS spike
+
+**Status:** ✅ complete 2026-09-07 · verdict: GO.
 
 **Retired:** Appendix B R-1, the project's highest risk.
 **Answered:** Decision D-4 — **Accepted**.
@@ -191,7 +196,9 @@ Build ~200 lines that:
 
 **New work created:** S16 must guard the trust evaluator, not just the pool. S9 must resolve which portable engine is CRAN-viable on macOS (R-13) — the spike used Homebrew OpenSSL, which is not a shippable answer.
 
-### S1 · Windows toolchain probe — ✅ **COMPLETE 2026-09-07 · R-3 CONFIRMED**
+### S1 · Windows toolchain probe
+
+**Status:** ✅ complete 2026-09-07 · R-3 confirmed.
 
 **Outcome:** Appendix B R-3 confirmed, not retired.
 **Actual effort:** ran on CI; no Windows machine needed.
@@ -215,17 +222,21 @@ The whole track is testable through the mock stream. It needs no TLS backend, no
 
 ### S2 · Foundations
 
+**Status:** ✅ complete. All three criteria were met but never ticked; ticked 2026-09-22 (review) against `make -C ctest strict` — 1500 checks, 0 failures, built on a machine with no R installed.
+
 **Effort:** 1.5 weeks. **Depends on:** nothing.
 
 Checked growable buffer; `zu_alloc`/`zu_realloc`/`zu_free` with overflow checks (§41); the `zu_error` type and code registry (§34.2); monotonic clock shims (§24.4); the `zu_stream` vtable (§9); and the **mock stream** (§50.1) that replays a byte script with configurable chunk boundaries and injectable errors.
 
 **Exit criteria**
 
-- [ ] Mock stream can deliver any byte sequence split at any boundary, including one byte at a time.
-- [ ] Allocator rejects every overflow case in its test matrix.
-- [ ] Builds standalone with no R headers — this is what makes S18 possible.
+- [x] Mock stream can deliver any byte sequence split at any boundary, including one byte at a time. (`ctest/test_stream.c`: every chunk size from 1 to N.)
+- [x] Allocator rejects every overflow case in its test matrix. (`ctest/test_alloc.c`.)
+- [x] Builds standalone with no R headers — this is what makes S18 possible. (`ctest/` builds and passes where R is not installed at all.)
 
 ### S3 · HTTP wire
+
+**Status:** ✅ complete. The one unticked criterion, the full §50.3 corpus, was handed to S18 and is tracked there.
 
 **Effort:** 3 weeks. **Depends on:** S2.
 
@@ -246,6 +257,8 @@ Implement against a thin parser interface and build **both** picohttpparser and 
 **Standing consequence:** picohttpparser rejects no smuggling attempt on our behalf. `zu_framing.c` is the only thing that does, which makes it the primary S18 fuzz target rather than a secondary one.
 
 ### S4 · URI and redirects
+
+**Status:** ✅ complete.
 
 **Effort:** 2.5 weeks. **Depends on:** S3.
 
@@ -274,6 +287,8 @@ in files the subset excludes — see `src/vendor/uriparser/VENDOR`.
 
 ### S5 · Content encoding
 
+**Status:** ✅ complete.
+
 **Effort:** 1 week. **Depends on:** S3.
 
 System zlib linkage; gzip/zlib auto-detection; raw-deflate fallback (§21.3); incremental enforcement of `max_decompressed_bytes` and `max_decompression_ratio` (§21.4).
@@ -290,6 +305,8 @@ System zlib linkage; gzip/zlib auto-detection; raw-deflate fallback (§21.3); in
 ## Track C — Transport
 
 ### S6 · Sockets, poll, deadlines
+
+**Status:** ◐ partial — six of seven criteria. The inactivity timer is not implemented, and neither are the §24.1 phase timeouts it belongs to: only `total` exists (#13). The graph marked this stage DONE until 2026-09-22.
 
 **Effort:** 2 weeks. **Depends on:** S2. **Blocks:** S7, S15.
 
@@ -315,9 +332,11 @@ Non-blocking sockets on POSIX and Winsock; `poll`/`WSAPoll` loop; the deadline c
       The fallback is now a build error, the suite asserts the clock advances
       and that a short deadline expires, and `tools/check-feature-macros`
       (run in CI) prevents a third instance of the class.
-- [ ] Inactivity timers reset on progress — arrives with the engine loop, which has no caller yet.
+- [ ] Inactivity timers reset on progress — arrives with the engine loop, which has no caller yet. **The engine loop has had callers since the §63.2 slice; the timer still does not exist** (#13).
 
 ### S7 · OpenSSL engine and trust
+
+**Status:** ◐ partial — one of four criteria. Open: the matrix's eighth row and pin match/mismatch, which are the same missing test (#4, #12), and `revocation = TRUE` failing every chain on this backend (#6). *2026-09-25:* the pin rows now exist in `test-certs.R` (match, mismatch, and a matching pin over an untrusted chain), with the expected pin computed by the `openssl` CLI; they run on the Linux legs only. Revocation is now refused on this backend (D-56), which closes the defect in #6 but not this stage's criterion, which asks for revocation to *work*.
 
 **Effort:** 2 weeks. **Depends on:** S6.
 
@@ -360,6 +379,7 @@ The reference implementation of the §13.1 engine/trust split. Hostname verifica
       what it says. The suite now skips the affected arms naming this
       criterion, and `?zuhttp_tls` and the README say so. Fixing it means a
       CRL source or OCSP, which is a design question §14.5 has not answered.
+      Tracked as #6.
 - [ ] Pin match and mismatch both behave, and pinning does not bypass chain
       verification. **Reachable from R as of 2026-09-08** (`zu_tls(pins = )`),
       and asserted to never silently do nothing: a build either enforces the
@@ -369,9 +389,12 @@ The reference implementation of the §13.1 engine/trust split. Hostname verifica
       at all, deliberately — Security.framework will not yield the
       SubjectPublicKeyInfo without hand-parsing DER, and "a pin that silently
       checks the wrong bytes is worse than no pin" — so this criterion cannot
-      be ticked there without reversing that decision.
+      be ticked there without reversing that decision. Tracked as #4; Schannel
+      refuses to pin as well (#12).
 
-### S8 · Schannel — ✅ **COMPLETE 2026-09-08 (TLS 1.2)**
+### S8 · Schannel
+
+**Status:** ◐ partial — two of four criteria; shipped 2026-09-08 at TLS 1.2. Open: custom CA, where `ca_file` and `ca_extra` are **both** refused (#5), and TLS 1.3 (R-3, #17). Pinning is refused here too; `?zuhttp_tls` said otherwise until 2026-09-25 (#12). *Also found 2026-09-25:* this backend never read `min_version`, so `zu_tls(min_version = 13)` connected at TLS 1.2 without a word, and the one test for it skipped every backend but Secure Transport. D-56 refuses it now, and the test runs offline on every leg. The R-level §50.5 matrix does not run on Windows: its fixture needs a POSIX shell, and every row passes `ca_file`. The heading said COMPLETE until 2026-09-22, which rule 3 does not allow.
 
 **Estimated:** 4–6 weeks, "the largest single line item in the plan and the
 lowest-confidence estimate". **Actual:** ~570 lines, nine CI rounds.
@@ -398,9 +421,10 @@ wrong host -> zu_tls_hostname_error
 - [ ] Additive custom CA through an in-memory store (§14.3). **Not
       implemented.** Configuring `ca_file`/`ca_data`/`ca_extra` on Windows
       raises an error rather than silently ignoring the setting and using
-      system trust anyway.
+      system trust anyway. Tracked as #5.
 - [ ] TLS 1.3. Needs `SCH_CREDENTIALS`, still absent from Rtools45/GCC 14.3
       (R-3, re-confirmed 2026-09-08). A toolchain bump will not fix it.
+      Tracked as #17.
 
 **What it cost, and why.** Nine CI rounds with no Windows machine in the loop.
 Four found real defects: a constant that lives in `wininet.h`, a
@@ -417,6 +441,8 @@ diagnostic steps that are meant to inform a decision must not carry
 
 ### S9 · macOS engine and trust
 
+**Status:** ◐ partial — none of four criteria ticked. Two look closable on existing evidence and are left for the maintainer to tick: criterion 2 was answered when R-13 was retired (Secure Transport; design Appendix B), leaving R-15 (#16), and criterion 3's F-3 negative test is `test-certs.R`'s unknown-issuer row, which runs against whichever backend the build linked. Open: the matrix's eighth row, because pinning refuses (#4), and revocation "works" (#6). The graph marked this stage DONE until 2026-09-22.
+
 **Effort:** 3–5 weeks. **Depends on:** S0 ✅.
 
 Implements the S0-validated design: portable engine + `SecTrustEvaluateWithError`. `spike/macos-tls/tls_spike.c` is the working reference for the handshake pump, the `cert_verify_callback` → SecTrust bridge, and anchor handling.
@@ -431,7 +457,7 @@ Implements the S0-validated design: portable engine + `SecTrustEvaluateWithError
       Transport has no `kTLSProtocol13`, and silently giving a caller 1.2 when
       they asked for 1.3 is weakening a security setting), and pinning refuses
       rather than pretending.
-- [ ] **A CRAN-viable engine is identified and building** (R-13). Homebrew OpenSSL is not an answer; this is the stage's real risk, not the TLS code.
+- [ ] **A CRAN-viable engine is identified and building** (R-13). Homebrew OpenSSL is not an answer; this is the stage's real risk, not the TLS code. *(2026-09-22: identified and building — Secure Transport, R-13 retired. Whether it is CRAN-viable is R-15, #16.)*
 - [ ] `SSL_VERIFY_PEER` set, with a test proving an invalid certificate aborts the handshake (F-3).
 - [ ] `zu_tls(revocation = TRUE)` works and is off by default (F-4). **Half
       closed 2026-09-10** (test-hardening A1): "off by default" is asserted
@@ -441,7 +467,9 @@ Implements the S0-validated design: portable engine + `SecTrustEvaluateWithError
       because Let's Encrypt no longer answers revocation queries. Needs a
       locally generated revoked certificate, alongside the §50.5 matrix.
 
-### S10 · Proxy and CONNECT — ✅ **COMPLETE 2026-09-08**
+### S10 · Proxy and CONNECT
+
+**Status:** ✅ complete 2026-09-08.
 
 **Effort:** 2 weeks. **Depends on:** S7.
 
@@ -502,7 +530,9 @@ request-line and the credential test.
 
 Buildable against an R-level transport stub before any C transport exists.
 
-### S11 · R API surface — ✅ **COMPLETE 2026-09-08**
+### S11 · R API surface
+
+**Status:** ✅ complete 2026-09-08. All 13 §31.16 workflows pass since S17; the first criterion was ticked at 11 of 13.
 
 **Effort:** 3 weeks. **Depends on:** S4.
 
@@ -549,7 +579,9 @@ request/response a condition carries (S12's criterion was explicitly waiting on
 this stage). What remains uncovered there is verbose transport logging and
 recordings, S14/S35.
 
-### S12 · Conditions and redaction — ✅ **COMPLETE 2026-09-08**
+### S12 · Conditions and redaction
+
+**Status:** ✅ complete 2026-09-08.
 
 **Effort:** 1.5 weeks. **Depends on:** S2 (for codes). Otherwise independent.
 
@@ -630,7 +662,9 @@ one definition:
       worse than no canary, because it is counted as coverage. Two of them
       here were, for months.
 
-### S13 · Retry, middleware, hooks — ✅ **COMPLETE 2026-09-08**
+### S13 · Retry, middleware, hooks
+
+**Status:** ✅ complete 2026-09-08.
 
 **Effort:** 2 weeks. **Depends on:** S11, S12.
 
@@ -681,7 +715,9 @@ the canary was inspecting the redacted *rendering* of the value it was meant
 to check. The helper now walks to any depth. That strengthens every existing
 arm, and all of them still pass.
 
-### S14 · R transports — ✅ **COMPLETE 2026-09-08**
+### S14 · R transports
+
+**Status:** ✅ complete 2026-09-08.
 
 **Effort:** 1 week. **Depends on:** S11.
 
@@ -726,7 +762,9 @@ turned up two defects, one of them in shipped code:
 
 ## Track E — Hardening and release
 
-### S15 · Cancellation and unwind — **PARTIAL, and honestly so**
+### S15 · Cancellation and unwind
+
+**Status:** ◐ partial, and honestly so — two of four criteria. Open: the 200 ms Ctrl-C bound (#7) and zero leaks under an interrupt at every phase (criterion 4, which #7 should carry too).
 
 **Effort:** 2 weeks. **Depends on:** S6.
 
@@ -751,7 +789,7 @@ promptly rather than at the next GC.
       forces a close.
 - [x] The checkpoint fires at the §25.1 cadence: measured at 100 ticks over a
       10 s request, i.e. every ~100 ms, which is the design's ceiling.
-- [ ] **Ctrl-C cancels within 200 ms on all three front-ends. NOT VERIFIED.**
+- [ ] **Ctrl-C cancels within 200 ms on all three front-ends. NOT VERIFIED.** (#7)
 - [ ] Interrupt at every phase leaks zero descriptors under ASan and valgrind.
       Blocked on the same thing.
 
@@ -784,9 +822,11 @@ not — failing with `bad value` on **every single request**, and looping until
 it had produced 2 GB of error output. Caught immediately because it broke the
 normal path, not the interrupt path.
 
-### S16 · Connection pool — ✅ **COMPLETE 2026-09-08**
+### S16 · Connection pool
 
-**Effort:** 2 weeks. **Depends on:** S7. **Status: ✅ COMPLETE 2026-09-08** — all six criteria.
+**Status:** ✅ complete 2026-09-08 — all six criteria.
+
+**Effort:** 2 weeks. **Depends on:** S7.
 
 Pool key by value (§26.1); policy and stale detection (§26.2); the no-reuse rules (§26.3); **PID guard on every acquisition and in every finalizer** (§26.4); lazy pool re-creation after deserialization (§26.5).
 
@@ -861,7 +901,9 @@ Verified non-vacuously: stubbing out `zu_pool_acquire()` fails 5 assertions
 across 3 tests, including the parent-side reuse check at the end of the
 `mclapply` test.
 
-### S17 · Streaming sinks — ✅ **COMPLETE 2026-09-08**
+### S17 · Streaming sinks
+
+**Status:** ✅ complete 2026-09-08.
 
 **Effort:** 1.5 weeks. **Depends on:** S5, S15, S16.
 
@@ -915,6 +957,8 @@ surfacing as "evaluation nested too deeply" from inside a C callback that had
 not yet run. `force(f)` is load-bearing, and there is a regression test for it.
 
 ### S18 · Fuzzing, sanitizers, CI
+
+**Status:** ◐ partial — two of three criteria, with nine targets (the ninth, `body`, landed with S17). Open: the 24 h soak per target, a pre-1.0 run.
 
 **Effort:** 2 weeks. **Depends on:** S3. Can start as soon as the engine builds standalone.
 
@@ -988,6 +1032,8 @@ Host header. Now rejected in the §8.2 policy layer.
 
 ### S19 · CRAN packaging
 
+**Status:** deferred with the CRAN submission (see Release scope), but not untouched. Recorded while preparing v0.1.0: a 261 KB tarball against the 2 MB ceiling; `configure` already prints the §47.3 message when OpenSSL is missing; network tests are gated on `ZU_TEST_NETWORK=1`, and the one example that reached the network is `\dontrun{}`. Nothing is ticked: the missing-OpenSSL path is not exercised in CI, cold compile time is unmeasured, and `--as-cran` still NOTEs the Secure Transport pragma. Blocked on #16.
+
 **Effort:** 2 weeks. **Depends on:** S8, S9, S10.
 
 POSIX `sh` configure with pkg-config fallback and actionable failure messages (§47.3); `cleanup`; `Makevars.win`; `SystemRequirements`; `inst/COPYRIGHTS` and `cph` roles (§49.2); the `LICENSE` two-line file; `.Rbuildignore` for `fuzz/`.
@@ -1001,6 +1047,8 @@ POSIX `sh` configure with pkg-config fallback and actionable failure messages (�
 
 ### S20 · Documentation
 
+**Status:** ◐ partial — v0.1.0 took the README and the `?zuhttp_fork` and `?zuhttp_tls` topics. Criterion 2 failed until 2026-09-25: DNS non-interruptibility (§25.4, D-30) was in no help page and not in the README. It is now in `?zuhttp_tls`, on every `timeout` parameter, in the README's limitations table and in NEWS (#14). Criterion 2 is not ticked: that needs a sweep of every §-limitation, not the two named ones. The articles are #8–#11.
+
 **Effort:** 2 weeks. **Depends on:** S13, S17.
 
 User docs per §55: TLS backend and trust per OS, proxy behavior, timeout semantics, redirect policy, retry safety, streaming, error classes, differences from `curl`, and **the §6.1 "when to use curl instead" section**. Developer docs: stream abstraction, parser ownership, TLS backend contract, cancellation model, allocation ownership, porting guide.
@@ -1010,7 +1058,25 @@ User docs per §55: TLS backend and trust per OS, proxy behavior, timeout semant
 - [ ] Three R users unfamiliar with the package each write a working GET and JSON POST within 5 minutes using only the reference index (§61.11).
 - [ ] Every documented limitation from the design doc appears in user-facing help — especially DNS non-interruptibility (§25.4) and `ca_file` replacing rather than adding (§14.2).
 
-### S-unassigned · §35.1 timings and §35.3 events — ✅ **DONE 2026-09-08**
+### S21 · Security review → 1.0
+
+**Status:** not started.
+
+**Effort:** 2 weeks plus review turnaround. **Depends on:** S18, S19, S20.
+
+The §45 checklist: external review of TLS glue, CRLF/header injection, redirect credential stripping, certificate failures, malformed proxy responses, timeout and cancellation cleanup, decompression bombs, ASan/UBSan/valgrind, no R API off the main thread, allocation overflow checks. Plus §46: `SECURITY.md`, a monitored contact, a patch SLA, and — per R-6 — **a second maintainer with CRAN rights.**
+
+**Exit criteria**
+
+- [ ] External review complete, all findings resolved or accepted in writing.
+- [ ] All 14 success criteria in §61 measured and passing.
+- [ ] `SECURITY.md` published; second maintainer in place, or the bus-factor risk stated prominently in the README.
+
+---
+
+## U1 — §35.1 timings and §35.3 events
+
+**Status:** ✅ done 2026-09-08.
 
 Both were specified from the start and neither existed. `zu_resp_timings()`
 returned `total` alone — one of nine — and the only hooks were the four
@@ -1058,7 +1124,9 @@ Also worth recording: the first draft of the tests failed because the
 the next request correctly skipped the phases being measured. The pooling was
 right; sharing a client between tests that measure connection setup was not.
 
-### S-unassigned · Test-framework hardening — 📋 **TODO**
+## U2 — Test-framework hardening
+
+**Status:** 📋 TODO — A1 closed, partially, 2026-09-10 (see A1); everything else open.
 
 **Raised 2026-09-09**, from measuring this suite against R `curl` 8.0.0 (source
 fetched from CRAN) and against what `requests` does. Twelve items in four
@@ -1094,7 +1162,7 @@ fail its own network tests rather than quietly skip them.
 
 ---
 
-#### Group A · TLS negatives against a public corpus
+### Group A · TLS negatives against a public corpus
 
 We use **4 of badssl.com's ~30 endpoints**. Each item below was probed live on
 2026-09-09 and produced the class stated, so these are transcriptions of
@@ -1164,7 +1232,7 @@ the other, and only the second can catch a platform changing under us.
 
 ---
 
-#### Group B · Resource lifecycle — a dimension with zero coverage
+### Group B · Resource lifecycle — a dimension with zero coverage
 
 `grep 'gc()' tests/` returns nothing. curl ships `test-gc.R` asserting
 `total_handles() == 0` after collection; we have an external pointer with a
@@ -1184,7 +1252,7 @@ finalizer and no test that it ever runs. New file, `test-lifecycle.R`.
 
 ---
 
-#### Group C · Timeouts — currently asserted only synthetically
+### Group C · Timeouts — currently asserted only synthetically
 
 `grep zu_timeout_error tests/` finds one hit and it constructs the condition
 with `zu_condition()`. **No request in this suite has ever timed out.**
@@ -1202,7 +1270,7 @@ with `zu_condition()`. **No request in this suite has ever timed out.**
 
 ---
 
-#### Group D · Infrastructure
+### Group D · Infrastructure
 
 - [ ] **D1. `ZU_HTTPBIN_URL`, and a local httpbin in CI.**
 
@@ -1250,7 +1318,7 @@ with `zu_condition()`. **No request in this suite has ever timed out.**
 
 ---
 
-#### Ordering, and why
+### Ordering, and why
 
 1. **A1** first. Highest value per line in the plan, and it guards a measured
    claim the design leans on heavily.
@@ -1263,7 +1331,7 @@ with `zu_condition()`. **No request in this suite has ever timed out.**
    because it needs the most new machinery.
 6. **D2, D3**, small and independent; do them whenever.
 
-#### Explicit non-goals
+### Explicit non-goals
 
 - **Not** a general move away from public hosts. Group A *wants* the real
   internet: the whole point is catching a platform change we could not
@@ -1273,7 +1341,9 @@ with `zu_condition()`. **No request in this suite has ever timed out.**
 - **Not** S18's 24 h soak or S20's usability test. Those need wall-clock time
   and people; nothing here is blocked on them.
 
-### S-unassigned · Spike: Mbed TLS as the macOS portable engine — 📋 **TODO**
+## U3 — Spike: Mbed TLS as the macOS portable engine
+
+**Status:** 📋 TODO — not scheduled; now an input to #16.
 
 **Raised 2026-09-08.** Not scheduled; recorded so the option is not
 rediscovered later under pressure.
@@ -1315,7 +1385,9 @@ GPL-or-commercial; BearSSL has no TLS 1.3; s2n drags in libcrypto.
       i.e. §13.1's split still holds and trust stays native.
 - [ ] A number for the maintenance obligation: release cadence and CVE history.
 
-### S-unassigned · §35.2 `zu_resp_connection()` — ✅ **DONE 2026-09-08**
+## U4 — §35.2 `zu_resp_connection()`
+
+**Status:** ✅ done 2026-09-08.
 
 Found by a question nobody could answer from the package: *what cipher did
 this connection negotiate?* §35.2 specifies a nine-field accessor, and none of
@@ -1344,7 +1416,9 @@ Two of them were more than plumbing:
 `remote_ip` through a proxy is the **proxy's** address, which is the honest
 answer: it is who we are connected to, and only the proxy knows the origin's.
 
-### S-unassigned · §14 TLS configuration reaches R — ✅ **DONE 2026-09-08**
+## U5 — §14 TLS configuration reaches R
+
+**Status:** ✅ done 2026-09-08.
 
 Not owned by a stage either, and it was blocking both S7 and S9. **None of
 §14 was reachable from R**: `grep 'ca_file|ca_extra|zu_tls(' R/` returned
@@ -1370,7 +1444,9 @@ never being reached. `test-tls.R` asserts exactly that: a *successful*
 response to a pinned request is a failure. Dropping the TLS fields from the
 key turns it into a 200.
 
-### S-unassigned · `zu_info()` (§39) — ✅ **DONE 2026-09-08**
+## U6 — `zu_info()` (§39)
+
+**Status:** ✅ done 2026-09-08.
 
 **Found during S11.** §39 specifies an information API — version, TLS backend,
 trust source, compression, IPv6, proxy — and two other sections lean on it:
@@ -1402,18 +1478,6 @@ It is itself a §42.2 egress — it exists to be pasted into bug reports, and a
 proxy URL routinely carries a credential — so it redacts, and there is a
 canary arm for it in `test-redact.R`. Non-vacuous: removing the redaction
 fails four assertions.
-
-### S21 · Security review → 1.0
-
-**Effort:** 2 weeks plus review turnaround. **Depends on:** S18, S19, S20.
-
-The §45 checklist: external review of TLS glue, CRLF/header injection, redirect credential stripping, certificate failures, malformed proxy responses, timeout and cancellation cleanup, decompression bombs, ASan/UBSan/valgrind, no R API off the main thread, allocation overflow checks. Plus §46: `SECURITY.md`, a monitored contact, a patch SLA, and — per R-6 — **a second maintainer with CRAN rights.**
-
-**Exit criteria**
-
-- [ ] External review complete, all findings resolved or accepted in writing.
-- [ ] All 14 success criteria in §61 measured and passing.
-- [ ] `SECURITY.md` published; second maintainer in place, or the bus-factor risk stated prominently in the README.
 
 ---
 
@@ -1452,12 +1516,16 @@ Cuts 6 and 7 are listed because they are real options, not because they are good
 ## Release scope: v0.1.0 — decided 2026-09-10
 
 **A GitHub release, not a CRAN submission.** The distinction is the whole
-decision, and it follows from S9: R-13 — "a CRAN-viable engine is identified
-and building" — is still open, so a CRAN submission would commit the package
-to Secure Transport on macOS while §9.1 records that backend as deprecated by
-Apple and capped at TLS 1.2. Shipping on GitHub first puts the package in front
-of real users, which is what will actually establish how urgent R-13 is;
-submitting first would answer that question by making it irreversible.
+decision, and it follows from S9: R-13 answered *which* engine — Secure
+Transport — but R-15, Apple removing it, is unmitigated (#16), so a CRAN
+submission would commit the package to Secure Transport on macOS while S9
+records that backend as deprecated by Apple and capped at TLS 1.2. Shipping on
+GitHub first puts the package in front of real users, which is what will
+actually establish how urgent R-15 is; submitting first would answer that
+question by making it irreversible.
+
+*(Corrected 2026-09-22: this paragraph said R-13 was still open, while
+Appendix B had retired it on 2026-09-08. The open question was always R-15.)*
 
 S19 is therefore deferred whole. `--as-cran` cleanliness stays a goal — the
 `source-package-hygiene` job already enforces part of it on every push — but it
@@ -1467,11 +1535,36 @@ is not a gate on this tag.
 Phase 2, so v0.1.0 is not short of features. What it lacks is release
 scaffolding and a handful of documentation defects, all of them small.
 
+### Stage by stage
+
+Added 2026-09-22. "Partial" means the stage shipped with an open criterion;
+the last column says where the gap is written down and tracked.
+
+| Section | In v0.1.0? | Gap, and where it is tracked |
+|---|---|---|
+| S0, S1 | complete | — |
+| S2–S5 | complete | S3's §50.3 corpus moved to S18 |
+| S6 | partial — gap **not yet** documented to users | inactivity and phase timeouts (#13) |
+| S7 | partial, gap documented | pin row (#4, #12); revocation on OpenSSL (#6) |
+| S8 | partial, gap documented | TLS 1.2 (#17); no custom CA (#5); no pinning, documented wrongly (#12) |
+| S9 | partial, gap documented | TLS 1.2 and R-15 (#16); no pinning (#4); revocation unverified (#6) |
+| S10–S14 | complete | — |
+| S15 | partial, gap documented | 200 ms bound and leaks under interrupt (#7) |
+| S16, S17 | complete | — |
+| S18 | partial, gap documented | 24 h soak, a pre-1.0 run |
+| S19 | post-0.1.0 | deferred with the CRAN submission; #16, #18 |
+| S20 | partial — DNS gap **not yet** documented | README and two topics shipped; DNS (#14); articles #8–#11 |
+| S21 | post-0.1.0 | — |
+| U1, U4, U5, U6 | complete | — |
+| U2 | post-0.1.0, except A1 | A1 shipped with v0.1.0; the rest is open |
+| U3 | post-0.1.0 | an input to #16 |
+
 ### What ships
 
 Everything already built: the six verbs; redirects with the §19.1 rewrite
-table and §19.2 stripping; gzip/deflate under §21.4's limits; the full §24
-timeout model including total-across-chain; system-trust verification on all
+table and §19.2 stripping; gzip/deflate under §21.4's limits; a single
+`total` timeout across the redirect chain and retries (§24.3 — the §24.1 phase
+timeouts are not implemented, #13); system-trust verification on all
 three backends; memory, file and callback sinks; the §26 connection pool;
 retry, middleware and hooks; the mock and cassette transports; §35.1 timings
 and the §35.3 event trace; `zu_info()`; §34 structured conditions; and §42
@@ -1481,11 +1574,15 @@ redaction. Record/replay ships too, which §59 had placed in Phase 3.
 
 | Deferred | To | Why |
 |---|---|---|
-| §30 async / parallel requests | v0.1.1 | §62's open question 15 — whether concurrency belongs in this package at all — is unanswered, and D-29 commits any implementation to a `later` integration that deserves its own design pass. Additive, so deferring breaks nothing. |
-| R connection sinks (§27.5) | v0.1.1 | §58 item, never built. `path` and `callback` cover the workloads in scope. |
-| Client certificates | v0.1.1 | §58 item, never built. No user has asked. |
+| §30 async / parallel requests | v0.2.0 | §62's open question 15 — whether concurrency belongs in this package at all — is unanswered, and D-29 commits any implementation to a `later` integration that deserves its own design pass. Additive, so deferring breaks nothing. |
+| R connection sinks (§27.5) | v0.2.0 | §58 item, never built. `path` and `callback` cover the workloads in scope. |
+| Client certificates | v0.2.0 | §58 item, never built. No user has asked. |
 | Brotli, zstd, Unix sockets, native system proxy, OpenTelemetry | unscheduled | §59, "add only if justified". None is. |
 | HTTP/2 | §60 | Requires its own design decision, not a release slot. |
+
+*(The three rows above read v0.1.1 until 2026-09-22. A patch release that adds
+asynchronous requests is not a patch: features go to 0.2.0, and 0.1.x is fixes
+only — design D-55, proposed.)*
 
 ### Exit criteria
 
@@ -1564,9 +1661,14 @@ UBSan. R suite green offline, at `NOT_CRAN=true`, and with `ZU_TEST_NETWORK=1`.
 ### Limitations this release documents rather than fixes
 
 macOS tops out at TLS 1.2, refuses to pin, and raises `zu_fork_error` for
-HTTPS in a forked child (S9 partial). Windows is TLS 1.2 only and has no
-additive custom CA (S8 partial). Ctrl-C's 200 ms bound is unverified (S15).
+HTTPS in a forked child (S9 partial). Windows is TLS 1.2 only, refuses to pin
+(#12), and has no custom CA at all — `ca_file` is refused as well as
+`ca_extra` (S8 partial, #5). Ctrl-C's 200 ms bound is unverified (S15).
 There are no parallel requests (§30). Revocation is off by default (§14.5).
+
+Two limits were not documented to users at all when this section was written:
+only a `total` timeout exists (#13), and DNS resolution ignores both `timeout`
+and Ctrl-C (#14). Both are in the README since 2026-09-25.
 
 Each is a documented limit and not a defect, but they belong in the README
 rather than only in this file — a user's first encounter with any of them
@@ -1618,18 +1720,141 @@ That last item is the honest test of the whole project. `zuhttp` exists on the p
     pre-0.1.0 one. What v0.1.0 needs from S20 is the README and the two help
     topics its own error messages already reference, not the whole stage.
 
-11. **Next: the seven v0.1.0 exit criteria.** Six are documentation or
+11. ~~**Next: the seven v0.1.0 exit criteria.**~~ ✅ Done 2026-09-10. Six are documentation or
     scaffolding; the seventh (A1, revocation) is the only one that adds a
     test, and it closes an S9 criterion on the way past.
 
-   Still open and not blockers: the mermaid graph marks **S9** DONE with all
-   four criteria unticked, and **S7** has no marker with 0 of 3. Rule 2 makes
-   the criteria authoritative, so both are partial. Reconciling them means
-   running the §50.5 certificate matrix, not editing the diagram.
-
-   Two pieces of bookkeeping remain open and are NOT blockers: the mermaid
-   graph still marks **S9** DONE with all four exit criteria unticked, and
-   **S7** carries no graph marker with 0 of 3 criteria. Rule 2 says the
-   criteria are authoritative, so both stages are partial and the graph is
-   stale. Reconciling them means running the §50.5 certificate matrix, not
+   Still open and not blockers: the mermaid graph marked **S9** DONE with all
+   four criteria unticked, and **S7** had no marker with 1 of 4. Rule 2 makes
+   the criteria authoritative, so both are partial, and since 2026-09-22 the
+   graph says so. Closing them means running the §50.5 certificate matrix, not
    editing the diagram.
+
+12. **Next: the review of 2026-09-22** — see the last section.
+
+---
+
+## Review 2026-09-22
+
+A read-only review of this roadmap, the design and the code, done against the
+sibling `zu*` repositories. Its status corrections are applied above; this
+section records the judgement behind them.
+
+### What should have been done differently
+
+- **S0 asked the wrong question.** It validated an OpenSSL engine with
+  SecTrust — using *Homebrew* OpenSSL — and returned GO, having failed its own
+  thread-count criterion. The question that decided the outcome, which engine
+  can ship on CRAN's macOS toolchain, was left to R-13. That was answered the
+  next day by adopting the engine §13.2 had called a fallback of last resort.
+  A spike's exit criteria should include "shippable on the target toolchain".
+- **Test infrastructure belonged before the TLS backends.** F-3 made the
+  §50.5 negative matrix mandatory "from the first commit", yet none of §14 was
+  reachable from R until U5, after S7–S9 had been marked done. No R-level
+  request has ever timed out (U2 Group C). The local certificate fixture and a
+  local httpbin (U2 D1) belonged in a stage ahead of S7.
+- **A Windows debug session, not nine blind CI rounds.** Five of S8's nine
+  rounds went on a crash that did not exist. An interactive session on a
+  Windows runner would have settled it in one, and the rule that came out of it
+  is broken today in `tls-spike.yaml`'s `slice-r` job (#18).
+- **One pull request per stage, not one squash.** All 21 stages landed as a
+  single squashed PR, so the per-stage CI evidence that rule 2 relies on is
+  gone: S6 cites commit `28fe55d`, which the repository no longer reaches. The
+  siblings ship a PR per stage.
+- **Markers were never checked against their boxes.** S2 read DONE with no
+  criterion ticked, S8 read COMPLETE with two open, and S9 read DONE with none
+  ticked. Rule 4 stops a marker from breaking links; only reading the boxes
+  stops it from being wrong.
+- **Proportionality.** About 5.8k lines of design and roadmap prose sit beside
+  about 6.3k lines of project-owned C and 1.5k of R, estimated at 41–48
+  person-weeks and delivered in four calendar days. The documents grow by
+  accretion — "an earlier draft…", "how this landed" — which is how they and
+  the code came to disagree in the places corrected above. A short normative
+  specification plus an append-only log of findings would stay true longer.
+
+### Recommended v0.1.0 scope
+
+Tag what exists, once the user-facing documentation stops contradicting the
+code. Two issues gate that tag, and both are documentation: #12 (`?zuhttp_tls`
+says Schannel pins; the README says pinning is missing on macOS only) and #14
+(DNS ignores `timeout` and Ctrl-C, and no help page says so). The documentation
+half of #5 belongs with them: the README says `ca_file` works everywhere, and
+on Windows it is refused.
+
+Everything else is post-0.1.0. The export trim and `zuhttp_error` (#19) should
+land before CRAN or 0.2.0, whichever comes first — it is cheap while nothing
+depends on the package (R-11), and a deprecation cycle afterwards. #16 gates
+S19. #13 is the largest functional gap and belongs in 0.2.0 (D-55).
+
+### Open issues against the tag
+
+| Issue | Gates v0.1.0? | Why |
+|---|---|---|
+| #4 macOS SPKI pinning | no | a documented refusal, not a silent gap |
+| #5 Schannel custom CA | documentation half only | the README says `ca_file` works everywhere; the implementation is post-0.1.0 |
+| #6 revocation | no | documented in `?zuhttp_tls` and the README; fails closed |
+| #7 Ctrl-C bound | no | unmeasured, and documented as unmeasured |
+| #8 TLS vignette | no | S20, post-0.1.0 |
+| #9 testing vignette | no | S20, post-0.1.0 |
+| #10 getting-started article | no | the README covers it for 0.1.0 |
+| #11 retries, timeouts, cancellation | no | S20; must not describe §24.1 phase timeouts before #13 |
+| #12 Schannel pinning | **yes** (documentation) | a help page states something false about a security setting |
+| #13 §24 phase timeouts | no | a functional gap, for 0.2.0; the roadmap's claim is corrected above |
+| #14 DNS ignores `timeout` and Ctrl-C | **yes** | S20 criterion 2; a `timeout` that does not bound DNS surprises users |
+| #15 C prefix and symbol visibility | no | invisible to users; needed before any `zukomp` consumption or §54 |
+| #16 macOS engine (R-15) | no | gates S19 and the CRAN submission |
+| #17 Windows TLS 1.3 (R-3) | no | a documented ceiling |
+| #18 CI to the family standard | no | gates CRAN: the CRAN-like containers find what CRAN finds |
+| #19 export surface, `zuhttp_error` | no | before CRAN or 0.2.0, whichever comes first |
+
+### Amends before merge (2026-09-25)
+
+The review merged together with the fixes for the issues it said gate the tag,
+so that the plan and the code agree on the day the plan becomes authoritative.
+
+| Issue | What landed |
+|---|---|
+| #12 | `?zuhttp_tls`, the README and NEWS now say pinning is OpenSSL-only. A backend that cannot pin raises the new `zu_tls_unsupported_error`, never `zu_tls_pin_error`, so the two can no longer be confused by a test (D-56). Pin match, mismatch and no-bypass rows added to the §50.5 matrix. Schannel pinning itself is still open. |
+| #14 | DNS's immunity to `timeout` and Ctrl-C is in `?zuhttp_tls`, on each `timeout` parameter, in the README's limitations table and in NEWS. |
+| #5 (docs) | README and `?zuhttp_tls` say Windows refuses `ca_file` as well as `ca_extra`; the refusal is `zu_tls_unsupported_error` and its message no longer implies a fallback to the Windows store. The implementation is still open. |
+| #6 (refusal) | OpenSSL refuses `revocation = TRUE` before connecting instead of failing every chain. The policy question — OCSP stapling, soft- versus hard-fail — is still open. |
+| #52 | Both vendored licence texts are installed under `licenses/`; `tools/check-vendor-licenses` in c-core keeps them equal to `src/vendor/`; `LICENSE.note` added. |
+| #18 (part) | The multi-line `Rscript -e` in `tls-spike.yaml` is now `tools/ci-run-tests.R`; `tests/testthat.R` guards `library(testthat)`; `R-CMD-check.yaml` accepts `workflow_dispatch`. |
+
+**Found on the way, and fixed by the same change:** Schannel ignored
+`min_version`, so `min_version = 13` silently gave TLS 1.2 on Windows. The
+test that should have caught it skipped every backend but Secure Transport.
+Under D-56 the refusal is table-driven, so a backend cannot forget a setting.
+
+**Found on the way, and fixed:** the §50.5 certificate matrix had **never
+run on Linux**. The fixture dated its expired and not-yet-valid certificates
+with `openssl x509 -not_before`, an option added in OpenSSL 3.4; Ubuntu ships
+3.0, generation failed, and the fixture skipped *every* row — so S7's "seven
+of eight rows pass" was true on macOS only, and the new pin rows skipped on
+the first CI run with "could not generate the expired certificate". The
+fixture now falls back to `openssl ca -startdate/-enddate`, and only the two
+dated rows depend on the dated certificates. Verified by forcing the
+fallback locally with a wrapper that rejects `-not_before`, and on CI.
+
+**Found by the matrix's first Linux run, and fixed:** on the OpenSSL
+backend, *any* chain failure on a pinned request — untrusted issuer, expired,
+wrong host — was reported as `zu_tls_pin_error`. `verify_cb` returns before
+comparing pins when the chain fails, and the error translation read the
+never-set `pin_ok` flag as a mismatch. The request was still refused, so this
+was a diagnosis defect (§14.6), not a bypass. The flag now records only a
+comparison that ran and failed; `ctest/test_tls.c` has the case, and
+reverting the fix fails it.
+
+**Found on the way, not fixed:** every job in every workflow carries
+`if: github.event_name != 'pull_request' || <fork>`, while `push` fires only
+on `main` and `develop`. A pull request from a branch of this repository
+therefore gets **no CI at all** before it merges; the checks on #20 were all
+"skipped". This PR's evidence came from `workflow_dispatch` runs on the
+branch. Folded into #18 and into the new roadmap's first milestone.
+
+Verified locally on macOS (Secure Transport): `make -C ctest strict` and
+`asan`, 1541 checks, 0 failures; `make -C fuzz replay-run`; `make -C ctest
+engine-st`; the R suite offline, at `NOT_CRAN=true` and with
+`ZU_TEST_NETWORK=1`. Non-vacuity: disabling one branch of
+`zu_tls_config_check()` fails 4 ctest checks; editing an installed licence
+copy fails `check-vendor-licenses`.

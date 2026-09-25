@@ -21,10 +21,15 @@ bundles neither cryptography nor a CA bundle. No hard R dependencies.
 * Redirects with method rewriting and cross-origin credential stripping;
   transparent gzip and deflate under explicit size limits.
 * A total timeout across a redirect chain, and Ctrl-C cancellation that
-  unwinds without leaking sockets or TLS contexts.
+  unwinds without leaking sockets or TLS contexts. Neither bounds DNS
+  resolution, which is synchronous.
 * Retry policies, middleware, and observability hooks.
 * Structured conditions (`zu_tls_certificate_error`, `zu_timeout_error`,
   `zu_fork_error`, …) rather than parsed message strings.
+* A `zu_tls()` setting the linked backend cannot honour — pins, TLS 1.3, a
+  custom CA, or revocation — raises `zu_tls_unsupported_error` before any
+  connection, rather than connecting without it. `zu_info()$tls_capabilities`
+  lists what the build supports.
 * Credential redaction applied at every output path — printing, conditions,
   traces, verbose logging, recordings, and `zu_resp_url()`.
 * `zu_mock_transport()` and a record/replay cassette transport, so packages
@@ -34,12 +39,13 @@ bundles neither cryptography nor a CA bundle. No hard R dependencies.
 
 ## Known limitations
 
-See the README. In brief: TLS 1.2 maximum on macOS and Windows, no pinning on
-macOS, no additive custom CA on Windows, HTTPS in a forked child raises on
-macOS, revocation off by default, and no parallel or asynchronous requests.
+See the README. In brief: TLS 1.2 maximum on macOS and Windows; pinning on
+OpenSSL only; no custom CA on Windows; revocation off by default and refused
+on OpenSSL; a single total timeout, which DNS resolution ignores; HTTPS in a
+forked child raises on macOS; and no parallel or asynchronous requests.
 
 ## Not in this release
 
 Asynchronous and parallel requests, R connection sinks, and client
-certificates are deferred to 0.1.1. HTTP/2, Brotli, zstd and Unix-domain
+certificates are deferred to 0.2.0. HTTP/2, Brotli, zstd and Unix-domain
 sockets are not planned.

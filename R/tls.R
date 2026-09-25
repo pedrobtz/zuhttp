@@ -86,6 +86,12 @@ print.zu_tls_config <- function(x, ...) {
 # Files are checked in R, where the error can name the argument and the path.
 # Doing it in C would produce "cannot load CA file" with no indication of which
 # of the two the caller got wrong.
+#
+# Then the backend is asked whether it can honour the rest (D-56), and a
+# setting it cannot raises zu_tls_unsupported_error here, before DNS. Not in
+# zu_tls() itself: a zu_tls_config is data that can be saved and loaded on
+# another platform, so the check belongs where the backend is known — the
+# request. The capability table lives in C (zu_tls_backend_caps), not here.
 check_tls <- function(tls) {
   if (is.null(tls)) return(NULL)
   if (!inherits(tls, "zu_tls_config"))
@@ -95,5 +101,6 @@ check_tls <- function(tls) {
     if (!is.null(p) && !file.exists(p))
       stop("`", f, "` does not exist: ", p, call. = FALSE)
   }
+  .Call(C_zu_tls_check, unclass(tls))
   tls
 }

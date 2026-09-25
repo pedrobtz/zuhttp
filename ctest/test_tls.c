@@ -138,6 +138,20 @@ int main(void) {
         }
     }
 
+    ZU_CASE("§14.6: a pinned request to an untrusted chain is a certificate error, not a pin error");
+    zu_tls_config_init(&cfg);
+    {
+        /* The pin is never compared: the chain fails first. Reporting that as
+         * a pin mismatch sends the user after the wrong fix (2026-09-25). */
+        static const char *pins[] = { "sha256//AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" };
+        cfg.pins = pins;
+        cfg.n_pins = 1;
+        if (dial("untrusted-root.badssl.com", &cfg, &s, NULL, &e) != ZU_OK) {
+            ZU_CHECK_EQ_INT(e.code, ZU_ERR_TLS_CERT);
+            printf("       %s\n", e.message);
+        } else { ZU_CHECK(0); zu_tls_stream_free(s); s = NULL; }
+    }
+
     ZU_CASE("§14.2: ca_file REPLACES system trust, so a public host fails");
     zu_tls_config_init(&cfg);
     cfg.source = ZU_TRUST_DATA;

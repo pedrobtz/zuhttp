@@ -98,4 +98,27 @@ const char *zu_tls_cipher_name(unsigned code);
 const char *zu_tls_backend_name(void);
 int         zu_tls_available(void);
 
+/* --- what the linked backend can honour (§14, D-56) ---
+ *
+ * One bit per zu_tls() setting that some backend cannot satisfy. Each backend
+ * reports its own mask; nothing outside the backend decides what it supports,
+ * so the R layer, zu_info() and the engine all read the same answer. */
+#define ZU_TLS_CAP_PINS       0x01u   /* §14.4 */
+#define ZU_TLS_CAP_TLS13      0x02u   /* min_version = 13 */
+#define ZU_TLS_CAP_CA_FILE    0x04u   /* §14.2 replace */
+#define ZU_TLS_CAP_CA_EXTRA   0x08u   /* §14.2 add */
+#define ZU_TLS_CAP_REVOCATION 0x10u   /* §14.5 */
+
+unsigned zu_tls_backend_caps(void);
+
+/* Refuse a configuration the backend cannot honour, before any handshake.
+ *
+ * Returns ZU_OK, or ZU_ERR_TLS_UNSUPPORTED with a message naming the setting
+ * and the backend. `caps` and `backend` are parameters rather than looked up
+ * so the policy is testable with no backend linked (ctest). Every backend
+ * calls this first in zu_tls_connect(), and init.c exposes it to R so a
+ * request is refused before DNS rather than after a TCP connect. */
+zu_code zu_tls_config_check(const zu_tls_config *cfg, unsigned caps,
+                            const char *backend, zu_error *err);
+
 #endif /* ZUHTTP_TLS_H */

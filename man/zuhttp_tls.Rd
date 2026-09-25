@@ -21,6 +21,28 @@ elsewhere \tab system OpenSSL \tab the system CA directory \cr
 The consequence worth knowing is that behaviour is not uniform, because the
 platforms are not. What follows is what actually differs.
 }
+\section{Refused, never downgraded}{
+
+Every \code{\link[=zu_tls]{zu_tls()}} setting is a request for a stronger connection. When the
+linked backend cannot honour one, the request raises
+\code{zu_tls_unsupported_error} (a \code{zu_tls_error}) \strong{before any network I/O},
+rather than connecting without it. \code{zu_info()$tls_capabilities} lists what
+this build honours:
+
+\tabular{llll}{
+\strong{Setting} \tab \strong{OpenSSL} \tab \strong{macOS} \tab \strong{Windows} \cr
+\code{pins} \tab yes \tab refused \tab refused \cr
+\code{min_version = 13} \tab yes \tab refused \tab refused \cr
+\code{ca_file} \tab yes \tab yes \tab refused \cr
+\code{ca_extra} \tab yes \tab yes \tab refused \cr
+\code{revocation = TRUE} \tab refused \tab yes, with caveats \tab yes \cr
+}
+
+A refusal is \code{zu_tls_unsupported_error}; a pin that does not match is
+\code{zu_tls_pin_error}. The two are different classes so that "this backend
+cannot pin" is never mistaken for "the pin was checked and failed".
+}
+
 \section{Maximum TLS version}{
 
 \code{zu_tls(min_version = 13)} is refused rather than silently downgraded on
@@ -33,11 +55,12 @@ highest version both ends support; it is the \emph{floor} that cannot be raised.
 
 \section{Certificate pinning}{
 
-\code{\link[=zu_tls]{zu_tls()}}'s \code{pins} works on OpenSSL and Schannel. On macOS it raises:
+\code{\link[=zu_tls]{zu_tls()}}'s \code{pins} works on \strong{OpenSSL only}. On macOS,
 Security.framework will not hand over the SubjectPublicKeyInfo without
-hand-parsing DER, and a pin that silently compares the wrong bytes is worse
-than no pin. A pinned request either enforces the pin or raises
-\code{zu_tls_pin_error}; it never quietly succeeds unpinned.
+hand-parsing DER; on Windows the CryptoAPI path is not written yet. Both
+refuse, because a pin that silently compares the wrong bytes is worse than
+no pin. A pinned request either enforces the pin or raises; it never quietly
+succeeds unpinned.
 }
 
 \section{Custom certificate authorities}{
@@ -45,7 +68,8 @@ than no pin. A pinned request either enforces the pin or raises
 \code{ca_file} \strong{replaces} the system trust store; \code{ca_extra} \strong{adds} to it.
 The distinction is deliberate and is the usual source of confusion — with
 \code{ca_file} set, a public certificate that verified a moment ago will not.
-Additive trust is not yet implemented on Schannel.
+\strong{Neither is implemented on Windows yet}: Schannel refuses both, rather
+than verifying against the Windows store and ignoring the file.
 }
 
 \section{Revocation}{
@@ -57,18 +81,29 @@ means here.
 \code{zu_tls(revocation = TRUE)} opts in, and what that buys you is
 backend-dependent in a way worth knowing before you rely on it:
 \itemize{
-\item \strong{OpenSSL: do not use it yet.} The flag sets \code{X509_V_FLAG_CRL_CHECK}
-with no CRL source configured, and OpenSSL neither downloads CRLs nor
-performs OCSP on its own — so every chain fails to verify, including
-valid ones. It fails closed rather than silently accepting a revoked
-certificate, but it is not usable as a revocation check.
+\item \strong{OpenSSL: refused.} OpenSSL neither downloads CRLs nor performs OCSP on
+its own, so a CRL check with no CRL source fails \emph{every} chain, valid
+ones included. Rather than offer a flag that means "no connection will
+ever succeed", this backend raises \code{zu_tls_unsupported_error}.
 \item \strong{macOS:} it works, in that revoked certificates are rejected — but so
 are valid certificates from CAs that no longer answer revocation queries.
 Let's Encrypt retired OCSP, so a large share of the web fails under it.
+\item \strong{Windows:} Schannel checks the chain, excluding the root, through the
+platform's own revocation machinery.
 }
 
-Both are recorded rather than papered over, and both are why revocation is
-not merely off by default but is a setting to reach for deliberately.
+Both caveats are recorded rather than papered over, and both are why
+revocation is not merely off by default but is a setting to reach for
+deliberately.
+}
+
+\section{Name resolution is not bounded}{
+
+DNS resolution uses the system resolver (\code{getaddrinfo()}), which is
+synchronous. \strong{Neither \code{timeout} nor Ctrl-C interrupts it}, so a host whose
+resolver stalls can hold R for as long as the resolver takes — on a
+misconfigured network, minutes. Every later phase (connect, handshake,
+response) is bounded by both.
 }
 
 \seealso{

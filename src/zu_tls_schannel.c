@@ -471,6 +471,15 @@ static const zu_stream_vtable k_sch_vt = {
 int zu_tls_available(void) { return 1; }
 const char *zu_tls_backend_name(void) { return "schannel"; }
 
+/* Revocation only. Pins need the leaf SubjectPublicKeyInfo, which CryptoAPI
+ * can supply but which is not wired yet (#12). ca_file and ca_extra need a
+ * CERT_STORE_PROV_MEMORY store passed to CertGetCertificateChain (§14.3,
+ * #5). TLS 1.3 needs SCH_CREDENTIALS (R-3, #17). All four are refused by
+ * zu_tls_config_check() before the handshake (D-56). */
+unsigned zu_tls_backend_caps(void) {
+    return ZU_TLS_CAP_REVOCATION;
+}
+
 zu_code zu_tls_connect(zu_stream **out, zu_stream *inner, const char *hostname,
                        const zu_tls_config *cfg, zu_deadline deadline,
                        zu_error *err) {
@@ -485,25 +494,8 @@ zu_code zu_tls_connect(zu_stream **out, zu_stream *inner, const char *hostname,
     if (!out || !inner || !hostname || !cfg) return ZU_ERR_TLS;
     *out = NULL;
 
-    /* §14.4 pinning would need the leaf SubjectPublicKeyInfo; CryptoAPI can
-     * supply it, but it is not implemented yet and a pin that checks the wrong
-     * bytes is worse than no pin. Refuse rather than pretend. */
-    if (cfg->n_pins > 0) {
-        zu_error_set(err, ZU_ERR_TLS_PIN, ZU_PHASE_TLS,
-                     "public-key pinning is not implemented in the Schannel "
-                     "backend; it is available on Linux (see ?zu_tls)");
-        return ZU_ERR_TLS_PIN;
-    }
-    if (cfg->source == ZU_TRUST_FILE || cfg->source == ZU_TRUST_DATA ||
-        cfg->ca_extra_file) {
-        /* §14.3 additive/replacement trust needs a CERT_STORE_PROV_MEMORY
-         * store wired into CertGetCertificateChain. S1 confirmed the API is
-         * available; the wiring is not written yet. */
-        zu_error_set(err, ZU_ERR_TLS, ZU_PHASE_TLS,
-                     "custom CA sources are not implemented in the Schannel "
-                     "backend yet; the Windows certificate store is used");
-        return ZU_ERR_TLS;
-    }
+    rc = zu_tls_config_check(cfg, zu_tls_backend_caps(), zu_tls_backend_name(), err);
+    if (rc != ZU_OK) return rc;
 
     t = (sch_impl *)zu_calloc(1, sizeof *t);
     s = (zu_stream *)zu_calloc(1, sizeof *s);

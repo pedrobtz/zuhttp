@@ -21,6 +21,9 @@ for f in picohttpparser.c picohttpparser.h; do
     curl -sSL "https://raw.githubusercontent.com/h2o/picohttpparser/$COMMIT/$f" -o "$DEST/$f"
 done
 sed -n '1,26p' "$DEST/picohttpparser.h" > "$DEST/LICENSE"
+# R installs only inst/, so this is the copy an installed package carries
+# (#52). tools/check-vendor-licenses fails CI if the two ever differ.
+cp "$DEST/LICENSE" inst/licenses/picohttpparser-LICENSE
 sed -i.bak "s|^Commit:.*|Commit:     $COMMIT|;s|^Retrieved:.*|Retrieved:  $(date -u +%Y-%m-%d)|" "$DEST/VENDOR"
 rm -f "$DEST/VENDOR.bak"
 

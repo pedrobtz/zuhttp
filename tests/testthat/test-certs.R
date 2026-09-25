@@ -60,6 +60,7 @@ test_that("a hostname mismatch is its OWN condition class (§14.6)", {
 
 test_that("an expired certificate is rejected", {
   skip_unless_local_tls()
+  skip_unless_cert("expired")
   fx <- tls_fixture()
   with_tls_server("expired", function(url) {
     e <- tryCatch(zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10),
@@ -71,6 +72,7 @@ test_that("an expired certificate is rejected", {
 
 test_that("a not-yet-valid certificate is rejected", {
   skip_unless_local_tls()
+  skip_unless_cert("notyet")
   fx <- tls_fixture()
   with_tls_server("notyet", function(url) {
     e <- tryCatch(zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10),
@@ -140,6 +142,56 @@ test_that("verify = FALSE warns, every time, and names what it turns off", {
   })
 })
 
+# --- §14.4 pinning (S7 criterion 4, #12) ----------------------------------
+#
+# Three rows, each against the local fixture with a pin computed by the
+# openssl CLI (spki_pin), never by zuhttp itself: a test that asked zuhttp for
+# the expected value would pass whatever zuhttp hashed. Backends that cannot
+# pin refuse before connecting; test-tls.R asserts that, so these skip there.
+
+test_that("a matching pin connects", {
+  skip_unless_local_tls()
+  skip_unless_tls_supports("pins")
+  fx <- tls_fixture()
+  with_tls_server("good", function(url) {
+    r <- zu_get(url, tls = zu_tls(ca_file = fx$ca, pins = spki_pin("good")),
+                timeout = 10)
+    expect_identical(zu_resp_status(r), 200L)
+  })
+})
+
+test_that("a pin that does not match is zu_tls_pin_error, not a refusal", {
+  skip_unless_local_tls()
+  skip_unless_tls_supports("pins")
+  fx <- tls_fixture()
+  # The chain is valid and trusted; only the key differs. The class must be
+  # the MISMATCH one: zu_tls_unsupported_error here would mean the pin was
+  # never compared, which is the vacuous pass #12 found on Windows.
+  with_tls_server("good", function(url) {
+    e <- tryCatch(zu_get(url, tls = zu_tls(ca_file = fx$ca,
+                                           pins = spki_pin("wronghost")),
+                         timeout = 10),
+                  condition = function(e) e)
+    expect_s3_class(e, "zu_tls_pin_error")
+    expect_false(inherits(e, "zu_tls_unsupported_error"))
+  })
+})
+
+test_that("a matching pin does not bypass chain verification (§14.4)", {
+  skip_unless_local_tls()
+  skip_unless_tls_supports("pins")
+  fx <- tls_fixture()
+  # "Checked in addition to, never instead of": the pin matches the served
+  # key exactly, and the untrusted issuer must still be rejected.
+  with_tls_server("untrusted", function(url) {
+    e <- tryCatch(zu_get(url, tls = zu_tls(ca_file = fx$ca,
+                                           pins = spki_pin("untrusted")),
+                         timeout = 10),
+                  condition = function(e) e)
+    expect_s3_class(e, "zu_tls_certificate_error")
+  })
+})
+
 # --- §14.5 revocation (test-hardening A1) ---------------------------------
 #
 # §14.5's whole argument rests on one measured fact: the platforms do NOT
@@ -158,6 +210,9 @@ test_that("revocation is off by default: a revoked certificate is accepted (§14
 
 test_that("zu_tls(revocation = TRUE) changes the outcome for a revoked host", {
   skip_unless_online()
+  # Where revocation is refused, the request fails before connecting, which
+  # would satisfy the assertion below without testing anything.
+  skip_unless_tls_supports("revocation")
   # The PARENT class, not zu_tls_certificate_error: the subclass differs by
   # backend and asserting one of them made this fail on Linux CI. Secure
   # Transport reports a certificate error; OpenSSL aborts the handshake, since
@@ -171,6 +226,7 @@ test_that("zu_tls(revocation = TRUE) changes the outcome for a revoked host", {
 
 test_that("a revocation failure is ABOUT revocation (S9 criterion 4)", {
   skip_unless_online()
+  skip_unless_tls_supports("revocation")
   # The arm above is not evidence that revocation checking works, and writing
   # it without this one would have been the vacuous pass §50 keeps warning
   # about. Measured 2026-09-10 on Secure Transport: a VALID badssl.com

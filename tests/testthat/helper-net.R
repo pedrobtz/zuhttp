@@ -39,3 +39,16 @@ skip_unless_online <- function() {
     testthat::skip("set ZU_TEST_NETWORK=1 to run network tests")
   if (!zu_have_network()) testthat::skip("no network")
 }
+
+# D-56: a zu_tls() setting the linked backend cannot honour is refused before
+# any network I/O, so a test that needs the setting to WORK must skip where it
+# is refused. The capability list comes from C (zu_tls_backend_caps), the one
+# definition; a table of backends here would drift the first time one gained
+# a capability.
+tls_supports <- function(cap) cap %in% zu_info()$tls_capabilities
+
+skip_unless_tls_supports <- function(cap) {
+  if (!tls_supports(cap))
+    testthat::skip(paste0("the ", zu_tls_backend(), " backend refuses `", cap,
+                          "` (zu_tls_unsupported_error; see ?zuhttp_tls)"))
+}
