@@ -487,6 +487,62 @@ static SEXP headers_to_r(const zu_headers *h) {
     return out;
 }
 
+/* §14. Built here rather than in R so there is one definition of what a
+ * TLS configuration is; the R layer validates paths, where the error can
+ * name which of ca_file and ca_extra was wrong. Returns 0 when `tls` is not a
+ * configuration (NULL: system defaults). Strings are borrowed from `tls` and
+ * the pin array is R_alloc'd, so both live until the .Call returns. */
+static int tls_from_r(SEXP tls, zu_tls_config *cfg) {
+    SEXP names;
+    R_xlen_t i, n;
+    if (tls == R_NilValue || !Rf_isVectorList(tls)) return 0;
+    names = Rf_getAttrib(tls, R_NamesSymbol);
+    n = Rf_xlength(tls);
+    zu_tls_config_init(cfg);
+    for (i = 0; i < n; i++) {
+        const char *nm = (names == R_NilValue) ? ""
+                         : Rf_translateCharUTF8(STRING_ELT(names, i));
+        SEXP v = VECTOR_ELT(tls, i);
+        if (v == R_NilValue) continue;
+        if (strcmp(nm, "ca_file") == 0 && Rf_isString(v) && Rf_length(v) == 1) {
+            cfg->ca_file = Rf_translateCharUTF8(STRING_ELT(v, 0));
+            cfg->source  = ZU_TRUST_FILE;   /* §14.2: REPLACES */
+        } else if (strcmp(nm, "ca_extra") == 0 && Rf_isString(v) && Rf_length(v) == 1) {
+            /* §14.2: ADDS. Deliberately does NOT touch `source`, which is
+             * the whole difference between the two arguments. */
+            cfg->ca_extra_file = Rf_translateCharUTF8(STRING_ELT(v, 0));
+        } else if (strcmp(nm, "pins") == 0 && Rf_isString(v) && Rf_length(v) > 0) {
+            R_xlen_t j, np = Rf_xlength(v);
+            const char **pins = (const char **)R_alloc((size_t)np, sizeof(char *));
+            for (j = 0; j < np; j++)
+                pins[j] = Rf_translateCharUTF8(STRING_ELT(v, j));
+            cfg->pins   = pins;
+            cfg->n_pins = (size_t)np;
+        } else if (strcmp(nm, "revocation") == 0) {
+            cfg->revocation = (Rf_asLogical(v) == TRUE);
+        } else if (strcmp(nm, "min_version") == 0) {
+            int mv = Rf_asInteger(v);
+            if (mv == 12 || mv == 13) cfg->min_version = mv;
+        }
+    }
+    return 1;
+}
+
+/* D-56: refuse a TLS configuration the linked backend cannot honour, from R,
+ * before DNS or TCP. The engine makes the same check again inside
+ * zu_tls_connect(), so a caller that bypasses the R layer is still refused;
+ * this copy exists so the refusal costs no network round trip. */
+static SEXP C_zu_tls_check(SEXP tls) {
+    zu_tls_config cfg;
+    zu_error e;
+    zu_error_clear(&e);
+    if (!tls_from_r(tls, &cfg)) return R_NilValue;
+    if (zu_tls_config_check(&cfg, zu_tls_backend_caps(), zu_tls_backend_name(),
+                            &e) != ZU_OK)
+        raise_zu_error(&e, NULL);
+    return R_NilValue;
+}
+
 /* One entry point for every method. The R layer owns argument shaping; this
  * function's job is to translate and to own nothing across a longjmp. */
 static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
@@ -582,36 +638,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
     /* §14. Built here rather than in R so there is one definition of what a
      * TLS configuration is; the R layer validates paths, where the error can
      * name which of ca_file and ca_extra was wrong. */
-    if (tls != R_NilValue && Rf_isVectorList(tls)) {
-        SEXP names = Rf_getAttrib(tls, R_NamesSymbol);
-        R_xlen_t i, n = Rf_xlength(tls);
-        zu_tls_config_init(&tlscfg);
-        for (i = 0; i < n; i++) {
-            const char *nm = (names == R_NilValue) ? ""
-                             : Rf_translateCharUTF8(STRING_ELT(names, i));
-            SEXP v = VECTOR_ELT(tls, i);
-            if (v == R_NilValue) continue;
-            if (strcmp(nm, "ca_file") == 0 && Rf_isString(v) && Rf_length(v) == 1) {
-                tlscfg.ca_file = Rf_translateCharUTF8(STRING_ELT(v, 0));
-                tlscfg.source  = ZU_TRUST_FILE;   /* §14.2: REPLACES */
-            } else if (strcmp(nm, "ca_extra") == 0 && Rf_isString(v) && Rf_length(v) == 1) {
-                /* §14.2: ADDS. Deliberately does NOT touch `source`, which is
-                 * the whole difference between the two arguments. */
-                tlscfg.ca_extra_file = Rf_translateCharUTF8(STRING_ELT(v, 0));
-            } else if (strcmp(nm, "pins") == 0 && Rf_isString(v) && Rf_length(v) > 0) {
-                R_xlen_t j, np = Rf_xlength(v);
-                const char **pins = (const char **)R_alloc((size_t)np, sizeof(char *));
-                for (j = 0; j < np; j++)
-                    pins[j] = Rf_translateCharUTF8(STRING_ELT(v, j));
-                tlscfg.pins   = pins;
-                tlscfg.n_pins = (size_t)np;
-            } else if (strcmp(nm, "revocation") == 0) {
-                tlscfg.revocation = (Rf_asLogical(v) == TRUE);
-            } else if (strcmp(nm, "min_version") == 0) {
-                int mv = Rf_asInteger(v);
-                if (mv == 12 || mv == 13) tlscfg.min_version = mv;
-            }
-        }
+    if (tls_from_r(tls, &tlscfg)) {
         o.tls = &tlscfg;
         /* One place names a replacement CA (§26.1's key reads it from here). */
         if (tlscfg.ca_file) o.ca_file = tlscfg.ca_file;
@@ -843,8 +870,21 @@ static SEXP trace_to_r(const zu_trace *t) {
 static SEXP C_zu_build_info(void) {
     static const char *nm[] = {
         "tls_backend", "trust", "tls_available", "revocation_default",
-        "compression", "ipv6", "http", NULL
+        "tls_capabilities", "compression", "ipv6", "http", NULL
     };
+    /* D-56: the zu_tls() settings this backend honours. The rest are refused
+     * before any connection, and a user deciding whether a setting will work
+     * should be able to ask rather than find out from an error. */
+    static const struct { unsigned bit; const char *name; } caps_tab[] = {
+        { ZU_TLS_CAP_PINS,       "pins" },
+        { ZU_TLS_CAP_TLS13,      "tls13" },
+        { ZU_TLS_CAP_CA_FILE,    "ca_file" },
+        { ZU_TLS_CAP_CA_EXTRA,   "ca_extra" },
+        { ZU_TLS_CAP_REVOCATION, "revocation" }
+    };
+    unsigned caps = zu_tls_available() ? zu_tls_backend_caps() : 0u;
+    SEXP capv;
+    int nc = 0, k;
     const char *backend = zu_tls_backend_name();
     const char *trust;
     SEXP out, names;
@@ -867,13 +907,20 @@ static SEXP C_zu_build_info(void) {
     SET_VECTOR_ELT(out, 2, Rf_ScalarLogical(zu_tls_available()));
     /* §14.5 / D-31: off by default on every platform, measured in S0 (F-4). */
     SET_VECTOR_ELT(out, 3, Rf_ScalarLogical(FALSE));
-    SET_VECTOR_ELT(out, 4, Rf_mkString("gzip, deflate"));
+    for (k = 0; k < (int)(sizeof caps_tab / sizeof caps_tab[0]); k++)
+        if (caps & caps_tab[k].bit) nc++;
+    capv = Rf_allocVector(STRSXP, nc);
+    SET_VECTOR_ELT(out, 4, capv);           /* protected by `out` from here */
+    for (k = 0, nc = 0; k < (int)(sizeof caps_tab / sizeof caps_tab[0]); k++)
+        if (caps & caps_tab[k].bit)
+            SET_STRING_ELT(capv, nc++, Rf_mkChar(caps_tab[k].name));
+    SET_VECTOR_ELT(out, 5, Rf_mkString("gzip, deflate"));
     /* §3.1: getaddrinfo is called with AF_UNSPEC, so both families are tried
      * in whatever order the resolver returns. Whether a route exists is a
      * property of the machine, not of this build — reporting "yes" here means
      * "not disabled", which is the honest claim. */
-    SET_VECTOR_ELT(out, 5, Rf_ScalarLogical(TRUE));
-    SET_VECTOR_ELT(out, 6, Rf_mkString("HTTP/1.1"));
+    SET_VECTOR_ELT(out, 6, Rf_ScalarLogical(TRUE));
+    SET_VECTOR_ELT(out, 7, Rf_mkString("HTTP/1.1"));
 
     for (i = 0; i < n; i++) SET_STRING_ELT(names, i, Rf_mkChar(nm[i]));
     Rf_setAttrib(out, R_NamesSymbol, names);
@@ -901,6 +948,7 @@ static const R_CallMethodDef call_methods[] = {
     {"C_zu_pool_stats",        (DL_FUNC) &C_zu_pool_stats,        1},
     {"C_zu_pool_clear",        (DL_FUNC) &C_zu_pool_clear,        1},
     {"C_zu_tls_backend",       (DL_FUNC) &C_zu_tls_backend,       0},
+    {"C_zu_tls_check",         (DL_FUNC) &C_zu_tls_check,         1},
     {"C_zu_build_info",        (DL_FUNC) &C_zu_build_info,        0},
     {NULL, NULL, 0}
 };

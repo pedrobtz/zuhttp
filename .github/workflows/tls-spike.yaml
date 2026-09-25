@@ -288,8 +288,7 @@ jobs:
           PKG_CONFIG_PATH: /opt/homebrew/opt/openssl@3/lib/pkgconfig:/usr/local/opt/openssl@3/lib/pkgconfig
         run: |
           R CMD INSTALL .
-          Rscript -e 'library(testthat); library(zuhttp);
-            r <- test_dir("tests/testthat", reporter="summary", stop_on_failure=TRUE)'
+          Rscript tools/ci-run-tests.R
 
   # The same slice at the C level, without R in the picture at all (§11).
   slice-c:

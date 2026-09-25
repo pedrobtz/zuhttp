@@ -77,6 +77,22 @@ tls_fixture <- function() {
   paths
 }
 
+# The §14.4 pin of a fixture certificate, computed by the openssl CLI rather
+# than by zuhttp, so a pin test compares zuhttp's digest with an independent
+# one (#12, S7 criterion 4). SHA-256 over the DER SubjectPublicKeyInfo.
+spki_pin <- function(cert) {
+  fx <- tls_fixture()
+  o <- shQuote(openssl_bin())
+  cmd <- sprintf(paste("%s x509 -in %s -pubkey -noout | %s pkey -pubin -outform der",
+                       "| %s dgst -sha256 -binary | %s base64 -A"),
+                 o, shQuote(fx$cert(cert)), o, o, o)
+  b64 <- suppressWarnings(system2("sh", c("-c", shQuote(cmd)), stdout = TRUE,
+                                  stderr = FALSE))
+  if (length(b64) != 1L || !grepl("^[A-Za-z0-9+/]{43}=$", b64))
+    testthat::skip(paste("could not compute the pin of", cert))
+  paste0("sha256//", b64)
+}
+
 # Serve `cert` over TLS on loopback for the duration of `code`, which receives
 # the base URL. openssl s_server -www answers any request with a small page,
 # which is all the matrix needs — what is under test is the handshake.
@@ -120,4 +136,6 @@ skip_unless_local_tls <- function() {
   testthat::skip_on_cran()
   if (.Platform$OS.type != "unix") testthat::skip("the fixture uses a POSIX shell")
   if (is.null(openssl_bin())) testthat::skip("openssl CLI not available")
+  # Every row of the matrix names its roots with ca_file.
+  skip_unless_tls_supports("ca_file")
 }

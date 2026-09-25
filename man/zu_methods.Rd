@@ -154,7 +154,8 @@ zu_delete(
 \item{headers}{Named character vector. Merged with the client's; \code{NA}
 removes an inherited header.}
 
-\item{timeout}{Total seconds, redirects included.}
+\item{timeout}{Total seconds, redirects included. DNS resolution is not
+bounded by it (nor by Ctrl-C); see \link{zuhttp_tls}.}
 
 \item{redirects}{Maximum redirects to follow.}
 

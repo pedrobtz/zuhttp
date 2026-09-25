@@ -2,7 +2,7 @@
 
 **Companion to:** [zuhttp-design.md](zuhttp-design.md)
 **Status:** Draft
-**Last updated:** 2026-09-22 (review) · **v0.1.0 shipped 2026-09-10 as a GitHub release; no `v0.1.0` tag exists yet. Complete: S0–S5, S10–S14, S16, S17, U1, U4–U6. Partial: S6, S7, S8, S9, S15, S18, S20. Not started: S19 (deferred), S21, U2 (except A1), U3.**
+**Last updated:** 2026-09-25 (review merged with its amends; see "Amends before merge" at the end) · **v0.1.0 shipped 2026-09-10 as a GitHub release; no `v0.1.0` tag exists yet. Complete: S0–S5, S10–S14, S16, S17, U1, U4–U6. Partial: S6, S7, S8, S9, S15, S18, S20. Not started: S19 (deferred), S21, U2 (except A1), U3.**
 **Total estimate:** 41–48 person-weeks (§64 of the design doc, plus spikes)
 
 ---
@@ -336,7 +336,7 @@ Non-blocking sockets on POSIX and Winsock; `poll`/`WSAPoll` loop; the deadline c
 
 ### S7 · OpenSSL engine and trust
 
-**Status:** ◐ partial — one of four criteria. Open: the matrix's eighth row and pin match/mismatch, which are the same missing test (#4, #12), and `revocation = TRUE` failing every chain on this backend (#6).
+**Status:** ◐ partial — one of four criteria. Open: the matrix's eighth row and pin match/mismatch, which are the same missing test (#4, #12), and `revocation = TRUE` failing every chain on this backend (#6). *2026-09-25:* the pin rows now exist in `test-certs.R` (match, mismatch, and a matching pin over an untrusted chain), with the expected pin computed by the `openssl` CLI; they run on the Linux legs only. Revocation is now refused on this backend (D-56), which closes the defect in #6 but not this stage's criterion, which asks for revocation to *work*.
 
 **Effort:** 2 weeks. **Depends on:** S6.
 
@@ -394,7 +394,7 @@ The reference implementation of the §13.1 engine/trust split. Hostname verifica
 
 ### S8 · Schannel
 
-**Status:** ◐ partial — two of four criteria; shipped 2026-09-08 at TLS 1.2. Open: custom CA, where `ca_file` and `ca_extra` are **both** refused (#5), and TLS 1.3 (R-3, #17). Pinning is refused here too, although `?zuhttp_tls` says otherwise (#12). The R-level §50.5 matrix does not run on Windows: its fixture needs a POSIX shell, and every row passes `ca_file`. The heading said COMPLETE until 2026-09-22, which rule 3 does not allow.
+**Status:** ◐ partial — two of four criteria; shipped 2026-09-08 at TLS 1.2. Open: custom CA, where `ca_file` and `ca_extra` are **both** refused (#5), and TLS 1.3 (R-3, #17). Pinning is refused here too; `?zuhttp_tls` said otherwise until 2026-09-25 (#12). *Also found 2026-09-25:* this backend never read `min_version`, so `zu_tls(min_version = 13)` connected at TLS 1.2 without a word, and the one test for it skipped every backend but Secure Transport. D-56 refuses it now, and the test runs offline on every leg. The R-level §50.5 matrix does not run on Windows: its fixture needs a POSIX shell, and every row passes `ca_file`. The heading said COMPLETE until 2026-09-22, which rule 3 does not allow.
 
 **Estimated:** 4–6 weeks, "the largest single line item in the plan and the
 lowest-confidence estimate". **Actual:** ~570 lines, nine CI rounds.
@@ -1047,7 +1047,7 @@ POSIX `sh` configure with pkg-config fallback and actionable failure messages (�
 
 ### S20 · Documentation
 
-**Status:** ◐ partial — v0.1.0 took the README and the `?zuhttp_fork` and `?zuhttp_tls` topics. Criterion 2 fails today: DNS non-interruptibility (§25.4, D-30) is in no help page and not in the README (#14). The articles are #8–#11.
+**Status:** ◐ partial — v0.1.0 took the README and the `?zuhttp_fork` and `?zuhttp_tls` topics. Criterion 2 failed until 2026-09-25: DNS non-interruptibility (§25.4, D-30) was in no help page and not in the README. It is now in `?zuhttp_tls`, on every `timeout` parameter, in the README's limitations table and in NEWS (#14). Criterion 2 is not ticked: that needs a sweep of every §-limitation, not the two named ones. The articles are #8–#11.
 
 **Effort:** 2 weeks. **Depends on:** S13, S17.
 
@@ -1668,7 +1668,7 @@ There are no parallel requests (§30). Revocation is off by default (§14.5).
 
 Two limits were not documented to users at all when this section was written:
 only a `total` timeout exists (#13), and DNS resolution ignores both `timeout`
-and Ctrl-C (#14).
+and Ctrl-C (#14). Both are in the README since 2026-09-25.
 
 Each is a documented limit and not a defect, but they belong in the README
 rather than only in this file — a user's first encounter with any of them
@@ -1806,3 +1806,36 @@ S19. #13 is the largest functional gap and belongs in 0.2.0 (D-55).
 | #17 Windows TLS 1.3 (R-3) | no | a documented ceiling |
 | #18 CI to the family standard | no | gates CRAN: the CRAN-like containers find what CRAN finds |
 | #19 export surface, `zuhttp_error` | no | before CRAN or 0.2.0, whichever comes first |
+
+### Amends before merge (2026-09-25)
+
+The review merged together with the fixes for the issues it said gate the tag,
+so that the plan and the code agree on the day the plan becomes authoritative.
+
+| Issue | What landed |
+|---|---|
+| #12 | `?zuhttp_tls`, the README and NEWS now say pinning is OpenSSL-only. A backend that cannot pin raises the new `zu_tls_unsupported_error`, never `zu_tls_pin_error`, so the two can no longer be confused by a test (D-56). Pin match, mismatch and no-bypass rows added to the §50.5 matrix. Schannel pinning itself is still open. |
+| #14 | DNS's immunity to `timeout` and Ctrl-C is in `?zuhttp_tls`, on each `timeout` parameter, in the README's limitations table and in NEWS. |
+| #5 (docs) | README and `?zuhttp_tls` say Windows refuses `ca_file` as well as `ca_extra`; the refusal is `zu_tls_unsupported_error` and its message no longer implies a fallback to the Windows store. The implementation is still open. |
+| #6 (refusal) | OpenSSL refuses `revocation = TRUE` before connecting instead of failing every chain. The policy question — OCSP stapling, soft- versus hard-fail — is still open. |
+| #52 | Both vendored licence texts are installed under `licenses/`; `tools/check-vendor-licenses` in c-core keeps them equal to `src/vendor/`; `LICENSE.note` added. |
+| #18 (part) | The multi-line `Rscript -e` in `tls-spike.yaml` is now `tools/ci-run-tests.R`; `tests/testthat.R` guards `library(testthat)`; `R-CMD-check.yaml` accepts `workflow_dispatch`. |
+
+**Found on the way, and fixed by the same change:** Schannel ignored
+`min_version`, so `min_version = 13` silently gave TLS 1.2 on Windows. The
+test that should have caught it skipped every backend but Secure Transport.
+Under D-56 the refusal is table-driven, so a backend cannot forget a setting.
+
+**Found on the way, not fixed:** every job in every workflow carries
+`if: github.event_name != 'pull_request' || <fork>`, while `push` fires only
+on `main` and `develop`. A pull request from a branch of this repository
+therefore gets **no CI at all** before it merges; the checks on #20 were all
+"skipped". This PR's evidence came from `workflow_dispatch` runs on the
+branch. Folded into #18 and into the new roadmap's first milestone.
+
+Verified locally on macOS (Secure Transport): `make -C ctest strict` and
+`asan`, 1541 checks, 0 failures; `make -C fuzz replay-run`; `make -C ctest
+engine-st`; the R suite offline, at `NOT_CRAN=true` and with
+`ZU_TEST_NETWORK=1`. Non-vacuity: disabling one branch of
+`zu_tls_config_check()` fails 4 ctest checks; editing an installed licence
+copy fails `check-vendor-licenses`.

@@ -6,7 +6,7 @@
 **Primary protocol scope:** HTTP/1.1 over HTTP and HTTPS  
 **TLS strategy:** Native/system trust; protocol engine per platform (§13.1)  
 **Estimated effort to 1.0:** 9–11 person-months (§64)  
-**Last updated:** 2026-09-22 (review: D-54 and D-55 proposed; status corrections to §1, §13, §14, §24, §34.1, §62.1 and R-2)
+**Last updated:** 2026-09-25 (D-54 and D-55 accepted with the review; D-56 added — backend refusals get their own class and happen before any I/O; §14.2, §14.4, §14.5, §34.1, §39, §49.2 updated)
 
 ---
 
@@ -69,8 +69,9 @@ Firm decisions and open questions were previously indistinguishable in this docu
 | D-51 | A URL enters the trace only through `zu_trace_add_url()`, which applies the §42 policy in C; the log's no-allocation rule yields to it | **Accepted** 2026-09-09 | 35.3, 35.4, 42.2 |
 | D-52 | `final_url` is redacted in the engine, so `zu_resp_url()` applies the whole of §42.1 and not just its userinfo clause | **Accepted** 2026-09-09 | 42.1, 42.2, 20.4 |
 | D-53 | The response sink is single: `path` and `callback` are mutually exclusive, and a committed `path` is readable back as `zu_resp_path()` | **Accepted** 2026-09-10 | 27.1, 31.2 |
-| D-54 | `zuhttp` consumes no `zu*` sibling in 0.x: compression stays on system zlib (D-7), pin digests come from the TLS backend (OpenSSL today; macOS and Windows once #4 and #12 land), `zuxml` is at most a `Suggests` for a future `zu_resp_xml()`; internal C identifiers move off `zu_`/`ZU_`, which is `zukomp`'s public ABI namespace (#15) | **Proposed** 2026-09-22 (review) | 5.1, 14.4, 21.1, 54 |
-| D-55 | Features deferred from 0.1.0 target **0.2.0**; 0.1.x releases are fixes only | **Proposed** 2026-09-22 (review) | 57–59 |
+| D-54 | `zuhttp` consumes no `zu*` sibling in 0.x: compression stays on system zlib (D-7), pin digests come from the TLS backend (OpenSSL today; macOS and Windows once #4 and #12 land), `zuxml` is at most a `Suggests` for a future `zu_resp_xml()`; internal C identifiers move off `zu_`/`ZU_`, which is `zukomp`'s public ABI namespace (#15) | **Accepted** 2026-09-25 (review merged, #20) | 5.1, 14.4, 21.1, 54 |
+| D-55 | Features deferred from 0.1.0 target **0.2.0**; 0.1.x releases are fixes only | **Accepted** 2026-09-25 (review merged, #20) | 57–59 |
+| D-56 | A `zu_tls()` setting the linked backend cannot honour raises **`zu_tls_unsupported_error`** (child of `zu_tls_error`, not retryable) **before any network I/O**; each backend declares a capability mask in C (`zu_tls_backend_caps()`), one shared `zu_tls_config_check()` applies it in both the R request path and `zu_tls_connect()`, and `zu_info()$tls_capabilities` reports it. OpenSSL refuses `revocation = TRUE` under this rule | **Accepted** 2026-09-25 (#6, #12) | 14.2, 14.4, 14.5, 34.1, 39 |
 
 ---
 
@@ -252,7 +253,7 @@ Because both packages will often be attached in the same session, `zuhttp` must 
 
 #### 5.1 Relationship to the `zu*` family (D-54)
 
-**Proposed 2026-09-22 (review); the maintainer accepts it by merging.**
+**Accepted 2026-09-25**, when the review (#20) merged.
 `zukomp`, `zucrypt` and `zuxml` each name `zuhttp` as a consumer. In 0.x it
 consumes none of them, and each boundary is decided here rather than left
 pending in a sibling's roadmap:
@@ -305,6 +306,8 @@ together, or not at all.
 | Symbols hidden (`$(C_VISIBILITY)`) | no ([zukomp#34](https://github.com/pedrobtz/zukomp/issues/34)) | no ([zuxml#39](https://github.com/pedrobtz/zuxml/issues/39)) | yes, audited | no | no ([zuhttp#15](https://github.com/pedrobtz/zuhttp/issues/15)) |
 | r-actions pin | commit, v1.7.0 | mostly floating `@v1` ([zuxml#39](https://github.com/pedrobtz/zuxml/issues/39)) | commit, v1.9.0 | not used ([zuxlsx#44](https://github.com/pedrobtz/zuxlsx/issues/44)) | coverage only, `@v1` ([zuhttp#18](https://github.com/pedrobtz/zuhttp/issues/18)) |
 | `Depends: R` | 4.0 | 4.1 | 4.1 | 4.1 | 3.5 |
+
+*zuhttp-only note, 2026-09-25: the "Upstream licence installed" cell for zuhttp is stale — both texts are installed since #52 closed. The table is left as it is in the other four repositories, per the rule above, until the next five-repository change.*
 
 **Relationships, as decided rather than as hoped:**
 
@@ -1012,7 +1015,7 @@ Both forms must be documented with the word "replaces" or "adds to" in the first
 
 Additive trust is straightforward with OpenSSL (`X509_STORE_add_cert`). On Windows it requires building a temporary in-memory store with `CertOpenStore(CERT_STORE_PROV_MEMORY, ...)`, adding the extra roots, and passing it to `CertGetCertificateChain` as an additional store so that the system chain engine is still consulted. The engine/trust split in §13.1 keeps this confined to the trust evaluator.
 
-**Not implemented on Windows (0.1.0).** The Schannel backend refuses `ca_file` and `ca_extra` alike with `zu_tls_error` rather than fall back to system trust (#5).
+**Not implemented on Windows (0.1.0).** The Schannel backend refuses `ca_file` and `ca_extra` alike with `zu_tls_unsupported_error` (D-56), before any connection, rather than fall back to system trust (#5).
 
 **On macOS this is confirmed working (S0, F-6):**
 
@@ -1041,7 +1044,7 @@ Support public-key pinning:
 zu_tls(pins = "sha256//YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg=")
 ```
 
-**Status (0.1.0, reviewed 2026-09-22): OpenSSL only.** `src/zu_tls_openssl.c` hashes the leaf's DER `SubjectPublicKeyInfo`. Secure Transport and Schannel both raise `zu_tls_pin_error` rather than pin: macOS for want of the SubjectPublicKeyInfo (#4), Windows because it is not written yet (#12). `?zuhttp_tls` says Schannel pins, which is wrong; #12 corrects it. The argument is `pins =`; `pinned_public_key =` was this section's draft name.
+**Status (0.1.0, reviewed 2026-09-22): OpenSSL only.** `src/zu_tls_openssl.c` hashes the leaf's DER `SubjectPublicKeyInfo`. Secure Transport and Schannel both refuse pins rather than pin: macOS for want of the SubjectPublicKeyInfo (#4), Windows because it is not written yet (#12). Since D-56 (2026-09-25) the refusal is `zu_tls_unsupported_error`, raised before any connection; it used to be `zu_tls_pin_error`, the mismatch class, which is how the R pin test passed on Windows without a pin ever being compared. `?zuhttp_tls` said Schannel pinned; corrected with D-56. The argument is `pins =`; `pinned_public_key =` was this section's draft name.
 
 Pinning is cheap to implement (hash the leaf `SubjectPublicKeyInfo` in the verify callback, compare against the pin set), and it is high-value for exactly the API-client workloads this package targets. It fits the "secure defaults" story better than several items currently in §3.2. Pinning is checked **in addition to**, never instead of, chain and hostname verification.
 
@@ -1072,7 +1075,7 @@ Exposed as:
 zu_tls(revocation = TRUE)   # documents both the latency cost and the uninterruptible fetch
 ```
 
-OpenSSL does not check revocation by default either. Windows/Schannel behavior must be measured in S3 rather than assumed. **Whatever the three platforms do, `zu_info()` (§39) must report the effective revocation policy**, because this is exactly the kind of silent asymmetry that produces "it works on my machine" bug reports.
+OpenSSL does not check revocation by default either, and it cannot check it on request without a revocation source: `X509_V_FLAG_CRL_CHECK` with no CRL loaded failed *every* chain (measured on CI 2026-09-10). **Since D-56, OpenSSL refuses `revocation = TRUE` with `zu_tls_unsupported_error`** rather than offer a flag that means "no connection succeeds" (#6). The honest implementation, when one is chosen, is OCSP stapling — the server supplies the response, so no fetch runs inside the handshake — and it is an open design question, not a fix. Windows/Schannel behavior (`CERT_CHAIN_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT`) must be measured rather than assumed; it still has not been. **Whatever the three platforms do, `zu_info()` (§39) must report the effective revocation policy**, because this is exactly the kind of silent asymmetry that produces "it works on my machine" bug reports.
 
 OCSP stapling verification may be added later on the engine path; `zuhttp` performing its own OCSP fetching remains out of scope.
 
@@ -2980,7 +2983,8 @@ zu_error  (inherits: error, condition)
 │   ├── zu_tls_certificate_error
 │   ├── zu_tls_hostname_error
 │   ├── zu_tls_handshake_error
-│   └── zu_tls_pin_error
+│   ├── zu_tls_pin_error          (the pin was compared and did not match)
+│   └── zu_tls_unsupported_error  (D-56: the backend cannot honour a zu_tls() setting)
 ├── zu_http_parse_error
 ├── zu_url_error                  (the URL itself does not parse or is unusable)
 ├── zu_proxy_error
@@ -3279,6 +3283,8 @@ Compression: gzip, deflate
 IPv6: yes
 Proxy: yes
 ```
+
+*(2026-09-25, D-56: `zu_info()` also carries `tls_capabilities`, the `zu_tls()` settings the linked backend honours — any of `pins`, `tls13`, `ca_file`, `ca_extra`, `revocation`. It is read from the backend's own mask in C, not from a table in R.)*
 
 Unix:
 
@@ -3641,13 +3647,15 @@ This is a CRAN requirement, not a courtesy, and it is a frequent cause of resubm
 - `inst/COPYRIGHTS` records, per component: name, upstream URL, version/commit, license identifier, and the full license text.
 - `LICENSE.note` summarises the aggregate licensing situation for a human reader.
 
+*(2026-09-25, #52: R installs only `inst/`, so the texts in `src/vendor/*/LICENSE` never reached an installed package. They are now copied to `inst/licenses/`, `inst/COPYRIGHTS` points there rather than carrying them inline, `tools/update-*` write both copies, and `tools/check-vendor-licenses` fails CI if they differ. `LICENSE.note` exists.)*
+
 Components considered and their licenses:
 
 | Component | License | Vendored? |
 |---|---|---|
-| picohttpparser | MIT | yes — D-10, inst/COPYRIGHTS; licence text not installed (#52) |
+| picohttpparser | MIT | yes — D-10, inst/COPYRIGHTS; text installed as `licenses/picohttpparser-LICENSE` (#52) |
 | llhttp | MIT | no — not chosen (D-10, A.3) |
-| uriparser (subset) | BSD-3-Clause | yes — §8.2, inst/COPYRIGHTS; licence text not installed (#52) |
+| uriparser (subset) | BSD-3-Clause | yes — §8.2, inst/COPYRIGHTS; text installed as `licenses/uriparser-LICENSE` (#52) |
 | zlib | zlib license | **no** — system-linked |
 | miniz | MIT | only under `--with-bundled-zlib` |
 

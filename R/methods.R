@@ -50,7 +50,8 @@ one_shot <- function(method, url, query, headers, policy, client,
 #'   application/json` unless you set that header yourself.
 #' @param form A named list, sent as `application/x-www-form-urlencoded`.
 #' @param file A path whose contents become the body.
-#' @param timeout Total seconds, redirects included.
+#' @param timeout Total seconds, redirects included. DNS resolution is not
+#'   bounded by it (nor by Ctrl-C); see [zuhttp_tls].
 #' @param redirects Maximum redirects to follow.
 #' @param verify Verify the certificate and hostname. Leave this `TRUE`.
 #' @param max_body Maximum decoded body size in bytes.

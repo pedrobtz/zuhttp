@@ -24,6 +24,11 @@ typedef enum {
     ZU_ERR_TLS_HOSTNAME,
     ZU_ERR_TLS_HANDSHAKE,
     ZU_ERR_TLS_PIN,
+    /* The linked backend cannot honour a setting the caller asked for (pins,
+     * TLS 1.3, a custom CA, revocation). Distinct from ZU_ERR_TLS_PIN so that
+     * "this backend cannot pin" and "the pin did not match" are never the
+     * same condition (#12): a test that accepts either passes vacuously. */
+    ZU_ERR_TLS_UNSUPPORTED,
     ZU_ERR_PARSE,
     ZU_ERR_URL,           /* §8.2: the URL itself does not parse or is unusable */
     ZU_ERR_PROXY,

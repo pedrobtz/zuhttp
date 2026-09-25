@@ -18,7 +18,9 @@
 #'
 #' @return A `zu_info` list, printed as a report. Fields: `version`, `http`,
 #'   `tls_backend`, `trust`, `tls_available`, `revocation_default`,
-#'   `compression`, `ipv6`, `proxy_env` and `default_client`.
+#'   `tls_capabilities` (the [zu_tls()] settings this backend honours, from
+#'   `"pins"`, `"tls13"`, `"ca_file"`, `"ca_extra"` and `"revocation"`; the
+#'   others raise `zu_tls_unsupported_error`), `compression`, `ipv6`, `proxy_env` and `default_client`.
 #'
 #' @section Why the TLS engine and the trust store are listed separately:
 #' §13.1 splits them deliberately. A build can speak TLS with one library and
@@ -85,6 +87,10 @@ print.zu_info <- function(x, ...) {
                     else paste0(x$tls_backend, " (https unavailable)"))
   f("Trust:", x$trust)
   f("Revocation:", if (isTRUE(x$revocation_default)) "on" else "off by default")
+  # D-56: what zu_tls() can ask of this backend; everything else is refused.
+  f("zu_tls() supports:", if (length(x$tls_capabilities))
+                            paste(x$tls_capabilities, collapse = ", ")
+                          else "none of pins, tls13, ca_file, ca_extra, revocation")
   f("Compression:", x$compression)
   f("IPv6:", if (isTRUE(x$ipv6)) "yes" else "no")
 

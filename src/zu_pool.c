@@ -400,7 +400,8 @@ zu_reuse zu_reuse_decide(zu_code rc, const zu_framing *fr,
             case ZU_ERR_TLS_CERT:
             case ZU_ERR_TLS_HOSTNAME:
             case ZU_ERR_TLS_HANDSHAKE:
-            case ZU_ERR_TLS_PIN:      return ZU_NOREUSE_TLS_ERROR;
+            case ZU_ERR_TLS_PIN:
+            case ZU_ERR_TLS_UNSUPPORTED: return ZU_NOREUSE_TLS_ERROR;
             /* Anything else means the body did not arrive whole, so the next
              * response cannot be located on this connection. */
             default:                  return ZU_NOREUSE_BODY_INCOMPLETE;

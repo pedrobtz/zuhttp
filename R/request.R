@@ -272,7 +272,8 @@ set_body <- function(req, bytes, kind, type) {
 #' @param req A `zu_request`.
 #' @param total Total seconds for the request, redirects included. A single
 #'   number today; the phase-specific model of §24 will accept richer values
-#'   through the same argument.
+#'   through the same argument. DNS resolution is not bounded by it (nor by
+#'   Ctrl-C); see [zuhttp_tls].
 #' @param max Maximum redirects to follow. `0` returns the 3xx response itself.
 #' @param check Raise a condition for 4xx and 5xx (§31.14).
 #' @return A `zu_request`.

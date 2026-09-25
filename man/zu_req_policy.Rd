@@ -18,7 +18,8 @@ zu_req_check(req, check = TRUE)
 
 \item{total}{Total seconds for the request, redirects included. A single
 number today; the phase-specific model of §24 will accept richer values
-through the same argument.}
+through the same argument. DNS resolution is not bounded by it (nor by
+Ctrl-C); see \link{zuhttp_tls}.}
 
 \item{max}{Maximum redirects to follow. \code{0} returns the 3xx response itself.}
 

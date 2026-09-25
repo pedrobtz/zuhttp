@@ -85,6 +85,26 @@ NULL
 #' The consequence worth knowing is that behaviour is not uniform, because the
 #' platforms are not. What follows is what actually differs.
 #'
+#' @section Refused, never downgraded:
+#' Every [zu_tls()] setting is a request for a stronger connection. When the
+#' linked backend cannot honour one, the request raises
+#' `zu_tls_unsupported_error` (a `zu_tls_error`) **before any network I/O**,
+#' rather than connecting without it. `zu_info()$tls_capabilities` lists what
+#' this build honours:
+#'
+#' \tabular{llll}{
+#'   **Setting** \tab **OpenSSL** \tab **macOS** \tab **Windows** \cr
+#'   `pins` \tab yes \tab refused \tab refused \cr
+#'   `min_version = 13` \tab yes \tab refused \tab refused \cr
+#'   `ca_file` \tab yes \tab yes \tab refused \cr
+#'   `ca_extra` \tab yes \tab yes \tab refused \cr
+#'   `revocation = TRUE` \tab refused \tab yes, with caveats \tab yes \cr
+#' }
+#'
+#' A refusal is `zu_tls_unsupported_error`; a pin that does not match is
+#' `zu_tls_pin_error`. The two are different classes so that "this backend
+#' cannot pin" is never mistaken for "the pin was checked and failed".
+#'
 #' @section Maximum TLS version:
 #' `zu_tls(min_version = 13)` is refused rather than silently downgraded on
 #' both macOS and Windows: Secure Transport has no TLS 1.3 constant, and the
@@ -94,17 +114,19 @@ NULL
 #' highest version both ends support; it is the *floor* that cannot be raised.
 #'
 #' @section Certificate pinning:
-#' [zu_tls()]'s `pins` works on OpenSSL and Schannel. On macOS it raises:
+#' [zu_tls()]'s `pins` works on **OpenSSL only**. On macOS,
 #' Security.framework will not hand over the SubjectPublicKeyInfo without
-#' hand-parsing DER, and a pin that silently compares the wrong bytes is worse
-#' than no pin. A pinned request either enforces the pin or raises
-#' `zu_tls_pin_error`; it never quietly succeeds unpinned.
+#' hand-parsing DER; on Windows the CryptoAPI path is not written yet. Both
+#' refuse, because a pin that silently compares the wrong bytes is worse than
+#' no pin. A pinned request either enforces the pin or raises; it never quietly
+#' succeeds unpinned.
 #'
 #' @section Custom certificate authorities:
 #' `ca_file` **replaces** the system trust store; `ca_extra` **adds** to it.
 #' The distinction is deliberate and is the usual source of confusion — with
 #' `ca_file` set, a public certificate that verified a moment ago will not.
-#' Additive trust is not yet implemented on Schannel.
+#' **Neither is implemented on Windows yet**: Schannel refuses both, rather
+#' than verifying against the Windows store and ignoring the file.
 #'
 #' @section Revocation:
 #' Off by default, on every platform, because none of them checks revocation
@@ -114,17 +136,26 @@ NULL
 #' `zu_tls(revocation = TRUE)` opts in, and what that buys you is
 #' backend-dependent in a way worth knowing before you rely on it:
 #'
-#' * **OpenSSL: do not use it yet.** The flag sets `X509_V_FLAG_CRL_CHECK`
-#'   with no CRL source configured, and OpenSSL neither downloads CRLs nor
-#'   performs OCSP on its own — so every chain fails to verify, including
-#'   valid ones. It fails closed rather than silently accepting a revoked
-#'   certificate, but it is not usable as a revocation check.
+#' * **OpenSSL: refused.** OpenSSL neither downloads CRLs nor performs OCSP on
+#'   its own, so a CRL check with no CRL source fails *every* chain, valid
+#'   ones included. Rather than offer a flag that means "no connection will
+#'   ever succeed", this backend raises `zu_tls_unsupported_error`.
 #' * **macOS:** it works, in that revoked certificates are rejected — but so
 #'   are valid certificates from CAs that no longer answer revocation queries.
 #'   Let's Encrypt retired OCSP, so a large share of the web fails under it.
+#' * **Windows:** Schannel checks the chain, excluding the root, through the
+#'   platform's own revocation machinery.
 #'
-#' Both are recorded rather than papered over, and both are why revocation is
-#' not merely off by default but is a setting to reach for deliberately.
+#' Both caveats are recorded rather than papered over, and both are why
+#' revocation is not merely off by default but is a setting to reach for
+#' deliberately.
+#'
+#' @section Name resolution is not bounded:
+#' DNS resolution uses the system resolver (`getaddrinfo()`), which is
+#' synchronous. **Neither `timeout` nor Ctrl-C interrupts it**, so a host whose
+#' resolver stalls can hold R for as long as the resolver takes — on a
+#' misconfigured network, minutes. Every later phase (connect, handshake,
+#' response) is bounded by both.
 #'
 #' @seealso [zu_tls()] for the settings, [zu_tls_backend()] for what this
 #'   build linked, [zu_info()] for the whole configuration at once.

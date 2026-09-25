@@ -1,0 +1,13 @@
+zuhttp is licensed under the MIT license (see LICENSE).
+
+It compiles in two vendored libraries, both under permissive licenses whose
+full texts are installed with the package, in licenses/:
+
+  picohttpparser   MIT (upstream is MIT or Perl; used here under MIT)
+                   licenses/picohttpparser-LICENSE
+  uriparser        BSD-3-Clause (a subset: parse, resolve, recompose)
+                   licenses/uriparser-LICENSE
+
+Copyright holders, upstream versions and the exact files included are listed
+in COPYRIGHTS. zlib and the platform TLS stack (OpenSSL, Schannel, or
+Security.framework) are linked from the system and not distributed here.

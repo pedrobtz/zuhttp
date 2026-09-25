@@ -370,6 +370,15 @@ int zu_tls_available(void) { return 1; }
 
 const char *zu_tls_backend_name(void) { return "securetransport"; }
 
+/* No pins: Security.framework exposes the key but not the SubjectPublicKeyInfo
+ * wrapper, so the pin input needs a DER walk that is not written yet (#4); a
+ * pin that checks the wrong bytes is worse than no pin. No TLS 1.3: the
+ * enum stops at kTLSProtocol12 (R-13). Both are refused by
+ * zu_tls_config_check() before the handshake (D-56). */
+unsigned zu_tls_backend_caps(void) {
+    return ZU_TLS_CAP_CA_FILE | ZU_TLS_CAP_CA_EXTRA | ZU_TLS_CAP_REVOCATION;
+}
+
 zu_code zu_tls_connect(zu_stream **out, zu_stream *inner, const char *hostname,
                        const zu_tls_config *cfg, zu_deadline deadline,
                        zu_error *err) {
@@ -383,6 +392,8 @@ zu_code zu_tls_connect(zu_stream **out, zu_stream *inner, const char *hostname,
 
     if (!out || !inner || !hostname || !cfg) return ZU_ERR_TLS;
     *out = NULL;
+    rc = zu_tls_config_check(cfg, zu_tls_backend_caps(), zu_tls_backend_name(), err);
+    if (rc != ZU_OK) return rc;
 
     /* §26.4 hazard 2 / D-32 / R-12. Security.framework opens an XPC connection
      * to trustd on first use, and that connection does not survive fork(): the
@@ -410,14 +421,7 @@ zu_code zu_tls_connect(zu_stream **out, zu_stream *inner, const char *hostname,
     SSLSetIOFuncs(t->ctx, st_read, st_write);
     SSLSetConnection(t->ctx, (SSLConnectionRef)(uintptr_t)(void *)t);
     SSLSetPeerDomainName(t->ctx, hostname, strlen(hostname));   /* SNI */
-    /* A caller asking for TLS 1.3 must be told no, not quietly given 1.2.
-     * Silently weakening a security setting is worse than failing. */
-    if (cfg->min_version >= 13) {
-        zu_error_set(err, ZU_ERR_TLS, ZU_PHASE_TLS,
-                     "min_version = TLS 1.3 cannot be satisfied on macOS: the "
-                     "system TLS API tops out at 1.2 (see ?zuhttp_tls)");
-        goto fail_detach;
-    }
+    /* min_version = 13 was refused by zu_tls_config_check() (D-56). */
     SSLSetProtocolVersionMin(t->ctx, kTLSProtocol12);
     /* §14.1: trust is evaluated by US, not by Secure Transport, so the
      * handshake is broken at the server-auth step and resumed after
@@ -448,17 +452,8 @@ zu_code zu_tls_connect(zu_stream **out, zu_stream *inner, const char *hostname,
         goto fail_rc;
     }
 
-    /* §14.4 pinning needs the SubjectPublicKeyInfo hash, and Security.framework
-     * exposes the key but not the SPKI wrapper, so computing it means parsing
-     * the certificate DER by hand. Refusing is correct: a pin that silently
-     * checks the wrong bytes is worse than no pin at all. */
-    if (cfg->n_pins > 0) {
-        zu_error_set(err, ZU_ERR_TLS_PIN, ZU_PHASE_TLS,
-                     "public-key pinning is not implemented in the Secure Transport "
-                     "backend; it is available on Linux (see ?zu_tls)");
-        rc = ZU_ERR_TLS_PIN;
-        goto fail_rc;
-    }
+    /* §14.4 pins were refused by zu_tls_config_check() before the handshake
+     * (D-56); this backend cannot compute the SPKI digest yet (#4). */
 
     {
         SSLProtocol proto = kSSLProtocolUnknown;

@@ -20,9 +20,10 @@ test_that("every class is catchable by base tryCatch with no extra package", {
 
 test_that("catching a parent class catches its children (§34.1)", {
   # The tree is the whole point: a caller who wants "any TLS problem" must not
-  # have to enumerate the four leaves.
+  # have to enumerate the five leaves.
   leaves <- c("zu_tls_certificate_error", "zu_tls_hostname_error",
-              "zu_tls_handshake_error", "zu_tls_pin_error")
+              "zu_tls_handshake_error", "zu_tls_pin_error",
+              "zu_tls_unsupported_error")
   for (leaf in leaves) {
     caught <- tryCatch(stop(zu_condition(leaf, "boom")),
                        zu_tls_error = function(e) "parent")

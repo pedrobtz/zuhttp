@@ -6,7 +6,10 @@
 # * https://r-pkgs.org/testing-design.html#sec-tests-files-overview
 # * https://testthat.r-lib.org/articles/special-files.html
 
-library(testthat)
-library(zuhttp)
-
-test_check("zuhttp")
+# testthat is a Suggests: a check run without Suggests installed must skip the
+# suite rather than fail loading it (#18).
+if (requireNamespace("testthat", quietly = TRUE)) {
+  library(testthat)
+  library(zuhttp)
+  test_check("zuhttp")
+}

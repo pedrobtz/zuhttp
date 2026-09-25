@@ -42,6 +42,7 @@ static const char *const k_class[ZU_CODE_COUNT] = {
     "zu_tls_hostname_error",
     "zu_tls_handshake_error",
     "zu_tls_pin_error",
+    "zu_tls_unsupported_error",
     "zu_http_parse_error",
     "zu_url_error",
     "zu_proxy_error",
@@ -69,7 +70,8 @@ static zu_code class_parent(zu_code code) {
         case ZU_ERR_TLS_CERT:
         case ZU_ERR_TLS_HOSTNAME:
         case ZU_ERR_TLS_HANDSHAKE:
-        case ZU_ERR_TLS_PIN:            return ZU_ERR_TLS;
+        case ZU_ERR_TLS_PIN:
+        case ZU_ERR_TLS_UNSUPPORTED:    return ZU_ERR_TLS;
         case ZU_ERR_PROXY_AUTH:         return ZU_ERR_PROXY;
         case ZU_ERR_TOO_MANY_REDIRECTS: return ZU_ERR_REDIRECT;
         case ZU_ERR_INTERRUPTED:        return ZU_ERR_CANCELLED;
@@ -127,6 +129,8 @@ int zu_code_retryable(zu_code code) {
         case ZU_ERR_TLS_HOSTNAME:
         case ZU_ERR_TLS_HANDSHAKE:
         case ZU_ERR_TLS_PIN:
+        /* A backend that cannot do something will not learn to on retry. */
+        case ZU_ERR_TLS_UNSUPPORTED:
         case ZU_ERR_PARSE:
         case ZU_ERR_URL:
         case ZU_ERR_CANCELLED:
