@@ -45,7 +45,12 @@ typedef struct {
     zu_tls_info info;
     const zu_tls_config *cfg;
     char       hostname[256];
-    int        pin_ok;
+    /* Set only when the pin comparison RAN and failed. "Not matched" is not
+     * the same as "mismatched": verify_cb returns before comparing when the
+     * chain itself fails, and reading an unset flag as a mismatch reported
+     * every chain failure on a pinned request as zu_tls_pin_error (§14.6;
+     * found by the §50.5 pin-over-untrusted-chain row, 2026-09-25). */
+    int        pin_mismatch;
 } tls_impl;
 
 static void ssl_err_string(char *out, size_t cap) {
@@ -123,10 +128,9 @@ static int verify_cb(X509_STORE_CTX *sctx, void *arg) {
     if (t->cfg && t->cfg->n_pins > 0) {
         X509 *leaf = X509_STORE_CTX_get0_cert(sctx);
         if (!leaf || !pin_matches(leaf, t->cfg->pins, t->cfg->n_pins)) {
-            t->pin_ok = 0;
+            t->pin_mismatch = 1;
             return 0;                 /* §14.4: in addition to, not instead of */
         }
-        t->pin_ok = 1;
     }
     return 1;
 }
@@ -395,7 +399,7 @@ zu_code zu_tls_connect(zu_stream **out, zu_stream *inner, const char *hostname,
             long v = SSL_get_verify_result(t->ssl);
             char eb[192];
             ssl_err_string(eb, sizeof eb);
-            if (cfg->n_pins > 0 && !t->pin_ok) {
+            if (t->pin_mismatch) {
                 zu_error_set(err, ZU_ERR_TLS_PIN, ZU_PHASE_TLS,
                              "certificate public key does not match any configured pin");
                 rc = ZU_ERR_TLS_PIN;

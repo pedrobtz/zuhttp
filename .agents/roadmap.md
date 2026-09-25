@@ -1836,6 +1836,15 @@ fixture now falls back to `openssl ca -startdate/-enddate`, and only the two
 dated rows depend on the dated certificates. Verified by forcing the
 fallback locally with a wrapper that rejects `-not_before`, and on CI.
 
+**Found by the matrix's first Linux run, and fixed:** on the OpenSSL
+backend, *any* chain failure on a pinned request — untrusted issuer, expired,
+wrong host — was reported as `zu_tls_pin_error`. `verify_cb` returns before
+comparing pins when the chain fails, and the error translation read the
+never-set `pin_ok` flag as a mismatch. The request was still refused, so this
+was a diagnosis defect (§14.6), not a bypass. The flag now records only a
+comparison that ran and failed; `ctest/test_tls.c` has the case, and
+reverting the fix fails it.
+
 **Found on the way, not fixed:** every job in every workflow carries
 `if: github.event_name != 'pull_request' || <fork>`, while `push` fires only
 on `main` and `develop`. A pull request from a branch of this repository
