@@ -597,6 +597,11 @@ changed the plan or the design.
 - **2026-09-25 — the §50.5 matrix had never run on Linux.** `x509
   -not_before` is OpenSSL 3.4+; Ubuntu has 3.0; the fixture skipped all rows.
   Fixed with an `openssl ca` fallback. Rule 6, again.
+- **2026-09-25 — a pinned request's chain failure was reported as a pin
+  mismatch** on OpenSSL: the translation read a never-set flag. Found by the
+  pin-over-untrusted-chain row on the matrix's first Linux run; fixed before
+  #20 merged. Rule 6 — and the reason every §50.5 row asserts a *class*, not
+  just a failure.
 - **2026-09-25 — pull requests from this repository run no CI.** Every job is
   skipped on same-repository `pull_request` events and `push` covers only
   `main`/`develop`. The review's own PR showed every check "skipped". → W1.
