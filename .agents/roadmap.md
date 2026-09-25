@@ -1826,6 +1826,16 @@ so that the plan and the code agree on the day the plan becomes authoritative.
 test that should have caught it skipped every backend but Secure Transport.
 Under D-56 the refusal is table-driven, so a backend cannot forget a setting.
 
+**Found on the way, and fixed:** the §50.5 certificate matrix had **never
+run on Linux**. The fixture dated its expired and not-yet-valid certificates
+with `openssl x509 -not_before`, an option added in OpenSSL 3.4; Ubuntu ships
+3.0, generation failed, and the fixture skipped *every* row — so S7's "seven
+of eight rows pass" was true on macOS only, and the new pin rows skipped on
+the first CI run with "could not generate the expired certificate". The
+fixture now falls back to `openssl ca -startdate/-enddate`, and only the two
+dated rows depend on the dated certificates. Verified by forcing the
+fallback locally with a wrapper that rejects `-not_before`, and on CI.
+
 **Found on the way, not fixed:** every job in every workflow carries
 `if: github.event_name != 'pull_request' || <fork>`, while `push` fires only
 on `main` and `develop`. A pull request from a branch of this repository

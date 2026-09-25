@@ -56,25 +56,53 @@ tls_fixture <- function() {
         "-extfile", f(name, ".ext"), ...)
   }
 
+  # A leaf with explicit validity dates, so the intent is readable and the
+  # fixture does not depend on today. `x509 -not_before` exists only from
+  # OpenSSL 3.4; Ubuntu's 3.0 rejects it, and until 2026-09-25 that made
+  # the whole matrix skip on every Linux leg — the OpenSSL backend's §50.5
+  # rows had never run in CI. `openssl ca -startdate` is the portable route.
+  dated <- function(name, from, to) {
+    leaf(name, "localhost", "ca", "-not_before", from, "-not_after", to)
+    if (file.exists(f(name, ".pem"))) return(invisible())
+    cadir <- f("ca-db-", name); dir.create(cadir)
+    file.create(file.path(cadir, "index.txt"))
+    writeLines("01", file.path(cadir, "serial"))
+    writeLines(c("[ca]", "default_ca=zu", "[zu]",
+                 paste0("database=", file.path(cadir, "index.txt")),
+                 paste0("new_certs_dir=", cadir),
+                 paste0("serial=", file.path(cadir, "serial")),
+                 "default_md=sha256", "policy=pol", "unique_subject=no",
+                 "[pol]", "commonName=supplied"),
+               file.path(cadir, "ca.cnf"))
+    ssl("ca", "-batch", "-notext", "-config", file.path(cadir, "ca.cnf"),
+        "-cert", f("ca.pem"), "-keyfile", f("ca.key"),
+        "-in", f(name, ".csr"), "-out", f(name, ".pem"),
+        "-extfile", f(name, ".ext"), "-startdate", from, "-enddate", to)
+  }
+
   leaf("good",      "localhost",  "ca", "-days", "30")
   leaf("wronghost", "other.test", "ca", "-days", "30")
   leaf("untrusted", "localhost",  "rogueca", "-days", "30")
-  # Explicit dates rather than a negative -days, so the intent is readable and
-  # the fixture does not depend on today.
-  leaf("expired",   "localhost",  "ca",
-       "-not_before", "20240101000000Z", "-not_after", "20240201000000Z")
-  leaf("notyet",    "localhost",  "ca",
-       "-not_before", "20400101000000Z", "-not_after", "20400201000000Z")
+  dated("expired", "20240101000000Z", "20240201000000Z")
+  dated("notyet",  "20400101000000Z", "20400201000000Z")
 
   paths <- list(dir = d, ca = f("ca.pem"), rogue_ca = f("rogueca.pem"),
                 cert = function(n) f(n, ".pem"), key = function(n) f(n, ".key"))
-  for (n in c("good", "wronghost", "untrusted", "expired", "notyet"))
+  # The three certificates every other row needs. The dated two are checked
+  # by the rows that use them (skip_unless_cert), so a toolchain that cannot
+  # date a certificate costs two rows, not the matrix.
+  for (n in c("good", "wronghost", "untrusted"))
     if (!file.exists(paths$cert(n)))
       testthat::skip(paste("could not generate the", n, "certificate"))
 
   .zu_tls_fixture$dir   <- d
   .zu_tls_fixture$paths <- paths
   paths
+}
+
+skip_unless_cert <- function(name) {
+  if (!file.exists(tls_fixture()$cert(name)))
+    testthat::skip(paste("could not generate the", name, "certificate"))
 }
 
 # The §14.4 pin of a fixture certificate, computed by the openssl CLI rather

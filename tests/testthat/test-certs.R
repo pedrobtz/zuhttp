@@ -60,6 +60,7 @@ test_that("a hostname mismatch is its OWN condition class (§14.6)", {
 
 test_that("an expired certificate is rejected", {
   skip_unless_local_tls()
+  skip_unless_cert("expired")
   fx <- tls_fixture()
   with_tls_server("expired", function(url) {
     e <- tryCatch(zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10),
@@ -71,6 +72,7 @@ test_that("an expired certificate is rejected", {
 
 test_that("a not-yet-valid certificate is rejected", {
   skip_unless_local_tls()
+  skip_unless_cert("notyet")
   fx <- tls_fixture()
   with_tls_server("notyet", function(url) {
     e <- tryCatch(zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10),
