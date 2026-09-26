@@ -57,7 +57,7 @@
 <li>Reusable clients (<code><a href="../reference/zu_client.html">zu_client()</a></code>) carrying base URL, headers, query, and policy defaults, with per-request overrides.</li>
 <li>Response bodies to memory, to a file (<code>path =</code>), or to a callback (<code>callback =</code>), the last two without holding the body in memory.</li>
 <li>Connection pooling with keep-alive, and a PID guard that drops connections inherited across <code>fork()</code>.</li>
-<li>Redirects with method rewriting and cross-origin credential stripping; transparent gzip and deflate under explicit size limits.</li>
+<li>Redirects with method rewriting and cross-origin credential stripping (up to 10 by default; a longer chain raises <code>zu_too_many_redirects</code>); transparent gzip and deflate under explicit size limits.</li>
 <li>A total timeout across a redirect chain, and Ctrl-C cancellation that unwinds without leaking sockets or TLS contexts. Neither bounds DNS resolution, which is synchronous.</li>
 <li>Retry policies, middleware, and observability hooks.</li>
 <li>Structured conditions (<code>zu_tls_certificate_error</code>, <code>zu_timeout_error</code>, <code>zu_fork_error</code>, …) rather than parsed message strings.</li>
@@ -66,6 +66,13 @@
 <li>
 <code><a href="../reference/zu_transport.html">zu_mock_transport()</a></code> and a record/replay cassette transport, so packages depending on <code>zuhttp</code> can test offline.</li>
 <li>Per-phase timings and an event trace (<code><a href="../reference/zu_resp_trace.html">zu_resp_trace()</a></code>, <code><a href="../reference/zu_verbose.html">zu_verbose()</a></code>), and <code><a href="../reference/zu_info.html">zu_info()</a></code> for a bug-report-ready configuration dump.</li>
+</ul></div>
+<div class="section level3">
+<h3 id="fixed-before-release-0-1-0">Fixed before release<a class="anchor" aria-label="anchor" href="#fixed-before-release-0-1-0"></a></h3>
+<ul><li>
+<strong>A redirect to another origin no longer carries credentials.</strong> <code>Authorization</code>, <code>Cookie</code> and <code>Proxy-Authorization</code> set by the caller were re-sent on every hop, including to a different host, port or scheme. They are now dropped at the first cross-origin hop and stay dropped for the rest of the chain.</li>
+<li>The <code>Host</code> header includes the port when it is not the scheme’s default.</li>
+<li>A redirect chain longer than <code>redirects</code> raises <code>zu_too_many_redirects</code> instead of returning its last 3xx as if it were the final response. <code>redirects = 0</code> still returns the 3xx itself.</li>
 </ul></div>
 <div class="section level3">
 <h3 id="known-limitations-0-1-0">Known limitations<a class="anchor" aria-label="anchor" href="#known-limitations-0-1-0"></a></h3>
