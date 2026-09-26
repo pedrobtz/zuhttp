@@ -61,6 +61,11 @@ bundles neither cryptography nor a CA bundle. No hard R dependencies.
   lines rather than their fields pasted together.
 * `zu_resp_timings()` no longer reports a `total` shorter than one of its own
   phases on very fast requests.
+* A connection on which the server sent bytes beyond a response's declared
+  length (or after a chunked body, or on a response that has no body) is no
+  longer returned to the pool. Those bytes were already discarded, but the
+  connection was out of step with its responses, so the next request on it
+  could have read an answer to a question it never asked.
 * A time limit reached during a request (`setTimeLimit()`,
   `R.utils::withTimeout()`) surfaces as its own error. It used to be printed
   to the console, discarded, and reported as `zu_interrupted_error`

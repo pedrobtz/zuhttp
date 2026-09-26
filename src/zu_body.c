@@ -96,7 +96,11 @@ zu_code zu_body_pipe_feed(zu_body_pipe *p, const void *data, size_t n, zu_error 
 zu_code zu_body_read(zu_stream *s, const zu_framing *fr, zu_body_pipe *p,
                          const char *seed, size_t seed_len,
                          uint64_t max_body, zu_deadline dl, zu_error *err) {
-    if (fr->kind == ZU_FRAME_NONE) return ZU_OK;
+    if (fr->kind == ZU_FRAME_NONE) {
+        /* HEAD, 204, 304: no body, so anything already read is surplus. */
+        p->surplus += (uint64_t)seed_len;
+        return ZU_OK;
+    }
 
     if (fr->kind == ZU_FRAME_CHUNKED) {
         zu_chunked dec;
@@ -141,6 +145,7 @@ zu_code zu_body_read(zu_stream *s, const zu_framing *fr, zu_body_pipe *p,
                 if (w != ZU_OK) { rc = w; break; }
             }
         }
+        if (rc == ZU_OK) p->surplus += (uint64_t)dec.surplus;
         zu_free(work);
         zu_chunked_free(&dec);
         return rc == ZU_OK ? ZU_OK : rc;
@@ -154,6 +159,7 @@ zu_code zu_body_read(zu_stream *s, const zu_framing *fr, zu_body_pipe *p,
          * buffer afterwards is what lets the body go straight to a sink. */
         if (fr->kind == ZU_FRAME_LENGTH && take > fr->length)
             take = (size_t)fr->length;
+        p->surplus += (uint64_t)(seed_len - take);
         {
             zu_code w = zu_body_pipe_feed(p, seed, take, err);
             if (w != ZU_OK) return w;
@@ -185,6 +191,7 @@ zu_code zu_body_read(zu_stream *s, const zu_framing *fr, zu_body_pipe *p,
         take = (size_t)n;
         if (fr->kind == ZU_FRAME_LENGTH && p->raw_seen + take > fr->length)
             take = (size_t)(fr->length - p->raw_seen);
+        p->surplus += (uint64_t)((size_t)n - take);
         {
             zu_code w = zu_body_pipe_feed(p, chunk, take, err);
             if (w != ZU_OK) return w;
