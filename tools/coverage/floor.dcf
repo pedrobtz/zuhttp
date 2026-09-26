@@ -1,0 +1,8 @@
+Comment: Coverage floors for tools/coverage/measure.R, per OS because each
+ builds a different TLS backend. Raise a floor when coverage rises; never
+ lower one to make CI pass. A drop means code lost its tests, or code
+ arrived without them.
+own_c_macos: 91.5
+r_macos: 90
+own_c_linux: 85
+r_linux: 90
