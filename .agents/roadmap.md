@@ -26,8 +26,8 @@ the evidence for several of the first half:
 | Pinning on macOS and Windows | refused | W9 |
 | Revocation on OpenSSL | refused, with no way to supply a source | W10 |
 | Ctrl-C bound, leaks under interrupt | unmeasured | W11 |
-| Cancellable DNS | not bounded by `timeout` or Ctrl-C | W14 |
-| macOS engine for CRAN | native TLS decided (D-63); Secure Transport is deprecated and NOTEs under `--as-cran` | W13 |
+| Cancellable DNS | not bounded by `timeout` or Ctrl-C | W13 (macOS), W14 |
+| macOS engine | Secure Transport is deprecated, caps at TLS 1.2 and NOTEs under `--as-cran`; Network.framework is decided (D-63) and measured | W13 |
 | Windows TLS 1.3 | blocked on an unverified ABI | W15 |
 | Performance | unmeasured against every §51.3 runtime threshold | W18 |
 | Evidence in CI | pull requests from this repository ran **no CI** until W1; the Linux certificate matrix had never run until 2026-09-25 | W1 |
@@ -77,8 +77,8 @@ graph LR
 | Milestone | Version | Theme | Work packages | Gate |
 |---|---|---|---|---|
 | M0 | 0.1.0 | tag what shipped | — | the four M0 steps |
-| M1 | 0.2.0 | the design's promises, tested | W1–W4, W6–W12 | every `zu_tls()` setting works on every backend except TLS 1.3 on macOS/Windows; phase timeouts; the export surface frozen |
-| M2 | 0.3.0 | on CRAN | W13–W16, W18 | accepted on CRAN; §61.1 and §61.5 measured |
+| M1 | 0.2.0 | the design's promises, tested | W1–W4, W6–W13 | every `zu_tls()` setting works on every backend except TLS 1.3 on Windows; Network.framework on macOS; phase timeouts; the export surface frozen |
+| M2 | 0.3.0 | on CRAN | W14–W16, W18 | accepted on CRAN; §61.1 and §61.5 measured |
 | M3 | 1.0 | others may depend on it | W17, W19 | all 14 §61 criteria; external review; `SECURITY.md` |
 
 D-55 holds throughout: 0.x.y patch releases carry fixes only; features wait
@@ -107,21 +107,25 @@ for the next minor.
    anything else on this list.
 2. **W2 second.** The C prefix rename touches every C file; done after W7–W11
    it would conflict with all of them.
-3. **W3 and W6** while nothing depends on the package (R-11): trimming exports
+3. **W13 third.** It replaces the macOS backend and moves the §9 seam there
+   (D-71). W7, W9 and W11 each touch that backend, and building them on
+   Secure Transport first would mean building them twice.
+4. **W3 and W6** while nothing depends on the package (R-11): trimming exports
    and fixing defaults is free now and a deprecation cycle later.
-4. **W4 before W7.** Phase timeouts are built against tests that already make
+5. **W4 before W7.** Phase timeouts are built against tests that already make
    real requests time out, rather than against synthetic conditions.
-5. **W7–W11 in any order**, in parallel if there are two people: they touch
+6. **W7–W11 in any order**, in parallel if there are two people: they touch
    different files (`zu_engine.c`/`zu_net.c`; `zu_tls_schannel.c`;
    `zu_spki.c` plus two backends; `zu_tls_openssl.c`; `init.c` and the test
    harness).
-6. **W12** last, because three of its four documents describe W7–W10.
+7. **W12** last, because three of its four documents describe W7–W10.
 
 **Exit criteria**
 
-- [ ] W1–W4 and W6–W12 closed.
-- [ ] `zu_info()$tls_capabilities` is `pins, ca_file, ca_extra, revocation`
-      on macOS and Windows, and all five on OpenSSL when `crl_file` is set.
+- [ ] W1–W4 and W6–W13 closed.
+- [ ] `zu_info()$tls_capabilities` is all five on macOS; `pins, ca_file,
+      ca_extra, revocation` on Windows; all five on OpenSSL when `crl_file` is
+      set.
 - [ ] Project-owned C ≤ 8,000 code lines (§51.3), measured by W1's job.
 - [ ] NEWS lists every user-visible change, including D-65's removals, D-68 and D-69.
 
@@ -131,12 +135,11 @@ for the next minor.
 
 **Order.** W18 first — measuring against `curl` is cheap and it is the last
 point at which an unfavourable number can change the plan before CRAN's
-obligations begin (R-7, R-11). W13 next: it decides which native engine ships on
-macOS and resolves or explains the `--as-cran` pragma NOTE. W14, W15 in parallel. W16 last.
+obligations begin (R-7, R-11). W14 and W15 in parallel. W16 last.
 
 **Exit criteria**
 
-- [ ] W13–W16 and W18 closed.
+- [ ] W14–W16 and W18 closed.
 - [ ] Accepted on CRAN; §61.1 green on win-builder, macOS builder and R-hub.
 - [ ] §61.5 and §61.4 measured and published in the README, even if unfavourable.
 
@@ -367,33 +370,56 @@ timeout documents.
 - [ ] M2: three R users new to the package each write a GET and a JSON POST
       in five minutes from the reference index (§61.11).
 
-### W13 — The native macOS engine for CRAN
+### W13 — Network.framework as the macOS engine
 
-**Status:** not started. **Milestone:** M2. **Closes:** #16, #44.
-**Implements:** D-63, §13.2. **Estimate:** spike 3 days, low; a move to
-Network.framework would add about a week.
+**Status:** not started; the go/no-go spike is done
+([`spike/network-framework/FINDINGS.md`](../spike/network-framework/FINDINGS.md)).
+**Milestone:** M1, straight after W2. **Closes:** #16, #44.
+**Implements:** D-63, D-71, §13.2, §9, §20.3. **Estimate:** 6 days, medium.
 
-D-63 settles *native* TLS on macOS (2026-09-26). What remains is which native
-API: Secure Transport or Network.framework. A spike in the S0 shape: measure,
-do not commit.
+This replaces `zu_tls_sectransport.c` with a Network.framework backend and
+deletes Secure Transport, which removes the `--as-cran` NOTE. It runs early in
+M1 so that W7 (timeouts), W9 (pinning) and W11 (cancellation) are built once,
+on the engine that ships, and not twice.
 
 **Exit criteria**
 
-- [ ] Every "unmeasured" cell of design §13.2's table has a number for
-      Network.framework: native CONNECT, `SecTrust` through the verify block,
-      cancellation latency from the poll loop, and the minimum macOS.
-- [ ] The engine choice recorded in design §13.2, with the measurements.
-- [ ] The chosen engine passes the full §50.5 matrix, CONNECT through a proxy,
-      W7's timeouts and W11's cancellation tests.
-- [ ] Either `--as-cran` has no pragma NOTE, or Secure Transport stays and
-      the NOTE is explained in `cran-comments.md`.
-- [ ] No bundled cryptography. The `zucrypt` engine route (design §13.2)
-      stays a documented later option, not part of this package.
+- [ ] `zu_tls_nw.c` implements `zu_tls_dial()`. The engine skips its own TCP
+      and CONNECT for `https://` when the backend reports `ZU_TLS_CAP_DIALS`.
+      Plain HTTP and the other backends are untouched.
+- [ ] Trust runs in the verify block with `SecTrustEvaluateWithError`. The
+      whole §50.5 matrix passes on the macOS leg: `ca_file`, `ca_extra`,
+      expired, not yet valid, wrong host and untrusted issuer, each with the
+      same class as before.
+- [ ] `tls13` is in `zu_info()$tls_capabilities` on macOS, and a TLS 1.3
+      server negotiates 1.3.
+- [ ] HTTPS through a proxy works on the macOS 14+ CI runner. A local
+      CONNECT proxy's log shows the tunnel was used, and Basic credentials
+      reach the proxy and nowhere else (the §42 canary).
+- [ ] On macOS below 14, a proxied HTTPS hop raises `zu_proxy_error` naming
+      the version. Tested by building with the availability check forced
+      false.
+- [ ] F-20 is measured on a runner with a system proxy configured. Either
+      `proxy = FALSE` is strictly direct, or the exception is written in
+      `?zuhttp_tls` and design §20.3.
+- [ ] Every completion only writes to a pipe; the poll loop owns all waiting.
+      Cancellation during DNS, connect and TLS returns within 200 ms (the
+      probe measured 0.4 ms).
+- [ ] The §26.4 guard fires before any Network.framework call in a forked
+      child; `tools/ci-fork-guard.R` passes (SIGILL otherwise, F-19).
+- [ ] `zu_resp_timings()` reports `dns`, `connect` and `tls` from the
+      establishment report, and `zu_resp_connection()` reports `remote_ip`.
+- [ ] `zu_tls_sectransport.c` is deleted, and `configure` links
+      `-framework Network`. `R CMD check --as-cran` on macOS shows no pragma
+      or deprecation NOTE.
+- [ ] Design §13.2 has its "still to settle" list emptied.
 
 ### W14 — Cancellable DNS
 
 **Status:** not started. **Milestone:** M2. **Closes:** the last of #14.
-**Implements:** D-59, §8.4, §29.1. **Estimate:** 3 days, medium.
+**Implements:** D-59, §8.4, §29.1. **Estimate:** 3 days, medium. Linux and
+Windows only: on macOS, W13's Network.framework resolves names itself and
+cancellably (F-16).
 
 **Exit criteria**
 
@@ -425,7 +451,7 @@ do not commit.
 
 **Status:** not started. **Milestone:** M2. **Closes:** #47.
 **Implements:** §47, §49. **Estimate:** 2 days plus review turnaround.
-**Depends on:** W13.
+**Depends on:** W13 (no macOS NOTE left to explain).
 
 **Exit criteria**
 
@@ -506,7 +532,7 @@ Strict framing, redaction and the fork guard are not cuttable (§57.1).
 | 2 | W14: keep DNS uninterruptible (D-30) | the last hole in cancellation | 3 days, and the only thread |
 | 3 | W10's `crl_file` | revocation on OpenSSL | 1 day |
 | 4 | Cassettes, as unexported and experimental | downstream testing convenience | maintenance |
-| 5 | W13 finds Network.framework unsuitable: Secure Transport kept on CRAN, its NOTE explained | TLS 1.3 on macOS; a harder CRAN review | 1–2 weeks |
+| 5 | W13's system-proxy gap (F-20) documented rather than closed | strict `proxy = FALSE` on Macs with a system proxy | a few days |
 
 ---
 
@@ -539,8 +565,7 @@ refused rather than silently downgraded. → **W8, W9, W15.**
 ### S9 · macOS engine and trust
 
 Partial: pinning refused; revocation criterion needs a local revoked
-certificate; native TLS decided (D-63), Secure Transport or Network.framework
-still to choose. → **W9, W10, W13.**
+certificate; Network.framework replaces Secure Transport (D-63). → **W9, W10, W13.**
 
 ### S15 · Cancellation and unwind
 
@@ -576,7 +601,7 @@ copy. #51 closes as superseded.
 ### Release scope: v0.1.0 — decided 2026-09-10
 
 A GitHub release, not a CRAN submission, because the macOS engine for CRAN
-was undecided. Native TLS is now decided (D-63); W13 picks the API. → **M0.**
+was undecided. It is now decided: Network.framework (D-63, W13). → **M0.**
 
 ### Stage by stage
 
@@ -620,3 +645,17 @@ changed the plan or the design.
   vendored Mbed TLS option is dropped; if a portable engine is ever needed it
   comes from `zucrypt`. W13 shrinks to Secure Transport or Network.framework,
   and U3 (#51) is superseded.
+- **2026-09-26 — Network.framework measured: GO.** Edition 1's F-11 had
+  rejected it on an API reading, never a run. The probe
+  (`spike/network-framework/`) found:
+  - trust stays ours, through the verify block;
+  - TLS 1.3 is negotiated;
+  - the poll-loop bridge works;
+  - cancellation takes 0.4 ms, DNS included;
+  - native CONNECT works, macOS 14+ only;
+  - the build is warning-free at deployment target 11.0.
+
+  The maintainer prefers dropping proxied HTTPS on macOS 11–13 to shipping a
+  CRAN NOTE, so D-63 becomes Network.framework and W13 moves into M1. Two new
+  facts to carry: fork after use kills the child with SIGILL (the guard must
+  come first), and `prefer_no_proxy` is not a strict "direct only".

@@ -47,7 +47,7 @@ Five rules keep it that way:
 | D-1 | R prefix `zu_`, response accessors `zu_resp_`; C macros `ZUHTTP_` (internal C prefix: D-66) | Accepted | 1.1 |
 | D-2 | No `zuhttp` export may collide with an httr2 export | Accepted | 1.1, 5 |
 | D-3 | Separate the TLS protocol engine from trust evaluation | Accepted | 13.1 |
-| D-4 | macOS: Secure Transport engine + `SecTrustEvaluateWithError` trust — the native engine D-63 keeps | Accepted | 13.2 |
+| D-4 | macOS: Secure Transport engine + `SecTrustEvaluateWithError` trust — **superseded by D-63 when W13 lands** | Accepted | 13.2 |
 | D-5 | Windows: Schannel for engine and trust — required, not preferred | Accepted | 13.4 |
 | D-6 | Unix: system OpenSSL for engine and trust | Accepted | 13.5 |
 | D-7 | Link system zlib; do not vendor miniz | Accepted | 21.1 |
@@ -114,7 +114,8 @@ accepted when that work package's PR merges.
 | D-60 | SubjectPublicKeyInfo is extracted by **one project-owned, bounded DER walker** shared by Secure Transport and Schannel; the digest comes from the platform (CommonCrypto, CNG). The walker is fuzz target 10 | Proposed | 14.4 | W9 |
 | D-61 | Windows custom trust: `ca_file` builds a chain engine with an exclusive root store; `ca_extra` evaluates against the system engine first and, on an untrusted-root result only, against an exclusive-root engine over the extra store | Proposed | 14.3 | W8 |
 | D-62 | Revocation stays **platform-provided**. OpenSSL refuses `revocation = TRUE` unless `zu_tls(crl_file = )` supplies CRLs; zuhttp never fetches OCSP or CRLs, and offers no soft-fail mode | Proposed | 14.5 | W10 |
-| D-63 | macOS stays on **Apple's native TLS**: Secure Transport now, Network.framework if W13 shows it meets §13.2. zuhttp vendors no TLS library. A bundled-crypto engine, if ever needed, comes from **`zucrypt`**, not from a private copy in zuhttp (amends D-54 from 1.0 on) | Accepted 2026-09-26 (maintainer) | 13.2, 5.1, 56 | W13 |
+| D-63 | macOS uses **Network.framework**, Apple's native, non-deprecated TLS, with trust still from our `SecTrustEvaluateWithError`. Direct HTTPS works on every macOS that R supports; HTTPS **through a proxy requires macOS 14**. Secure Transport is removed rather than kept as a fallback, because keeping it would keep the `--as-cran` NOTE. zuhttp vendors no TLS library; a bundled engine, if ever needed, comes from **`zucrypt`** | Accepted 2026-09-26 (maintainer; measured in `spike/network-framework/`) | 13.2, 5.1, 56 | W13 |
+| D-71 | On macOS an HTTPS stream is **dialled** by the TLS backend (`zu_tls_dial()`, `ZU_TLS_CAP_DIALS`), which does TCP, DNS and CONNECT itself; everywhere else, and for plain HTTP, the engine still opens the socket and the backend wraps it | Proposed | 9, 13.2, 20.3 | W13 |
 | D-64 | Windows TLS 1.3 ships only behind a CI job that proves the local `SCH_CREDENTIALS` / `TLS_PARAMETERS` layout equals MSVC's; otherwise Windows stays TLS 1.2 and scope cut 4 is recorded as taken | Proposed | 13.4, 47.4 | W15 |
 | D-65 | Export surface: exactly the **17** removals in §53, leaving **58** functions at 0.2.0 (75 today); every condition also inherits **`zuhttp_error`**, directly above `error` | Proposed | 34.1, 53 | W3 |
 | D-66 | Internal C identifiers become `zuh_` / `ZUH_`; only `R_init_zuhttp` is exported from the shared object | Proposed | 1.1, 11 | W2 |
@@ -329,7 +330,8 @@ System zlib (D-7); §21.
 #### 8.4 DNS
 
 **Status:** Partial — resolution is synchronous and ignores `timeout` and
-Ctrl-C (D-30); W14 makes it cancellable (D-59).
+Ctrl-C (D-30). On macOS, W13 makes it cancellable through Network.framework;
+on Linux and Windows, W14 does (D-59).
 
 `getaddrinfo()` with `AF_UNSPEC`. Until W14 this is the one phase outside
 both the deadline and the interrupt guarantee, and it is documented as such in
@@ -353,7 +355,8 @@ rather than the kernel.
 
 ### 9. Generic Stream Interface
 
-**Status:** Built — `src/zu_stream.h`.
+**Status:** Built — `src/zu_stream.h`. On macOS after W13, HTTPS streams are
+dialled rather than wrapped (D-71); the vtable is the same.
 
 The HTTP engine depends only on the `zu_stream` vtable: `read`, `write`,
 `close`, `destroy`, and `readable(timeout_ms)`, the non-consuming liveness
@@ -405,7 +408,7 @@ transports, safe retries and observability, not on protocol breadth.
 
 ### 13. TLS Architecture
 
-**Status:** Built on three backends. macOS stays on native Apple TLS (D-63).
+**Status:** Built on three backends. On macOS, Network.framework replaces Secure Transport in W13 (D-63).
 
 #### 13.1 Separate the protocol engine from trust evaluation
 
@@ -415,7 +418,7 @@ chain is trusted. Only the second must be native to deliver "system trust".
 | Platform | Engine | Trust |
 |---|---|---|
 | Windows | Schannel | `CertGetCertificateChain` + `CertVerifyCertificateChainPolicy`, Windows store |
-| macOS | Secure Transport (D-4) | `SecTrustEvaluateWithError`, Keychain |
+| macOS | Secure Transport (D-4) → Network.framework (D-63, W13) | `SecTrustEvaluateWithError`, Keychain — from the verify block after W13 |
 | Unix | system OpenSSL | OpenSSL default verify paths |
 
 Every backend breaks the handshake at the server-authentication step, runs
@@ -424,44 +427,69 @@ settings it honours (D-56, §14.7).
 
 #### 13.2 macOS engine
 
-**Status:** Secure Transport ships (TLS 1.2 ceiling, deprecated by Apple
-since 10.15, 87 SDK deprecation markers). **Decided (D-63, 2026-09-26): macOS
-stays on Apple's native TLS.** zuhttp vendors no TLS library.
+**Status:** Decided (D-63, 2026-09-26): **Network.framework**, measured GO in
+[`spike/network-framework/FINDINGS.md`](../spike/network-framework/FINDINGS.md).
+Secure Transport ships until W13 replaces it, and W13 removes it.
 
-That leaves one open engineering question, answered by W13: stay on Secure
-Transport, or move to Network.framework, Apple's supported native API. The
-criteria:
+Secure Transport has to go for three reasons: it is deprecated (87 SDK
+markers), it caps at TLS 1.2, and its deprecation costs an `--as-cran` NOTE.
+Edition 1 rejected Network.framework (F-11) because it owns the socket, so
+zuhttp could not run TLS over its own CONNECT tunnel. That was an API reading,
+never a run. The 2026-09-26 probe answers the objection instead of refuting
+it: for HTTPS, Network.framework no longer needs our socket.
 
-| Criterion | Secure Transport | Network.framework |
-|---|---|---|
-| TLS 1.3 | no | yes |
-| Runs over a caller-owned socket (§20.3 CONNECT) | yes | no — but `nw_proxy_config_create_http_connect` (macOS 14+) does CONNECT natively; unmeasured |
-| Trust stays `SecTrustEvaluateWithError` | yes | via `sec_protocol_options_set_verify_block`; unmeasured |
-| Cancellable from the poll loop within §25.1's 100 ms | yes | `nw_connection_cancel`; unmeasured |
-| Minimum macOS covered | all | 14 for native CONNECT; CRAN's floor is lower |
-| Future API risk | removal (R-15) | none known |
-| `--as-cran` clean | no — deprecation pragma NOTE | yes |
+| Measured | Result |
+|---|---|
+| Trust is decided by our `SecTrustEvaluateWithError`, via `sec_protocol_options_set_verify_block` | yes — an empty anchors-only set rejects a host the system trusts (F-13) |
+| TLS 1.3 | yes (F-14) |
+| Completions bridged to the §25.1 poll loop through a pipe | yes (F-15) |
+| `nw_connection_cancel()` to the cancelled state | 0.4 ms, DNS included (F-16) |
+| HTTPS through an HTTP CONNECT proxy | yes, `nw_proxy_config_create_http_connect`, **macOS 14+** (F-17) |
+| Warning-free at deployment target 11.0 under `-Werror -Wunguarded-availability` | yes; no deprecated API, so no NOTE (F-18) |
+| Fork after use | child killed (SIGILL): the §26.4 hazard as before (F-19) |
+| `proxy = FALSE` strictly direct | not guaranteed: `prefer_no_proxy` is a preference (F-20) |
 
-The spike MUST produce a number for every "unmeasured" cell. Decision rule:
-Network.framework if it passes every row; Network.framework on macOS 14+ with
-Secure Transport below it if it passes only there; otherwise Secure Transport
-stays and its `--as-cran` NOTE is explained in `cran-comments.md`.
+**Consequences for the design.**
 
-**The later option: `zucrypt`.** If Apple removes Secure Transport before
-Network.framework can replace it, or TLS 1.3 on older macOS becomes a hard
-requirement, the portable-engine route is a TLS engine built on `zucrypt`'s
-cryptography with trust still from `SecTrust` (§13.1 keeps that change inside
-the engine). That would be zuhttp's first consumption of a sibling, so it
-amends D-54 and §56 constraint 2 when taken. It is not planned before 1.0.
-Vendoring a private Mbed TLS copy and static OpenSSL (4.64 MB) are both
-rejected (Appendix A).
+- **The §9 seam moves on macOS (D-71).** An HTTPS stream is *dialled* by the
+  backend (`zu_tls_dial(host, port, proxy, cfg, deadline)`); it is no longer
+  *wrapped* around a TCP stream and CONNECT tunnel the engine opened. The
+  engine asks the backend (`ZU_TLS_CAP_DIALS`) and skips its own TCP and
+  CONNECT for `https://` when it can. Plain `http://`, and every other
+  platform, is unchanged. Above the stream, including framing, the pool,
+  redirects and sinks, nothing changes.
+- **Proxied HTTPS needs macOS 14.** zuhttp still decides per hop *whether* to
+  proxy (§20.1–§20.2) and passes the chosen proxy, with Basic credentials,
+  into the connection. On macOS 11–13 a proxied HTTPS hop raises
+  `zu_proxy_error` saying it needs macOS 14. Direct HTTPS and all HTTP work on
+  every macOS that R supports.
+- **DNS becomes cancellable on macOS for free** (F-16). D-59's helper thread
+  is for Linux and Windows only.
+- **Trust code carries over.** `ca_file`, `ca_extra`, revocation and pinning
+  (the leaf from `SecTrustGetCertificateAtIndex`, D-60) run in the verify
+  block against the same `SecTrustRef` API as today.
+- **Still to settle in W13:**
+  - per-phase timings, from `nw_connection_access_establishment_report()`;
+  - pool liveness without a descriptor (the state handler plus the idle
+    timeout, with the §26.2 probe answering "unknown");
+  - F-20 on a machine with a system proxy configured.
+
+**The later option: `zucrypt`.** If a portable engine is ever needed on
+macOS, for example because a proxied-HTTPS user cannot move to macOS 14, it
+is built on `zucrypt`'s cryptography with trust still from `SecTrust`. That
+would be zuhttp's first dependency on a sibling, so it amends D-54 and §56
+constraint 2 when taken. It is not planned before 1.0. Vendoring a private
+Mbed TLS copy and static OpenSSL (4.64 MB) are both rejected (Appendix A).
 
 ##### 13.2.1 Trust evaluation is not fork-safe
 
 Security.framework's XPC connection to `trustd` does not survive `fork()`:
 a child that evaluates trust after its parent did is killed by SIGSEGV
-(S0 F-5). The PID guard (§26.4) turns that into `zu_fork_error`. This holds
-for every macOS engine candidate, because trust is `SecTrust` in all three.
+(S0 F-5). Network.framework is no better: a child that connects after the
+parent did dies with SIGILL, because libdispatch refuses to run after
+`fork()` (F-19). The PID guard (§26.4) turns both into `zu_fork_error`. Under
+Network.framework it must fire before *any* Network.framework call, not only
+before trust evaluation.
 
 #### 13.3 TLS is hidden behind the stream interface
 
@@ -606,7 +634,7 @@ through `skip_unless_tls_supports()`; no R code keeps a table of backends.
 | Setting | OpenSSL | macOS | Windows |
 |---|---|---|---|
 | `pins` | yes | W9 | W9 |
-| `tls13` | yes | W13 | W15 |
+| `tls13` | yes | W13 (Network.framework) | W15 |
 | `ca_file`, `ca_extra` | yes | yes | W8 |
 | `revocation` | with `crl_file` (W10) | yes | yes |
 
@@ -768,6 +796,13 @@ status. Nothing may follow the CONNECT response header block. The proxy is
 resolved per hop, so a redirect across a `NO_PROXY` boundary goes the right
 way.
 
+On macOS after W13, the CONNECT for HTTPS is Network.framework's
+(`nw_proxy_config_create_http_connect`, macOS 14+, D-71). zuhttp still
+decides whether a hop is proxied and which proxy to use. On macOS 11–13 a
+proxied HTTPS hop raises `zu_proxy_error`. Network.framework may also fall
+back to a *system* proxy when a direct connection fails (F-20); W13 either
+closes that gap or documents it next to `proxy = FALSE`.
+
 #### 20.4 Credentials
 
 None or Basic. `Proxy-Authorization` goes only to the proxy — on the CONNECT
@@ -924,7 +959,8 @@ maximum, idle timeout; defaults `zu_pool(max_idle = 16, max_per_host = 4,
 idle_timeout = 30)`. On by default (D-37); counters via `zu_pool_stats()`
 (D-38). A pooled socket that is readable before a request is written is
 stale and discarded; the probe never consumes a byte, and "unknown" is not
-"safe".
+"safe". A dialled macOS stream has no descriptor to probe (D-71): it answers
+"unknown", and the connection's state handler plus the idle timeout decide.
 
 #### 26.3 When a connection must NOT be reused
 
@@ -1291,7 +1327,9 @@ backend code comes last. §61.9 audits the catalogue at 1.0.
 
 `zu_resp_timings()`: `dns`, `connect`, `tls`, `request_write`, `ttfb`,
 `response_read`, `total`, `body_bytes_wire`, `body_bytes_decoded`, monotonic.
-A phase that did not happen is `NA`, not 0.
+A phase that did not happen is `NA`, not 0. On macOS after W13, `dns`,
+`connect` and `tls` for HTTPS come from Network.framework's establishment
+report.
 
 #### 35.2 Connection metadata
 
@@ -1481,7 +1519,7 @@ milestone M2.
 | Platform | Link |
 |---|---|
 | Windows | `-lws2_32 -lsecur32 -lcrypt32 -lz` (+ `-lbcrypt` after W9) |
-| macOS | `-framework Security -framework CoreFoundation -lz` (+ `-framework Network` if W13 moves engines) |
+| macOS | `-framework Network -framework Security -framework CoreFoundation -lz` (after W13) |
 | Unix | `-lssl -lcrypto -lz` |
 
 #### 47.2 DESCRIPTION requirements
@@ -1505,7 +1543,7 @@ is the only way the local declaration ships.
 No network in examples or tests by default (network tests need
 `ZU_TEST_NETWORK=1`, not merely `NOT_CRAN`); no writes outside `tempdir()`;
 no compiled-code output outside R's facilities; the Secure Transport pragma
-NOTE resolved or explained by W13 before submission.
+NOTE removed by W13.
 
 ### 48. Vendoring Policy
 
@@ -1620,7 +1658,9 @@ add (estimated +900 lines). R-4 is now a live risk, not a hypothetical one.
 
 **Status:** Accepted. Windows x86_64 (ARM64 when Rtools allows), macOS arm64
 and x86_64, Linux x86_64 and arm64; portable C99; no compiler extensions in
-project code.
+project code, except Apple blocks in the macOS backend, which
+Network.framework's C API requires. On macOS, direct HTTPS works on every
+version R supports; HTTPS through a proxy needs macOS 14 (D-63).
 
 ### 53. API Stability
 
@@ -1729,7 +1769,7 @@ zuhttp.
 
 | # | Question | Answered by |
 |---|---|---|
-| 1a | Secure Transport or Network.framework on macOS? (native either way, D-63) | W13 |
+| ~~1a~~ | ~~Which macOS engine?~~ **Answered: Network.framework** (D-63), measured 2026-09-26. | — |
 | 2a | Is a local `SCH_CREDENTIALS` ABI-correct? | W15 (D-64) |
 
 #### 62.2 Important — answer before 1.0
@@ -1798,6 +1838,7 @@ remaining estimate sits.
 | A.3 llhttp | ~8k vendored lines against 0.8k, once the framing layer was written and tested anyway (D-10) |
 | A.4 Mbed TLS, vendored | duplicates platform cryptography; a private copy is rejected on every platform (D-63). A bundled engine, if ever needed on macOS, comes from `zucrypt` |
 | A.5 Static OpenSSL on macOS | 4.64 MB of bundled cryptography |
+| A.8 Secure Transport, kept as a fallback below macOS 14 | deprecated, TLS 1.2, and its presence alone keeps the `--as-cran` NOTE (D-63) |
 | A.6 R connection sinks | `callback` covers them (D-67) |
 | A.7 OCSP fetching, soft-fail revocation | §14.5 (D-62) |
 
@@ -1810,7 +1851,8 @@ R-14 is unused.
 
 | ID | Risk | L | I | Mitigation | Trigger |
 |---|---|---|---|---|---|
-| R-15 | Apple removes Secure Transport | Low | High | W13 evaluates Network.framework before CRAN; the §13.1 split confines any change to the engine | removal announced → W13 becomes M1 work; if Network.framework cannot replace it, the `zucrypt` engine (§13.2) |
+| R-15 | Apple removes Secure Transport | Low | High | **retired by W13**, which removes it (D-63) | — |
+| R-18 | Proxied HTTPS on macOS 11–13 has no route after W13 | Medium | Low | a clear `zu_proxy_error`; the README says so | a user who cannot upgrade → the `zucrypt` engine (§13.2) |
 | R-3 | Rtools lacks `SCH_CREDENTIALS` | Certain | Medium | D-64's ABI job | ABI unprovable → TLS 1.2 on Windows, documented |
 | R-4 | Size budget blown | **Medium, rising** | High | measure per PR (W1); W7–W14 sized before starting | > 8,000 owned code lines → cut before adding; > 12,000 → revise §1 publicly |
 | R-5 | Security defect in own TLS glue, framing or DER walker | Medium | Very high | fuzzing (§43), sanitizers, review (§45) | verification bypass post-release → external audit before the next release |
