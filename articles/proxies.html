@@ -186,7 +186,7 @@ client:</p>
 <span><span class="fu"><a href="../reference/zu_resp_connection.html">zu_resp_connection</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span><span class="op">$</span><span class="va">proxy_used</span></span>
 <span><span class="co">#&gt; [1] TRUE</span></span>
 <span><span class="fu">proxy_log</span><span class="op">(</span><span class="va">proxy</span><span class="op">)</span></span>
-<span><span class="co">#&gt; GET http://127.0.0.1:44585/get  (credentials: no)</span></span></code></pre></div>
+<span><span class="co">#&gt; GET http://127.0.0.1:33925/get  (credentials: no)</span></span></code></pre></div>
 <p>The proxy received the full URL in the request line — that is how a
 plain HTTP request tells the proxy where to go.</p>
 <p>On a client, the proxy applies to every request:</p>
@@ -194,9 +194,9 @@ plain HTTP request tells the proxy where to go.</p>
 <code class="sourceCode R"><span><span class="va">via_proxy</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/zu_client.html">zu_client</a></span><span class="op">(</span>proxy <span class="op">=</span> <span class="va">proxy</span><span class="op">$</span><span class="va">url</span><span class="op">)</span></span>
 <span><span class="kw">for</span> <span class="op">(</span><span class="va">p</span> <span class="kw">in</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"/uuid"</span>, <span class="st">"/ip"</span><span class="op">)</span><span class="op">)</span> <span class="fu"><a href="https://rdrr.io/r/base/invisible.html" class="external-link">invisible</a></span><span class="op">(</span><span class="fu"><a href="../reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="va">web</span><span class="op">$</span><span class="fu">url</span><span class="op">(</span><span class="va">p</span><span class="op">)</span>, client <span class="op">=</span> <span class="va">via_proxy</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="fu">proxy_log</span><span class="op">(</span><span class="va">proxy</span><span class="op">)</span></span>
-<span><span class="co">#&gt; GET http://127.0.0.1:44585/get  (credentials: no)</span></span>
-<span><span class="co">#&gt; GET http://127.0.0.1:44585/uuid  (credentials: no)</span></span>
-<span><span class="co">#&gt; GET http://127.0.0.1:44585/ip  (credentials: no)</span></span></code></pre></div>
+<span><span class="co">#&gt; GET http://127.0.0.1:33925/get  (credentials: no)</span></span>
+<span><span class="co">#&gt; GET http://127.0.0.1:33925/uuid  (credentials: no)</span></span>
+<span><span class="co">#&gt; GET http://127.0.0.1:33925/ip  (credentials: no)</span></span></code></pre></div>
 </div>
 <div class="section level2">
 <h2 id="https-through-a-proxy">HTTPS through a proxy<a class="anchor" aria-label="anchor" href="#https-through-a-proxy"></a>
@@ -265,7 +265,7 @@ prints them:</p>
 <span><span class="fu"><a href="../reference/zu_resp.html">zu_resp_status</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] 200</span></span>
 <span><span class="fu">proxy_log</span><span class="op">(</span><span class="va">guarded</span><span class="op">)</span></span>
-<span><span class="co">#&gt; GET http://127.0.0.1:44585/headers  (credentials: yes)</span></span></code></pre></div>
+<span><span class="co">#&gt; GET http://127.0.0.1:33925/headers  (credentials: yes)</span></span></code></pre></div>
 <p>The web server behind the proxy never receives the proxy’s
 credentials:</p>
 <div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
@@ -278,7 +278,7 @@ does not repeat the password:</p>
 <code class="sourceCode R"><span><span class="va">wrong</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/grep.html" class="external-link">sub</a></span><span class="op">(</span><span class="st">"http://"</span>, <span class="st">"http://alice:guess@"</span>, <span class="va">guarded</span><span class="op">$</span><span class="va">url</span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="va">web</span><span class="op">$</span><span class="fu">url</span><span class="op">(</span><span class="st">"/get"</span><span class="op">)</span>, proxy <span class="op">=</span> <span class="va">wrong</span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #BBBB00; font-weight: bold;">Error</span><span style="font-weight: bold;"> in `zu_perform()`:</span></span></span>
-<span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> GET http://127.0.0.1:44585/get failed: HTTP 407 Proxy Authentication Required</span></span>
+<span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> GET http://127.0.0.1:33925/get failed: HTTP 407 Proxy Authentication Required</span></span>
 <span><span class="co">#&gt;   The proxy refused the request. Check the user name and password in the proxy URL (http://user:password@host:port).</span></span></code></pre></div>
 <p>Printed clients redact it too:</p>
 <div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
@@ -331,7 +331,7 @@ caller redirect your traffic.</p>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Sys.setenv.html" class="external-link">Sys.setenv</a></span><span class="op">(</span>http_proxy <span class="op">=</span> <span class="va">p3</span><span class="op">$</span><span class="va">url</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/invisible.html" class="external-link">invisible</a></span><span class="op">(</span><span class="fu"><a href="../reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="va">web</span><span class="op">$</span><span class="fu">url</span><span class="op">(</span><span class="st">"/get"</span><span class="op">)</span><span class="op">)</span><span class="op">)</span>          <span class="co"># no proxy argument</span></span>
 <span><span class="fu">proxy_log</span><span class="op">(</span><span class="va">p3</span><span class="op">)</span></span>
-<span><span class="co">#&gt; GET http://127.0.0.1:44585/get  (credentials: no)</span></span></code></pre></div>
+<span><span class="co">#&gt; GET http://127.0.0.1:33925/get  (credentials: no)</span></span></code></pre></div>
 <p><code>no_proxy</code> lists hosts to reach directly: comma-separated
 names, matched on whole labels (<code>example.com</code> covers
 <code>api.example.com</code>, not <code>notexample.com</code>), with an

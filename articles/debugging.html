@@ -98,7 +98,7 @@ replaced:</p>
 <span>  <span class="fu"><a href="../reference/zu_headers.html">zu_headers</a></span><span class="op">(</span>Authorization <span class="op">=</span> <span class="st">"Bearer s3cret"</span>, Accept <span class="op">=</span> <span class="st">"application/json"</span><span class="op">)</span></span>
 <span><span class="va">req</span></span>
 <span><span class="co">#&gt; &lt;zu_request&gt;</span></span>
-<span><span class="co">#&gt; GET http://127.0.0.1:43505/get?api_key=&lt;redacted&gt;&amp;page=2</span></span>
+<span><span class="co">#&gt; GET http://127.0.0.1:39297/get?api_key=&lt;redacted&gt;&amp;page=2</span></span>
 <span><span class="co">#&gt; Authorization: &lt;redacted&gt;</span></span>
 <span><span class="co">#&gt; Accept: application/json</span></span></code></pre></div>
 <p>The request itself is untouched: redaction happens when formatting,
@@ -116,8 +116,8 @@ DNS, connect, request, headers, body — with timestamps:</p>
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">chatty</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/zu_client.html">zu_client</a></span><span class="op">(</span>hooks <span class="op">=</span> <span class="fu"><a href="../reference/zu_verbose.html">zu_verbose</a></span><span class="op">(</span>to <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/showConnections.html" class="external-link">stdout</a></span><span class="op">(</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="va">r</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/connections.html" class="external-link">url</a></span><span class="op">(</span><span class="st">"/gzip"</span><span class="op">)</span>, trace <span class="op">=</span> <span class="cn">TRUE</span>, client <span class="op">=</span> <span class="va">chatty</span><span class="op">)</span></span>
-<span><span class="co">#&gt; &gt; GET http://127.0.0.1:43505/gzip</span></span>
-<span><span class="co">#&gt; * 0ms     +0     request.start     http://127.0.0.1:43505/gzip</span></span>
+<span><span class="co">#&gt; &gt; GET http://127.0.0.1:39297/gzip</span></span>
+<span><span class="co">#&gt; * 0ms     +0     request.start     http://127.0.0.1:39297/gzip</span></span>
 <span><span class="co">#&gt; * 0ms     +0     dns.start         127.0.0.1</span></span>
 <span><span class="co">#&gt; * 0ms     +0     dns.done          127.0.0.1</span></span>
 <span><span class="co">#&gt; * 0ms     +0     connect.start     127.0.0.1</span></span>
@@ -127,11 +127,11 @@ DNS, connect, request, headers, body — with timestamps:</p>
 <span><span class="co">#&gt; * 19ms    +0     body.chunk        body  (368)</span></span>
 <span><span class="co">#&gt; * 19ms    +0     request.done        (200)</span></span>
 <span><span class="co">#&gt; &lt; HTTP 200</span></span>
-<span><span class="co">#&gt; &lt;   Date: Sat, 26 Sep 2026 06:38:49 GMT</span></span>
+<span><span class="co">#&gt; &lt;   Date: Sat, 26 Sep 2026 06:45:02 GMT</span></span>
 <span><span class="co">#&gt; &lt;   Content-Type: application/json</span></span>
-<span><span class="co">#&gt; &lt;   ETag: "84949b10"</span></span>
+<span><span class="co">#&gt; &lt;   ETag: "b26fc590"</span></span>
 <span><span class="co">#&gt; &lt; 368 bytes</span></span>
-<span><span class="co">#&gt; &lt; 0.019s</span></span></code></pre></div>
+<span><span class="co">#&gt; &lt; 0.020s</span></span></code></pre></div>
 <p>(<code>to = stdout()</code> is only so the output appears in this
 article.)</p>
 </div>
@@ -144,19 +144,19 @@ response, as a data frame you can inspect or save:</p>
 <code class="sourceCode R"><span><span class="va">r</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/connections.html" class="external-link">url</a></span><span class="op">(</span><span class="st">"/redirect/1"</span><span class="op">)</span>, trace <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/zu_resp_trace.html">zu_resp_trace</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span></span>
 <span><span class="co">#&gt;                event at_ms   n                            detail</span></span>
-<span><span class="co">#&gt; 1      request.start     0   0 http://127.0.0.1:43505/redirect/1</span></span>
+<span><span class="co">#&gt; 1      request.start     0   0 http://127.0.0.1:39297/redirect/1</span></span>
 <span><span class="co">#&gt; 2          dns.start     0   0                         127.0.0.1</span></span>
 <span><span class="co">#&gt; 3           dns.done     0   0                         127.0.0.1</span></span>
-<span><span class="co">#&gt; 4      connect.start     1   0                         127.0.0.1</span></span>
+<span><span class="co">#&gt; 4      connect.start     0   0                         127.0.0.1</span></span>
 <span><span class="co">#&gt; 5       connect.done     1   0                         127.0.0.1</span></span>
 <span><span class="co">#&gt; 6       request.sent     1 142                               GET</span></span>
-<span><span class="co">#&gt; 7   headers.received     7   5                               302</span></span>
-<span><span class="co">#&gt; 8  redirect.followed     7   1        http://127.0.0.1:43505/get</span></span>
-<span><span class="co">#&gt; 9  connection.reused     7   0                         127.0.0.1</span></span>
-<span><span class="co">#&gt; 10      request.sent     7 135                               GET</span></span>
-<span><span class="co">#&gt; 11  headers.received    49   4                               200</span></span>
-<span><span class="co">#&gt; 12        body.chunk    49 271                              body</span></span>
-<span><span class="co">#&gt; 13      request.done    49 200</span></span></code></pre></div>
+<span><span class="co">#&gt; 7   headers.received     8   5                               302</span></span>
+<span><span class="co">#&gt; 8  redirect.followed     8   1        http://127.0.0.1:39297/get</span></span>
+<span><span class="co">#&gt; 9  connection.reused     8   0                         127.0.0.1</span></span>
+<span><span class="co">#&gt; 10      request.sent     8 135                               GET</span></span>
+<span><span class="co">#&gt; 11  headers.received    50   4                               200</span></span>
+<span><span class="co">#&gt; 12        body.chunk    50 271                              body</span></span>
+<span><span class="co">#&gt; 13      request.done    50 200</span></span></code></pre></div>
 <p>A followed redirect appears as an event carrying the resolved target,
 and a URL is redacted as it is recorded.</p>
 </div>
@@ -254,9 +254,9 @@ breaks a request.</p>
 <span><span class="fu"><a href="https://rdrr.io/r/base/invisible.html" class="external-link">invisible</a></span><span class="op">(</span><span class="fu"><a href="../reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="st">"status/404"</span>, check <span class="op">=</span> <span class="cn">FALSE</span>, client <span class="op">=</span> <span class="va">logging</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="va">log</span></span>
 <span><span class="co">#&gt;   method                               url status ms</span></span>
-<span><span class="co">#&gt; 1    GET        http://127.0.0.1:43505/get    200  2</span></span>
-<span><span class="co">#&gt; 2   POST       http://127.0.0.1:43505/post    200 43</span></span>
-<span><span class="co">#&gt; 3    GET http://127.0.0.1:43505/status/404    404 44</span></span></code></pre></div>
+<span><span class="co">#&gt; 1    GET        http://127.0.0.1:39297/get    200  1</span></span>
+<span><span class="co">#&gt; 2   POST       http://127.0.0.1:39297/post    200 44</span></span>
+<span><span class="co">#&gt; 3    GET http://127.0.0.1:39297/status/404    404 44</span></span></code></pre></div>
 </div>
 <div class="section level2">
 <h2 id="middleware-change-requests-and-responses">Middleware: change requests and responses<a class="anchor" aria-label="anchor" href="#middleware-change-requests-and-responses"></a>

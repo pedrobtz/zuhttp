@@ -179,7 +179,7 @@ fails. The printed configuration spells out which one you have:</p>
 <div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/zu_tls.html">zu_tls</a></span><span class="op">(</span>ca_extra <span class="op">=</span> <span class="va">ca</span><span class="op">)</span></span>
 <span><span class="co">#&gt; &lt;zu_tls_config&gt;</span></span>
-<span><span class="co">#&gt;   ca_extra: /tmp/RtmpRQhfJS/zuhttp-tls-20353e95e274/ca.pem (adds to system trust)</span></span>
+<span><span class="co">#&gt;   ca_extra: /tmp/Rtmp9v0XbN/zuhttp-tls-2002311a303/ca.pem (adds to system trust)</span></span>
 <span><span class="co">#&gt;   revocation: off</span></span></code></pre></div>
 <p>Put the setting on a client to apply it to every request:</p>
 <div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
@@ -214,10 +214,10 @@ so, with the command that converts it:</p>
 <span><span class="fu">ssl</span><span class="op">(</span><span class="st">"x509"</span>, <span class="st">"-in"</span>, <span class="va">ca</span>, <span class="st">"-outform"</span>, <span class="st">"der"</span>, <span class="st">"-out"</span>, <span class="va">der</span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="va">site</span>, tls <span class="op">=</span> <span class="fu"><a href="../reference/zu_tls.html">zu_tls</a></span><span class="op">(</span>ca_extra <span class="op">=</span> <span class="va">der</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #BBBB00; font-weight: bold;">Error</span><span style="font-weight: bold;">:</span></span></span>
-<span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> `ca_extra` has no PEM certificate in it: /tmp/RtmpRQhfJS/zuhttp-tls-20353e95e274/corporate-root-der.crt</span></span>
+<span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> `ca_extra` has no PEM certificate in it: /tmp/Rtmp9v0XbN/zuhttp-tls-2002311a303/corporate-root-der.crt</span></span>
 <span><span class="co">#&gt;   It looks like a DER (binary) certificate. zuhttp reads PEM, the text</span></span>
 <span><span class="co">#&gt;   form starting '-----BEGIN CERTIFICATE-----'. Convert it with:</span></span>
-<span><span class="co">#&gt;     openssl x509 -inform der -in /tmp/RtmpRQhfJS/zuhttp-tls-20353e95e274/corporate-root-der.crt -out cert.pem</span></span></code></pre></div>
+<span><span class="co">#&gt;     openssl x509 -inform der -in /tmp/Rtmp9v0XbN/zuhttp-tls-2002311a303/corporate-root-der.crt -out cert.pem</span></span></code></pre></div>
 </div>
 </div>
 <div class="section level2">

@@ -25,7 +25,7 @@ srv <- webfakes::new_app_process(
 )
 base <- srv$url()
 base
-#> [1] "http://127.0.0.1:33471/"
+#> [1] "http://127.0.0.1:33295/"
 ```
 
 httpbin’s endpoints echo the request back as JSON, which makes it easy
@@ -122,7 +122,7 @@ api <- zu_client(
 )
 api
 #> <zu_client>
-#>   base_url:  http://127.0.0.1:33471/
+#>   base_url:  http://127.0.0.1:33295/
 #>   Accept: application/json
 #>   X-Client: article
 #>   query:     lang=en
@@ -142,7 +142,7 @@ resolution, so a base URL ending in `/v1` keeps its `/v1`:
 
 r <- zu_get("anything/users", query = list(page = 2), client = api)
 sent(r)$url
-#> [1] "http://127.0.0.1:33471/anything/users"
+#> [1] "http://127.0.0.1:33295/anything/users"
 sent(r)$headers[c("Accept", "X-Client")]
 #> $Accept
 #> [1] "application/json"
@@ -221,7 +221,7 @@ req <- zu_request("POST", paste0(base, "anything/orders")) |>
 
 req
 #> <zu_request>
-#> POST http://127.0.0.1:33471/anything/orders?dry_run=true
+#> POST http://127.0.0.1:33295/anything/orders?dry_run=true
 #> Idempotency-Key: order-2026-001
 #> Content-Type: application/json
 #> Body: JSON, 23 bytes
