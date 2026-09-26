@@ -1,0 +1,318 @@
+# zuhttp
+
+A minimal HTTP/1.1 client for R that uses **each platform’s own TLS
+stack and trust store** — Schannel on Windows, Secure Transport with
+`SecTrust` on macOS, system OpenSSL elsewhere — rather than bundling
+cryptography or a CA bundle. Zero hard R dependencies.
+
+``` r
+
+# install.packages("remotes")
+remotes::install_github("pedrobtz/zuhttp")
+```
+
+Every example below is a real request against a public API, and the `#>`
+lines are what it actually returns.
+
+``` r
+
+library(zuhttp)
+
+r <- zu_get("https://ipwho.is/8.8.8.8")
+zu_resp_status(r)
+#> [1] 200
+zu_resp_json(r)$country
+#> [1] "United States"
+
+# Query parameters are encoded for you.
+r <- zu_get("https://ipwho.is/8.8.8.8", query = list(fields = "ip,country,city"))
+zu_resp_url(r)
+#> [1] "https://ipwho.is/8.8.8.8?fields=ip%2Ccountry%2Ccity"
+str(zu_resp_json(r))
+#> List of 3
+#>  $ ip     : chr "8.8.8.8"
+#>  $ country: chr "United States"
+#>  $ city   : chr "San Jose"
+
+# `json =` serialises the body and sets Content-Type, unless you set it.
+r <- zu_post("https://postman-echo.com/post", json = list(name = "Alice", active = TRUE))
+str(zu_resp_json(r)$data)
+#> List of 2
+#>  $ name  : chr "Alice"
+#>  $ active: logi TRUE
+```
+
+Straight to disk: the body never passes through memory, and the file
+appears at its destination only once it has arrived whole.
+
+``` r
+
+r <- zu_get("https://raw.githubusercontent.com/pedrobtz/zuhttp/main/README.md",
+            path = "README-copy.md")
+zu_resp_path(r)
+#> [1] "README-copy.md"
+length(zu_resp_raw(r))
+#> [1] 0   # it went to the file, not through memory
+```
+
+A client carries defaults; a request overrides them. Connections are
+reused across requests to the same origin.
+
+``` r
+
+gh <- zu_client(
+  base_url = "https://api.github.com",
+  headers  = c(
+    Accept = "application/vnd.github+json"
+    # , Authorization = paste("Bearer", Sys.getenv("GITHUB_PAT"))
+  ),
+  retry    = zu_retry(3)
+)
+
+zu_resp_json(zu_get("/repos/pedrobtz/zuhttp", client = gh))$language
+#> [1] "C"
+
+zu_get("/repos/pedrobtz/zuhttp", client = gh)      # second request, same origin
+zu_pool_stats(gh)[["hits"]]
+#> [1] 1
+```
+
+A failed request raises, and what it raises is a condition you match by
+class rather than by parsing a message.
+
+``` r
+
+tryCatch(
+  zu_get("/repos/pedrobtz/no-such-repo", client = gh),
+  zu_http_client_error = function(e) zu_resp_status(e$response)
+)
+#> [1] 404
+```
+
+[`zu_resp_json()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_json.md)
+uses `jsonlite` when it is installed, and says so plainly when it is not
+— everything else here, including sending a JSON body you have already
+encoded, works with no packages at all.
+
+## Why this rather than `curl`
+
+Because the trust decision is the platform’s. There is no bundled CA
+bundle to go stale, and no vendored TLS library to track for CVEs — an
+enterprise MDM root or a corporate proxy CA already installed on the
+machine simply works. The package is small enough to audit, and its
+behaviour under malformed input is fuzzed rather than assumed.
+
+**When `curl` is the better choice**, stated plainly rather than left to
+inference:
+
+- Anything needing HTTP/2, HTTP/3, or a non-HTTP protocol.
+- Anything needing NTLM, Kerberos, or cloud-provider request signing.
+- Anything relying on libcurl’s decade of workarounds for badly behaved
+  servers.
+- **Any project that cannot accept a single-maintainer dependency for
+  security-critical code.** `curl` inherits libcurl’s security response;
+  `zuhttp` has none to inherit. See [Security](#security).
+- Forked parallelism with HTTPS on macOS — see below.
+
+Choosing `curl` after reading that list is a reasonable decision.
+
+## Known limitations
+
+These are documented limits, not open defects. Most are a consequence of
+using the platform’s TLS stack instead of shipping one.
+[`zu_info()`](https://pedrobtz.github.io/zuhttp/reference/zu_info.md)
+reports which
+[`zu_tls()`](https://pedrobtz.github.io/zuhttp/reference/zu_tls.md)
+settings this build supports; a setting it cannot honour raises before
+any connection is made, never downgrades.
+
+| Limitation | Where | Detail |
+|----|----|----|
+| TLS 1.2 maximum | macOS, Windows | Secure Transport has no TLS 1.3 constant; the Schannel build in Rtools lacks `SCH_CREDENTIALS`. `zu_tls(min_version = 13)` **raises** rather than silently giving you 1.2. [`?zuhttp_tls`](https://pedrobtz.github.io/zuhttp/reference/zuhttp_tls.md) |
+| No certificate pinning | macOS, Windows | Pinning needs the leaf’s SubjectPublicKeyInfo: Security.framework will not yield it without hand-parsing DER, and the Schannel path is not written yet. `zu_tls(pins = )` **raises** `zu_tls_unsupported_error` rather than connecting unpinned. OpenSSL pins. |
+| No custom CA | Windows | Neither `ca_file` (replace) nor `ca_extra` (add) is implemented on Schannel yet. Both **raise** rather than falling back to the Windows store. They work on macOS and OpenSSL. |
+| HTTPS in a forked child fails | macOS | The system trust evaluator does not survive `fork()`. Raises `zu_fork_error` instead of killing the worker. Use a `PSOCK` cluster or `future::plan("multisession")`. [`?zuhttp_fork`](https://pedrobtz.github.io/zuhttp/reference/zuhttp_fork.md) |
+| Revocation off by default, and opting in is backend-dependent | all | No platform checks revocation by default. `zu_tls(revocation = TRUE)` opts in on macOS and Windows; macOS also rejects valid certificates from CAs that no longer answer revocation queries. On OpenSSL, which has no CRL or OCSP source, it **raises** rather than failing every chain. [`?zuhttp_tls`](https://pedrobtz.github.io/zuhttp/reference/zuhttp_tls.md) |
+| No parallel or async requests | all | One request at a time. Parallelism is the caller’s, via a non-forking plan. |
+| Only a total timeout | all | `timeout` bounds the whole request, redirects and retries included. There are no separate connect, first-byte or inactivity timeouts yet. |
+| DNS ignores `timeout` and Ctrl-C | all | Name resolution calls the system resolver synchronously (`getaddrinfo`), so a stalled resolver can hold R until it gives up. Every later phase is bounded. [`?zuhttp_tls`](https://pedrobtz.github.io/zuhttp/reference/zuhttp_tls.md) |
+| Ctrl-C timing unverified | all | Cancellation works once a request is past DNS; the 200 ms bound is not yet measured on every front-end. |
+
+## Status
+
+**v0.1.0 — a first release, not a 1.0.** The API is expected to be
+stable, but it has not been through the external security review that
+1.0 requires, and it is not on CRAN yet. Suitable for use; pin the
+version if you depend on it.
+
+## Security
+
+`zuhttp` has a single maintainer and no inherited security-response
+process. That is a real risk for security-critical code and is stated
+here rather than buried: if your project cannot accept it, use `curl`.
+
+To report a vulnerability, open a private security advisory through
+GitHub, or email the maintainer listed in `DESCRIPTION`. There is no
+patch SLA yet; one is a 1.0 requirement.
+
+## License
+
+MIT. Vendored components — picohttpparser and a subset of uriparser —
+retain their own licences; see `inst/COPYRIGHTS`.
+
+# Package index
+
+## All functions
+
+- [`zu_body_json()`](https://pedrobtz.github.io/zuhttp/reference/zu_body.md)
+  [`zu_body_form()`](https://pedrobtz.github.io/zuhttp/reference/zu_body.md)
+  [`zu_body_raw()`](https://pedrobtz.github.io/zuhttp/reference/zu_body.md)
+  [`zu_body_file()`](https://pedrobtz.github.io/zuhttp/reference/zu_body.md)
+  : Set the request body
+- [`zu_body_rewindable()`](https://pedrobtz.github.io/zuhttp/reference/zu_body_rewindable.md)
+  : Can this request's body be replayed?
+- [`zu_cassette_interactions()`](https://pedrobtz.github.io/zuhttp/reference/zu_cassette_interactions.md)
+  [`zu_cassette_clear()`](https://pedrobtz.github.io/zuhttp/reference/zu_cassette_interactions.md)
+  : Inspect or delete a cassette
+- [`zu_cassette_transport()`](https://pedrobtz.github.io/zuhttp/reference/zu_cassette_transport.md)
+  : Record and replay HTTP interactions
+- [`zu_client()`](https://pedrobtz.github.io/zuhttp/reference/zu_client.md)
+  : Create a reusable client
+- [`zu_client_get()`](https://pedrobtz.github.io/zuhttp/reference/zu_client_methods.md)
+  [`zu_client_head()`](https://pedrobtz.github.io/zuhttp/reference/zu_client_methods.md)
+  [`zu_client_post()`](https://pedrobtz.github.io/zuhttp/reference/zu_client_methods.md)
+  [`zu_client_put()`](https://pedrobtz.github.io/zuhttp/reference/zu_client_methods.md)
+  [`zu_client_patch()`](https://pedrobtz.github.io/zuhttp/reference/zu_client_methods.md)
+  [`zu_client_delete()`](https://pedrobtz.github.io/zuhttp/reference/zu_client_methods.md)
+  : Client-first wrappers
+- [`zu_client_update()`](https://pedrobtz.github.io/zuhttp/reference/zu_client_update.md)
+  : Derive a client from another
+- [`zu_code_retryable()`](https://pedrobtz.github.io/zuhttp/reference/zu_code_retryable.md)
+  : Is an error code worth retrying?
+- [`zu_condition()`](https://pedrobtz.github.io/zuhttp/reference/zu_condition.md)
+  : Construct a zuhttp condition
+- [`zu_default_client()`](https://pedrobtz.github.io/zuhttp/reference/zu_default_client.md)
+  : The package-managed default client
+- [`zu_error_codes()`](https://pedrobtz.github.io/zuhttp/reference/zu_error_codes.md)
+  : Error codes used by zuhttp
+- [`zu_headers()`](https://pedrobtz.github.io/zuhttp/reference/zu_headers.md)
+  : Add headers
+- [`zu_hooks()`](https://pedrobtz.github.io/zuhttp/reference/zu_hooks.md)
+  : Register lifecycle hooks
+- [`zu_info()`](https://pedrobtz.github.io/zuhttp/reference/zu_info.md)
+  : What this build of zuhttp can do
+- [`zu_is_secret_header()`](https://pedrobtz.github.io/zuhttp/reference/zu_is_secret_header.md)
+  : Which header names carry a secret value?
+- [`zu_is_secret_param()`](https://pedrobtz.github.io/zuhttp/reference/zu_is_secret_param.md)
+  : Which query parameter names carry a secret value?
+- [`zu_get()`](https://pedrobtz.github.io/zuhttp/reference/zu_methods.md)
+  [`zu_head()`](https://pedrobtz.github.io/zuhttp/reference/zu_methods.md)
+  [`zu_post()`](https://pedrobtz.github.io/zuhttp/reference/zu_methods.md)
+  [`zu_put()`](https://pedrobtz.github.io/zuhttp/reference/zu_methods.md)
+  [`zu_patch()`](https://pedrobtz.github.io/zuhttp/reference/zu_methods.md)
+  [`zu_delete()`](https://pedrobtz.github.io/zuhttp/reference/zu_methods.md)
+  : Perform a request in one call
+- [`zu_perform()`](https://pedrobtz.github.io/zuhttp/reference/zu_perform.md)
+  : Perform a request
+- [`zu_pool()`](https://pedrobtz.github.io/zuhttp/reference/zu_pool.md)
+  : Connection pool settings
+- [`zu_pool_reset()`](https://pedrobtz.github.io/zuhttp/reference/zu_pool_reset.md)
+  : Close a client's idle connections
+- [`zu_pool_stats()`](https://pedrobtz.github.io/zuhttp/reference/zu_pool_stats.md)
+  : Connection reuse counters
+- [`zu_query()`](https://pedrobtz.github.io/zuhttp/reference/zu_query.md)
+  : Add query parameters
+- [`zu_redact_form()`](https://pedrobtz.github.io/zuhttp/reference/zu_redact_form.md)
+  : Redact a form-encoded request body
+- [`zu_redact_headers()`](https://pedrobtz.github.io/zuhttp/reference/zu_redact_headers.md)
+  : Additional header names to redact
+- [`zu_redact_headers_for_display()`](https://pedrobtz.github.io/zuhttp/reference/zu_redact_headers_for_display.md)
+  : Redact a set of headers for display
+- [`zu_redact_params()`](https://pedrobtz.github.io/zuhttp/reference/zu_redact_params.md)
+  : Additional query parameter names to redact
+- [`zu_redact_url()`](https://pedrobtz.github.io/zuhttp/reference/zu_redact_url.md)
+  : Redact credentials from a URL
+- [`zu_req_callback()`](https://pedrobtz.github.io/zuhttp/reference/zu_req_callback.md)
+  : Stream the response body to a callback
+- [`zu_req_path()`](https://pedrobtz.github.io/zuhttp/reference/zu_req_path.md)
+  : Stream the response body to a file
+- [`zu_req_timeout()`](https://pedrobtz.github.io/zuhttp/reference/zu_req_policy.md)
+  [`zu_req_redirects()`](https://pedrobtz.github.io/zuhttp/reference/zu_req_policy.md)
+  [`zu_req_check()`](https://pedrobtz.github.io/zuhttp/reference/zu_req_policy.md)
+  : Set request policy
+- [`zu_req_replay_safe()`](https://pedrobtz.github.io/zuhttp/reference/zu_req_replay_safe.md)
+  : Is this request safe to replay?
+- [`zu_req_retry()`](https://pedrobtz.github.io/zuhttp/reference/zu_req_retry.md)
+  : Per-request retry settings
+- [`zu_req_trace()`](https://pedrobtz.github.io/zuhttp/reference/zu_req_trace.md)
+  : Record a §35.3 event trace for this request
+- [`zu_request()`](https://pedrobtz.github.io/zuhttp/reference/zu_request.md)
+  : Build a request without performing it
+- [`zu_resp_status()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp.md)
+  [`zu_resp_path()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp.md)
+  [`zu_resp_ok()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp.md)
+  [`zu_resp_headers()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp.md)
+  [`zu_resp_header()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp.md)
+  [`zu_resp_url()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp.md)
+  [`zu_resp_method()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp.md)
+  [`zu_resp_timings()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp.md)
+  : Response accessors
+- [`zu_resp_check()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_check.md)
+  : Raise a condition for an error status
+- [`zu_resp_connection()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_connection.md)
+  : Connection metadata
+- [`zu_resp_json()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_json.md)
+  : The response body as parsed JSON
+- [`zu_resp_raw()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_raw.md)
+  : The response body, decoded
+- [`zu_resp_text()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_text.md)
+  : The response body as text
+- [`zu_resp_trace()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_trace.md)
+  : The event trace for a request
+- [`zu_response()`](https://pedrobtz.github.io/zuhttp/reference/zu_response.md)
+  : Construct a response
+- [`zu_retry()`](https://pedrobtz.github.io/zuhttp/reference/zu_retry.md)
+  : Retry policy
+- [`zu_set_default_client()`](https://pedrobtz.github.io/zuhttp/reference/zu_set_default_client.md)
+  : Replace the default client
+- [`zu_set_json_backend()`](https://pedrobtz.github.io/zuhttp/reference/zu_set_json_backend.md)
+  : Choose the JSON implementation
+- [`zu_stub()`](https://pedrobtz.github.io/zuhttp/reference/zu_stub.md)
+  : Match a request and return a canned response
+- [`zu_tls()`](https://pedrobtz.github.io/zuhttp/reference/zu_tls.md) :
+  TLS and certificate trust settings
+- [`zu_tls_backend()`](https://pedrobtz.github.io/zuhttp/reference/zu_tls_backend.md)
+  : Which TLS backend was this build linked against?
+- [`zu_native_transport()`](https://pedrobtz.github.io/zuhttp/reference/zu_transport.md)
+  [`zu_mock_transport()`](https://pedrobtz.github.io/zuhttp/reference/zu_transport.md)
+  : Transports
+- [`zu_transport_perform()`](https://pedrobtz.github.io/zuhttp/reference/zu_transport_perform.md)
+  : Perform a request through a transport
+- [`zu_verbose()`](https://pedrobtz.github.io/zuhttp/reference/zu_verbose.md)
+  : Print a trace of each request
+- [`zuhttp_fork`](https://pedrobtz.github.io/zuhttp/reference/zuhttp_fork.md)
+  : HTTPS in a forked process
+- [`zuhttp_tls`](https://pedrobtz.github.io/zuhttp/reference/zuhttp_tls.md)
+  : TLS backends and their limits
+
+# Articles
+
+### Using zuhttp
+
+- [Clients, requests and the rest of
+  HTTP](https://pedrobtz.github.io/zuhttp/articles/clients.md):
+- [When requests fail: errors, timeouts, retries and
+  redirects](https://pedrobtz.github.io/zuhttp/articles/failures.md):
+- [Large responses: downloads, streaming and
+  limits](https://pedrobtz.github.io/zuhttp/articles/streaming.md):
+- [TLS, certificates and
+  trust](https://pedrobtz.github.io/zuhttp/articles/tls.md):
+- [Working through a
+  proxy](https://pedrobtz.github.io/zuhttp/articles/proxies.md):
+
+### Testing and debugging
+
+- [Testing code that makes HTTP
+  requests](https://pedrobtz.github.io/zuhttp/articles/testing.md):
+- [Seeing what happened: verbose output, traces, hooks and
+  middleware](https://pedrobtz.github.io/zuhttp/articles/debugging.md):
