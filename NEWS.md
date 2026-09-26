@@ -49,6 +49,18 @@ bundles neither cryptography nor a CA bundle. No hard R dependencies.
 * A redirect chain longer than `redirects` raises `zu_too_many_redirects`
   instead of returning its last 3xx as if it were the final response.
   `redirects = 0` still returns the 3xx itself.
+* An HTTP status missing from zuhttp's table of status texts (412, 451, a
+  proxy's 407, ...) crashed `zu_resp_check()` with "subscript out of bounds"
+  instead of raising `zu_http_client_error` or `zu_http_server_error`.
+* A 407 from a proxy on a plain `http://` request is `zu_proxy_auth_error`,
+  the class the same failure already had over `https://`.
+* `ca_file` and `ca_extra` explain a certificate file that is not PEM, and
+  show the `openssl` command that converts a DER (binary) `.crt` or `.cer`;
+  the backends' own message was "cannot read CA file".
+* A printed client shows its retry policy and TLS configuration as readable
+  lines rather than their fields pasted together.
+* `zu_resp_timings()` no longer reports a `total` shorter than one of its own
+  phases on very fast requests.
 
 ## Known limitations
 

@@ -166,9 +166,13 @@ zu_resp_timings <- function(resp) {
   out[secs] <- ms[secs] / 1000
   # The elapsed total measured in R covers the whole zu_perform() including
   # retries and middleware; the C one covers the last attempt. Prefer R's,
-  # because it is the number that answers "how long did my call take".
+  # because it is the number that answers "how long did my call take" — but
+  # never below C's: proc.time() ticks in whole milliseconds, so a 1.8 ms
+  # request read total 0.001 beside a ttfb of 0.002, a total shorter than
+  # one of its own phases.
   if (!is.null(resp$timings) && !is.na(resp$timings[["total"]]))
-    out[["total"]] <- unname(resp$timings[["total"]])
+    out[["total"]] <- max(unname(resp$timings[["total"]]), out[["total"]],
+                          na.rm = TRUE)
   out
 }
 
@@ -374,7 +378,12 @@ zu_resp_json <- function(resp, ...) {
 #' tryCatch(zu_resp_check(r), zu_http_client_error = function(e) conditionMessage(e))
 zu_resp_check <- function(resp) {
   if (zu_resp_ok(resp)) return(invisible(resp))
-  code <- if (resp$status < 500L) "zu_http_client_error" else "zu_http_server_error"
+  # 407 is sent only by a proxy, so it is the proxy-auth failure a CONNECT
+  # tunnel already reports as zu_proxy_auth_error (§20.4) — the same class
+  # whichever scheme the request used.
+  code <- if (resp$status == 407L) "zu_proxy_auth_error"
+          else if (resp$status < 500L) "zu_http_client_error"
+          else "zu_http_server_error"
   msg <- paste0(
     if (!is.null(resp$method)) paste0(resp$method, " ") else "",
     resp$url %||% "request", " failed: HTTP ", resp$status,
@@ -416,16 +425,26 @@ status_text <- function(s) {
     "308" = "Permanent Redirect",
     "400" = "Bad Request", "401" = "Unauthorized", "402" = "Payment Required",
     "403" = "Forbidden", "404" = "Not Found", "405" = "Method Not Allowed",
-    "406" = "Not Acceptable", "408" = "Request Timeout", "409" = "Conflict",
-    "410" = "Gone", "413" = "Payload Too Large", "415" = "Unsupported Media Type",
-    "418" = "I'm a teapot", "422" = "Unprocessable Content",
-    "429" = "Too Many Requests",
+    "406" = "Not Acceptable", "407" = "Proxy Authentication Required",
+    "408" = "Request Timeout", "409" = "Conflict",
+    "410" = "Gone", "411" = "Length Required", "412" = "Precondition Failed",
+    "413" = "Content Too Large", "414" = "URI Too Long",
+    "415" = "Unsupported Media Type", "416" = "Range Not Satisfiable",
+    "418" = "I'm a teapot", "421" = "Misdirected Request",
+    "422" = "Unprocessable Content", "423" = "Locked", "425" = "Too Early",
+    "426" = "Upgrade Required", "428" = "Precondition Required",
+    "429" = "Too Many Requests", "431" = "Request Header Fields Too Large",
+    "451" = "Unavailable For Legal Reasons",
     "500" = "Internal Server Error", "501" = "Not Implemented",
     "502" = "Bad Gateway", "503" = "Service Unavailable",
-    "504" = "Gateway Timeout"
+    "504" = "Gateway Timeout", "505" = "HTTP Version Not Supported",
+    "507" = "Insufficient Storage", "511" = "Network Authentication Required"
   )
-  v <- known[[as.character(s)]]
-  if (is.null(v)) "" else v
+  # Single brackets: `[[` on a named vector errors on a missing name instead
+  # of returning NULL, so every status not listed here (407 was the one found)
+  # crashed zu_resp_check() with "subscript out of bounds".
+  v <- unname(known[as.character(s)])
+  if (is.na(v)) "" else v
 }
 
 # §34.4: what was attempted, what failed, and the most likely fix. The fix is
@@ -436,6 +455,7 @@ status_hint <- function(s) {
     "403" = "Authenticated but not permitted. The credential is valid and lacks this scope, or the resource belongs to someone else.",
     "404" = "The server has no such resource. If you are using a client base_url, check the join: base_url and path are concatenated, not resolved.",
     "405" = "The path exists but not for this method.",
+    "407" = "The proxy refused the request. Check the user name and password in the proxy URL (http://user:password@host:port).",
     "413" = "The request body was too large for the server.",
     "415" = "The server rejected the body's Content-Type.",
     "429" = "Rate limited. Any Retry-After header is in zu_resp_header(resp, \"retry-after\").",
