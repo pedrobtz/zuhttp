@@ -61,6 +61,11 @@ bundles neither cryptography nor a CA bundle. No hard R dependencies.
   lines rather than their fields pasted together.
 * `zu_resp_timings()` no longer reports a `total` shorter than one of its own
   phases on very fast requests.
+* A time limit reached during a request (`setTimeLimit()`,
+  `R.utils::withTimeout()`) surfaces as its own error. It used to be printed
+  to the console, discarded, and reported as `zu_interrupted_error`
+  ("interrupted by the user"), so `withTimeout()` never saw it. A real Ctrl-C
+  is still `zu_interrupted_error`.
 
 ## Known limitations
 
