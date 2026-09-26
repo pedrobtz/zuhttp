@@ -22,6 +22,11 @@ zu_redact_opt <- function(name, default = character()) {
 #' @param ... Header names, or a single character vector.
 #' @return The resulting character vector of extra names, invisibly.
 #' @export
+#' @examples
+#' old <- getOption("zuhttp.redact_headers")
+#' zu_redact_headers("X-Session")
+#' zu_is_secret_header("X-Session")
+#' options(zuhttp.redact_headers = old)   # restore
 zu_redact_headers <- function(...) {
   v <- unique(as.character(unlist(list(...), use.names = FALSE)))
   options(zuhttp.redact_headers = v)
@@ -30,11 +35,20 @@ zu_redact_headers <- function(...) {
 
 #' Additional query parameter names to redact
 #'
-#' The defaults are `access_token`, `api_key`, `signature` and `sig` (§42.1).
+#' The defaults are `access_token`, `api_key`, `apikey`, `signature`, `sig`,
+#' `client_secret`, `password`, `passwd`, `pwd`, `secret`, `token`,
+#' `refresh_token`, `id_token`, `private_key`, `auth_token` and
+#' `session_token`, matched exactly and case-insensitively (§42.1). This adds
+#' to them; it cannot remove a default.
 #'
 #' @param ... Parameter names, or a single character vector.
 #' @return The resulting character vector of extra names, invisibly.
 #' @export
+#' @examples
+#' old <- getOption("zuhttp.redact_params")
+#' zu_redact_params("ticket")
+#' zu_redact_url("https://api.example.com/v1?ticket=ABC123&page=2")
+#' options(zuhttp.redact_params = old)    # restore
 zu_redact_params <- function(...) {
   v <- unique(as.character(unlist(list(...), use.names = FALSE)))
   options(zuhttp.redact_params = v)
@@ -67,6 +81,8 @@ zu_redact_url <- function(url) {
 #' @param body A single `application/x-www-form-urlencoded` string.
 #' @return The redacted string.
 #' @export
+#' @examples
+#' zu_redact_form("user=alice&password=hunter2&remember=1")
 zu_redact_form <- function(body) {
   extra <- zu_redact_opt("zuhttp.redact_params")
   vapply(as.character(body), function(b) {
@@ -79,6 +95,8 @@ zu_redact_form <- function(body) {
 #' @param name A character vector of header names.
 #' @return A logical vector.
 #' @export
+#' @examples
+#' zu_is_secret_header(c("Authorization", "cookie", "Accept"))
 zu_is_secret_header <- function(name) {
   .Call(C_zu_is_secret_header, as.character(name),
         zu_redact_opt("zuhttp.redact_headers"))
@@ -89,6 +107,9 @@ zu_is_secret_header <- function(name) {
 #' @param name A character vector of parameter names.
 #' @return A logical vector.
 #' @export
+#' @examples
+#' # Exact matches only: `token` is secret, `page_token` is not.
+#' zu_is_secret_param(c("token", "page_token", "api_key", "page"))
 zu_is_secret_param <- function(name) {
   .Call(C_zu_is_secret_param, as.character(name),
         zu_redact_opt("zuhttp.redact_params"))
@@ -105,6 +126,9 @@ zu_is_secret_param <- function(name) {
 #' @param headers A named character vector or list.
 #' @return The same shape, with secret values replaced by `<redacted>`.
 #' @export
+#' @examples
+#' zu_redact_headers_for_display(c(Authorization = "Bearer abc123",
+#'                                 Accept = "application/json"))
 zu_redact_headers_for_display <- function(headers) {
   if (length(headers) == 0) return(headers)
   nms <- names(headers)

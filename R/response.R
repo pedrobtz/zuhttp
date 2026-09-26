@@ -205,12 +205,11 @@ zu_resp_timings <- function(resp) {
 #'   narration.
 #' @export
 #' @examples
-#' # A trace comes from the engine, so there is nothing a mock can stand in
-#' # for here — hence \dontrun{}. An example that reaches a third party is
-#' # one that fails in every offline R CMD check, the user's included.
-#' \dontrun{
-#' r <- zu_get("https://example.com", trace = TRUE)
-#' zu_resp_trace(r)
+#' # A trace is recorded by the network engine, so a mock has nothing to
+#' # show; the example makes a real request and runs only interactively.
+#' if (interactive()) {
+#'   r <- zu_get("https://example.com", trace = TRUE)
+#'   zu_resp_trace(r)
 #' }
 zu_resp_trace <- function(resp) {
   tr <- resp$trace
@@ -234,6 +233,10 @@ zu_resp_trace <- function(resp) {
 #' @param resp A `zu_response`.
 #' @return A raw vector.
 #' @export
+#' @examples
+#' r <- zu_response(200L, body = "hello")
+#' zu_resp_raw(r)
+#' rawToChar(zu_resp_raw(r))
 zu_resp_raw <- function(resp) resp$body
 
 #' The response body as text
@@ -336,6 +339,10 @@ bom_of <- function(b) {
 #' @return Whatever the backend returns, by default a list.
 #' @seealso [zu_set_json_backend()] if you would rather not use `jsonlite`.
 #' @export
+#' @examplesIf requireNamespace("jsonlite", quietly = TRUE)
+#' r <- zu_response(200L, c("Content-Type" = "application/json"),
+#'                  '{"name": "Alice", "tags": ["a", "b"]}')
+#' str(zu_resp_json(r))
 zu_resp_json <- function(resp, ...) {
   txt <- zu_resp_text(resp, encoding = "UTF-8")
   if (!nzchar(trimws(txt)))

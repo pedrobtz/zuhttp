@@ -12,6 +12,7 @@
 # --as-cran reports "Object files/libraries should not be included in a source
 # package". Caught by --as-cran, not by a plain check.
 ^src/vendor/.*\.(o|so|dll|a)$
+^cran-comments\.md$
 ^_pkgdown\.yml$
 ^docs$
 ^pkgdown$

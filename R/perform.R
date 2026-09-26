@@ -66,6 +66,12 @@ zu_mock_transport <- function(handler = NULL, ...) {
 #' @param req A resolved `zu_request`.
 #' @return A `zu_response`.
 #' @export
+#' @examples
+#' # This is what zu_perform() calls after resolving the request. Calling it
+#' # directly shows the contract: one request in, one zu_response out.
+#' tr <- zu_mock_transport(function(req) zu_response(204L))
+#' r <- zu_transport_perform(tr, zu_request("GET", "https://api.example.com/x"))
+#' zu_resp_status(r)
 zu_transport_perform <- function(transport, req) UseMethod("zu_transport_perform")
 
 #' @export

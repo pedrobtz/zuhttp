@@ -17,3 +17,9 @@ The defaults are \code{Authorization}, \code{Proxy-Authorization}, \code{Cookie}
 \code{Set-Cookie}, \code{X-Api-Key} and \code{X-Auth-Token} (§42.1). This adds to them; it
 cannot remove a default.
 }
+\examples{
+old <- getOption("zuhttp.redact_headers")
+zu_redact_headers("X-Session")
+zu_is_secret_header("X-Session")
+options(zuhttp.redact_headers = old)   # restore
+}

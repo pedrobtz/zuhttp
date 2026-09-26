@@ -15,3 +15,7 @@ A logical vector.
 \description{
 Which query parameter names carry a secret value?
 }
+\examples{
+# Exact matches only: `token` is secret, `page_token` is not.
+zu_is_secret_param(c("token", "page_token", "api_key", "page"))
+}

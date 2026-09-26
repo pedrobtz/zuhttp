@@ -6,22 +6,23 @@
 \alias{zuhttp-package}
 \title{zuhttp: Minimal HTTP Client Using Native System TLS}
 \description{
-A small HTTP/1.1 client for HTTP and HTTPS requests that uses the operating system's own TLS implementation and certificate trust store rather than a bundled cryptography library or certificate bundle. Provides structured timeouts, reliable cancellation from R, connection reuse, streaming request and response bodies, structured error conditions, and a pluggable transport layer for testing. Intended as a focused alternative to full multi-protocol clients for packages whose only requirement is reliable HTTPS.
+A small client for the Hypertext Transfer Protocol (HTTP/1.1), over plain connections and over Transport Layer Security (TLS), that uses the operating system's own TLS implementation and certificate trust store instead of a bundled cryptography library or certificate bundle: 'Schannel' on 'Windows', Apple's native TLS on 'macOS', and 'OpenSSL' elsewhere. Provides a total request timeout, cancellation from 'R' with an interrupt, connection reuse, streaming of response bodies to files or callbacks, structured error conditions, and a pluggable transport layer for testing without a network. Intended as a focused alternative to full multi-protocol clients for packages that only need reliable HTTP requests.
 }
 \seealso{
 Useful links:
 \itemize{
   \item \url{https://github.com/pedrobtz/zuhttp}
+  \item \url{https://pedrobtz.github.io/zuhttp/}
   \item Report bugs at \url{https://github.com/pedrobtz/zuhttp/issues}
 }
 
 }
 \author{
-\strong{Maintainer}: Pedro Baltazar \email{pedrobtz@gmail.com}
+\strong{Maintainer}: Pedro Baltazar \email{pedrobtz@gmail.com} [copyright holder]
 
 Authors:
 \itemize{
-  \item Pedro Baltazar \email{pedrobtz@gmail.com}
+  \item Pedro Baltazar \email{pedrobtz@gmail.com} [copyright holder]
 }
 
 Other contributors:

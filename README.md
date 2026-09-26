@@ -12,6 +12,8 @@ trust store** — Schannel on Windows, Secure Transport with `SecTrust` on macOS
 system OpenSSL elsewhere — rather than bundling cryptography or a CA bundle.
 Zero hard R dependencies.
 
+zuhttp is not on CRAN yet. Install it from GitHub:
+
 ```r
 # install.packages("remotes")
 remotes::install_github("pedrobtz/zuhttp")
