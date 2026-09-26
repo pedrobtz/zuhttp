@@ -799,12 +799,12 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
             zu_redirect_policy pol;
             zu_redirect_decision dec;
 
-            if (!loc) break;                  /* a redirect with no Location */
+            if (!loc) { zu_proxy_free(&px); break; }   /* a redirect with no Location */
             rc = zu_uri_resolve(&next, &cur, loc, loc + strlen(loc));
             if (rc != ZU_OK) {
                 zu_error_set(err, ZU_ERR_URL, ZU_PHASE_NONE,
                              "redirect Location is not a usable URL");
-                zu_uri_free(&cur); zu_result_free(out);
+                zu_uri_free(&cur); zu_result_free(out); zu_proxy_free(&px);
                 return ZU_ERR_URL;
             }
             zu_redirect_policy_init(&pol);
@@ -856,8 +856,15 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
         if (body_sink != &mem_sink && out->body.len) {
             rc = zu_sink_write(body_sink, out->body.data, out->body.len, err);
             zu_buf_reset(&out->body);
-            if (rc != ZU_OK) { zu_uri_free(&cur); zu_result_free(out); return rc; }
+            if (rc != ZU_OK) {
+                zu_uri_free(&cur); zu_result_free(out); zu_proxy_free(&px);
+                return rc;
+            }
         }
+        /* Every exit from a hop frees `px`, the success path included: it
+         * holds the proxy password, and a request whose final hop was proxied
+         * once left it on the heap after returning (§42). */
+        zu_proxy_free(&px);
         break;
     }
 

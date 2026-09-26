@@ -161,8 +161,9 @@ zu_client <- function(base_url = NULL, headers = NULL, query = NULL,
     # the user prints and copies — that list is the client's value, and it has
     # to survive serialization intact. The environment is a cache hung beside
     # it, created empty and filled on the first request. Copies made by
-    # zu_client_update() share it, which is safe because the §26.1 key
-    # discriminates on everything that must not be shared.
+    # zu_client_update() share it unless they change `pool`, which is safe
+    # because the §26.1 key discriminates on everything that must not be
+    # shared.
     pool_state = new.env(parent = emptyenv())
   )
 }
@@ -186,10 +187,12 @@ zu_client_update <- function(client, ...) {
   changes <- list(...)
   if (length(changes) && (is.null(names(changes)) || any(!nzchar(names(changes)))))
     stop("all arguments to zu_client_update() must be named", call. = FALSE)
-  bad <- setdiff(names(changes), names(client))
+  # Checked against the constructor, not the list: a client read back from
+  # an older serialization may lack a field it is still entitled to set.
+  bad <- setdiff(names(changes), names(formals(zu_client)))
   if (length(bad))
     stop("not a client setting: ", paste(bad, collapse = ", "),
-         "\n  settings are: ", paste(names(client), collapse = ", "),
+         "\n  settings are: ", paste(names(formals(zu_client)), collapse = ", "),
          call. = FALSE)
   # Derived headers merge with the parent's, which is what makes the
   # base -> authenticated -> admin chain in §31.10 work.
@@ -197,7 +200,14 @@ zu_client_update <- function(client, ...) {
     changes$headers <- merge_headers(client$headers, as_header_vec(changes$headers))
   if (!is.null(changes$query))
     changes$query <- merge_query(client$query, as_query_list(changes$query))
-  for (nm in names(changes)) client[[nm]] <- changes[[nm]]
+  # §26.5: a child that changes the pool settings gets a pool of its own.
+  # Sharing one slot made parent and child each rebuild the pool the other
+  # had just built, dropping every idle connection on each alternation.
+  if ("pool" %in% names(changes) && !identical(changes$pool, client$pool))
+    attr(client, "pool_state") <- new.env(parent = emptyenv())
+  # `[<-` with a list, not `[[<-`: assigning NULL through `[[<-` deletes the
+  # element, and NULL is how §31.9 spells "reset to the package default".
+  for (nm in names(changes)) client[nm] <- list(changes[[nm]])
   client
 }
 
@@ -313,6 +323,7 @@ print.zu_client <- function(x, ...) {
   for (f in policy_fields()) {
     v <- if (is.null(x[[f]])) d[[f]] else x[[f]]
     if (is.null(v)) next
+    if (f == "proxy") v <- redact_proxy(v)
     cat("  ", f, ": ", format(v), if (is.null(x[[f]])) "  (default)" else "",
         "\n", sep = "")
   }

@@ -63,6 +63,26 @@ test_that("changing pool settings rebuilds the pool rather than keeping the old 
   expect_true(pool_valid(p2))
 })
 
+test_that("a parent and a child with different pool settings each keep their pool (§26.5)", {
+  # One shared slot made each client rebuild the pool the other had just
+  # built, so alternating between them dropped every idle connection and
+  # orphaned a native pool per switch.
+  api <- zu_client(pool = zu_pool(max_idle = 2))
+  derived <- zu_client_update(api, pool = zu_pool(max_idle = 8))
+  p1 <- client_pool(api)
+  p2 <- client_pool(derived)
+  expect_identical(client_pool(api), p1)
+  expect_identical(client_pool(derived), p2)
+  expect_false(identical(p1, p2))
+})
+
+test_that("a child that keeps its parent's pool settings shares the parent's pool (§26.5)", {
+  api <- zu_client()
+  p1  <- client_pool(api)
+  expect_identical(client_pool(zu_client_update(api, headers = c(A = "b"))), p1)
+  expect_identical(client_pool(zu_client_update(api, pool = zu_pool())), p1)
+})
+
 test_that("a client survives saveRDS()/readRDS() and re-creates its pool (§26.5)", {
   api <- zu_client(base_url = "https://example.com", pool = zu_pool(max_idle = 3))
   live <- client_pool(api)

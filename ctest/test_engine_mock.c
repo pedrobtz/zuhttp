@@ -404,6 +404,37 @@ void suite_engine_mock(void) {
         zu_result_free(&r); dialer_free(&d);
     }
 
+    ZU_CASE("engine: a request whose last hop is proxied frees the proxy, password included (§20, §42)");
+    {
+        /* The case above ends on a NO_PROXY host, whose hop never parses a
+         * proxy, so it could not see that every exit after the response
+         * leaked the one it had. Measured per request rather than left to the
+         * end-of-main() check, which would name no path. The third exit
+         * cannot parse "http://[x" as a URL, so it returns straight out of
+         * the loop. */
+        const char *finals[3] = {
+            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+            "HTTP/1.1 302 Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 302 Found\r\nLocation: http://[x\r\nContent-Length: 0\r\nConnection: close\r\n\r\n" };
+        const zu_code want[3] = { ZU_OK, ZU_OK, ZU_ERR_URL };
+        int k;
+        for (k = 0; k < 3; k++) {
+            zu_alloc_stats before, after;
+            conn_script s[1];
+            s[0].bytes = finals[k]; s[0].len = 0; s[0].max_read = 0;
+            s[0].not_readable = 0; s[0].next = NULL;
+            zu_alloc_stats_get(&before);
+            dialer_init(&d, s, 1); opts_for(&o, &d);
+            o.proxy = "http://u:p@proxy.test:3128";
+            ZU_CHECK_EQ_INT(zu_engine_get(&r, "http://example.test/", &o, &e), want[k]);
+            ZU_CHECK(strcmp(d.host[0], "proxy.test") == 0);
+            if (want[k] == ZU_OK) zu_result_free(&r);
+            dialer_free(&d);
+            zu_alloc_stats_get(&after);
+            ZU_CHECK_EQ_INT(after.live_blocks, before.live_blocks);
+        }
+    }
+
     ZU_CASE("engine: CONNECT outcomes for HTTPS through a proxy (§20.3)");
     {
         conn_script s407[] = {{ "HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n", 0, 0, 0, NULL }};

@@ -323,7 +323,7 @@ print.zu_request <- function(x, ...) {
   # policy value, not just the ones the caller named; show those instead.
   pol <- if (!is.null(x$resolved)) x$resolved else x$policy
   for (f in names(pol)) {
-    v <- pol[[f]]
+    v <- if (f == "proxy") redact_proxy(pol[[f]]) else pol[[f]]
     if (is.null(v)) next
     cat(f, ": ", if (inherits(v, "zu_reset")) "package default" else format(v),
         "\n", sep = "")

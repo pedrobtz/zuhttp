@@ -91,6 +91,9 @@ for the next minor.
 - [x] Merge the review (#20), with its amends: D-54, D-55 and D-56 accepted;
       #12, #14 and #52 closed; #5 and #6 reduced to their implementation
       halves; the Linux certificate matrix running.
+- [x] Fix the seven tag blockers of the 2026-09-26 architecture review (#73):
+      C-1, R-1, R-2, R-3, R-4, CI-1, CI-2, each with a test that failed
+      first (#74).
 - [ ] Tag `v0.1.0` on the merge commit and publish the GitHub release (#40).
 - [ ] Close #21 and #40; retitle #22 to track M3.
 - [ ] Create milestone issues for M1–M3 and one issue per work package, each
@@ -172,6 +175,7 @@ from this repository runs nothing. That comes first. The rest is #18.
       demonstrated on this package's own PR.
 - [ ] R CMD check through pinned `pedrobtz/r-actions` (the commit zucrypt pins),
       including the CRAN-like containers; `coverage.yaml` pinned to a commit.
+      The `coverage.yaml` half is done (#74, zucrypt's `68c22c1`).
 - [ ] rchk and a sanitizer build over `src/init.c` in CI.
 - [ ] `tools/vendor/{manifest.tsv,checksums.sha256,verify}`, run in CI;
       editing one vendored byte fails it.
@@ -677,3 +681,20 @@ changed the plan or the design.
   time limit inside a request was reported as a user interrupt (D-74); the
   engine seam (D-72, #58) found that out-of-step connections were pooled
   (D-73). Coverage floors now run on every PR (#59).
+- **2026-09-26 — an architecture review of 0.1.0 (#73)** found the design
+  sound and every M1/M2 feature an addition to an existing seam, and recorded
+  its findings in `.agents/reviews/2026-09-26-architecture.md`. Seven were
+  tag blockers and are fixed (#74): a successful proxied request leaked the
+  proxy, password included (C-1); proxy credentials printed from a client, a
+  request, a condition and a hook payload (R-1); each retry attempt got the
+  whole `timeout` instead of what was left of it, and `attempt_timeout` was
+  never read (R-2, 20 s against a 1 s budget on a stalled socket);
+  `zu_client_update(x, f = NULL)` deleted the field (R-3); parent and child
+  with different pool settings rebuilt each other's pool (R-4, D-75); the
+  `--as-cran` gate grepped a pattern `00check.log` never contains (CI-1); and
+  `coverage.yaml` used a floating tag with write access (CI-2). R-2 and CI-1
+  are rule 6 again: a mock that returns instantly, and a grep that cannot
+  match. The review's C-2 (an OpenSSL liveness probe blind to buffered
+  ciphertext) is narrower than it states, since the peer's FIN usually
+  reaches the socket probe; it stays open with the rest of its section 5,
+  which is not yet folded into the work packages.
