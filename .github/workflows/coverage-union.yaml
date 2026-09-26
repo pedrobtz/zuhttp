@@ -1,0 +1,53 @@
+# Coverage that counts every suite, with a floor that fails the build.
+#
+# coverage.yaml's badge measures one thing: how much of the C core the R
+# suite reaches, with NOT_CRAN unset, so every loopback test is skipped and
+# the C suite (ctest), which exercises most of the core, is not counted. That
+# number is useful and misleading. This workflow measures the R suite with
+# NOT_CRAN=true and merges it line by line with ctest, per OS, because each
+# OS builds a different TLS backend. tools/coverage/floor.dcf holds the floors.
+#
+# Windows is not measured yet: covr works there, but ctest's clang coverage
+# build does not under Rtools.
+#
+# Runs on every pull request, including from this repository's own branches,
+# unlike the jobs that still carry the same-repository skip (roadmap W1).
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  workflow_dispatch:
+
+name: coverage-union.yaml
+
+permissions: read-all
+
+jobs:
+  coverage:
+    runs-on: ${{ matrix.os }}
+    name: coverage (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::covr
+
+      - name: clang and llvm (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang llvm zlib1g-dev
+
+      - name: C suite coverage
+        run: tools/coverage/ctest-lcov.sh ctest.lcov
+
+      - name: Merge with the R suite and check the floors
+        run: Rscript tools/coverage/measure.R ctest.lcov
