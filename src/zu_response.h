@@ -58,6 +58,9 @@ typedef struct {
     uint64_t max_chunk;     /* §40 max_chunk_size; 0 disables */
     uint64_t total;         /* running decoded total */
     uint64_t max_total;     /* §40 max_body_bytes; 0 disables */
+    size_t   surplus;       /* bytes after the final chunk and trailers, once
+                             * decoding is complete: data the server sent
+                             * beyond this response (§26.3) */
 } zu_chunked;
 
 zu_code zu_chunked_init(zu_chunked *c, uint64_t max_chunk, uint64_t max_total);

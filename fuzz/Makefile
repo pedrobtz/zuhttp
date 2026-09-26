@@ -30,7 +30,13 @@ CORE := $(SRC)/zu_alloc.c $(SRC)/zu_buffer.c $(SRC)/zu_error.c \
         $(URIDIR)/UriRecompose.c $(URIDIR)/UriCommon.c $(URIDIR)/UriMemory.c \
         $(URIDIR)/UriIp4.c $(URIDIR)/UriIp4Base.c
 
-TARGETS := response chunked headers uri redirect inflate proxy redact body
+TARGETS := response chunked headers uri redirect inflate proxy redact body engine
+
+# The engine target links the whole request path. zu_net.c is compiled but
+# never dialled (the harness supplies connections through the §50.1 seam), and
+# ctest/tls_none.c stands in for a TLS backend.
+ENGINE_EXTRA := $(SRC)/zu_engine.c $(SRC)/zu_net.c $(SRC)/zu_pool.c \
+                $(SRC)/zu_trace.c $(SRC)/zu_tls.c ../ctest/tls_none.c
 
 # --- libFuzzer -------------------------------------------------------------
 FUZZ_CC     ?= clang
@@ -41,6 +47,9 @@ fuzz: $(addprefix fuzz_,$(TARGETS))
 
 fuzz_%: fuzz_%.c $(CORE)
 	$(FUZZ_CC) $(BASE) $(FUZZ_FLAGS) -o $@ $< $(CORE) -lz
+
+fuzz_engine: fuzz_engine.c $(CORE) $(ENGINE_EXTRA)
+	$(FUZZ_CC) $(BASE) $(FUZZ_FLAGS) -o $@ $< $(CORE) $(ENGINE_EXTRA) -lz
 
 # One short run of every target. `make fuzz-run SECS=3600` for a longer soak;
 # S18's exit criterion is 24 h per target, which is a scheduled job, not CI.
@@ -61,6 +70,9 @@ replay: $(addprefix replay_,$(TARGETS))
 
 replay_%: fuzz_%.c replay_main.c $(CORE)
 	$(CC) $(BASE) $(REPLAY_FLAGS) -o $@ $< replay_main.c $(CORE) -lz
+
+replay_engine: fuzz_engine.c replay_main.c $(CORE) $(ENGINE_EXTRA)
+	$(CC) $(BASE) $(REPLAY_FLAGS) -o $@ $< replay_main.c $(CORE) $(ENGINE_EXTRA) -lz
 
 # Replay every seed. Two things this must get right:
 #   - an empty corpus directory must not silently pass, so the count is checked;

@@ -165,6 +165,11 @@ zu_code zu_chunked_decode(zu_chunked *c, char *buf, size_t *len, zu_error *err) 
         return ZU_ERR_BODY_LIMIT;
     }
 
-    if (rc >= 0) return ZU_OK;          /* final chunk seen */
+    if (rc >= 0) {                      /* final chunk seen */
+        /* consume_trailer is set, so rc counts only what follows the whole
+         * message — never part of this body. */
+        c->surplus = (size_t)rc;
+        return ZU_OK;
+    }
     return ZU_ERR_WOULDBLOCK;           /* rc == -2: need more input */
 }

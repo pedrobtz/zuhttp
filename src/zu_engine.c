@@ -361,10 +361,12 @@ static zu_code open_stream(zu_stream **out, const zu_uri *u,
     /* Through a proxy the socket goes to the PROXY, not the origin. For plain
      * HTTP that is the whole of it — the request then uses absolute-form
      * (§20.3) and the proxy does the rest. */
-    if (via_proxy)
-        rc = zu_net_connect(&tcp, px->host, px->port, dl, &nopts, err);
-    else
-        rc = zu_net_connect(&tcp, u->host, u->port, dl, &nopts, err);
+    {
+        const char *host = via_proxy ? px->host : u->host;
+        uint16_t    port = via_proxy ? px->port : u->port;
+        rc = o->dial ? o->dial(o->dial_ctx, host, port, &tcp, err)
+                     : zu_net_connect(&tcp, host, port, dl, &nopts, err);
+    }
     if (rc != ZU_OK) return rc;
     /* dns and connect are filled by zu_net, which is the only layer that can
      * see the boundary between them. */
@@ -531,6 +533,7 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
         zu_body_pipe pipe;
         zu_sink *hop_sink = NULL;
         size_t consumed = 0;
+        uint64_t surplus = 0;
         char hosthdr[300];
 
         memset(&pipe, 0, sizeof pipe);
@@ -741,6 +744,7 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
                 zu_trace_add(o->trace, ZU_EV_BODY_CHUNK, "body",
                              hop_sink ? hop_sink->written : 0);
             }
+            surplus = pipe.surplus;
             zu_body_pipe_free(&pipe);
         }
         zu_buf_free(&raw);
@@ -761,6 +765,13 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
                 rc = ZU_OK;
                 reason = ZU_NOREUSE_CANCELLED;
             }
+            /* The server sent bytes past this response's framing. They were
+             * dropped, not delivered, but the connection is now out of step:
+             * whatever arrives next on it may not answer the next request.
+             * The §26.2 probe would usually catch it, but only if the bytes
+             * arrive before the next request is written. */
+            if (rc == ZU_OK && surplus > 0 && reason == ZU_REUSE_OK)
+                reason = ZU_NOREUSE_FRAMING;
             done_with_stream(o, &cur, &px, s, reason);
         }
 
