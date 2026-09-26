@@ -47,7 +47,7 @@ Five rules keep it that way:
 | D-1 | R prefix `zu_`, response accessors `zu_resp_`; C macros `ZUHTTP_` (internal C prefix: D-66) | Accepted | 1.1 |
 | D-2 | No `zuhttp` export may collide with an httr2 export | Accepted | 1.1, 5 |
 | D-3 | Separate the TLS protocol engine from trust evaluation | Accepted | 13.1 |
-| D-4 | macOS: Secure Transport engine + `SecTrustEvaluateWithError` trust — **for 0.x on GitHub; reopened for CRAN by D-63** | Accepted | 13.2 |
+| D-4 | macOS: Secure Transport engine + `SecTrustEvaluateWithError` trust — the native engine D-63 keeps | Accepted | 13.2 |
 | D-5 | Windows: Schannel for engine and trust — required, not preferred | Accepted | 13.4 |
 | D-6 | Unix: system OpenSSL for engine and trust | Accepted | 13.5 |
 | D-7 | Link system zlib; do not vendor miniz | Accepted | 21.1 |
@@ -114,7 +114,7 @@ accepted when that work package's PR merges.
 | D-60 | SubjectPublicKeyInfo is extracted by **one project-owned, bounded DER walker** shared by Secure Transport and Schannel; the digest comes from the platform (CommonCrypto, CNG). The walker is fuzz target 10 | Proposed | 14.4 | W9 |
 | D-61 | Windows custom trust: `ca_file` builds a chain engine with an exclusive root store; `ca_extra` evaluates against the system engine first and, on an untrusted-root result only, against an exclusive-root engine over the extra store | Proposed | 14.3 | W8 |
 | D-62 | Revocation stays **platform-provided**. OpenSSL refuses `revocation = TRUE` unless `zu_tls(crl_file = )` supplies CRLs; zuhttp never fetches OCSP or CRLs, and offers no soft-fail mode | Proposed | 14.5 | W10 |
-| D-63 | The macOS engine for CRAN is chosen by a comparative spike against the §13.2 criteria: Secure Transport, Network.framework, vendored Mbed TLS | **Open** — answered by W13 | 13.2 | W13 |
+| D-63 | macOS stays on **Apple's native TLS**: Secure Transport now, Network.framework if W13 shows it meets §13.2. zuhttp vendors no TLS library. A bundled-crypto engine, if ever needed, comes from **`zucrypt`**, not from a private copy in zuhttp (amends D-54 from 1.0 on) | Accepted 2026-09-26 (maintainer) | 13.2, 5.1, 56 | W13 |
 | D-64 | Windows TLS 1.3 ships only behind a CI job that proves the local `SCH_CREDENTIALS` / `TLS_PARAMETERS` layout equals MSVC's; otherwise Windows stays TLS 1.2 and scope cut 4 is recorded as taken | Proposed | 13.4, 47.4 | W15 |
 | D-65 | Export surface: exactly the **17** removals in §53, leaving **58** functions at 0.2.0 (75 today); every condition also inherits **`zuhttp_error`**, directly above `error` | Proposed | 34.1, 53 | W3 |
 | D-66 | Internal C identifiers become `zuh_` / `ZUH_`; only `R_init_zuhttp` is exported from the shared object | Proposed | 1.1, 11 | W2 |
@@ -236,7 +236,9 @@ merging, and a transport seam (§36). It MUST NOT mask an httr2 export (D-2).
 
 zuhttp consumes no sibling in 0.x. Compression is system zlib; pin digests
 come from each TLS backend; `zuxml` is at most a `Suggests` for a future
-`zu_resp_xml()`. The shared five-repository family table is in edition 1
+`zu_resp_xml()`. `zucrypt` is the named route for a bundled TLS engine on
+macOS if native TLS ever stops being enough (D-63, §13.2); taking it would be
+zuhttp's first sibling dependency. The shared five-repository family table is in edition 1
 §5.1 and changes only in all five repositories at once; its zuhttp licence
 cell is stale since #52 closed.
 
@@ -403,7 +405,7 @@ transports, safe retries and observability, not on protocol breadth.
 
 ### 13. TLS Architecture
 
-**Status:** Built on three backends; macOS engine open for CRAN (D-63).
+**Status:** Built on three backends. macOS stays on native Apple TLS (D-63).
 
 #### 13.1 Separate the protocol engine from trust evaluation
 
@@ -422,28 +424,37 @@ settings it honours (D-56, §14.7).
 
 #### 13.2 macOS engine
 
-**Status:** Secure Transport ships in 0.x (TLS 1.2 ceiling, deprecated by
-Apple since 10.15, 87 SDK deprecation markers). Its replacement for CRAN is
-**Open (D-63)** and is answered by the W13 spike.
+**Status:** Secure Transport ships (TLS 1.2 ceiling, deprecated by Apple
+since 10.15, 87 SDK deprecation markers). **Decided (D-63, 2026-09-26): macOS
+stays on Apple's native TLS.** zuhttp vendors no TLS library.
 
-Candidates and the criteria each is measured against:
+That leaves one open engineering question, answered by W13: stay on Secure
+Transport, or move to Network.framework, Apple's supported native API. The
+criteria:
 
-| Criterion | Secure Transport | Network.framework | Mbed TLS (vendored) |
-|---|---|---|---|
-| TLS 1.3 | no | yes | yes |
-| Runs over a caller-owned socket (§20.3 CONNECT) | yes | no — but `nw_proxy_config_create_http_connect` (macOS 14+) does CONNECT natively; unmeasured | yes |
-| Trust stays `SecTrustEvaluateWithError` | yes | via `sec_protocol_options_set_verify_block`; unmeasured | yes, chain handed over |
-| Cancellable from the poll loop within §25.1's 100 ms | yes | `nw_connection_cancel`; unmeasured | yes |
-| Bundles cryptography (§56 constraint 2) | no | no | **yes** — size unmeasured |
-| Minimum macOS covered | all | 14 for native CONNECT; CRAN's floor is lower | all |
-| Future API risk | removal (R-15) | none known | maintenance and CVE duty (§46) |
-| `--as-cran` clean | no — deprecation pragma NOTE | yes | yes |
+| Criterion | Secure Transport | Network.framework |
+|---|---|---|
+| TLS 1.3 | no | yes |
+| Runs over a caller-owned socket (§20.3 CONNECT) | yes | no — but `nw_proxy_config_create_http_connect` (macOS 14+) does CONNECT natively; unmeasured |
+| Trust stays `SecTrustEvaluateWithError` | yes | via `sec_protocol_options_set_verify_block`; unmeasured |
+| Cancellable from the poll loop within §25.1's 100 ms | yes | `nw_connection_cancel`; unmeasured |
+| Minimum macOS covered | all | 14 for native CONNECT; CRAN's floor is lower |
+| Future API risk | removal (R-15) | none known |
+| `--as-cran` clean | no — deprecation pragma NOTE | yes |
 
 The spike MUST produce a number for every "unmeasured" cell. Decision rule:
-prefer the option that keeps §56 constraint 2 (no bundled crypto) and passes
-every other row; if Network.framework passes all rows only on macOS 14+,
-the answer may be Network.framework with Secure Transport as the floor below
-14. Static OpenSSL (4.64 MB) is not a candidate.
+Network.framework if it passes every row; Network.framework on macOS 14+ with
+Secure Transport below it if it passes only there; otherwise Secure Transport
+stays and its `--as-cran` NOTE is explained in `cran-comments.md`.
+
+**The later option: `zucrypt`.** If Apple removes Secure Transport before
+Network.framework can replace it, or TLS 1.3 on older macOS becomes a hard
+requirement, the portable-engine route is a TLS engine built on `zucrypt`'s
+cryptography with trust still from `SecTrust` (§13.1 keeps that change inside
+the engine). That would be zuhttp's first consumption of a sibling, so it
+amends D-54 and §56 constraint 2 when taken. It is not planned before 1.0.
+Vendoring a private Mbed TLS copy and static OpenSSL (4.64 MB) are both
+rejected (Appendix A).
 
 ##### 13.2.1 Trust evaluation is not fork-safe
 
@@ -1448,8 +1459,7 @@ supported versions.
 
 #### 46.2 Dependency watch
 
-Upstream security channels for picohttpparser and uriparser (and Mbed TLS, if
-D-63 picks it); `tools/update-*` make an update a same-day mechanical change;
+Upstream security channels for picohttpparser and uriparser; `tools/update-*` make an update a same-day mechanical change;
 `tools/vendor/checksums` (W1) verifies what is vendored.
 
 #### 46.3 The maintainer-count risk
@@ -1471,7 +1481,7 @@ milestone M2.
 | Platform | Link |
 |---|---|
 | Windows | `-lws2_32 -lsecur32 -lcrypt32 -lz` (+ `-lbcrypt` after W9) |
-| macOS | `-framework Security -framework CoreFoundation -lz` (per D-63) |
+| macOS | `-framework Security -framework CoreFoundation -lz` (+ `-framework Network` if W13 moves engines) |
 | Unix | `-lssl -lcrypto -lz` |
 
 #### 47.2 DESCRIPTION requirements
@@ -1495,7 +1505,7 @@ is the only way the local declaration ships.
 No network in examples or tests by default (network tests need
 `ZU_TEST_NETWORK=1`, not merely `NOT_CRAN`); no writes outside `tempdir()`;
 no compiled-code output outside R's facilities; the Secure Transport pragma
-NOTE resolved by D-63 before submission.
+NOTE resolved or explained by W13 before submission.
 
 ### 48. Vendoring Policy
 
@@ -1653,8 +1663,9 @@ and criteria the plan is judged against.
 
 **Status:** Accepted.
 
-1. HTTP only. 2. Native TLS; no vendored cryptography (D-63 may amend this
-for macOS, and would have to say so here). 3. Small core. 4. Bounded
+1. HTTP only. 2. Native TLS; no vendored cryptography (D-63 — the only
+future exception is an engine built on `zucrypt`, which would amend this
+line). 3. Small core. 4. Bounded
 behaviour. 5. R-first cancellation. 6. Every networking layer mockable.
 7. System-native trust. 8. Portable C99 with isolated platform shims. 9. No
 hidden runtime. 10. Do not become libcurl.
@@ -1718,7 +1729,7 @@ zuhttp.
 
 | # | Question | Answered by |
 |---|---|---|
-| 1a | Which macOS engine ships on CRAN? | W13 (D-63) |
+| 1a | Secure Transport or Network.framework on macOS? (native either way, D-63) | W13 |
 | 2a | Is a local `SCH_CREDENTIALS` ABI-correct? | W15 (D-64) |
 
 #### 62.2 Important — answer before 1.0
@@ -1785,7 +1796,7 @@ remaining estimate sits.
 | A.1 Gambit Scheme | a second GC, exception model and runtime inside R |
 | A.2 CRUNCH | young toolchain, no runtime advantage once picohttpparser is used |
 | A.3 llhttp | ~8k vendored lines against 0.8k, once the framing layer was written and tested anyway (D-10) |
-| A.4 Mbed TLS everywhere | duplicates platform cryptography and trust; **still a candidate for the macOS engine only (D-63)** |
+| A.4 Mbed TLS, vendored | duplicates platform cryptography; a private copy is rejected on every platform (D-63). A bundled engine, if ever needed on macOS, comes from `zucrypt` |
 | A.5 Static OpenSSL on macOS | 4.64 MB of bundled cryptography |
 | A.6 R connection sinks | `callback` covers them (D-67) |
 | A.7 OCSP fetching, soft-fail revocation | §14.5 (D-62) |
@@ -1799,7 +1810,7 @@ R-14 is unused.
 
 | ID | Risk | L | I | Mitigation | Trigger |
 |---|---|---|---|---|---|
-| R-15 | Apple removes Secure Transport | Low | High | W13 before CRAN (D-63); the §13.1 split confines the change to the engine | removal announced → W13 becomes M1 work |
+| R-15 | Apple removes Secure Transport | Low | High | W13 evaluates Network.framework before CRAN; the §13.1 split confines any change to the engine | removal announced → W13 becomes M1 work; if Network.framework cannot replace it, the `zucrypt` engine (§13.2) |
 | R-3 | Rtools lacks `SCH_CREDENTIALS` | Certain | Medium | D-64's ABI job | ABI unprovable → TLS 1.2 on Windows, documented |
 | R-4 | Size budget blown | **Medium, rising** | High | measure per PR (W1); W7–W14 sized before starting | > 8,000 owned code lines → cut before adding; > 12,000 → revise §1 publicly |
 | R-5 | Security defect in own TLS glue, framing or DER walker | Medium | Very high | fuzzing (§43), sanitizers, review (§45) | verification bypass post-release → external audit before the next release |

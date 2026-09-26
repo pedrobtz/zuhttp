@@ -27,7 +27,7 @@ the evidence for several of the first half:
 | Revocation on OpenSSL | refused, with no way to supply a source | W10 |
 | Ctrl-C bound, leaks under interrupt | unmeasured | W11 |
 | Cancellable DNS | not bounded by `timeout` or Ctrl-C | W14 |
-| macOS engine for CRAN | Secure Transport is deprecated and NOTEs under `--as-cran` | W13 |
+| macOS engine for CRAN | native TLS decided (D-63); Secure Transport is deprecated and NOTEs under `--as-cran` | W13 |
 | Windows TLS 1.3 | blocked on an unverified ABI | W15 |
 | Performance | unmeasured against every §51.3 runtime threshold | W18 |
 | Evidence in CI | pull requests from this repository ran **no CI** until W1; the Linux certificate matrix had never run until 2026-09-25 | W1 |
@@ -131,8 +131,8 @@ for the next minor.
 
 **Order.** W18 first — measuring against `curl` is cheap and it is the last
 point at which an unfavourable number can change the plan before CRAN's
-obligations begin (R-7, R-11). W13 next: it decides what ships on macOS and
-resolves the `--as-cran` pragma NOTE. W14, W15 in parallel. W16 last.
+obligations begin (R-7, R-11). W13 next: it decides which native engine ships on
+macOS and resolves or explains the `--as-cran` pragma NOTE. W14, W15 in parallel. W16 last.
 
 **Exit criteria**
 
@@ -367,25 +367,28 @@ timeout documents.
 - [ ] M2: three R users new to the package each write a GET and a JSON POST
       in five minutes from the reference index (§61.11).
 
-### W13 — The macOS engine for CRAN
+### W13 — The native macOS engine for CRAN
 
-**Status:** not started. **Milestone:** M2. **Closes:** #16, #51, #44.
-**Implements:** D-63, §13.2. **Estimate:** spike 4 days, low; implementation
-depends on the answer.
+**Status:** not started. **Milestone:** M2. **Closes:** #16, #44.
+**Implements:** D-63, §13.2. **Estimate:** spike 3 days, low; a move to
+Network.framework would add about a week.
 
-A spike in the S0 shape: measure, do not commit.
+D-63 settles *native* TLS on macOS (2026-09-26). What remains is which native
+API: Secure Transport or Network.framework. A spike in the S0 shape: measure,
+do not commit.
 
 **Exit criteria**
 
-- [ ] Every "unmeasured" cell of design §13.2's table has a number, for
-      Network.framework and for a trimmed, hidden-visibility Mbed TLS (reusing
-      zucrypt's TF-PSA-Crypto manifest row).
-- [ ] D-63 decided in the register, with the measurements.
+- [ ] Every "unmeasured" cell of design §13.2's table has a number for
+      Network.framework: native CONNECT, `SecTrust` through the verify block,
+      cancellation latency from the poll loop, and the minimum macOS.
+- [ ] The engine choice recorded in design §13.2, with the measurements.
 - [ ] The chosen engine passes the full §50.5 matrix, CONNECT through a proxy,
       W7's timeouts and W11's cancellation tests.
-- [ ] `--as-cran` has no pragma NOTE.
-- [ ] If the answer bundles cryptography, design §2 and §56 constraint 2 are
-      amended in the same PR.
+- [ ] Either `--as-cran` has no pragma NOTE, or Secure Transport stays and
+      the NOTE is explained in `cran-comments.md`.
+- [ ] No bundled cryptography. The `zucrypt` engine route (design §13.2)
+      stays a documented later option, not part of this package.
 
 ### W14 — Cancellable DNS
 
@@ -503,7 +506,7 @@ Strict framing, redaction and the fork guard are not cuttable (§57.1).
 | 2 | W14: keep DNS uninterruptible (D-30) | the last hole in cancellation | 3 days, and the only thread |
 | 3 | W10's `crl_file` | revocation on OpenSSL | 1 day |
 | 4 | Cassettes, as unexported and experimental | downstream testing convenience | maintenance |
-| 5 | W13 finds nothing acceptable: CRAN without macOS binaries' TLS 1.3, Secure Transport kept and its NOTE argued | TLS 1.3 on macOS; a harder CRAN review | 1–2 weeks |
+| 5 | W13 finds Network.framework unsuitable: Secure Transport kept on CRAN, its NOTE explained | TLS 1.3 on macOS; a harder CRAN review | 1–2 weeks |
 
 ---
 
@@ -536,7 +539,8 @@ refused rather than silently downgraded. → **W8, W9, W15.**
 ### S9 · macOS engine and trust
 
 Partial: pinning refused; revocation criterion needs a local revoked
-certificate; the engine for CRAN undecided. → **W9, W10, W13.**
+certificate; native TLS decided (D-63), Secure Transport or Network.framework
+still to choose. → **W9, W10, W13.**
 
 ### S15 · Cancellation and unwind
 
@@ -565,12 +569,14 @@ A1 done; groups A–D remain. → **W4.**
 
 ### U3 — Spike: Mbed TLS as the macOS portable engine
 
-Folded into the wider engine spike. → **W13.**
+Dropped (D-63, 2026-09-26): macOS stays on native TLS. If a portable engine is
+ever needed, it is built on `zucrypt` (design §13.2), not a private Mbed TLS
+copy. #51 closes as superseded.
 
 ### Release scope: v0.1.0 — decided 2026-09-10
 
 A GitHub release, not a CRAN submission, because the macOS engine for CRAN
-was undecided. It still is; that is W13. → **M0.**
+was undecided. Native TLS is now decided (D-63); W13 picks the API. → **M0.**
 
 ### Stage by stage
 
@@ -610,3 +616,7 @@ changed the plan or the design.
   decompression ratio limit implemented and passed 0. → W6 (D-68, D-69).
 - **2026-09-25 — project-owned C is at 80% of its budget** (6,379 of 8,000
   code lines) with ~900 lines of planned work. R-4 is live. → W1's size gate.
+- **2026-09-26 — decision: macOS stays on native TLS (D-63).** The
+  vendored Mbed TLS option is dropped; if a portable engine is ever needed it
+  comes from `zucrypt`. W13 shrinks to Secure Transport or Network.framework,
+  and U3 (#51) is superseded.
