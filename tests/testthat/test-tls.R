@@ -106,7 +106,10 @@ test_that("revocation = TRUE does not break ordinary verification (§14.5)", {
 # neither half is empty on any CI leg.
 
 unsupported_cases <- function() {
-  pem <- tempfile(fileext = ".pem"); writeLines("", pem)
+  # PEM-shaped, so check_tls()'s PEM check passes and the capability check is
+  # what decides; the certificate itself is never parsed on this path.
+  pem <- tempfile(fileext = ".pem")
+  writeLines(c("-----BEGIN CERTIFICATE-----", "MIIB", "-----END CERTIFICATE-----"), pem)
   list(
     pins       = zu_tls(pins = "sha256//YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg="),
     tls13      = zu_tls(min_version = 13),
@@ -258,4 +261,18 @@ test_that("revocation and min_version are part of the key too", {
   # each one is asserted rather than assumed to have been included.
   expect_identical(zu_pool_stats(api)[["hits"]], 0)
   expect_identical(zu_pool_stats(api)[["misses"]], 2)
+})
+
+test_that("a DER certificate file is named as such, with the fix", {
+  # Offline. The extension is irrelevant (.crt is used for PEM and DER alike);
+  # the content decides. Before this check the backends said only "cannot
+  # read CA file".
+  pem <- tempfile(fileext = ".crt")
+  writeLines(c("-----BEGIN CERTIFICATE-----", "MIIB", "-----END CERTIFICATE-----"), pem)
+  expect_null(zuhttp:::check_pem(pem, "ca_extra"))
+  der <- tempfile(fileext = ".crt")
+  writeBin(as.raw(c(0x30, 0x82, 0x01, 0x0a, 0x02)), der)
+  expect_error(zuhttp:::check_tls(zu_tls(ca_extra = der)), "DER .*openssl x509 -inform der")
+  junk <- tempfile(fileext = ".crt"); writeLines("not a certificate", junk)
+  expect_error(zuhttp:::check_tls(zu_tls(ca_file = junk)), "`ca_file` has no PEM certificate")
 })

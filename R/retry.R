@@ -65,6 +65,16 @@ zu_retry <- function(attempts = 3L, backoff = c("exponential", "constant"),
   )
 }
 
+# One line, for print.zu_client(): its policy loop calls format() on every
+# field, and without this a policy printed as its fields pasted together
+# ("3exponential160TRUETRUE60NULL").
+#' @export
+format.zu_retry_policy <- function(x, ...) {
+  if (x$attempts <= 1L) return("off (1 attempt)")
+  paste0(x$attempts, " attempts, ", x$backoff, " backoff",
+         if (x$retry_after) ", honours Retry-After" else "")
+}
+
 #' @export
 print.zu_retry_policy <- function(x, ...) {
   cat("<zu_retry_policy>\n")

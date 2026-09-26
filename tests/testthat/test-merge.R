@@ -130,3 +130,20 @@ test_that("a URL that already has a query keeps it", {
   r <- resolved(zu_query(zu_request("GET", "https://x/?a=1"), b = "2"), zu_client())
   expect_identical(r$url, "https://x/?a=1&b=2")
 })
+
+test_that("a printed client shows policy objects as readable lines", {
+  # print.zu_client() formats every policy field; without format() methods a
+  # retry policy printed as its fields pasted together
+  # ("3exponential160TRUETRUE60NULL") and a TLS config likewise.
+  out <- capture.output(print(zu_client(
+    retry = zu_retry(attempts = 3),
+    tls   = zu_tls(ca_extra = "/etc/hosts", min_version = 12)
+  )))
+  retry <- grep("^  retry: ", out, value = TRUE)
+  tls   <- grep("^  tls: ", out, value = TRUE)
+  expect_identical(retry, "  retry: 3 attempts, exponential backoff, honours Retry-After")
+  expect_match(tls, "ca_extra /etc/hosts (adds to system trust)", fixed = TRUE)
+  expect_match(tls, "min TLS 1.2", fixed = TRUE)
+  expect_match(grep("^  retry: ", capture.output(print(zu_client())), value = TRUE),
+               "off (1 attempt)", fixed = TRUE)
+})

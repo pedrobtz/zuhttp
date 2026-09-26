@@ -1,0 +1,204 @@
+---
+title: "Seeing what happened: verbose output, traces, hooks and middleware"
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+When a request misbehaves, the first question is what actually happened on
+the wire. zuhttp answers it at several levels of detail: a printed response,
+verbose logging, a full event trace, timings and connection metadata. For
+behaviour you want every time, there are hooks, which observe, and
+middleware, which can change the request.
+
+All of it goes through one redaction policy, so none of it prints your
+credentials.
+
+```{r server}
+library(zuhttp)
+srv <- webfakes::new_app_process(
+  webfakes::httpbin_app(),
+  opts = webfakes::server_opts(remote = TRUE, enable_keep_alive = TRUE,
+                               num_threads = 4)
+)
+url <- function(path) srv$url(path)
+```
+
+## Printing is safe
+
+A printed request or response shows what you need to recognise it — method,
+URL, headers, body size, timing — with secret values replaced:
+
+```{r print}
+req <- zu_request("GET", url("/get")) |>
+  zu_query(api_key = "KEY-12345", page = 2) |>
+  zu_headers(Authorization = "Bearer s3cret", Accept = "application/json")
+req
+```
+
+The request itself is untouched: redaction happens when formatting, so the
+request above still sends the real key and token. The same applies to error
+messages and condition objects, which routinely end up in logs and bug
+reports.
+
+## Verbose output
+
+`zu_verbose()` narrates each request as it happens, on standard error so it
+never mixes with data a script writes to standard output. Add `trace = TRUE`
+to see the phases underneath — DNS, connect, request, headers, body — with
+timestamps:
+
+```{r verbose}
+chatty <- zu_client(hooks = zu_verbose(to = stdout()))
+r <- zu_get(url("/gzip"), trace = TRUE, client = chatty)
+```
+
+(`to = stdout()` is only so the output appears in this article.)
+
+## The event trace
+
+With `trace = TRUE` the same events are kept on the response, as a data
+frame you can inspect or save:
+
+```{r trace}
+r <- zu_get(url("/redirect/1"), trace = TRUE)
+zu_resp_trace(r)
+```
+
+A followed redirect appears as an event carrying the resolved target, and a
+URL is redacted as it is recorded.
+
+## Timings and connection details
+
+Every response carries its timings, in seconds. A phase that did not happen
+is `NA`, not zero — a reused connection has no DNS or connect time:
+
+```{r timings}
+api <- zu_client(base_url = srv$url())
+first  <- zu_get("get", client = api)
+second <- zu_get("get", client = api)
+rbind(first = zu_resp_timings(first), second = zu_resp_timings(second))[
+  , c("dns", "connect", "ttfb", "total")]
+```
+
+`zu_resp_connection()` answers the questions a timing cannot:
+
+```{r connection}
+str(zu_resp_connection(first))
+zu_resp_connection(second)$reused_connection
+```
+
+Over HTTPS it also reports the negotiated protocol and cipher, and which
+trust store vouched for the certificate.
+
+## What this build can do
+
+`zu_info()` is the thing to paste into a bug report: the TLS backend and trust
+store, the `zu_tls()` settings this platform supports, the default client, and
+which proxy variables are set (with any credentials in them redacted):
+
+```{r info}
+zu_info()
+```
+
+## Hooks: observe every request
+
+Hooks are functions zuhttp calls at points in a request's life:
+`before_request`, `after_response`, `before_retry` and `after_retry`. They
+see a redacted copy of the request and response, and their return value is
+ignored — a hook can log, count or time, but cannot change what is sent. A
+hook that errors is downgraded to a warning, so observability never breaks a
+request.
+
+A simple request log:
+
+```{r hooks}
+log <- data.frame()
+logging <- zu_client(
+  base_url = srv$url(),
+  hooks = zu_hooks(after_response = function(p) {
+    log <<- rbind(log, data.frame(
+      method = p$request$method,
+      url    = p$request$url,
+      status = zu_resp_status(p$response),
+      ms     = round(1000 * zu_resp_timings(p$response)[["total"]], 1)
+    ))
+  })
+)
+invisible(zu_get("get", client = logging))
+invisible(zu_post("post", json = list(a = 1), client = logging))
+invisible(zu_get("status/404", check = FALSE, client = logging))
+log
+```
+
+## Middleware: change requests and responses
+
+Middleware is a function of the request and the next step, returning a
+response. It wraps everything below it — including retries, so a middleware
+sees one logical request however many attempts it takes. The first in the
+list is the outermost.
+
+Adding a header to every request, such as a signature or a request ID:
+
+```{r middleware-header}
+add_request_id <- function(req, next_fn) {
+  req$headers <- c(req$headers, "X-Request-Id" = sprintf("req-%04d", sample(9999, 1)))
+  next_fn(req)
+}
+signed <- zu_client(base_url = srv$url(), middleware = list(add_request_id))
+zu_resp_json(zu_get("headers", client = signed))$headers[["X-Request-Id"]]
+```
+
+Middleware can also answer without calling `next_fn` at all. A minimal
+in-memory cache:
+
+```{r middleware-cache}
+cache <- new.env()
+cached <- function(req, next_fn) {
+  key <- paste(req$method, req$url)
+  if (req$method == "GET" && !is.null(cache[[key]])) return(cache[[key]])
+  resp <- next_fn(req)
+  if (req$method == "GET" && zu_resp_ok(resp)) cache[[key]] <- resp
+  resp
+}
+memo <- zu_client(base_url = srv$url(), middleware = list(cached))
+a <- zu_get("uuid", client = memo)
+b <- zu_get("uuid", client = memo)   # served from the cache
+identical(zu_resp_json(a)$uuid, zu_resp_json(b)$uuid)
+```
+
+Use a hook when you only need to watch, and middleware when you need to act.
+Policies zuhttp already has — timeouts, retries, redirects, TLS — are set
+with their own arguments, not rebuilt as middleware.
+
+## Redaction, in detail
+
+The same rules apply everywhere output leaves zuhttp: printing, error
+messages, hooks, verbose output, traces, cassettes and `zu_resp_url()`.
+
+- **Headers:** `Authorization`, `Proxy-Authorization`, `Cookie`,
+  `Set-Cookie`, `X-Api-Key` and `X-Auth-Token`.
+- **URLs:** any `user:password@` part, and the values of query parameters
+  with names like `access_token`, `api_key`, `token`, `password` or
+  `client_secret` (matched exactly, so `page_token` is left alone).
+- **Form bodies:** the same parameter names.
+
+```{r redact}
+zu_redact_url("https://user:pw@api.example.com/v1?access_token=abc&page_token=2")
+zu_is_secret_param(c("token", "page_token"))
+```
+
+Your API may use its own names. Add them for the session — they extend the
+defaults and cannot remove one:
+
+```{r redact-custom}
+old <- getOption("zuhttp.redact_params")
+zu_redact_params("ticket")
+zu_redact_url("https://api.example.com/v1?ticket=T-998877")
+options(zuhttp.redact_params = old)
+```
+
+```{r cleanup, include = FALSE}
+srv$stop()
+```
