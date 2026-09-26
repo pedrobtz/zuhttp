@@ -4,5 +4,5 @@ Comment: Coverage floors for tools/coverage/measure.R, per OS because each
  arrived without them.
 own_c_macos: 91.5
 r_macos: 90
-own_c_linux: 85
+own_c_linux: 89
 r_linux: 90
