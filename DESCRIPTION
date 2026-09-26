@@ -34,7 +34,8 @@ Depends:
 Suggests:
     jsonlite,
     parallel,
-    testthat (>= 3.1.7)
+    testthat (>= 3.1.7),
+    webfakes
 SystemRequirements: zlib; and each platform's own TLS stack, which
     ./configure selects: Schannel on Windows and Secure Transport on macOS,
     both part of the operating system, and OpenSSL >= 1.1.1 on other Unix.
@@ -42,6 +43,7 @@ SystemRequirements: zlib; and each platform's own TLS stack, which
     everywhere.
 URL: https://github.com/pedrobtz/zuhttp, https://pedrobtz.github.io/zuhttp/
 BugReports: https://github.com/pedrobtz/zuhttp/issues
+Config/Needs/website: rmarkdown, sys
 Config/testthat/edition: 3
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 8.0.0

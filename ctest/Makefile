@@ -46,12 +46,13 @@ OWN   := $(SRC)/zu_alloc.c $(SRC)/zu_buffer.c $(SRC)/zu_error.c \
          $(SRC)/zu_response.c $(SRC)/zu_uri.c $(SRC)/zu_redirect.c \
          $(SRC)/zu_inflate.c $(SRC)/zu_net.c \
          $(SRC)/zu_fork.c $(SRC)/zu_pool.c $(SRC)/zu_proxy.c $(SRC)/zu_redact.c \
-         $(SRC)/zu_sink.c $(SRC)/zu_body.c $(SRC)/zu_tls.c $(SRC)/zu_trace.c
+         $(SRC)/zu_sink.c $(SRC)/zu_body.c $(SRC)/zu_tls.c $(SRC)/zu_trace.c \
+         $(SRC)/zu_engine.c tls_none.c
 TESTS := test_main.c test_alloc.c test_buffer.c test_error.c test_time.c \
          test_stream.c test_headers.c test_request.c test_framing.c \
          test_response.c test_redirect.c test_uri.c \
          test_inflate.c test_net.c test_pool.c test_redact.c \
-         test_proxy.c test_body.c test_trace.c
+         test_proxy.c test_body.c test_trace.c test_engine_mock.c
 URISRC := UriParse.c UriParseBase.c UriResolve.c UriRecompose.c \
           UriCommon.c UriMemory.c UriIp4.c UriIp4Base.c
 VOBJ  := $(BUILD)/picohttpparser.o $(patsubst %.c,$(BUILD)/%.o,$(URISRC))

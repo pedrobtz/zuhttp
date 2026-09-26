@@ -28,6 +28,12 @@ typedef struct {
     int        inflating;
     zu_buffer  staging;     /* decoded bytes, drained to the sink each pass */
     uint64_t   raw_seen;    /* pre-decode, so LENGTH framing can find its end */
+    /* Bytes received beyond the end of this response's framing. A server
+     * does not send what was not asked for, so any surplus means the stream
+     * is out of step with its responses; the engine then refuses to pool the
+     * connection (§26.3), since the next response on it could not be trusted
+     * to be the answer to the next request. */
+    uint64_t   surplus;
     uint64_t   max_body;    /* §40; checked BEFORE the sink sees a byte */
 } zu_body_pipe;
 

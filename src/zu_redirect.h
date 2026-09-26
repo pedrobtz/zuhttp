@@ -50,6 +50,11 @@ zu_code zu_redirect_decide(const zu_redirect_policy *p, int status,
  * Returns how many were removed. */
 size_t zu_redirect_strip_credentials(zu_headers *h);
 
+/* Nonzero if `name` is one of the headers §19.2 strips on a cross-origin
+ * redirect. The engine rebuilds each hop's headers from the caller's list,
+ * so it filters with this while adding them rather than stripping after. */
+int zu_redirect_is_credential_header(const char *name);
+
 /* Loop detection (§19.4): has this (method, absolute URL) pair been seen? */
 typedef struct {
     char **seen;      /* "METHOD scheme://host:port/path" */

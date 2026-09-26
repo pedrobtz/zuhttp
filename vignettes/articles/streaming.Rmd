@@ -1,0 +1,168 @@
+---
+title: "Large responses: downloads, streaming and limits"
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+By default a response body is read into memory, which is right for an API
+reply and wrong for a 2 GB file. zuhttp has two other destinations — a file,
+and a function you supply — and in both the body is never held in memory
+whole. This article also covers compression, and the limits that stop a
+response from growing without bound.
+
+The examples use a local test server ([webfakes](https://webfakes.r-lib.org))
+with one extra endpoint, a compressed response that would inflate to 50 MB:
+
+```{r server}
+library(zuhttp)
+
+app <- webfakes::httpbin_app()
+app$get("/bomb", function(req, res) {
+  # 50 MB of zeros, gzip-compressed on the fly: about 50 KB on the wire.
+  tf <- tempfile()
+  con <- gzfile(tf, "wb"); writeBin(raw(50e6), con); close(con)
+  res$set_header("Content-Encoding", "gzip")$
+    set_type("application/octet-stream")$
+    send(readBin(tf, "raw", file.size(tf)))
+})
+srv <- webfakes::new_app_process(app)
+url <- function(path) srv$url(path)
+```
+
+## Downloading to a file
+
+`path =` writes the body straight to disk:
+
+```{r path}
+dest <- tempfile(fileext = ".bin")
+r <- zu_get(url("/bytes/10000"), path = dest)
+zu_resp_path(r)
+file.size(dest)
+length(zu_resp_raw(r))   # nothing was kept in memory
+```
+
+The file appears at `dest` only once the body has arrived whole. zuhttp
+writes to a temporary file beside it and renames at the end, so a download
+that fails part-way leaves nothing behind, and a file that was already at
+`dest` is untouched:
+
+```{r path-atomic}
+writeLines("the previous version", dest)
+
+# Five bytes spread over three seconds, and a one-second budget.
+e <- tryCatch(
+  zu_get(url("/drip?numbytes=5&duration=3"), path = dest, timeout = 1),
+  error = function(e) e
+)
+class(e)[1]
+readLines(dest)            # the old file is still intact
+list.files(dirname(dest), pattern = basename(dest))   # and no partial file
+```
+
+One thing a file sink does not do is judge the status code. A 404 page is a
+complete body, so with `check = FALSE` it is written like any other; check
+`zu_resp_ok()` before trusting the file.
+
+## Streaming to a function
+
+`callback =` receives the body in chunks as they arrive, already
+decompressed. Return `FALSE` to stop. Here the server sends five bytes over
+two seconds, and the callback sees them as they come:
+
+```{r callback}
+seen <- character()
+r <- zu_get(url("/drip?numbytes=5&duration=2"), callback = function(chunk) {
+  seen <<- c(seen, format(Sys.time(), "%H:%M:%OS1"))
+  TRUE
+})
+length(seen)      # one call per chunk
+seen
+```
+
+That makes line-oriented streams easy to process incrementally — for example
+newline-delimited JSON, parsed a record at a time without ever holding the
+whole response:
+
+```{r ndjson}
+records <- list()
+pending <- ""
+r <- zu_get(url("/stream/5"), callback = function(chunk) {
+  lines <- strsplit(paste0(pending, rawToChar(chunk)), "\n", fixed = TRUE)[[1]]
+  pending <<- if (endsWith(rawToChar(chunk), "\n")) "" else lines[length(lines)]
+  complete <- if (nzchar(pending)) lines[-length(lines)] else lines
+  for (l in complete[nzchar(complete)]) {
+    records[[length(records) + 1]] <<- jsonlite::fromJSON(l)$id
+  }
+  TRUE
+})
+unlist(records)
+```
+
+Returning `FALSE` ends the transfer cleanly — useful when the first part of a
+response already answers the question:
+
+```{r stop-early}
+chunks <- 0
+r <- zu_get(url("/drip?numbytes=10&duration=2"), callback = function(chunk) {
+  chunks <<- chunks + 1
+  chunks < 2        # stop after the second chunk
+})
+chunks
+zu_resp_status(r)   # the response is still a response
+```
+
+An error inside the callback stops the transfer too, and reaches you as the
+error you raised, not wrapped in a zuhttp one:
+
+```{r callback-error, error = TRUE}
+zu_get(url("/stream/5"), callback = function(chunk) stop("not what I expected"))
+```
+
+## Compression
+
+zuhttp asks for gzip and decompresses transparently. `zu_resp_raw()` and
+`zu_resp_text()` return the decoded body, and the timings show what actually
+crossed the wire:
+
+```{r gzip}
+r <- zu_get(url("/gzip"))
+zu_resp_json(r)$gzipped
+zu_resp_timings(r)[c("body_bytes_wire", "body_bytes_decoded")]
+```
+
+`decode = FALSE` keeps the bytes exactly as sent — what you want when
+checking them against a published checksum:
+
+```{r no-decode}
+r <- zu_get(url("/gzip"), decode = FALSE)
+zu_resp_header(r, "content-encoding")
+head(zu_resp_raw(r), 4)                 # the gzip magic number, 1f 8b
+```
+
+## Limits
+
+A response body is capped at 16 MiB by default, counted *after*
+decompression, on every destination — memory, file or callback. Raise it with
+`max_body` when you expect more:
+
+```{r max-body, error = TRUE}
+zu_get(url("/bytes/5000"), max_body = 1000)
+```
+
+The limit is enforced while decompressing, which is what makes it a defence
+and not only a setting. The `/bomb` endpoint sends about 50 KB that would
+inflate to 50 MB; zuhttp stops at the limit instead of allocating the rest:
+
+```{r bomb, error = TRUE}
+zu_get(url("/bomb"))
+```
+
+For a file you expect to be large, raise `max_body` on that request, or on a
+client used for downloads.
+
+```{r cleanup, include = FALSE}
+srv$stop()
+unlink(dest)
+```

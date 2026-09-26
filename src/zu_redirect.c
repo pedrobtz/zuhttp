@@ -28,6 +28,14 @@ size_t zu_redirect_strip_credentials(zu_headers *h) {
     return removed;
 }
 
+int zu_redirect_is_credential_header(const char *name) {
+    size_t i;
+    if (!name) return 0;
+    for (i = 0; k_credential_headers[i]; i++)
+        if (zu_ascii_casecmp(name, k_credential_headers[i]) == 0) return 1;
+    return 0;
+}
+
 zu_code zu_redirect_decide(const zu_redirect_policy *p, int status,
                            const char *method, const zu_uri *from,
                            const zu_uri *to, size_t hops_so_far,
@@ -42,7 +50,9 @@ zu_code zu_redirect_decide(const zu_redirect_policy *p, int status,
 
     if (p->max_redirects && hops_so_far >= p->max_redirects) {
         zu_error_set(err, ZU_ERR_TOO_MANY_REDIRECTS, ZU_PHASE_READ,
-                     "exceeded %lu redirects", (unsigned long)p->max_redirects);
+                     "stopped after %lu redirects, and the server sent another; "
+                     "raise `redirects` if the chain is expected",
+                     (unsigned long)p->max_redirects);
         return ZU_ERR_TOO_MANY_REDIRECTS;
     }
 

@@ -39,3 +39,4 @@ spike/macos-engine/st_probe
 src/Makevars
 src/Makevars.win
 ctest/zu_engtest_st
+docs/

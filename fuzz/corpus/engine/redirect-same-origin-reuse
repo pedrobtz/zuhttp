@@ -1,0 +1,8 @@
+HTTP/1.1 301 Moved
+Location: /n
+Content-Length: 1
+
+xHTTP/1.1 200 OK
+Content-Length: 2
+
+ok
