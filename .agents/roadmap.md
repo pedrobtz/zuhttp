@@ -460,6 +460,11 @@ cancellably (F-16).
 - [ ] The missing-OpenSSL `configure` path runs in CI and prints §47.3's
       message.
 - [ ] Cold compile time measured (§51.3).
+- [ ] `cran-comments.md` (added by #54) filled in with the platforms actually
+      checked and the final check results.
+- [ ] README install section leads with `install.packages("zuhttp")`, with the
+      GitHub install kept as the development version. On acceptance, not
+      before — until then the line would be false.
 - [ ] Submitted; accepted.
 
 ### W17 — Fuzzing soak
