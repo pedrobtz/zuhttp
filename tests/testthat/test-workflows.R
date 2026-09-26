@@ -145,9 +145,13 @@ test_that("8. a request timeout overrides the client's", {
   # §31.9's third rule: NULL is not "the client's value", it is the package's.
   zu_get("https://example.com/reset", timeout = NULL, client = api)
 
+  # What the transport sees is the attempt's share of the budget (§24.3):
+  # the merged value less whatever has elapsed, so compared to within the
+  # few milliseconds a mock takes, and never above it.
   got <- vapply(rec$calls(), function(r) r$resolved$timeout, numeric(1))
-  expect_identical(got, c(5, 30, 30))
-  expect_identical(got[[3]], zuhttp:::zu_defaults()$timeout)
+  expect_equal(got, c(5, 30, 30), tolerance = 0.01)
+  expect_true(all(got <= c(5, 30, 30)))
+  expect_equal(got[[3]], zuhttp:::zu_defaults()$timeout, tolerance = 0.01)
 })
 
 test_that("9. redirect and error inspection", {

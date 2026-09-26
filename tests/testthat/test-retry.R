@@ -252,6 +252,63 @@ test_that("the total timeout bounds the whole call, retries included", {
   expect_lt(c1$n(), 20L)
 })
 
+test_that("each attempt is given what is left of the budget, not all of it (§24.3)", {
+  # The test above passes whatever each attempt is given, because its mock
+  # returns instantly: only the sleep was ever budget-checked. Here every
+  # attempt takes real time, and the budget each one is handed is recorded.
+  # Handing each the full `timeout` let three slow attempts run for three
+  # times what the caller asked.
+  seen <- numeric()
+  slow <- counting(function(n, req) {
+    seen[[n]] <<- req$resolved$timeout
+    Sys.sleep(0.3)
+    zu_response(503L)
+  })
+  cli <- zu_client(transport = slow$transport, check = FALSE,
+                   retry = zu_retry(attempts = 3, base = 0.01, jitter = FALSE))
+  invisible(zu_get("https://h/x", timeout = 2, client = cli))
+
+  expect_identical(slow$n(), 3L)
+  expect_lte(seen[[1]], 2)
+  expect_lt(seen[[2]], 2 - 0.25)
+  expect_lt(seen[[3]], seen[[2]] - 0.25)
+  expect_true(all(seen > 0))
+})
+
+test_that("attempt_timeout bounds each attempt within the budget (§24.3)", {
+  seen <- numeric()
+  c1 <- counting(function(n, req) { seen[[n]] <<- req$resolved$timeout; zu_response(503L) })
+  cli <- zu_client(transport = c1$transport, check = FALSE,
+                   retry = zu_retry(attempts = 2, base = 0.01, jitter = FALSE,
+                                    attempt_timeout = 0.25))
+  resp <- zu_get("https://h/x", timeout = 30, client = cli)
+  expect_identical(seen, c(0.25, 0.25))
+  # The request the caller gets back still says what the caller asked for.
+  expect_identical(resp$request$resolved$timeout, 30)
+})
+
+test_that("attempt_timeout reaches the engine: a stalled server is retried, not waited on (§24.3)", {
+  skip_on_cran()
+  skip_if(getRversion() < "4.0.0", "serverSocket() is R 4.0")
+  # A socket that listens and never accepts: the kernel completes the
+  # handshake, the request is sent, and no response ever comes. Without the
+  # per-attempt bound the first attempt waits out the whole 20 s budget.
+  port <- sample(20000:59000, 1L)
+  srv <- serverSocket(port)
+  on.exit(close(srv), add = TRUE)
+  cli <- zu_client(pool = NULL,
+                   retry = zu_retry(attempts = 2, base = 0.01, jitter = FALSE,
+                                    attempt_timeout = 0.5))
+  t0 <- proc.time()[["elapsed"]]
+  e <- tryCatch(zu_get(sprintf("http://127.0.0.1:%d/", port), timeout = 20,
+                       client = cli),
+                zu_error = function(e) e)
+  elapsed <- proc.time()[["elapsed"]] - t0
+  expect_s3_class(e, "zu_timeout_error")
+  expect_gt(elapsed, 0.9)     # both attempts ran...
+  expect_lt(elapsed, 5)       # ...and neither waited for the budget
+})
+
 test_that("a backoff that fits the budget is actually slept", {
   # The mirror of the test above: proving the budget is respected is only
   # half of it, since "never sleeps at all" would also pass that one.

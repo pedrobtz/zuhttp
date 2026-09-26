@@ -511,7 +511,7 @@ redact_request <- function(req) {
   # A form body carries credentials as often as a header does.
   if (identical(req$body_kind, "form") && !is.null(req$body))
     req$body <- charToRaw(zu_redact_form(rawToChar(req$body)))
-  req
+  redact_request_proxy(req)
 }
 
 #' @export

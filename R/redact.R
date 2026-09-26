@@ -76,6 +76,26 @@ zu_redact_url <- function(url) {
   }, character(1), USE.NAMES = FALSE)
 }
 
+# §42.1 applied to a proxy setting, which is a URL and routinely carries
+# userinfo. The engine also accepts a bare "user:pw@host:port", as curl does
+# (zu_proxy_parse() supplies "http://"); without a scheme the URL redactor
+# cannot tell userinfo from a path, so the same default is supplied here and
+# taken off again. `FALSE`, `NULL` and a reset marker are settings, not URLs,
+# and pass through.
+redact_proxy <- function(proxy) {
+  if (!is.character(proxy) || length(proxy) != 1L || is.na(proxy)) return(proxy)
+  if (grepl("://", proxy, fixed = TRUE)) return(zu_redact_url(proxy))
+  sub("^http://", "", zu_redact_url(paste0("http://", proxy)))
+}
+
+# The two places a request carries a proxy: the policy the caller set on it,
+# and the resolved policy zu_perform() merged in from the client.
+redact_request_proxy <- function(req) {
+  if (!is.null(req$policy$proxy))   req$policy$proxy   <- redact_proxy(req$policy$proxy)
+  if (!is.null(req$resolved$proxy)) req$resolved$proxy <- redact_proxy(req$resolved$proxy)
+  req
+}
+
 #' Redact a form-encoded request body
 #'
 #' @param body A single `application/x-www-form-urlencoded` string.

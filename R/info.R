@@ -74,7 +74,7 @@ default_client_report <- function(cl) {
                             cl$pool$idle_timeout_ms / 1000),
     proxy    = if (isFALSE(cl$proxy)) "disabled (proxy = FALSE)"
                else if (is.null(cl$proxy)) "from the environment"
-               else zu_redact_url(cl$proxy)
+               else redact_proxy(cl$proxy)
   )
 }
 

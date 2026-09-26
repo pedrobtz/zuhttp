@@ -126,6 +126,7 @@ accepted when that work package's PR merges.
 | D-72 | A **connection seam**, `zu_get_opts.dial`: NULL opens real TCP (always, in the package); set, it supplies every connection while everything above it runs for real. It is how the offline suite and fuzz target 10 drive the whole engine | Accepted 2026-09-26 (#58) | 50.1 | — |
 | D-73 | Bytes received **past a response's framing** — after `Content-Length`, after a chunked body's trailers, or on a bodiless response — keep that connection out of the pool | Accepted 2026-09-26 (#58) | 26.3 | — |
 | D-74 | The interrupt checkpoint runs `R_CheckUserInterrupt()` under `R_tryCatch` and keeps the condition: a user interrupt becomes `zu_interrupted_error`; any other error raised there (a time limit) is re-raised unchanged after the engine unwinds. Its context lives in a per-call slot, never in a pooled stream | Accepted 2026-09-26 (#57) | 25.2 | — |
+| D-75 | A client derived with **different `pool` settings gets a pool of its own**; any other derived client shares its parent's. One shared slot made parent and child each rebuild the pool the other had built, dropping every idle connection on each alternation | Accepted 2026-09-26 (#74) | 26.5, 31.10 | — |
 
 ---
 
@@ -1005,7 +1006,10 @@ well as a failure.
 A client's value holds only pool **configuration**; the live pool hangs off an
 attribute environment. A pointer that did not survive `readRDS()` is detected
 by tag plus NULL address and rebuilt lazily. `zu_client_update()` copies share
-the parent's pool, which the §26.1 key makes safe.
+the parent's pool, which the §26.1 key makes safe — unless the copy changes
+`pool`, in which case it gets a pool of its own (D-75): a pool built to one
+configuration cannot serve a client asking for another, and a shared slot
+would rebuild it on every switch between the two.
 
 ### 27. Streaming Model
 
@@ -1196,8 +1200,9 @@ value overrides.
 
 #### 31.10 Derived clients
 
-`zu_client_update(client, …)` returns a new client and shares the pool
-(§26.5).
+`zu_client_update(client, …)` returns a new client and shares the pool unless
+it changes `pool` (§26.5, D-75). A field set to `NULL` is reset to the package
+default by the §31.9 rule; it is never removed from the client.
 
 #### 31.11 Client and request naming
 
@@ -1450,7 +1455,9 @@ definition.
 #### 42.1 What is redacted
 
 Headers `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`,
-`X-Api-Key`, `X-Auth-Token` and a configurable list; URL userinfo; query and
+`X-Api-Key`, `X-Auth-Token` and a configurable list; URL userinfo, including a
+proxy setting's, in either spelling the engine accepts (`http://u:p@host:port`
+or a bare `u:p@host:port`); query and
 form parameters named `access_token`, `api_key`, `apikey`, `signature`, `sig`,
 `client_secret`, `password`, `passwd`, `pwd`, `secret`, `token`,
 `refresh_token`, `id_token`, `private_key`, `auth_token`, `session_token`

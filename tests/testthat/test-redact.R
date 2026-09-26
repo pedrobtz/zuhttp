@@ -294,6 +294,42 @@ test_that("the canary does not reach zu_info() (§39, §42.2)", {
   expect_false(any(grepl(CANARY, capture.output(print(i)), fixed = TRUE)))
 })
 
+test_that("the canary does not leak through a configured proxy URL (§42.1, §42.2)", {
+  # The proxy is a policy value like `timeout`, so every egress that shows
+  # policy showed it verbatim: a printed client, a printed request, the
+  # request a condition carries and a hook payload. Both spellings the engine
+  # accepts are covered; the schemeless one is what zu_redact_url() alone
+  # misses, since without "://" it cannot tell userinfo from a path.
+  for (px in c(paste0("http://u:", CANARY, "@corp:3128"),
+               paste0("u:", CANARY, "@corp:3128"))) {
+    seen <- list()
+    cli <- zu_client(
+      proxy     = px,
+      transport = zu_mock_transport(function(r) zu_response(500L)),
+      hooks     = zu_hooks(before_request = function(p) seen$before <<- p,
+                           after_response = function(p) seen$after  <<- p))
+    expect_false(any(grepl(CANARY, capture.output(print(cli)), fixed = TRUE)),
+                 info = paste("printed client,", px))
+
+    # Set on the client (resolved) and on the request (policy): both travel.
+    e1 <- tryCatch(zu_get("https://h/x", client = cli), zu_error = function(e) e)
+    e2 <- tryCatch(zu_get("https://h/x", proxy = px, client = cli),
+                   zu_error = function(e) e)
+    expect_s3_class(e1, "zu_http_server_error")
+    expect_no_canary(e1, "a condition from a client with a proxy")
+    expect_no_canary(e2, "a condition from a request with a proxy")
+    expect_no_canary(seen$before, "the before_request hook payload")
+    expect_no_canary(seen$after, "the after_response hook payload")
+
+    old <- zu_set_default_client(cli)
+    expect_no_canary(zu_info()$default_client, "zu_info()'s default client")
+    zu_set_default_client(old)
+
+    # Redaction is for display: the client still holds what it will dial.
+    expect_identical(cli$proxy, px)
+  }
+})
+
 test_that("the canary does not reach verbose output (§42.2, §42.4)", {
   # The last egress in §42.2's table, and the one §42.4 names first. It is
   # covered structurally rather than carefully: zu_verbose() is built on §35.3

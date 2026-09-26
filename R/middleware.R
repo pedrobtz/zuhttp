@@ -75,6 +75,7 @@ redact_payload <- function(p) {
   if (!is.null(p$request)) {
     p$request$url     <- zu_redact_url(p$request$url %||% "")
     p$request$headers <- zu_redact_headers_for_display(p$request$headers)
+    p$request         <- redact_request_proxy(p$request)
   }
   if (!is.null(p$response)) {
     p$response$url     <- zu_redact_url(p$response$url %||% "")
@@ -83,6 +84,7 @@ redact_payload <- function(p) {
       p$response$request$url     <- zu_redact_url(p$response$request$url %||% "")
       p$response$request$headers <-
         zu_redact_headers_for_display(p$response$request$headers)
+      p$response$request <- redact_request_proxy(p$response$request)
     }
   }
   p
