@@ -71,6 +71,17 @@ typedef struct {
     zu_tick_fn  tick;            /* §25.1 interrupt seam; may be NULL */
     void       *tick_ctx;
 
+    /* §50.1 connection seam. NULL opens a real TCP connection. Set, it is
+     * called instead of zu_net_connect() for every new connection — to the
+     * origin, or to the proxy when one is in use — and must return a stream
+     * or an error. Everything above it runs for real: proxy routing, the
+     * pool, the CONNECT tunnel, framing, redirects, decoding and sinks. That
+     * is what lets the offline suite and the fuzzer drive the whole engine
+     * with scripted bytes; nothing in the package sets it. */
+    zu_code   (*dial)(void *ctx, const char *host, uint16_t port,
+                      zu_stream **out, zu_error *err);
+    void       *dial_ctx;
+
     /* §26. NULL means "no pooling": every hop opens and closes its own
      * connection, which is the pre-S16 behaviour and still the right one for
      * a one-shot request. The pool is NOT owned here — it outlives any single

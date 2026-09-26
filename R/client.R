@@ -24,7 +24,10 @@
 zu_defaults <- function() {
   list(
     timeout    = 30,
-    redirects  = 1L,
+    # §19.4. Was 1, the §63.2 slice's value, which made an ordinary
+    # http -> https -> www chain fail once an exhausted chain began to raise
+    # (zu_too_many_redirects) instead of returning its last 3xx.
+    redirects  = 10L,
     verify     = TRUE,
     max_body   = 16 * 1024^2,
     user_agent = NULL,

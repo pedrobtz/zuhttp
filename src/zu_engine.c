@@ -30,7 +30,7 @@ void zu_get_opts_init(zu_get_opts *o) {
     if (!o) return;
     memset(o, 0, sizeof *o);
     o->timeout_ms    = ZU_DEFAULT_TIMEOUT_MS;
-    o->max_redirects = 1;               /* §63.2: the slice follows one */
+    o->max_redirects = 10;              /* §19.4; the R layer passes its own */
     o->verify        = 1;               /* never 0 by default (§14.1) */
     o->max_body      = ZU_DEFAULT_MAX_BODY;
 }
@@ -65,6 +65,19 @@ static char *dup_str(const char *s) {
 }
 
 /* "scheme://host[:port]path?query", never with userinfo (§42.1). */
+/* RFC 9112 §3.2: Host is the authority — the host, bracketed if it is an
+ * IPv6 literal, plus ":port" unless the port is the scheme's default. Taking
+ * cur.host alone dropped the port, so a server on :8080 saw `Host: h`. */
+static int host_header(const zu_uri *u, char *out, size_t cap) {
+    int v6 = strchr(u->host, ':') != NULL;
+    int n;
+    if (u->port != zu_uri_default_port(u->scheme))
+        n = snprintf(out, cap, v6 ? "[%s]:%u" : "%s:%u", u->host, (unsigned)u->port);
+    else
+        n = snprintf(out, cap, v6 ? "[%s]" : "%s", u->host);
+    return n > 0 && (size_t)n < cap;
+}
+
 static char *url_of(const zu_uri *u) {
     zu_buffer b;
     const char *s = NULL;
@@ -348,10 +361,12 @@ static zu_code open_stream(zu_stream **out, const zu_uri *u,
     /* Through a proxy the socket goes to the PROXY, not the origin. For plain
      * HTTP that is the whole of it — the request then uses absolute-form
      * (§20.3) and the proxy does the rest. */
-    if (via_proxy)
-        rc = zu_net_connect(&tcp, px->host, px->port, dl, &nopts, err);
-    else
-        rc = zu_net_connect(&tcp, u->host, u->port, dl, &nopts, err);
+    {
+        const char *host = via_proxy ? px->host : u->host;
+        uint16_t    port = via_proxy ? px->port : u->port;
+        rc = o->dial ? o->dial(o->dial_ctx, host, port, &tcp, err)
+                     : zu_net_connect(&tcp, host, port, dl, &nopts, err);
+    }
     if (rc != ZU_OK) return rc;
     /* dns and connect are filled by zu_net, which is the only layer that can
      * see the boundary between them. */
@@ -475,6 +490,10 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
     size_t body_len    = req ? req->body_len : 0;
     size_t n_hdr       = req ? req->n_headers : 0;
     int is_head        = (strcmp(method, "HEAD") == 0);
+    /* §19.2: set once a redirect crosses origins, and never cleared — a chain
+     * that later returns to the first origin does not get the credentials
+     * back, because the hop in between chose where to send us. */
+    int strip_creds    = 0;
 
     if (!out || !url) return ZU_ERR_URL;
     zu_env_system(&sysenv);
@@ -514,6 +533,8 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
         zu_body_pipe pipe;
         zu_sink *hop_sink = NULL;
         size_t consumed = 0;
+        uint64_t surplus = 0;
+        char hosthdr[300];
 
         memset(&pipe, 0, sizeof pipe);
         /* Pre-set to the §26.3 safe default. `fr` is only really filled once
@@ -540,7 +561,13 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
         zu_request_init(&rq);
         rq.method = method;
         rq.target = cur.path_query;
-        rq.host   = cur.host;
+        if (!host_header(&cur, hosthdr, sizeof hosthdr)) {
+            zu_error_set(err, ZU_ERR_URL, ZU_PHASE_NONE, "host name too long");
+            zu_request_free(&rq); zu_stream_free(s);
+            zu_uri_free(&cur); zu_result_free(out); zu_proxy_free(&px);
+            return ZU_ERR_URL;
+        }
+        rq.host   = hosthdr;
         rq.form   = ZU_TARGET_ORIGIN;
         /* §20.3: plain HTTP through a proxy uses absolute-form, so the proxy
          * knows which origin to reach. HTTPS does not — by then we are inside
@@ -605,6 +632,13 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
          * validated here, which is what stops a header carrying a CRLF from
          * becoming a second request (§17.1). */
         for (hi = 0; hi < n_hdr; hi++) {
+            /* §19.2: after a cross-origin hop the caller's credentials stay
+             * behind. This loop rebuilds the headers from the caller's list
+             * on every hop, which is why the filter has to be here: until
+             * 2026-09-26 nothing read dec.strip_credentials at all, and an
+             * Authorization header followed a redirect to any origin. */
+            if (strip_creds && zu_redirect_is_credential_header(req->header_names[hi]))
+                continue;
             rc = zu_headers_add_str(&rq.headers, req->header_names[hi],
                                     req->header_values[hi]);
             if (rc != ZU_OK) {
@@ -684,7 +718,7 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
              * bytes are bounded by ZU_MAX_REDIRECT_BODY, so this is not a
              * route back to buffering a large body. */
             int may_follow = zu_status_is_redirect(resp.status) &&
-                             hops < (size_t)o->max_redirects &&
+                             o->max_redirects > 0 &&
                              zu_headers_get(&resp.headers, "Location") != NULL;
             uint64_t cap = o->max_body ? o->max_body : ZU_DEFAULT_MAX_BODY;
 
@@ -710,6 +744,7 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
                 zu_trace_add(o->trace, ZU_EV_BODY_CHUNK, "body",
                              hop_sink ? hop_sink->written : 0);
             }
+            surplus = pipe.surplus;
             zu_body_pipe_free(&pipe);
         }
         zu_buf_free(&raw);
@@ -730,6 +765,13 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
                 rc = ZU_OK;
                 reason = ZU_NOREUSE_CANCELLED;
             }
+            /* The server sent bytes past this response's framing. They were
+             * dropped, not delivered, but the connection is now out of step:
+             * whatever arrives next on it may not answer the next request.
+             * The §26.2 probe would usually catch it, but only if the bytes
+             * arrive before the next request is written. */
+            if (rc == ZU_OK && surplus > 0 && reason == ZU_REUSE_OK)
+                reason = ZU_NOREUSE_FRAMING;
             done_with_stream(o, &cur, &px, s, reason);
         }
 
@@ -747,7 +789,11 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
         zu_response_free(&resp);
 
         /* --- redirect? --- */
-        if (zu_status_is_redirect(out->status) && hops < (size_t)o->max_redirects) {
+        /* `redirects = 0` means "give me the 3xx". Any other limit is a
+         * limit: zu_redirect_decide() raises zu_too_many_redirects once it is
+         * reached (§19.4). Testing `hops < max` here used to skip that call,
+         * so an exhausted chain returned its last 3xx as if it were final. */
+        if (zu_status_is_redirect(out->status) && o->max_redirects > 0) {
             const char *loc = zu_headers_get(&out->headers, "Location");
             zu_uri next;
             zu_redirect_policy pol;
@@ -775,6 +821,7 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
                  * expects. */
                 if (dec.rewrite_to_get) { method = "GET"; is_head = 0; }
                 if (dec.drop_body) { body = NULL; body_len = 0; }
+                if (dec.strip_credentials) strip_creds = 1;
                 zu_uri_free(&cur);
                 cur = next;
                 hops++;

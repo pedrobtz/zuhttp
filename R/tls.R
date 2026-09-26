@@ -72,6 +72,20 @@ zu_tls <- function(ca_file = NULL, ca_extra = NULL, pins = NULL,
   )
 }
 
+# One line, for print.zu_client() — see format.zu_retry_policy(). Says
+# "replaces" and "adds to", as §14.2 asks of every place the two appear.
+#' @export
+format.zu_tls_config <- function(x, ...) {
+  parts <- c(
+    if (!is.null(x$ca_file))  paste0("ca_file ", x$ca_file, " (replaces system trust)"),
+    if (!is.null(x$ca_extra)) paste0("ca_extra ", x$ca_extra, " (adds to system trust)"),
+    if (length(x$pins))       paste0(length(x$pins), " pin(s)"),
+    if (x$revocation)         "revocation on",
+    if (x$min_version)        paste0("min TLS 1.", x$min_version - 10L)
+  )
+  if (length(parts)) paste(parts, collapse = "; ") else "system trust"
+}
+
 #' @export
 print.zu_tls_config <- function(x, ...) {
   cat("<zu_tls_config>\n")
@@ -92,6 +106,24 @@ print.zu_tls_config <- function(x, ...) {
 # zu_tls() itself: a zu_tls_config is data that can be saved and loaded on
 # another platform, so the check belongs where the backend is known — the
 # request. The capability table lives in C (zu_tls_backend_caps), not here.
+# Every backend reads PEM; none reads DER. A certificate file's extension says
+# nothing about which it is (.crt and .cer are both used for both), and the
+# backends' own errors ("cannot read CA file") do not say which was wrong, so
+# the file is checked here, where the message can say how to convert it.
+check_pem <- function(path, arg) {
+  bytes <- readBin(path, "raw", n = min(file.size(path), 1e6))
+  if (length(grepRaw("-----BEGIN CERTIFICATE-----", bytes, fixed = TRUE)))
+    return(invisible())
+  der <- length(bytes) > 1L && bytes[1L] == as.raw(0x30)
+  stop("`", arg, "` has no PEM certificate in it: ", path, "\n",
+       if (der) paste0(
+         "  It looks like a DER (binary) certificate. zuhttp reads PEM, the text\n",
+         "  form starting '-----BEGIN CERTIFICATE-----'. Convert it with:\n",
+         "    openssl x509 -inform der -in ", path, " -out cert.pem")
+       else "  Expected a PEM file containing '-----BEGIN CERTIFICATE-----'.",
+       call. = FALSE)
+}
+
 check_tls <- function(tls) {
   if (is.null(tls)) return(NULL)
   if (!inherits(tls, "zu_tls_config"))
@@ -100,6 +132,7 @@ check_tls <- function(tls) {
     p <- tls[[f]]
     if (!is.null(p) && !file.exists(p))
       stop("`", f, "` does not exist: ", p, call. = FALSE)
+    if (!is.null(p)) check_pem(p, f)
   }
   .Call(C_zu_tls_check, unclass(tls))
   tls

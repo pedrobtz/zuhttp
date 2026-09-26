@@ -405,19 +405,61 @@ static SEXP C_zu_is_secret_param(SEXP names, SEXP extra_params) {
  *
  * That is §25.2's discipline (b) — no native allocation lives only in a C
  * local across a checkpoint — enforced by never letting a longjmp cross one. */
-static void check_interrupt_inner(void *ignored) {
+/*
+ * R_tryCatch, not R_ToplevelExec (2026-09-26). The checkpoint can raise more
+ * than a user interrupt: setTimeLimit() and R.utils::withTimeout() raise
+ * "reached elapsed time limit" from inside R_CheckUserInterrupt(). Under
+ * R_ToplevelExec that error was printed to the console and then discarded,
+ * and the request reported "interrupted by the user" — so a withTimeout()
+ * around a zuhttp call never saw the error it was waiting for. Catching the
+ * condition keeps it, and C_zu_perform re-raises it unchanged once the engine
+ * has unwound; only a real interrupt becomes zu_interrupted_error. */
+typedef struct { SEXP caught; } tick_ctx;
+static SEXP g_tick_classes = NULL;   /* c("interrupt", "error"), preserved */
+
+/* The tick of the request running now. Not the stream's tick_ctx: a pooled
+ * connection keeps the zu_net_opts of the request that OPENED it, so a
+ * context stored there points into a .Call frame that has already returned
+ * the next time the connection is used — a dangling stack pointer read on
+ * every poll tick of a reused connection (found 2026-09-26). C_zu_perform
+ * sets this on entry and restores the previous value before it returns or
+ * raises, which also keeps a nested request from a callback (§27.4) right. */
+static tick_ctx *g_tick_current = NULL;
+
+static SEXP tick_body(void *ignored) {
     (void)ignored;
     R_CheckUserInterrupt();
+    return R_NilValue;
 }
 
+static SEXP tick_handler(SEXP cond, void *data) {
+    tick_ctx *t = (tick_ctx *)data;
+    if (!t->caught) { R_PreserveObject(cond); t->caught = cond; }
+    return R_NilValue;
+}
+
+static void tick_release(tick_ctx *t);
+
 static int r_interrupt_tick(void *ctx) {
-    (void)ctx;
+    tick_ctx local = { NULL };
+    tick_ctx *t = g_tick_current ? g_tick_current : &local;
+    int hit;
+    (void)ctx;   /* deliberately unused: see g_tick_current */
 #if defined(_WIN32)
     /* §25.4: in Rgui and RStudio the interrupt is delivered through the event
      * loop, so it is never observed unless the loop is pumped. */
     R_ProcessEvents();
 #endif
-    return R_ToplevelExec(check_interrupt_inner, NULL) ? 0 : 1;
+    if (t->caught) return 1;
+    R_tryCatch(tick_body, NULL, g_tick_classes, tick_handler, t, NULL, NULL);
+    hit = t->caught != NULL;
+    if (t == &local) tick_release(t);   /* nobody to hand it to */
+    return hit;
+}
+
+/* Drop a condition the tick kept but will not re-raise. */
+static void tick_release(tick_ctx *t) {
+    if (t->caught) { R_ReleaseObject(t->caught); t->caught = NULL; }
 }
 
 /* --- §63.2 the vertical slice --------------------------------------------- */
@@ -552,6 +594,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
                          SEXP path, SEXP callback, SEXP proxy, SEXP tls,
                          SEXP trace, SEXP redact_params) {
     zu_get_opts o;
+    tick_ctx tick = { NULL };
     zu_req_spec spec;
     cb_ctx cb;
     zu_sink cb_sink;
@@ -676,10 +719,15 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
     /* §25.1: a checkpoint at most one tick apart, and never inside a blocking
      * call. 100 ms is the design's ceiling. */
     o.tick     = r_interrupt_tick;
-    o.tick_ctx = NULL;
+    o.tick_ctx = NULL;       /* never per-request state in a pooled object */
 
     zu_error_clear(&e);
-    rc = zu_engine_perform(&r, u, &spec, &o, &e);
+    {
+        tick_ctx *prev = g_tick_current;
+        g_tick_current = &tick;
+        rc = zu_engine_perform(&r, u, &spec, &o, &e);
+        g_tick_current = prev;
+    }
 
     /* §27.3: the loop has unwound and every C resource it held is released,
      * so this is the first point at which raising is safe. Re-signal the
@@ -688,6 +736,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
     if (cb.caught) {
         SEXP cond = cb.caught;
         SEXP call;
+        tick_release(&tick);
         cb.caught = NULL;
         zu_result_free(&r);
         PROTECT(cond);
@@ -713,6 +762,21 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
          * cancellation reaching here is always that (§34.1 separates
          * zu_interrupted_error from zu_cancelled_error because a person
          * pressing Ctrl-C and a programmatic stop want different handling). */
+        /* Not an interrupt: an error R raised at the checkpoint, such as a
+         * time limit. Re-raise it as it was; the sink above is already
+         * discarded and the engine holds nothing. */
+        if (rc == ZU_ERR_CANCELLED && tick.caught &&
+            !Rf_inherits(tick.caught, "interrupt")) {
+            SEXP cond = PROTECT(tick.caught);
+            SEXP call;
+            R_ReleaseObject(cond);
+            tick.caught = NULL;
+            call = PROTECT(Rf_lang2(Rf_install("stop"), cond));
+            Rf_eval(call, R_GlobalEnv);
+            UNPROTECT(2);
+            return R_NilValue;   /* not reached */
+        }
+        tick_release(&tick);
         if (rc == ZU_ERR_CANCELLED) {
             zu_error err2 = e;
             err2.code = ZU_ERR_INTERRUPTED;
@@ -957,6 +1021,10 @@ void attribute_visible R_init_zuhttp(DllInfo *dll) {
     /* Interned once. Pointer identity against this symbol is what tells our
      * external pointers from another package's (§26.5). */
     zu_pool_tag = Rf_install("zu_pool");
+    g_tick_classes = Rf_allocVector(STRSXP, 2);
+    R_PreserveObject(g_tick_classes);
+    SET_STRING_ELT(g_tick_classes, 0, Rf_mkChar("interrupt"));
+    SET_STRING_ELT(g_tick_classes, 1, Rf_mkChar("error"));
     R_registerRoutines(dll, NULL, call_methods, NULL, NULL);
     R_useDynamicSymbols(dll, FALSE);
     R_forceSymbols(dll, TRUE);

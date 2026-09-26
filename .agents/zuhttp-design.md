@@ -111,7 +111,7 @@ accepted when that work package's PR merges.
 | D-57 | Timeout phases are **`connect`**, **`read`**, **`write`** and **`total`**. `connect` covers TCP and the TLS handshake (per hop, elapsed); `read`/`write` are inactivity timers; `tls` and `pool` are dropped | Proposed | 24.1 | W7 |
 | D-58 | Defaults: `total = 30` s, `connect = 10` s, `read`/`write` unset (bounded by `total`). §24.5's 300 s is rejected: 30 s is what shipped and what an API client wants | Proposed | 24.5 | W7 |
 | D-59 | DNS becomes cancellable: `getaddrinfo()` on a **detached helper thread** that never touches R, handing its result back through a pipe the poll loop watches. A scoped exception to §29.1, the same model as libcurl's threaded resolver | Proposed | 8.4, 25.4, 29.1 | W14 |
-| D-60 | SubjectPublicKeyInfo is extracted by **one project-owned, bounded DER walker** shared by Secure Transport and Schannel; the digest comes from the platform (CommonCrypto, CNG). The walker is fuzz target 10 | Proposed | 14.4 | W9 |
+| D-60 | SubjectPublicKeyInfo is extracted by **one project-owned, bounded DER walker** shared by Secure Transport and Schannel; the digest comes from the platform (CommonCrypto, CNG). The walker is fuzz target 11 | Proposed | 14.4 | W9 |
 | D-61 | Windows custom trust: `ca_file` builds a chain engine with an exclusive root store; `ca_extra` evaluates against the system engine first and, on an untrusted-root result only, against an exclusive-root engine over the extra store | Proposed | 14.3 | W8 |
 | D-62 | Revocation stays **platform-provided**. OpenSSL refuses `revocation = TRUE` unless `zu_tls(crl_file = )` supplies CRLs; zuhttp never fetches OCSP or CRLs, and offers no soft-fail mode | Proposed | 14.5 | W10 |
 | D-63 | macOS uses **Network.framework**, Apple's native, non-deprecated TLS, with trust still from our `SecTrustEvaluateWithError`. Direct HTTPS works on every macOS that R supports; HTTPS **through a proxy requires macOS 14**. Secure Transport is removed rather than kept as a fallback, because keeping it would keep the `--as-cran` NOTE. zuhttp vendors no TLS library; a bundled engine, if ever needed, comes from **`zucrypt`** | Accepted 2026-09-26 (maintainer; measured in `spike/network-framework/`) | 13.2, 5.1, 56 | W13 |
@@ -120,9 +120,12 @@ accepted when that work package's PR merges.
 | D-65 | Export surface: exactly the **17** removals in §53, leaving **58** functions at 0.2.0 (75 today); every condition also inherits **`zuhttp_error`**, directly above `error` | Proposed | 34.1, 53 | W3 |
 | D-66 | Internal C identifiers become `zuh_` / `ZUH_`; only `R_init_zuhttp` is exported from the shared object | Proposed | 1.1, 11 | W2 |
 | D-67 | No asynchronous or concurrent requests before 1.0 (answers §62 Q15 for 0.x). R connection sinks (§27.5) are **rejected** — `callback` covers them. Client certificates are post-1.0, on demand | Proposed | 27.5, 30, 38 | — |
-| D-68 | Default `redirects` becomes **10**, as §19.4 always said; the shipped default of 1 is a leftover of the §63.2 slice | Proposed | 19.4, 31.9 | W6 |
+| D-68 | Default `redirects` is **10**, as §19.4 always said; the shipped default of 1 was a leftover of the §63.2 slice. An exhausted chain raises `zu_too_many_redirects`; `redirects = 0` returns the 3xx | Accepted 2026-09-26 (#55) | 19.4, 31.9 | — |
 | D-69 | The decompression-ratio limit is enforced by default (`max_decompression_ratio = 1000`), as §21.4 requires; today it is implemented in `zu_inflate.c` and switched off at `zu_body.c:35` | Proposed | 21.4, 40 | W6 |
 | D-70 | Process: CI runs on every pull request; one PR per work package; a work package's test lands before or with it, `skip()`ped with the package named until then | Proposed | 50 | W1 |
+| D-72 | A **connection seam**, `zu_get_opts.dial`: NULL opens real TCP (always, in the package); set, it supplies every connection while everything above it runs for real. It is how the offline suite and fuzz target 10 drive the whole engine | Accepted 2026-09-26 (#58) | 50.1 | — |
+| D-73 | Bytes received **past a response's framing** — after `Content-Length`, after a chunked body's trailers, or on a bodiless response — keep that connection out of the pool | Accepted 2026-09-26 (#58) | 26.3 | — |
+| D-74 | The interrupt checkpoint runs `R_CheckUserInterrupt()` under `R_tryCatch` and keeps the condition: a user interrupt becomes `zu_interrupted_error`; any other error raised there (a time limit) is re-raised unchanged after the engine unwinds. Its context lives in a per-call slot, never in a pooled stream | Accepted 2026-09-26 (#57) | 25.2 | — |
 
 ---
 
@@ -144,8 +147,10 @@ three TLS backends, R glue), vendored picohttpparser (D-10) and a uriparser
 subset (D-11), system zlib (D-7), and the platform TLS stack (§13).
 
 Measured 2026-09-25: 6.4k code lines of project-owned C (9.3k raw), 7.9k raw
-lines vendored, 3.4k lines of R, 75 exports, 1,541 offline C checks, 247
-`test_that()` blocks, nine fuzz targets.
+lines vendored, 3.4k lines of R, 75 exports, 1,630 offline C checks (the
+engine included), 247 `test_that()` blocks before the local-server suites of
+2026-09-26, ten fuzz targets. Combined line coverage of project-owned C: 91.9%
+on macOS, 89.4% on Linux (`tools/coverage/`, floors enforced in CI).
 
 #### 1.1 Naming conventions
 
@@ -582,7 +587,7 @@ backend that cannot pin raises `zu_tls_unsupported_error` before connecting
 issuer → validity → subject → subjectPublicKeyInfo` and returns the SPKI's
 full TLV. It accepts DER only: definite lengths, no length above the buffer,
 at most four length octets, and each element's tag checked. It is ~120 lines,
-allocates nothing, and is fuzz target 10 with a corpus of real leaf
+allocates nothing, and is fuzz target 11 with a corpus of real leaf
 certificates plus truncations at every boundary. Input comes from
 `SecCertificateCopyData()` on macOS and `CERT_CONTEXT.pbCertEncoded` on
 Windows; the digest from CommonCrypto (`CC_SHA256`) and CNG (`BCrypt*`) respectively. The
@@ -750,8 +755,8 @@ HTTPS → HTTP is refused with `zu_redirect_error` by default.
 
 #### 19.4 Limits applied across the chain
 
-`redirects` (**default 10 after W6**, D-68; 1 in 0.1.0) raises
-`zu_too_many_redirects`; the `total` deadline and `max_body` span the whole
+`redirects` (**default 10**, D-68) raises `zu_too_many_redirects` when a
+chain would exceed it (`redirects = 0` returns the 3xx itself); the `total` deadline and `max_body` span the whole
 chain; a repeated (method, URL) pair is a loop and raises.
 
 #### 19.5 Interaction with sinks
@@ -816,7 +821,9 @@ Pooled tunnels are keyed on proxy identity including credentials (§26.1).
 
 #### 21.1 zlib, not miniz
 
-System zlib (D-7), `inflateInit2(15 + 32)` for gzip/zlib auto-detection.
+System zlib (D-7). `gzip` is decoded with `inflateInit2(15 + 16)`, which
+accepts the gzip wrapper only — a zlib stream labelled `gzip` is refused as
+malformed (measured 2026-09-26; edition 1 said `15 + 32`, auto-detect).
 `ZUHTTP_NO_COMPRESSION` removes the module. Brotli and zstd are §59.
 
 #### 21.2 `Accept-Encoding` policy
@@ -924,6 +931,13 @@ frames. All native state is owned through external pointers with finalizers,
 and the request loop runs under `R_UnwindProtect()` so resources are released
 at the unwind rather than at the next GC.
 
+The poll-tick checkpoint never lets `R_CheckUserInterrupt()` longjmp through
+the engine: it runs under `R_tryCatch` on `interrupt` and `error`, keeps the
+condition, and the engine unwinds through its own error paths. A user
+interrupt then becomes `zu_interrupted_error` (measured: ~10 ms after SIGINT
+on Rscript); anything else — `setTimeLimit()`, `R.utils::withTimeout()` — is
+re-raised as itself (D-74).
+
 #### 25.3 Connection state after cancellation
 
 An interrupted connection is closed, never pooled.
@@ -967,7 +981,8 @@ stale and discarded; the probe never consumes a byte, and "unknown" is not
 Body not fully consumed; cancelled or timed out; any §18.1 rejection;
 close-delimited framing; `Connection: close` from either side; a redirect body
 over `max_redirect_body`; any TLS error, including an unsupported-setting
-refusal. When in doubt, close.
+refusal; **any byte received past the response's framing** (D-73). When in
+doubt, close.
 
 #### 26.4 Fork safety
 
@@ -1327,7 +1342,8 @@ backend code comes last. §61.9 audits the catalogue at 1.0.
 
 `zu_resp_timings()`: `dns`, `connect`, `tls`, `request_write`, `ttfb`,
 `response_read`, `total`, `body_bytes_wire`, `body_bytes_decoded`, monotonic.
-A phase that did not happen is `NA`, not 0. On macOS after W13, `dns`,
+A phase that did not happen is `NA`, not 0, and `total` is never shorter than
+a phase inside it. On macOS after W13, `dns`,
 `connect` and `tls` for HTTPS come from Network.framework's establishment
 report.
 
@@ -1407,7 +1423,7 @@ for pasting into bug reports.
 | `max_header_bytes` | 64 KiB |
 | `max_header_count` | 100 |
 | `max_header_name` / `max_header_value` | 256 B / 8 KiB |
-| `redirects` | 1 → 10 (D-68) |
+| `redirects` | 10 (D-68) |
 | `max_body` (decoded, every sink) | 16 MiB |
 | `max_decompression_ratio` | off → 1000 (D-69) |
 | `max_redirect_body` | 64 KiB |
@@ -1461,12 +1477,14 @@ without a canary arm is a defect.
 
 ### 43. Fuzzing
 
-**Status:** Partial — nine targets, corpus replay on three OSes in CI; the
+**Status:** Partial — ten targets, corpus replay on three OSes in CI; the
 24 h soak per target (§61.8) is W17.
 
 Targets: response parser, chunked decoder, headers, URI, redirect, proxy
-environment, inflate limits, body path and redaction; W9 adds the DER walker
-as the tenth. Each harness builds against libFuzzer and against a plain replay
+environment, inflate limits, body path, redaction, and the **engine** — the
+whole request path through the D-72 seam, with termination, the `max_body`
+bound and per-input allocation balance as oracles (9.1M executions in its
+first 10-minute soak, clean). W9 adds the DER walker as the eleventh. Each harness builds against libFuzzer and against a plain replay
 driver, so the corpus is a regression suite everywhere, Windows included.
 Only curated seeds are committed.
 
@@ -1583,8 +1601,8 @@ named in `COPYRIGHTS` for the reader.
 | Level | Substitutes | Exercises | Used for |
 |---|---|---|---|
 | R transport mock | everything below R | API, merging, middleware | ergonomics; downstream packages |
-| `zu_stream` mock | sockets and TLS | parser, framing, pool, redirects, decompression, body path | most of zuhttp's own tests (`ctest/`, 1,541 checks) |
-| local servers | nothing | the whole stack | integration |
+| `zu_stream` mock | sockets and TLS | parser, framing, pool, redirects, decompression, body path — and, through the D-72 seam, the whole engine | most of zuhttp's own tests (`ctest/`, 1,630 checks) |
+| local servers | nothing | the whole stack | integration: webfakes, a raw-bytes server, `openssl s_server`, a logging proxy |
 
 #### 50.2 Unit tests
 

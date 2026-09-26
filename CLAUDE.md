@@ -29,14 +29,15 @@ retire a section by saying so in its status line.
 ## Commands
 
 ```sh
-# C core — no R, no network, no TLS. 1541 checks against a mock stream.
+# C core — no R, no network, no TLS. 1630 checks against mock streams,
+# including the whole engine through the dial seam (test_engine_mock.c).
 make -C ctest strict          # warnings-as-errors; the one to run by default
 make -C ctest asan            # ASan + UBSan
 make -C ctest engine-st       # live engine over macOS Secure Transport (network)
 make -C ctest engine          # same, over OpenSSL
 make -C ctest tls             # OpenSSL backend only (network)
 
-# Fuzzing — 9 targets, each buildable two ways (W9 adds a tenth)
+# Fuzzing — 10 targets (engine is the whole request path), each built two ways
 make -C fuzz replay-run       # corpus replay, needs no clang; a regression suite
 make -C fuzz replay-asan      # the same corpus under ASan + UBSan
 make -C fuzz fuzz-run         # libFuzzer, needs clang

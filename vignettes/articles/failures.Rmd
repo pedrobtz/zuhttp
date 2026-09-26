@@ -1,0 +1,237 @@
+---
+title: "When requests fail: errors, timeouts, retries and redirects"
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+Requests fail in two different ways, and zuhttp keeps them apart. A
+**transport failure** means no usable response arrived: the host did not
+resolve, the connection was refused, the certificate was wrong, the clock ran
+out. An **HTTP error** means the server answered, and the answer was no. Both
+are R conditions with classes you can catch, and neither is a string you have
+to parse.
+
+This article runs against two local test servers
+([webfakes](https://webfakes.r-lib.org)). One gets two extra endpoints that
+fail on purpose, so retries have something to retry:
+
+```{r servers}
+library(zuhttp)
+
+app <- webfakes::httpbin_app()
+# Handlers run in the server process, so each keeps its own count there.
+app$locals$flaky <- 0L
+app$locals$orders <- 0L
+# Fails twice with "503, try again in 1 second", then succeeds.
+app$get("/flaky", function(req, res) {
+  n <- req$app$locals$flaky <- req$app$locals$flaky + 1L
+  if (n %% 3L != 0L) {
+    res$set_status(503L)$set_header("Retry-After", "1")$send("busy")
+  } else {
+    res$send_json(list(ok = TRUE, attempt = n), auto_unbox = TRUE)
+  }
+})
+# The same, for a POST.
+app$post("/flaky-order", function(req, res) {
+  n <- req$app$locals$orders <- req$app$locals$orders + 1L
+  if (n %% 3L != 0L) res$set_status(503L)$send("busy")
+  else res$send_json(list(created = TRUE, attempt = n), auto_unbox = TRUE)
+})
+
+srv   <- webfakes::new_app_process(app)
+other <- webfakes::new_app_process(webfakes::httpbin_app())  # another origin
+url <- function(path) srv$url(path)
+```
+
+## HTTP errors are conditions
+
+By default a 4xx or 5xx response raises. The message says what was attempted,
+what came back, and what usually fixes it:
+
+```{r status-error, error = TRUE}
+zu_get(url("/status/404"))
+```
+
+Every zuhttp condition inherits from `zu_error`, and the classes form a tree,
+so you catch as broadly or as narrowly as you need:
+
+```{r classes}
+e <- tryCatch(zu_get(url("/status/503")), error = function(e) e)
+class(e)
+
+tryCatch(zu_get(url("/status/404")),
+         zu_http_client_error = function(e) "a 4xx: fix the request",
+         zu_http_server_error = function(e) "a 5xx: maybe try again")
+```
+
+The condition carries structured fields as well as a message, including the
+response itself when there is one:
+
+```{r fields}
+zu_resp_status(e$response)
+zu_resp_header(e$response, "content-type")
+```
+
+To treat an error status as data instead, turn the check off, per request or
+for a whole client, and decide later with `zu_resp_check()`:
+
+```{r check-false}
+r <- zu_get(url("/status/404"), check = FALSE)
+zu_resp_status(r)
+zu_resp_ok(r)
+tryCatch(zu_resp_check(r), zu_http_status_error = function(e) "checked later")
+```
+
+## Transport failures
+
+The same tree covers failures below HTTP. Each class names the phase that
+failed, which is the first thing to know when debugging one:
+
+```{r transport, error = TRUE}
+# Nothing listens on this port any more.
+closed <- webfakes::new_app_process(webfakes::httpbin_app())
+closed_url <- closed$url("/get")
+closed$stop()
+e <- tryCatch(zu_get(closed_url), error = function(e) e)
+class(e)[1]
+e$phase
+e$retryable   # a failed connection may well succeed next time
+
+# Not a URL zuhttp will send.
+tryCatch(zu_get("ftp://example.com/file"), zu_url_error = function(e) conditionMessage(e))
+```
+
+## Timeouts
+
+`timeout` is a budget in seconds for the whole call: every redirect, every
+retry, every backoff between them. When it runs out, `zu_timeout_error` is
+raised, however far the request got:
+
+```{r timeout}
+t0 <- Sys.time()
+e <- tryCatch(zu_get(url("/delay/5"), timeout = 1), error = function(e) e)
+class(e)[1]
+round(as.numeric(difftime(Sys.time(), t0, units = "secs")), 1)
+```
+
+The request stopped after about a second, not five. A slow download that
+keeps making progress still counts against the same budget, so set `timeout`
+with the largest response you expect in mind. There are no separate connect
+or inactivity timeouts yet, and name resolution is not bounded by `timeout`
+(see `?zuhttp_tls`).
+
+## Retries
+
+Retrying is **off by default**: a client that silently repeats requests can
+repeat a payment. Turn it on with a policy:
+
+```{r retry}
+r <- zu_get(url("/flaky"), retry = zu_retry(attempts = 3))
+zu_resp_json(r)
+zu_resp_connection(r)$retries_performed
+```
+
+`attempts` counts the first try, so `attempts = 3` means at most two retries.
+Between attempts zuhttp waits: exponential backoff with jitter, or what the
+server asks for in `Retry-After` — here, one second — capped by
+`max_retry_after` so a server cannot park your session for an hour. A hook
+shows each decision as it happens:
+
+```{r retry-hook}
+watch <- zu_client(
+  retry = zu_retry(attempts = 3),
+  hooks = zu_hooks(before_retry = function(ctx) {
+    message("retry ", ctx$attempt, " in ", ctx$delay, "s after ", ctx$why)
+  })
+)
+r <- zu_get(url("/flaky"), client = watch)
+zu_resp_status(r)
+```
+
+Only failures that might succeed next time are retried: connection failures,
+timeouts with budget left, and the statuses 408, 429, 500, 502, 503 and 504.
+A certificate error or a 404 is never retried.
+
+### A POST is not retried unless you say it is safe
+
+`GET`, `PUT` and `DELETE` are idempotent: sending one twice has the same
+effect as sending it once. `POST` is not, so a retry policy does not apply to
+it, and the first 503 is the answer:
+
+```{r post-not-retried}
+e <- tryCatch(
+  zu_post(url("/flaky-order"), json = list(item = "book"),
+          retry = zu_retry(attempts = 3)),
+  error = function(e) e
+)
+class(e)[1]
+```
+
+When the server makes a POST safe to repeat — most payment and order APIs do,
+through an `Idempotency-Key` header — say so on the request.
+`zu_req_retry()` generates the key and marks the request replay-safe:
+
+```{r post-retried}
+req <- zu_request("POST", url("/flaky-order")) |>
+  zu_body_json(list(item = "book")) |>
+  zu_req_retry(attempts = 3, idempotency_key = TRUE)
+zu_req_replay_safe(req)
+zu_resp_json(zu_perform(req))
+```
+
+## Redirects
+
+zuhttp follows redirects, up to 10 by default, and counts them:
+
+```{r redirects}
+r <- zu_get(url("/redirect/3"))
+zu_resp_url(r)
+zu_resp_connection(r)$redirect_count
+```
+
+A chain longer than `redirects` is an error rather than a surprise 3xx.
+`redirects = 0` asks for the redirect itself:
+
+```{r redirect-limit, error = TRUE}
+zu_get(url("/redirect/3"), redirects = 2)
+
+r <- zu_get(url("/redirect/1"), redirects = 0)
+zu_resp_status(r)
+zu_resp_header(r, "location")
+```
+
+A 303 turns any method into a `GET` and drops the body; 307 and 308 keep
+both. That is why a body you want replayed must be rewindable — memory and
+files are.
+
+```{r redirect-methods}
+see_other <- paste0(url("/redirect-to"), "?status_code=303&url=",
+                    utils::URLencode(url("/anything"), reserved = TRUE))
+zu_resp_json(zu_post(see_other, body = "order"))$method
+```
+
+### Credentials stay with their origin
+
+A redirect to a different scheme, host or port drops `Authorization`,
+`Cookie` and `Proxy-Authorization`, so a token meant for one server is never
+handed to another. Other headers travel on:
+
+```{r strip}
+to_other <- paste0(url("/redirect-to"), "?url=",
+                   utils::URLencode(other$url("/headers"), reserved = TRUE))
+r <- zu_get(to_other, headers = c(Authorization = "Bearer s3cret",
+                                  "X-Request-Id" = "abc-123"))
+sent <- zu_resp_json(r)$headers
+sent[["X-Request-Id"]]
+is.null(sent$Authorization)
+```
+
+A redirect from `https://` to `http://` is refused outright with
+`zu_redirect_error`.
+
+```{r cleanup, include = FALSE}
+srv$stop()
+other$stop()
+```

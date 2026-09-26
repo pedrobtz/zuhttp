@@ -344,6 +344,10 @@ void zu_net_stream_free(zu_stream *s) { net_destroy(s); }
 int zu_net_peer_ip(const zu_stream *s, char *out, size_t cap) {
     const net_impl *m;
     if (!s || !s->impl || !out || cap == 0) return 0;
+    /* Only a TCP stream has a peer. Casting another stream's impl to net_impl
+     * would read someone else's memory; with the engine's dial seam (§50.1)
+     * the stream here may be a mock. */
+    if (s->vt != &k_net_vt) return 0;
     m = (const net_impl *)s->impl;
     strncpy(out, m->peer, cap - 1);
     out[cap - 1] = '\0';

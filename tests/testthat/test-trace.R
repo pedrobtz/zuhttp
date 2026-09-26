@@ -177,3 +177,19 @@ test_that("zu_verbose() without a trace shows the HTTP layer only", {
   expect_true(any(grepl("^> GET", lines2)))
   expect_false(any(grepl("dns.start", lines2, fixed = TRUE)))
 })
+
+test_that("the total is never shorter than a phase inside it", {
+  # Offline: a response carrying the engine's millisecond timings and an
+  # R-measured total that proc.time()'s 1 ms resolution rounded down.
+  r <- zu_response(200L)
+  r$timings_ms <- c(dns = 0, connect = 0, tls = NA, request_write = 0,
+                    ttfb = 2, response_read = 2, total = 2,
+                    body_bytes_wire = 10, body_bytes_decoded = 10)
+  r$timings <- c(total = 0.001)
+  t <- zu_resp_timings(r)
+  expect_gte(t[["total"]], t[["ttfb"]])
+  expect_identical(t[["total"]], 0.002)
+  # ...and the R total still wins when it is the larger, as with retries.
+  r$timings <- c(total = 1.5)
+  expect_identical(zu_resp_timings(r)[["total"]], 1.5)
+})

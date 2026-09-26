@@ -240,13 +240,13 @@ groups A–D). **Implements:** §50.4, §50.6. **Estimate:** 3 days, medium.
 
 ### W6 — Correct two shipped defaults
 
-**Status:** not started. **Milestone:** M1. **Implements:** D-68, D-69,
+**Status:** half done — `redirects = 10` shipped with #55; the ratio limit is open. **Milestone:** M1. **Implements:** D-68, D-69,
 §19.4, §21.4. **Estimate:** 0.5 day, high.
 
 **Exit criteria**
 
-- [ ] `redirects` defaults to 10; a 3-hop redirect chain succeeds with the
-      default client (it fails today).
+- [x] `redirects` defaults to 10; a 3-hop redirect chain succeeds with the
+      default client. (#55; an exhausted chain now raises.)
 - [ ] `max_decompression_ratio` defaults to 1000 and is passed at
       `zu_body.c:35`; a 1 KB → 100 MB bomb fails after less than 1 MB of
       output, with the absolute cap raised out of the way to prove it is the
@@ -474,7 +474,7 @@ cancellably (F-16).
 
 **Exit criteria**
 
-- [ ] 24 h of libFuzzer per target, all ten, with ASan and UBSan: 0 crashes,
+- [ ] 24 h of libFuzzer per target, all eleven, with ASan and UBSan: 0 crashes,
       0 reports. Each new crash becomes a committed seed.
 
 ### W18 — Measure the premise
@@ -664,3 +664,16 @@ changed the plan or the design.
   CRAN NOTE, so D-63 becomes Network.framework and W13 moves into M1. Two new
   facts to carry: fork after use kills the child with SIGILL (the guard must
   come first), and `prefer_no_proxy` is not a strict "direct only".
+- **2026-09-26 — writing the pkgdown articles against local servers found
+  eight bugs** that the unit suites missed: Authorization and Cookie followed
+  a redirect to any origin (security, #55); `Host` dropped a non-default
+  port; an exhausted redirect chain returned its last 3xx; statuses outside a
+  lookup table crashed `zu_resp_check()`; a proxy's 407 on plain HTTP had the
+  wrong class; a DER `.crt` failed without saying why; a client printed its
+  policies as pasted fields; `total` could be shorter than `ttfb` (#56).
+- **2026-09-26 — a coverage map, not the badge, chose the next tests.** The R
+  suite with `NOT_CRAN` merged with ctest showed the callback/interrupt glue
+  and the engine unreached offline. Local-server tests (#57) found that a
+  time limit inside a request was reported as a user interrupt (D-74); the
+  engine seam (D-72, #58) found that out-of-step connections were pooled
+  (D-73). Coverage floors now run on every PR (#59).

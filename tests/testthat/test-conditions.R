@@ -115,3 +115,20 @@ test_that("conditions are well-formed for rlang without depending on it", {
   expect_true(all(c("message", "call") %in% names(e)))
   expect_identical(conditionMessage(e), "took too long")
 })
+
+test_that("a status outside the text table still raises a zuhttp condition", {
+  # status_text() used `[[` on a named vector, so any unlisted status crashed
+  # zu_resp_check() with "subscript out of bounds" (found with a proxy's 407).
+  for (s in c(412L, 499L, 599L)) {
+    e <- tryCatch(zu_resp_check(zu_response(s)), error = function(e) e)
+    expect_s3_class(e, "zu_http_status_error")
+    expect_match(conditionMessage(e), paste("HTTP", s))
+  }
+})
+
+test_that("407 is a proxy-authentication failure, whatever the scheme (§20.4)", {
+  e <- tryCatch(zu_resp_check(zu_response(407L)), error = function(e) e)
+  expect_s3_class(e, "zu_proxy_auth_error")
+  expect_s3_class(e, "zu_proxy_error")
+  expect_match(conditionMessage(e), "Proxy Authentication Required", fixed = TRUE)
+})

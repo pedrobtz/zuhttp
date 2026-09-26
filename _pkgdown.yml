@@ -1,0 +1,23 @@
+url: https://pedrobtz.github.io/zuhttp/
+
+template:
+  bootstrap: 5
+
+navbar:
+  structure:
+    left: [intro, reference, articles, news]
+    right: [search, github]
+
+articles:
+- title: Using zuhttp
+  navbar: ~
+  contents:
+  - articles/clients
+  - articles/failures
+  - articles/streaming
+  - articles/tls
+  - articles/proxies
+- title: Testing and debugging
+  contents:
+  - articles/testing
+  - articles/debugging
