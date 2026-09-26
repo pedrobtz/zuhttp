@@ -31,7 +31,8 @@ Depends:
 Suggests:
     jsonlite,
     parallel,
-    testthat (>= 3.1.7)
+    testthat (>= 3.1.7),
+    webfakes
 SystemRequirements: zlib; and each platform's own TLS stack, which
     ./configure selects: Schannel on Windows and Secure Transport on macOS,
     both part of the operating system, and OpenSSL >= 1.1.1 on other Unix.

@@ -18,7 +18,8 @@ bundles neither cryptography nor a CA bundle. No hard R dependencies.
   (`callback =`), the last two without holding the body in memory.
 * Connection pooling with keep-alive, and a PID guard that drops connections
   inherited across `fork()`.
-* Redirects with method rewriting and cross-origin credential stripping;
+* Redirects with method rewriting and cross-origin credential stripping
+  (up to 10 by default; a longer chain raises `zu_too_many_redirects`);
   transparent gzip and deflate under explicit size limits.
 * A total timeout across a redirect chain, and Ctrl-C cancellation that
   unwinds without leaking sockets or TLS contexts. Neither bounds DNS
@@ -36,6 +37,18 @@ bundles neither cryptography nor a CA bundle. No hard R dependencies.
   depending on `zuhttp` can test offline.
 * Per-phase timings and an event trace (`zu_resp_trace()`, `zu_verbose()`),
   and `zu_info()` for a bug-report-ready configuration dump.
+
+## Fixed before release
+
+* **A redirect to another origin no longer carries credentials.**
+  `Authorization`, `Cookie` and `Proxy-Authorization` set by the caller were
+  re-sent on every hop, including to a different host, port or scheme. They
+  are now dropped at the first cross-origin hop and stay dropped for the rest
+  of the chain.
+* The `Host` header includes the port when it is not the scheme's default.
+* A redirect chain longer than `redirects` raises `zu_too_many_redirects`
+  instead of returning its last 3xx as if it were the final response.
+  `redirects = 0` still returns the 3xx itself.
 
 ## Known limitations
 
