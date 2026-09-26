@@ -11,14 +11,20 @@ Both live in [`.agents/`](.agents/) and are excluded from the R package build:
 
 | File | What it is | When to read it |
 |---|---|---|
-| [`.agents/zuhttp-design.md`](.agents/zuhttp-design.md) | The design. ~65 numbered sections, a Decision Register (D-1…D-56), and a risk register (R-1…R-15; R-14 is unused). | Before changing behaviour. Cite the section, e.g. §31.9. |
-| [`.agents/roadmap.md`](.agents/roadmap.md) | Stages S0–S21 with exit criteria, and six sections no stage owned (U1–U6). Each carries a `**Status:**` line; status never goes in a heading, because issues link the anchors. | Before starting work, to see what stage owns it. |
+| [`.agents/zuhttp-design.md`](.agents/zuhttp-design.md) | The design, edition 2: a normative specification in 64 numbered sections, each with a status line; a Decision Register (D-1…D-70); a risk register. | Before changing behaviour. Cite the section, e.g. §31.9. |
+| [`.agents/roadmap.md`](.agents/roadmap.md) | The plan, edition 2: milestones M0–M3 (0.1.0 tag → 0.2.0 → CRAN 0.3.0 → 1.0), work packages W1–W19 with exit criteria, and an append-only findings log. | Before starting work, to see which work package owns it. |
+| [`.agents/history/`](.agents/history/) | Edition 1 of both, verbatim: every spike measurement and how each stage landed. | When you need the *why* behind a decision, or a measurement. |
 
 **Read the relevant section before implementing.** Nearly every non-obvious
 choice in this codebase is already decided and justified there; the design is
 the specification, not a summary written after the fact. When work resolves a
 question the design left open, write the decision back into it — a new `D-nn`
 row plus the prose — in the same commit as the code.
+
+Edition 2 is a specification, not a log: write what the code *is*, in the
+present tense, and put dated findings in the roadmap's findings log. **Never
+renumber or delete a design section** — the code cites them ~1,100 times;
+retire a section by saying so in its status line.
 
 ## Commands
 
@@ -126,12 +132,12 @@ names that a `zukomp` header could also declare (#15).
 
 ## Current state
 
-v0.1.0 shipped on 2026-09-10 as a GitHub release, and no `v0.1.0` tag exists
-yet. Complete: S0–S5, S10–S14, S16, S17, U1, U4–U6; all 13 §31.16 workflows
-pass. Partial: S6 (no phase timeouts, #13), S7, S8, S9, S15, S18, S20. Not
-started: S19 (deferred with the CRAN submission), S21, U2 except A1, and U3.
-S16 closed R-12, so forked HTTPS on macOS now raises `zu_fork_error` rather
-than killing the worker. The roadmap's per-stage exit criteria are
-authoritative — check them rather than inferring status from the code — and
-the two issues that gated the tag (#12, #14) closed with the review's merge
-on 2026-09-25 — see its "Amends before merge" section.
+v0.1.0 is built and awaiting its tag (roadmap M0); the review and its amends
+merged on 2026-09-25 (#20). Next is **M1 → v0.2.0**, and its first work
+package is **W1: CI on pull requests** — until it lands, a pull request from a
+branch of this repository runs no CI, so dispatch the workflows by hand as
+shown under Commands. Then W2 (the `zuh_` C prefix rename) before any other C
+work, because it touches every file. The roadmap's work-package exit criteria
+are authoritative — check them rather than inferring status from the code.
+Forked HTTPS on macOS raises `zu_fork_error` by design (D-32); it is not a bug
+to fix.
