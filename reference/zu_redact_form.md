@@ -17,3 +17,10 @@ zu_redact_form(body)
 ## Value
 
 The redacted string.
+
+## Examples
+
+``` r
+zu_redact_form("user=alice&password=hunter2&remember=1")
+#> [1] "user=alice&password=<redacted>&remember=1"
+```

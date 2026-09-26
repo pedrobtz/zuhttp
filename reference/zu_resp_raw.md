@@ -21,3 +21,13 @@ zu_resp_raw(resp)
 ## Value
 
 A raw vector.
+
+## Examples
+
+``` r
+r <- zu_response(200L, body = "hello")
+zu_resp_raw(r)
+#> [1] 68 65 6c 6c 6f
+rawToChar(zu_resp_raw(r))
+#> [1] "hello"
+```

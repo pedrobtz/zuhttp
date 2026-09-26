@@ -118,7 +118,7 @@ zu_resp_status(r)
 zu_resp_connection(r)$proxy_used
 #> [1] TRUE
 proxy_log(proxy)
-#> GET http://127.0.0.1:42047/get  (credentials: no)
+#> GET http://127.0.0.1:44585/get  (credentials: no)
 ```
 
 The proxy received the full URL in the request line — that is how a
@@ -131,9 +131,9 @@ On a client, the proxy applies to every request:
 via_proxy <- zu_client(proxy = proxy$url)
 for (p in c("/uuid", "/ip")) invisible(zu_get(web$url(p), client = via_proxy))
 proxy_log(proxy)
-#> GET http://127.0.0.1:42047/get  (credentials: no)
-#> GET http://127.0.0.1:42047/uuid  (credentials: no)
-#> GET http://127.0.0.1:42047/ip  (credentials: no)
+#> GET http://127.0.0.1:44585/get  (credentials: no)
+#> GET http://127.0.0.1:44585/uuid  (credentials: no)
+#> GET http://127.0.0.1:44585/ip  (credentials: no)
 ```
 
 ## HTTPS through a proxy
@@ -210,7 +210,7 @@ r <- zu_get(web$url("/headers"), proxy = authed)
 zu_resp_status(r)
 #> [1] 200
 proxy_log(guarded)
-#> GET http://127.0.0.1:42047/headers  (credentials: yes)
+#> GET http://127.0.0.1:44585/headers  (credentials: yes)
 ```
 
 The web server behind the proxy never receives the proxy’s credentials:
@@ -230,7 +230,7 @@ not repeat the password:
 wrong <- sub("http://", "http://alice:guess@", guarded$url)
 zu_get(web$url("/get"), proxy = wrong)
 #> Error in `zu_perform()`:
-#> ! GET http://127.0.0.1:42047/get failed: HTTP 407 Proxy Authentication Required
+#> ! GET http://127.0.0.1:44585/get failed: HTTP 407 Proxy Authentication Required
 #>   The proxy refused the request. Check the user name and password in the proxy URL (http://user:password@host:port).
 ```
 
@@ -264,7 +264,7 @@ p3 <- start_proxy()
 Sys.setenv(http_proxy = p3$url)
 invisible(zu_get(web$url("/get")))          # no proxy argument
 proxy_log(p3)
-#> GET http://127.0.0.1:42047/get  (credentials: no)
+#> GET http://127.0.0.1:44585/get  (credentials: no)
 ```
 
 `no_proxy` lists hosts to reach directly: comma-separated names, matched

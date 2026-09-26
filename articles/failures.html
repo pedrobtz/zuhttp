@@ -113,7 +113,7 @@ attempted, what came back, and what usually fixes it:</p>
 <div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/connections.html" class="external-link">url</a></span><span class="op">(</span><span class="st">"/status/404"</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #BBBB00; font-weight: bold;">Error</span><span style="font-weight: bold;"> in `zu_perform()`:</span></span></span>
-<span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> GET http://127.0.0.1:35269/status/404 failed: HTTP 404 Not Found</span></span>
+<span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> GET http://127.0.0.1:46579/status/404 failed: HTTP 404 Not Found</span></span>
 <span><span class="co">#&gt;   The server has no such resource. If you are using a client base_url, check the join: base_url and path are concatenated, not resolved.</span></span></code></pre></div>
 <p>Every zuhttp condition inherits from <code>zu_error</code>, and the
 classes form a tree, so you catch as broadly or as narrowly as you
@@ -266,7 +266,7 @@ request replay-safe:</p>
 <div class="sourceCode" id="cb12"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">r</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/connections.html" class="external-link">url</a></span><span class="op">(</span><span class="st">"/redirect/3"</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/zu_resp.html">zu_resp_url</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] "http://127.0.0.1:35269/get"</span></span>
+<span><span class="co">#&gt; [1] "http://127.0.0.1:46579/get"</span></span>
 <span><span class="fu"><a href="../reference/zu_resp_connection.html">zu_resp_connection</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span><span class="op">$</span><span class="va">redirect_count</span></span>
 <span><span class="co">#&gt; [1] 3</span></span></code></pre></div>
 <p>A chain longer than <code>redirects</code> is an error rather than a

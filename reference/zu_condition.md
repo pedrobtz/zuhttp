@@ -57,3 +57,19 @@ zu_condition(
 
 A condition object inheriting from the §34.1 classes, plus `error` and
 `condition`.
+
+## Examples
+
+``` r
+cnd <- zu_condition("zu_timeout_error", "the request took too long",
+                    url = "https://user:pw@api.example.com/v1",
+                    phase = "read")
+class(cnd)
+#> [1] "zu_timeout_error" "zu_error"         "error"            "condition"       
+cnd$url        # redacted: the userinfo is gone
+#> [1] "https://api.example.com/v1"
+
+# Raise it, and catch it by any class in its chain.
+tryCatch(stop(cnd), zu_error = function(e) conditionMessage(e))
+#> [1] "the request took too long"
+```

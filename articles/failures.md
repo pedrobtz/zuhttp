@@ -49,7 +49,7 @@ attempted, what came back, and what usually fixes it:
 
 zu_get(url("/status/404"))
 #> Error in `zu_perform()`:
-#> ! GET http://127.0.0.1:35269/status/404 failed: HTTP 404 Not Found
+#> ! GET http://127.0.0.1:46579/status/404 failed: HTTP 404 Not Found
 #>   The server has no such resource. If you are using a client base_url, check the join: base_url and path are concatenated, not resolved.
 ```
 
@@ -230,7 +230,7 @@ zuhttp follows redirects, up to 10 by default, and counts them:
 
 r <- zu_get(url("/redirect/3"))
 zu_resp_url(r)
-#> [1] "http://127.0.0.1:35269/get"
+#> [1] "http://127.0.0.1:46579/get"
 zu_resp_connection(r)$redirect_count
 #> [1] 3
 ```

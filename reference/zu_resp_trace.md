@@ -49,11 +49,10 @@ for a printed narration.
 ## Examples
 
 ``` r
-# A trace comes from the engine, so there is nothing a mock can stand in
-# for here — hence \dontrun{}. An example that reaches a third party is
-# one that fails in every offline R CMD check, the user's included.
-if (FALSE) { # \dontrun{
-r <- zu_get("https://example.com", trace = TRUE)
-zu_resp_trace(r)
-} # }
+# A trace is recorded by the network engine, so a mock has nothing to
+# show; the example makes a real request and runs only interactively.
+if (interactive()) {
+  r <- zu_get("https://example.com", trace = TRUE)
+  zu_resp_trace(r)
+}
 ```

@@ -21,3 +21,12 @@ zu_redact_headers_for_display(headers)
 ## Value
 
 The same shape, with secret values replaced by `<redacted>`.
+
+## Examples
+
+``` r
+zu_redact_headers_for_display(c(Authorization = "Bearer abc123",
+                                Accept = "application/json"))
+#>      Authorization             Accept 
+#>       "<redacted>" "application/json" 
+```

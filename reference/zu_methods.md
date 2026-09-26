@@ -281,21 +281,43 @@ to build a request without performing it.
 ## Examples
 
 ``` r
-if (FALSE) { # \dontrun{
-zu_get("https://api.example.com/search", query = list(q = "HTTP", limit = 20))
-zu_post("https://api.example.com/users", json = list(name = "Alice"))
+# A mock transport answers instead of the network, so these run anywhere.
+# Swap `client = api` for nothing and the same calls go over the wire.
+echo <- zu_mock_transport(function(req) {
+  zu_response(200L, c("Content-Type" = "text/plain"),
+              paste(req$method, req$url))
+})
+api <- zu_client(transport = echo)
 
-# Download straight to disk: the body never passes through memory, and the
-# file appears at its destination only once it has arrived whole.
-r <- zu_get("https://example.com/big.bin", path = "big.bin")
-zu_resp_path(r)                       # "big.bin"
-zu_resp_header(r, "content-type")     # the response is still a response
+r <- zu_get("https://api.example.com/search",
+            query = list(q = "HTTP", limit = 20), client = api)
+zu_resp_status(r)
+#> [1] 200
+zu_resp_text(r)
+#> [1] "GET https://api.example.com/search?q=HTTP&limit=20"
 
-# A non-2xx body is still a body: this raises AND leaves the 404 page at
-# out.bin, replacing whatever was there. §27.1's atomicity covers a failed
-# transfer, and a 404 is a successful transfer of an error page. Check
-# first if the destination matters.
-r <- zu_get("https://example.com/missing", path = "out.bin", check = FALSE)
-if (zu_resp_ok(r)) file.rename("out.bin", "wanted.bin")
-} # }
+zu_resp_text(zu_delete("https://api.example.com/users/42", client = api))
+#> [1] "DELETE https://api.example.com/users/42"
+
+if (requireNamespace("jsonlite", quietly = TRUE)) {
+  zu_resp_text(zu_post("https://api.example.com/users",
+                       json = list(name = "Alice"), client = api))
+}
+#> [1] "POST https://api.example.com/users"
+
+if (interactive()) {
+  # Download straight to disk: the body never passes through memory, and
+  # the file appears at its destination only once it has arrived whole.
+  dest <- tempfile(fileext = ".html")
+  r <- zu_get("https://example.com", path = dest)
+  zu_resp_path(r)
+  zu_resp_header(r, "content-type")  # the response is still a response
+
+  # A non-2xx body is still a body: with check = FALSE this returns the
+  # 404 AND leaves the error page at `dest`. §27.1's atomicity covers a
+  # failed transfer, and a 404 is a successful transfer of an error page.
+  r <- zu_get("https://example.com/missing", path = dest, check = FALSE)
+  zu_resp_ok(r)
+  unlink(dest)
+}
 ```

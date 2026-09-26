@@ -77,6 +77,14 @@ disclosure.</p>
     <p>The same shape, with secret values replaced by <code>&lt;redacted&gt;</code>.</p>
     </div>
 
+    <div class="section level2">
+    <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="fu">zu_redact_headers_for_display</span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>Authorization <span class="op">=</span> <span class="st">"Bearer abc123"</span>,</span></span>
+<span class="r-in"><span>                                Accept <span class="op">=</span> <span class="st">"application/json"</span><span class="op">)</span><span class="op">)</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      Authorization             Accept </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>       "&lt;redacted&gt;" "application/json" </span>
+</code></pre></div>
+    </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
     </nav></aside></div>
 

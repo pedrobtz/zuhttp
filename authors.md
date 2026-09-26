@@ -2,7 +2,7 @@
 
 ## Authors
 
-- **Pedro Baltazar**. Author, maintainer.
+- **Pedro Baltazar**. Author, maintainer, copyright holder.
 
 - **Kazuho Oku**. Copyright holder.  
   picohttpparser, see inst/COPYRIGHTS

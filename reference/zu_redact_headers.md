@@ -19,3 +19,13 @@ zu_redact_headers(...)
 ## Value
 
 The resulting character vector of extra names, invisibly.
+
+## Examples
+
+``` r
+old <- getOption("zuhttp.redact_headers")
+zu_redact_headers("X-Session")
+zu_is_secret_header("X-Session")
+#> [1] TRUE
+options(zuhttp.redact_headers = old)   # restore
+```

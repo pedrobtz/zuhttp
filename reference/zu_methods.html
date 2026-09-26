@@ -319,23 +319,45 @@ performing it.</p></div>
 
     <div class="section level2">
     <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
-    <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="kw">if</span> <span class="op">(</span><span class="cn">FALSE</span><span class="op">)</span> <span class="op">{</span> <span class="co"># \dontrun{</span></span></span>
-<span class="r-in"><span><span class="fu">zu_get</span><span class="op">(</span><span class="st">"https://api.example.com/search"</span>, query <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>q <span class="op">=</span> <span class="st">"HTTP"</span>, limit <span class="op">=</span> <span class="fl">20</span><span class="op">)</span><span class="op">)</span></span></span>
-<span class="r-in"><span><span class="fu">zu_post</span><span class="op">(</span><span class="st">"https://api.example.com/users"</span>, json <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>name <span class="op">=</span> <span class="st">"Alice"</span><span class="op">)</span><span class="op">)</span></span></span>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="co"># A mock transport answers instead of the network, so these run anywhere.</span></span></span>
+<span class="r-in"><span><span class="co"># Swap `client = api` for nothing and the same calls go over the wire.</span></span></span>
+<span class="r-in"><span><span class="va">echo</span> <span class="op">&lt;-</span> <span class="fu"><a href="zu_transport.html">zu_mock_transport</a></span><span class="op">(</span><span class="kw">function</span><span class="op">(</span><span class="va">req</span><span class="op">)</span> <span class="op">{</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="zu_response.html">zu_response</a></span><span class="op">(</span><span class="fl">200L</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"Content-Type"</span> <span class="op">=</span> <span class="st">"text/plain"</span><span class="op">)</span>,</span></span>
+<span class="r-in"><span>              <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste</a></span><span class="op">(</span><span class="va">req</span><span class="op">$</span><span class="va">method</span>, <span class="va">req</span><span class="op">$</span><span class="va">url</span><span class="op">)</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="op">}</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="va">api</span> <span class="op">&lt;-</span> <span class="fu"><a href="zu_client.html">zu_client</a></span><span class="op">(</span>transport <span class="op">=</span> <span class="va">echo</span><span class="op">)</span></span></span>
 <span class="r-in"><span></span></span>
-<span class="r-in"><span><span class="co"># Download straight to disk: the body never passes through memory, and the</span></span></span>
-<span class="r-in"><span><span class="co"># file appears at its destination only once it has arrived whole.</span></span></span>
-<span class="r-in"><span><span class="va">r</span> <span class="op">&lt;-</span> <span class="fu">zu_get</span><span class="op">(</span><span class="st">"https://example.com/big.bin"</span>, path <span class="op">=</span> <span class="st">"big.bin"</span><span class="op">)</span></span></span>
-<span class="r-in"><span><span class="fu"><a href="zu_resp.html">zu_resp_path</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span>                       <span class="co"># "big.bin"</span></span></span>
-<span class="r-in"><span><span class="fu"><a href="zu_resp.html">zu_resp_header</a></span><span class="op">(</span><span class="va">r</span>, <span class="st">"content-type"</span><span class="op">)</span>     <span class="co"># the response is still a response</span></span></span>
+<span class="r-in"><span><span class="va">r</span> <span class="op">&lt;-</span> <span class="fu">zu_get</span><span class="op">(</span><span class="st">"https://api.example.com/search"</span>,</span></span>
+<span class="r-in"><span>            query <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>q <span class="op">=</span> <span class="st">"HTTP"</span>, limit <span class="op">=</span> <span class="fl">20</span><span class="op">)</span>, client <span class="op">=</span> <span class="va">api</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="fu"><a href="zu_resp.html">zu_resp_status</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 200</span>
+<span class="r-in"><span><span class="fu"><a href="zu_resp_text.html">zu_resp_text</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "GET https://api.example.com/search?q=HTTP&amp;limit=20"</span>
 <span class="r-in"><span></span></span>
-<span class="r-in"><span><span class="co"># A non-2xx body is still a body: this raises AND leaves the 404 page at</span></span></span>
-<span class="r-in"><span><span class="co"># out.bin, replacing whatever was there. §27.1's atomicity covers a failed</span></span></span>
-<span class="r-in"><span><span class="co"># transfer, and a 404 is a successful transfer of an error page. Check</span></span></span>
-<span class="r-in"><span><span class="co"># first if the destination matters.</span></span></span>
-<span class="r-in"><span><span class="va">r</span> <span class="op">&lt;-</span> <span class="fu">zu_get</span><span class="op">(</span><span class="st">"https://example.com/missing"</span>, path <span class="op">=</span> <span class="st">"out.bin"</span>, check <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></span>
-<span class="r-in"><span><span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="zu_resp.html">zu_resp_ok</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span><span class="op">)</span> <span class="fu"><a href="https://rdrr.io/r/base/files.html" class="external-link">file.rename</a></span><span class="op">(</span><span class="st">"out.bin"</span>, <span class="st">"wanted.bin"</span><span class="op">)</span></span></span>
-<span class="r-in"><span><span class="op">}</span> <span class="co"># }</span></span></span>
+<span class="r-in"><span><span class="fu"><a href="zu_resp_text.html">zu_resp_text</a></span><span class="op">(</span><span class="fu">zu_delete</span><span class="op">(</span><span class="st">"https://api.example.com/users/42"</span>, client <span class="op">=</span> <span class="va">api</span><span class="op">)</span><span class="op">)</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "DELETE https://api.example.com/users/42"</span>
+<span class="r-in"><span></span></span>
+<span class="r-in"><span><span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/ns-load.html" class="external-link">requireNamespace</a></span><span class="op">(</span><span class="st">"jsonlite"</span>, quietly <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span> <span class="op">{</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="zu_resp_text.html">zu_resp_text</a></span><span class="op">(</span><span class="fu">zu_post</span><span class="op">(</span><span class="st">"https://api.example.com/users"</span>,</span></span>
+<span class="r-in"><span>                       json <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>name <span class="op">=</span> <span class="st">"Alice"</span><span class="op">)</span>, client <span class="op">=</span> <span class="va">api</span><span class="op">)</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="op">}</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] "POST https://api.example.com/users"</span>
+<span class="r-in"><span></span></span>
+<span class="r-in"><span><span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/interactive.html" class="external-link">interactive</a></span><span class="op">(</span><span class="op">)</span><span class="op">)</span> <span class="op">{</span></span></span>
+<span class="r-in"><span>  <span class="co"># Download straight to disk: the body never passes through memory, and</span></span></span>
+<span class="r-in"><span>  <span class="co"># the file appears at its destination only once it has arrived whole.</span></span></span>
+<span class="r-in"><span>  <span class="va">dest</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span>fileext <span class="op">=</span> <span class="st">".html"</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="va">r</span> <span class="op">&lt;-</span> <span class="fu">zu_get</span><span class="op">(</span><span class="st">"https://example.com"</span>, path <span class="op">=</span> <span class="va">dest</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="zu_resp.html">zu_resp_path</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="zu_resp.html">zu_resp_header</a></span><span class="op">(</span><span class="va">r</span>, <span class="st">"content-type"</span><span class="op">)</span>  <span class="co"># the response is still a response</span></span></span>
+<span class="r-in"><span></span></span>
+<span class="r-in"><span>  <span class="co"># A non-2xx body is still a body: with check = FALSE this returns the</span></span></span>
+<span class="r-in"><span>  <span class="co"># 404 AND leaves the error page at `dest`. §27.1's atomicity covers a</span></span></span>
+<span class="r-in"><span>  <span class="co"># failed transfer, and a 404 is a successful transfer of an error page.</span></span></span>
+<span class="r-in"><span>  <span class="va">r</span> <span class="op">&lt;-</span> <span class="fu">zu_get</span><span class="op">(</span><span class="st">"https://example.com/missing"</span>, path <span class="op">=</span> <span class="va">dest</span>, check <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="zu_resp.html">zu_resp_ok</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/unlink.html" class="external-link">unlink</a></span><span class="op">(</span><span class="va">dest</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="op">}</span></span></span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

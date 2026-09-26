@@ -17,3 +17,10 @@ zu_is_secret_header(name)
 ## Value
 
 A logical vector.
+
+## Examples
+
+``` r
+zu_is_secret_header(c("Authorization", "cookie", "Accept"))
+#> [1]  TRUE  TRUE FALSE
+```
