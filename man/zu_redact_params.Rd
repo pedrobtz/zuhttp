@@ -13,5 +13,15 @@ zu_redact_params(...)
 The resulting character vector of extra names, invisibly.
 }
 \description{
-The defaults are \code{access_token}, \code{api_key}, \code{signature} and \code{sig} (§42.1).
+The defaults are \code{access_token}, \code{api_key}, \code{apikey}, \code{signature}, \code{sig},
+\code{client_secret}, \code{password}, \code{passwd}, \code{pwd}, \code{secret}, \code{token},
+\code{refresh_token}, \code{id_token}, \code{private_key}, \code{auth_token} and
+\code{session_token}, matched exactly and case-insensitively (§42.1). This adds
+to them; it cannot remove a default.
+}
+\examples{
+old <- getOption("zuhttp.redact_params")
+zu_redact_params("ticket")
+zu_redact_url("https://api.example.com/v1?ticket=ABC123&page=2")
+options(zuhttp.redact_params = old)    # restore
 }

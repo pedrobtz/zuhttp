@@ -15,3 +15,6 @@ A logical vector.
 \description{
 Which header names carry a secret value?
 }
+\examples{
+zu_is_secret_header(c("Authorization", "cookie", "Accept"))
+}

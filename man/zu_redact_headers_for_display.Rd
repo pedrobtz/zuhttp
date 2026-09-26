@@ -19,3 +19,7 @@ documented asymmetry is that \code{zu_req_headers()} returns real values,
 because a user asking for their own header by name is not an accidental
 disclosure.
 }
+\examples{
+zu_redact_headers_for_display(c(Authorization = "Bearer abc123",
+                                Accept = "application/json"))
+}

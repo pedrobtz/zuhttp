@@ -30,6 +30,10 @@ zu_error_codes <- function() {
 #' @param code An integer code, or the class name of a zuhttp condition.
 #' @return `TRUE`, `FALSE`, or `NA` if the code is unknown.
 #' @export
+#' @examples
+#' zu_code_retryable("zu_connect_error")          # a transport failure: yes
+#' zu_code_retryable("zu_tls_certificate_error")  # will not fix itself: no
+#' zu_code_retryable("not_a_zuhttp_class")        # unknown: NA
 zu_code_retryable <- function(code) {
   code <- as_zu_code(code)
   if (is.na(code)) return(NA)
@@ -65,6 +69,15 @@ as_zu_code <- function(code) {
 #' @return A condition object inheriting from the §34.1 classes, plus `error`
 #'   and `condition`.
 #' @export
+#' @examples
+#' cnd <- zu_condition("zu_timeout_error", "the request took too long",
+#'                     url = "https://user:pw@api.example.com/v1",
+#'                     phase = "read")
+#' class(cnd)
+#' cnd$url        # redacted: the userinfo is gone
+#'
+#' # Raise it, and catch it by any class in its chain.
+#' tryCatch(stop(cnd), zu_error = function(e) conditionMessage(e))
 zu_condition <- function(code, message, url = NULL, phase = NULL,
                          backend = NULL, backend_code = NULL,
                          request = NULL, response = NULL,

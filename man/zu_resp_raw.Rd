@@ -18,3 +18,8 @@ not the bytes that crossed the wire; if you are checksumming against a
 server-side hash, perform the request with \code{decode = FALSE} and the body
 will be exactly what the server sent.
 }
+\examples{
+r <- zu_response(200L, body = "hello")
+zu_resp_raw(r)
+rawToChar(zu_resp_raw(r))
+}

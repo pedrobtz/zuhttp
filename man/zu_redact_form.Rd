@@ -15,3 +15,6 @@ The redacted string.
 \description{
 Redact a form-encoded request body
 }
+\examples{
+zu_redact_form("user=alice&password=hunter2&remember=1")
+}

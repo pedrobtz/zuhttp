@@ -2,7 +2,7 @@ Package: zuhttp
 Title: Minimal HTTP Client Using Native System TLS
 Version: 0.1.0
 Authors@R: c(
-    person("Pedro", "Baltazar", , "pedrobtz@gmail.com", role = c("aut", "cre")),
+    person("Pedro", "Baltazar", , "pedrobtz@gmail.com", role = c("aut", "cre", "cph")),
     person("Kazuho", "Oku", role = "cph",
            comment = "picohttpparser, see inst/COPYRIGHTS"),
     person("Tokuhiro", "Matsuno", role = "cph",
@@ -16,14 +16,17 @@ Authors@R: c(
     person("Sebastian", "Pipping", role = "cph",
            comment = "uriparser, see inst/COPYRIGHTS")
   )
-Description: A small HTTP/1.1 client for HTTP and HTTPS requests that uses
-    the operating system's own TLS implementation and certificate trust
-    store rather than a bundled cryptography library or certificate
-    bundle. Provides structured timeouts, reliable cancellation from R,
-    connection reuse, streaming request and response bodies, structured
-    error conditions, and a pluggable transport layer for testing.
-    Intended as a focused alternative to full multi-protocol clients for
-    packages whose only requirement is reliable HTTPS.
+Description: A small client for the Hypertext Transfer Protocol (HTTP/1.1),
+    over plain connections and over Transport Layer Security (TLS), that uses
+    the operating system's own TLS implementation and certificate trust store
+    instead of a bundled cryptography library or certificate bundle:
+    'Schannel' on 'Windows', Apple's native TLS on 'macOS', and 'OpenSSL'
+    elsewhere. Provides a total request timeout, cancellation from 'R' with
+    an interrupt, connection reuse, streaming of response bodies to files or
+    callbacks, structured error conditions, and a pluggable transport layer
+    for testing without a network. Intended as a focused alternative to
+    full multi-protocol clients for packages that only need reliable HTTP
+    requests.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Depends:
@@ -37,7 +40,7 @@ SystemRequirements: zlib; and each platform's own TLS stack, which
     both part of the operating system, and OpenSSL >= 1.1.1 on other Unix.
     No certificate bundle is shipped: the system trust store is used
     everywhere.
-URL: https://github.com/pedrobtz/zuhttp
+URL: https://github.com/pedrobtz/zuhttp, https://pedrobtz.github.io/zuhttp/
 BugReports: https://github.com/pedrobtz/zuhttp/issues
 Config/testthat/edition: 3
 Roxygen: list(markdown = TRUE)

@@ -15,3 +15,8 @@ zu_code_retryable(code)
 \description{
 Is an error code worth retrying?
 }
+\examples{
+zu_code_retryable("zu_connect_error")          # a transport failure: yes
+zu_code_retryable("zu_tls_certificate_error")  # will not fix itself: no
+zu_code_retryable("not_a_zuhttp_class")        # unknown: NA
+}

@@ -17,6 +17,13 @@ Whatever the backend returns, by default a list.
 \description{
 The response body as parsed JSON
 }
+\examples{
+\dontshow{if (requireNamespace("jsonlite", quietly = TRUE)) withAutoprint(\{ # examplesIf}
+r <- zu_response(200L, c("Content-Type" = "application/json"),
+                 '{"name": "Alice", "tags": ["a", "b"]}')
+str(zu_resp_json(r))
+\dontshow{\}) # examplesIf}
+}
 \seealso{
 \code{\link[=zu_set_json_backend]{zu_set_json_backend()}} if you would rather not use \code{jsonlite}.
 }
