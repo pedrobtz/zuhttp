@@ -260,7 +260,7 @@ test_that("each attempt is given what is left of the budget, not all of it (§24
   # times what the caller asked.
   seen <- numeric()
   slow <- counting(function(n, req) {
-    seen[[n]] <<- req$resolved$timeout
+    seen[[n]] <<- req$attempt_budget
     Sys.sleep(0.3)
     zu_response(503L)
   })
@@ -277,14 +277,23 @@ test_that("each attempt is given what is left of the budget, not all of it (§24
 
 test_that("attempt_timeout bounds each attempt within the budget (§24.3)", {
   seen <- numeric()
-  c1 <- counting(function(n, req) { seen[[n]] <<- req$resolved$timeout; zu_response(503L) })
+  merged <- numeric()
+  c1 <- counting(function(n, req) {
+    seen[[n]]   <<- req$attempt_budget
+    merged[[n]] <<- req$resolved$timeout
+    zu_response(503L)
+  })
   cli <- zu_client(transport = c1$transport, check = FALSE,
                    retry = zu_retry(attempts = 2, base = 0.01, jitter = FALSE,
                                     attempt_timeout = 0.25))
   resp <- zu_get("https://h/x", timeout = 30, client = cli)
   expect_identical(seen, c(0.25, 0.25))
-  # The request the caller gets back still says what the caller asked for.
+  # The budget is a field of its own: the resolved policy the transport sees
+  # is still the §31.9 merge, untouched by the clock, and so is the request
+  # the caller gets back.
+  expect_identical(merged, c(30, 30))
   expect_identical(resp$request$resolved$timeout, 30)
+  expect_null(resp$request$attempt_budget)
 })
 
 test_that("attempt_timeout reaches the engine: a stalled server is retried, not waited on (§24.3)", {

@@ -84,7 +84,11 @@ test_that("the one-shot helpers lower to the same request (§31.1 principle 3)",
   expect_identical(one_shot$url, composed$url)
   expect_identical(one_shot$headers, composed$headers)
   expect_identical(one_shot$body, composed$body)
+  # identical(), not all.equal(): the resolved policy is the §31.9 merge and
+  # nothing else. The attempt's time budget (§24.3) is a separate field, so a
+  # clock reading cannot leak in here and make the two differ by a tick.
   expect_identical(one_shot$resolved, composed$resolved)
+  expect_true(one_shot$attempt_budget <= one_shot$resolved$timeout)
 })
 
 test_that("every method helper sends its own method", {

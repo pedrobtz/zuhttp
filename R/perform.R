@@ -84,7 +84,10 @@ zu_transport_perform.zu_native_transport <- function(transport, req) {
                if (length(h)) names(h) else NULL,
                if (length(h)) unname(h) else NULL,
                req$body,
-               timeout_ms(p$timeout),
+               # §24.3: this attempt's share of the budget when the retry
+               # loop set one; the whole merged `timeout` when the transport
+               # is driven directly, as the zu_transport_perform() example is.
+               timeout_ms(req$attempt_budget %||% p$timeout),
                as.integer(p$redirects),
                isTRUE(p$verify),
                as.numeric(p$max_body),
@@ -336,16 +339,27 @@ attempt_with_retries <- function(r, client, hooks, deadline_at) {
 # §24.3: an attempt is given what is left of `total`, and no more than
 # `attempt_timeout`. Handing every attempt the whole `total` bounded only the
 # sleeps between attempts, so three slow attempts could run for three times
-# what the caller asked. The copy is the transport's alone: hooks, conditions
-# and the returned response keep the request as the caller resolved it. The
-# floor matters, because the engine reads a timeout of 0 as "use the default"
-# (30 s), which is the opposite of an exhausted budget. `timeout` itself is
-# in the min() because `left` can come out a rounding error above it when no
-# time has passed, and an attempt must never be given more than was asked.
+# what the caller asked.
+#
+# The share travels as its own field, `attempt_budget`, and NOT by rewriting
+# `resolved$timeout`: the resolved policy is the outcome of the §31.9 merge and
+# nothing else, so two spellings of the same request resolve identically and a
+# test can say so with identical(). A clock reading folded into it made that
+# comparison flicker by a millisecond, or by a floating-point epsilon, from
+# one CI leg to the next. The field is the transport's alone: hooks,
+# conditions and the returned response carry the request as the caller
+# resolved it, and a transport called outside this loop finds no budget and
+# falls back to `resolved$timeout`.
+#
+# The floor matters, because the engine reads a timeout of 0 as "use the
+# default" (30 s), which is the opposite of an exhausted budget. `timeout`
+# itself is in the min() because `left` can come out a rounding error above
+# it when no time has passed, and an attempt must never be given more than
+# was asked.
 attempt_request <- function(r, policy, deadline_at) {
   left <- deadline_at - proc.time()[["elapsed"]]
-  r$resolved$timeout <- max(0.001, min(r$resolved$timeout, left,
-                                       policy$attempt_timeout %||% Inf))
+  r$attempt_budget <- max(0.001, min(r$resolved$timeout, left,
+                                     policy$attempt_timeout %||% Inf))
   r
 }
 

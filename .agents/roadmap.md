@@ -698,3 +698,11 @@ changed the plan or the design.
   ciphertext) is narrower than it states, since the peer's FIN usually
   reaches the socket probe; it stays open with the rest of its section 5,
   which is not yet folded into the work packages.
+- **2026-09-27 — the R-2 fix (#74) turned main red on five Linux jobs.** It
+  wrote each attempt's share of the budget into `resolved$timeout`, so the
+  resolved policy carried a clock reading and `identical()` comparisons of
+  two spellings of one request differed by a millisecond, or by a
+  floating-point epsilon, on some legs and not others. The share now travels
+  as the request's own `attempt_budget` field (§24.3) and `resolved` is the
+  §31.9 merge and nothing else. Rule 6 in the other direction: a test that
+  was right, and a fix that made it flicker.
