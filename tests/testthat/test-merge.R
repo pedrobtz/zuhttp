@@ -83,6 +83,19 @@ test_that("zu_client_update() rejects a setting that does not exist", {
   expect_error(zu_client_update(zu_client(), timout = 5), "not a client setting")
 })
 
+test_that("zu_client_update(x, field = NULL) resets the field and keeps it (§31.9)", {
+  # `client[[nm]] <- NULL` deletes a list element, so this once removed
+  # `timeout` from the client, and the next update of it was rejected as
+  # "not a client setting".
+  api <- zu_client(timeout = 10)
+  reset <- zu_client_update(api, timeout = NULL)
+  expect_identical(names(reset), names(api))
+  expect_null(reset$timeout)
+  expect_identical(resolved(zu_request("GET", "https://x/"), reset)$resolved$timeout,
+                   zuhttp:::zu_defaults()$timeout)
+  expect_identical(zu_client_update(reset, timeout = 5)$timeout, 5)
+})
+
 test_that("base_url is joined, not resolved", {
   api <- zu_client(base_url = "https://api.example.com/v1")
   # RFC 3986 resolution would drop /v1 here. That surprise is the reason the

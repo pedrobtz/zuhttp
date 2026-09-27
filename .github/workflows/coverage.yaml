@@ -50,6 +50,9 @@ jobs:
   #     gap means an input, or an env block, in pedrobtz/r-actions.
   coverage:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
-    uses: pedrobtz/r-actions/.github/workflows/coverage.yml@v1
+    # A commit, not the floating tag: this job holds `contents: write`, so a
+    # moved tag in another repository could commit to this one. The same
+    # commit zucrypt pins; coverage.yml is unchanged from it through v1.16.0.
+    uses: pedrobtz/r-actions/.github/workflows/coverage.yml@68c22c173f9ddbb7e51284fe230053174e941afc # v1.15.0
     permissions:
       contents: write

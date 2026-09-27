@@ -305,7 +305,8 @@ attempt_with_retries <- function(r, client, hooks, deadline_at) {
   repeat {
     fire_hook(hooks, "before_request", list(request = r, attempt = attempt))
     resp <- NULL; cnd <- NULL
-    resp <- tryCatch(zu_transport_perform(client$transport, r),
+    resp <- tryCatch(zu_transport_perform(client$transport,
+                                          attempt_request(r, policy, deadline_at)),
                      zu_error = function(e) { cnd <<- e; NULL })
 
     if (!may_replay || attempt >= policy$attempts) break
@@ -330,6 +331,22 @@ attempt_with_retries <- function(r, client, hooks, deadline_at) {
   if (is.null(resp)) stop(cnd)
   resp$attempts <- attempt
   resp
+}
+
+# §24.3: an attempt is given what is left of `total`, and no more than
+# `attempt_timeout`. Handing every attempt the whole `total` bounded only the
+# sleeps between attempts, so three slow attempts could run for three times
+# what the caller asked. The copy is the transport's alone: hooks, conditions
+# and the returned response keep the request as the caller resolved it. The
+# floor matters, because the engine reads a timeout of 0 as "use the default"
+# (30 s), which is the opposite of an exhausted budget. `timeout` itself is
+# in the min() because `left` can come out a rounding error above it when no
+# time has passed, and an attempt must never be given more than was asked.
+attempt_request <- function(r, policy, deadline_at) {
+  left <- deadline_at - proc.time()[["elapsed"]]
+  r$resolved$timeout <- max(0.001, min(r$resolved$timeout, left,
+                                       policy$attempt_timeout %||% Inf))
+  r
 }
 
 # §27.4: mark the client as "inside a callback" for exactly as long as the

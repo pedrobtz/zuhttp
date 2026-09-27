@@ -124,7 +124,18 @@ jobs:
       - name: R CMD check --as-cran
         run: |
           R CMD check --as-cran --no-manual zuhttp_*.tar.gz || true
-          # "New submission" and the dev version string are expected; anything
-          # else is not.
-          if grep -E '^(WARNING|ERROR)' zuhttp.Rcheck/00check.log; then exit 1; fi
-          grep -c 'NOTE' zuhttp.Rcheck/00check.log || true
+          # "New submission" and the dev version string are expected NOTEs;
+          # a WARNING or an ERROR is not. 00check.log puts a status at the END
+          # of its line, after --as-cran's timings ("... [6s/15s] WARNING"),
+          # and sums them up as "Status: 1 WARNING". The pattern this replaced
+          # looked for one at the start of a line, never matched, and so
+          # passed every check whatever it found.
+          log=zuhttp.Rcheck/00check.log
+          if ! grep -q '^Status:' "$log"; then
+            echo "::error::no Status line in $log — the check did not complete"
+            exit 1
+          fi
+          if grep -E '^Status: .*(WARNING|ERROR)|\.\.\. (\[[^]]*\] )?(WARNING|ERROR)$' "$log"; then
+            exit 1
+          fi
+          grep -c 'NOTE' "$log" || true
