@@ -900,6 +900,13 @@ fires first names the phase in `zu_timeout_error$phase`.
 attempt_timeout = )` bounds each attempt within it. The retry layer checks the
 remaining budget before sleeping and fails rather than sleep past it.
 
+Each attempt is handed its share of the budget, `min(total remaining,
+attempt_timeout)`, as the request's `attempt_budget` field. The transport
+spends that; `resolved$timeout` stays the §31.9 merge, so the resolved policy
+is a pure function of the request and the client and never of the clock. A
+transport driven outside the retry loop finds no `attempt_budget` and spends
+`resolved$timeout`.
+
 #### 24.4 Clocks
 
 Monotonic only. A platform with no monotonic clock fails to **build**; the
