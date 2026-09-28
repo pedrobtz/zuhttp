@@ -129,6 +129,7 @@ accepted when that work package's PR merges.
 | D-75 | A client derived with **different `pool` settings gets a pool of its own**; any other derived client shares its parent's. One shared slot made parent and child each rebuild the pool the other had built, dropping every idle connection on each alternation | Accepted 2026-09-26 (#74) | 26.5, 31.10 | — |
 | D-76 | A compressed body succeeds only if its **stream is complete** when the framing ends: every framing mode then asks the decoder, and a stream cut short is `zu_body_decode_error`. Consecutive gzip members are all decoded (RFC 1952 §2.2); bytes after a deflate stream are malformed. An empty body under a coding decodes to nothing, successfully | Accepted 2026-09-28 (#77) | 21.5 | — |
 | D-77 | A redirect that will be followed has its body **drained undecoded**; a body that cannot be drained — over `max_redirect_body` or cut short — closes the connection and the redirect is still followed. Timeouts and interrupts still stop the request | Accepted 2026-09-28 (#77) | 19.5 | — |
+| D-78 | **The body decides a request's framing.** A caller `Transfer-Encoding` header is refused, and a caller `Content-Length` that does not match the body is refused, both before connecting; a matching one is accepted. The engine emits the framing of each hop's own body, so a length never outlives a 303 that dropped the body | Accepted 2026-09-28 (#77) | 17.4 | — |
 
 ---
 
@@ -695,6 +696,16 @@ credentials.
 #### 17.3 `Expect: 100-continue`
 
 Never sent automatically. Informational `1xx` responses are skipped.
+
+#### 17.4 Framing headers (D-78)
+
+`Content-Length` and `Transfer-Encoding` describe the body, so the body
+decides them. zuhttp sends a body with `Content-Length` and never chunks one,
+so a caller `Transfer-Encoding` raises `zu_http_parse_error` before
+connecting, as does a caller `Content-Length` that disagrees with the body.
+One that agrees is accepted and not sent: the engine emits the framing of each
+hop's own body, which after a 303 is no body at all (RFC 9112 §6.2 forbids the
+two together; a wrong length puts the connection out of step with the server).
 
 ### 18. Response Parsing and Body Framing
 

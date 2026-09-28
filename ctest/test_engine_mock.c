@@ -211,6 +211,59 @@ void suite_engine_mock(void) {
         zu_result_free(&r); dialer_free(&d);
     }
 
+    ZU_CASE("engine: the body decides a request's framing, not the caller's headers (RFC 9112 §6.2)");
+    {
+        /* A caller Content-Length of 1 on a five-byte body went out as
+         * written, followed by all five bytes; a caller Transfer-Encoding
+         * went out beside the generated Content-Length over an unchunked
+         * body. Either leaves the connection out of step with the server.
+         * Both are refused before connecting; a matching Content-Length is
+         * accepted and sent once. */
+        static const char *te_n[] = { "Transfer-Encoding" }, *te_v[] = { "chunked" };
+        static const char *bad_n[] = { "Content-Length" },   *bad_v[] = { "1" };
+        static const char *ok_n[] = { "content-length", "Content-Length" };
+        static const char *ok_v[] = { " 5 ", "5" };
+        zu_req_spec spec;
+        memset(&spec, 0, sizeof spec);
+        spec.method = "POST"; spec.body = "hello"; spec.body_len = 5;
+
+        spec.header_names = bad_n; spec.header_values = bad_v; spec.n_headers = 1;
+        dialer_init(&d, NULL, 0); opts_for(&o, &d); zu_error_clear(&e);
+        ZU_CHECK_EQ_INT(zu_engine_perform(&r, "http://example.test/", &spec, &o, &e), ZU_ERR_PARSE);
+        ZU_CHECK_EQ_INT(e.code, ZU_ERR_PARSE);
+        ZU_CHECK_EQ_INT(d.next, 0);
+        dialer_free(&d);
+
+        spec.header_names = te_n; spec.header_values = te_v;
+        dialer_init(&d, NULL, 0); opts_for(&o, &d); zu_error_clear(&e);
+        ZU_CHECK_EQ_INT(zu_engine_perform(&r, "http://example.test/", &spec, &o, &e), ZU_ERR_PARSE);
+        ZU_CHECK_EQ_INT(e.code, ZU_ERR_PARSE);
+        ZU_CHECK_EQ_INT(d.next, 0);
+        dialer_free(&d);
+
+        /* Matching, twice and with whitespace: one Content-Length on the
+         * wire. Then a 303 turns the POST into a GET and drops the body, and
+         * the caller's length must not follow it. */
+        {
+            conn_script sc[] = {
+                { "HTTP/1.1 303 See Other\r\nLocation: /done\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", 0, 0, 0, NULL },
+                { OK200(2) "ok", 0, 0, 0, NULL } };
+            const char *w0, *first;
+            spec.header_names = ok_n; spec.header_values = ok_v; spec.n_headers = 2;
+            dialer_init(&d, sc, 2); opts_for(&o, &d);
+            rc = zu_engine_perform(&r, "http://example.test/", &spec, &o, &e);
+            ZU_CHECK_EQ_INT(rc, ZU_OK);
+            w0 = sent(&d, 0);
+            first = strstr(w0, "ontent-Length");
+            ZU_CHECK(first != NULL && strstr(first + 1, "ontent-Length") == NULL);
+            ZU_CHECK(has(w0, "Content-Length: 5\r\n") && has(w0, "\r\n\r\nhello"));
+            ZU_CHECK(has(sent(&d, 1), "GET /done HTTP/1.1\r\n"));
+            ZU_CHECK(!has(sent(&d, 1), "ontent-Length"));
+            if (rc == ZU_OK) zu_result_free(&r);
+            dialer_free(&d);
+        }
+    }
+
     ZU_CASE("engine: a cross-origin redirect drops credentials, keeps other headers (§19.2)");
     {
         static const char *hn[] = { "Authorization", "Cookie", "X-Keep" };

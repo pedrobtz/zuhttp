@@ -473,6 +473,49 @@ zu_code zu_engine_get(zu_result *out, const char *url,
     return zu_engine_perform(out, url, NULL, o, err);
 }
 
+/* RFC 9112 §6.2 (D-78): the body decides the framing. A caller's
+ * Content-Length used to go out as written, so "1" on a five-byte body sent
+ * five bytes the server would read as one plus the start of the next
+ * request; a caller's Transfer-Encoding went out beside the generated
+ * Content-Length over a body that was never chunked. Either leaves the
+ * connection out of step with the server. A Content-Length that matches the
+ * body is harmless and is accepted — the engine emits its own either way. */
+static zu_code check_caller_framing(const zu_req_spec *req, size_t body_len,
+                                    zu_error *err) {
+    size_t i;
+    if (!req) return ZU_OK;
+    for (i = 0; i < req->n_headers; i++) {
+        const char *name = req->header_names ? req->header_names[i] : NULL;
+        const char *v    = req->header_values ? req->header_values[i] : NULL;
+        if (!name) continue;
+        if (zu_ascii_casecmp(name, "Transfer-Encoding") == 0) {
+            zu_error_set(err, ZU_ERR_PARSE, ZU_PHASE_NONE,
+                         "a Transfer-Encoding header cannot be set: zuhttp "
+                         "frames the body itself, with Content-Length");
+            return ZU_ERR_PARSE;
+        }
+        if (zu_ascii_casecmp(name, "Content-Length") == 0) {
+            uint64_t n = 0;
+            int digits = 0, ok = 1;
+            const char *c = v ? v : "";
+            while (*c == ' ' || *c == '\t') c++;
+            for (; *c >= '0' && *c <= '9'; c++, digits++) {
+                if (n > (UINT64_MAX - 9) / 10) { ok = 0; break; }
+                n = n * 10 + (uint64_t)(*c - '0');
+            }
+            while (*c == ' ' || *c == '\t') c++;
+            if (!ok || !digits || *c || n != (uint64_t)body_len) {
+                zu_error_set(err, ZU_ERR_PARSE, ZU_PHASE_NONE,
+                             "a Content-Length header of '%.40s' does not "
+                             "match the %lu-byte body",
+                             v ? v : "", (unsigned long)body_len);
+                return ZU_ERR_PARSE;
+            }
+        }
+    }
+    return ZU_OK;
+}
+
 zu_code zu_engine_perform(zu_result *out, const char *url,
                           const zu_req_spec *req, const zu_get_opts *o,
                           zu_error *err) {
@@ -514,6 +557,9 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
         zu_error_set(err, ZU_ERR_URL, ZU_PHASE_NONE, "not a usable URL: %s", url);
         return ZU_ERR_URL;
     }
+
+    rc = check_caller_framing(req, body_len, err);
+    if (rc != ZU_OK) { zu_uri_free(&cur); zu_result_free(out); return rc; }
 
     /* §27: where the final body goes. `o->sink` is the caller's; without one
      * the body is buffered into the result, which is the pre-S17 behaviour and
@@ -640,6 +686,10 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
              * 2026-09-26 nothing read dec.strip_credentials at all, and an
              * Authorization header followed a redirect to any origin. */
             if (strip_creds && zu_redirect_is_credential_header(req->header_names[hi]))
+                continue;
+            /* D-78: framing comes from this hop's body, which a 303 may have
+             * dropped; the caller's length, checked above, is never sent. */
+            if (zu_ascii_casecmp(req->header_names[hi], "Content-Length") == 0)
                 continue;
             rc = zu_headers_add_str(&rq.headers, req->header_names[hi],
                                     req->header_values[hi]);
