@@ -69,6 +69,14 @@ zu_retry(
 A `zu_retry_policy`, for `zu_client(retry = )` or
 [`zu_req_retry()`](https://pedrobtz.github.io/zuhttp/reference/zu_req_retry.md).
 
+## Details
+
+A request with a streaming `callback` is not retried once the callback
+has been handed any bytes: what it received, and did with them, cannot
+be taken back, so a retry would give it a second body after the first. A
+retryable failure that delivered nothing, such as a 503 with an empty
+body, is still retried.
+
 ## See also
 
 [`zu_req_retry()`](https://pedrobtz.github.io/zuhttp/reference/zu_req_retry.md)

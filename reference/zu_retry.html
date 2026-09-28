@@ -116,6 +116,14 @@ timeout still bounds the whole call (§24.3); this bounds one try.</p></dd>
 <code><a href="zu_req_retry.html">zu_req_retry()</a></code>.</p>
     </div>
     <div class="section level2">
+    <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
+    <p>A request with a streaming <code>callback</code> is not retried once the callback has
+been handed any bytes: what it received, and did with them, cannot be taken
+back, so a retry would give it a second body after the first. A retryable
+failure that delivered nothing, such as a 503 with an empty body, is still
+retried.</p>
+    </div>
+    <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
     <div class="dont-index"><p><code><a href="zu_req_retry.html">zu_req_retry()</a></code> for per-request opt-in, including the
 replay-safety override that a POST needs.</p></div>
