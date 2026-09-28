@@ -787,7 +787,17 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
         }
         /* No C resources are live here: zu_engine_get frees everything it
          * owns before returning non-OK, which is what makes it safe to raise
-         * an R condition (and longjmp) from this point. */
+         * an R condition (and longjmp) from this point.
+         *
+         * The return code is the authority. A path that returned an error
+         * without filling `e` once reached R as "unknown zuhttp error code:
+         * 0" — a plain simpleError no handler for zu_error would catch. */
+        if (e.code == ZU_OK) {
+            e.code = rc;
+            if (!e.message[0])
+                snprintf(e.message, sizeof e.message, "request failed (%s)",
+                         zu_code_class(rc));
+        }
         raise_zu_error(&e, u);
         return R_NilValue;   /* not reached */
     }

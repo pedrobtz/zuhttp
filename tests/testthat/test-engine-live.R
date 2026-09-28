@@ -35,6 +35,24 @@ test_that("an HTTP/1.0 response without framing is read to the close", {
   })
 })
 
+test_that("a truncated gzip body is an error, and a download keeps the old file (D-76)", {
+  skip_unless_forkable()
+  # 30 bytes of a gzip stream that decodes to 10,000: the header and a little
+  # deflate data, under an accurate Content-Length. This returned a complete,
+  # empty 200 and replaced the destination with an empty file.
+  gz <- memCompress(charToRaw(strrep("abcdefghij", 1000)), "gzip")
+  gz <- c(as.raw(c(0x1f, 0x8b, 0x08, 0, 0, 0, 0, 0, 0, 0x03)),
+          gz[-c(1:2, length(gz) - 0:3)], as.raw(rep(0, 8)))   # zlib -> gzip
+  head <- charToRaw(crlf("HTTP/1.1 200 OK", "Content-Encoding: gzip",
+                         "Content-Length: 30", "Connection: close", "", ""))
+  dest <- tempfile(); writeLines("PRECIOUS", dest)
+  on.exit(unlink(dest), add = TRUE)
+  with_raw_server(c(head, gz[1:30]), function(base) {
+    expect_error(zu_get(paste0(base, "/"), path = dest), class = "zu_body_decode_error")
+  })
+  expect_identical(readLines(dest), "PRECIOUS")
+})
+
 test_that("a status line that is not HTTP/1.x is a parse error", {
   skip_unless_forkable()
   with_raw_server(crlf("HTTP/2.0 200 OK", "Content-Length: 0", "", ""), function(base) {

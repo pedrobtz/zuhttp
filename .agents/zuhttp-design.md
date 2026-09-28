@@ -127,6 +127,8 @@ accepted when that work package's PR merges.
 | D-73 | Bytes received **past a response's framing** — after `Content-Length`, after a chunked body's trailers, or on a bodiless response — keep that connection out of the pool | Accepted 2026-09-26 (#58) | 26.3 | — |
 | D-74 | The interrupt checkpoint runs `R_CheckUserInterrupt()` under `R_tryCatch` and keeps the condition: a user interrupt becomes `zu_interrupted_error`; any other error raised there (a time limit) is re-raised unchanged after the engine unwinds. Its context lives in a per-call slot, never in a pooled stream | Accepted 2026-09-26 (#57) | 25.2 | — |
 | D-75 | A client derived with **different `pool` settings gets a pool of its own**; any other derived client shares its parent's. One shared slot made parent and child each rebuild the pool the other had built, dropping every idle connection on each alternation | Accepted 2026-09-26 (#74) | 26.5, 31.10 | — |
+| D-76 | A compressed body succeeds only if its **stream is complete** when the framing ends: every framing mode then asks the decoder, and a stream cut short is `zu_body_decode_error`. Consecutive gzip members are all decoded (RFC 1952 §2.2); bytes after a deflate stream are malformed. An empty body under a coding decodes to nothing, successfully | Accepted 2026-09-28 (#77) | 21.5 | — |
+| D-77 | A redirect that will be followed has its body **drained undecoded**; a body that cannot be drained — over `max_redirect_body` or cut short — closes the connection and the redirect is still followed. Timeouts and interrupts still stop the request | Accepted 2026-09-28 (#77) | 19.5 | — |
 
 ---
 
@@ -672,7 +674,10 @@ environment variables and explicit arguments are.
 
 The builder writes the request line (origin-form, or absolute-form to an HTTP
 proxy), `Host`, headers, and `Content-Length` into a checked buffer with
-overflow-safe integer formatting.
+overflow-safe integer formatting. That buffer is the header block and is
+capped at 64 KiB; exceeding it raises `zu_overflow_error` before a byte is
+sent. The body is not part of the cap: it goes in the same write when it fits
+beside the headers, and in a second write under the same deadline otherwise.
 
 #### 17.1 Header injection
 
@@ -762,9 +767,11 @@ chain; a repeated (method, URL) pair is a loop and raises.
 
 #### 19.5 Interaction with sinks
 
-Redirect bodies never reach the caller's sink. They are drained into a
-discard sink up to `max_redirect_body` (64 KiB); beyond it the connection is
-closed instead.
+Redirect bodies never reach the caller's sink. They are drained, without
+decoding, up to `max_redirect_body` (64 KiB); a body beyond it, or one cut
+short, closes the connection instead, and the redirect is followed on a new
+one (D-77). Decoding a body that is thrown away could only fail a request whose
+`Location` is valid.
 
 #### 19.6 Resolving the `Location` header
 
@@ -846,6 +853,19 @@ the connection. **The ratio check exists in `zu_inflate.c` but is passed 0
 by `zu_body.c:35` and so never runs; D-69 turns it on at 1000.** The absolute
 cap bounds a bomb today; the ratio makes it fail after kilobytes, not
 megabytes. `Transfer-Encoding: gzip` is rejected (§18.1).
+
+#### 21.5 Completeness (D-76)
+
+A body is decoded only if it exists: a bodyless response (HEAD, 204, 304)
+keeps its `Content-Encoding` and `Content-Length`, which describe the
+representation rather than bytes that follow (RFC 9112 §6.3). A body that
+exists succeeds only when its compressed stream ends: each framing mode asks
+the decoder at the end, and a stream cut short — a missing gzip trailer, a
+body truncated inside its deflate data — is `zu_body_decode_error`, which
+discards a download rather than committing it. A gzip body may be several
+members, decoded in turn; anything after a deflate stream, or after a gzip
+member that is not another member, is malformed. The byte limits of §21.4 are
+not an integrity check and were never meant as one.
 
 ### 22. Cookies
 

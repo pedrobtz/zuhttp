@@ -533,6 +533,8 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
         zu_body_pipe pipe;
         zu_sink *hop_sink = NULL;
         size_t consumed = 0;
+        size_t sent_bytes = 0;
+        int may_follow = 0;
         uint64_t surplus = 0;
         char hosthdr[300];
 
@@ -656,16 +658,38 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
         }
         rc = zu_request_add_defaults(&rq, o->user_agent);
         if (rc == ZU_OK) rc = zu_request_write(&rq, &wire);
-        /* The body is appended to the same buffer rather than written
-         * separately: one write means one TCP segment for a small request,
-         * and it keeps the "headers sent but body not" window closed. */
-        if (rc == ZU_OK && body_len > 0 && !zu_buf_append(&wire, body, body_len))
+        /* The 64 KiB cap is on the header block (§17.1), so running into it
+         * is the caller's headers being too large, not memory running out. */
+        if (rc == ZU_ERR_NOMEM && zu_buf_hit_limit(&wire)) {
+            zu_error_set(err, ZU_ERR_OVERFLOW, ZU_PHASE_NONE,
+                         "request headers exceed the 64 KiB limit");
+            rc = ZU_ERR_OVERFLOW;
+        } else if (rc != ZU_OK && !err->code) {
+            zu_error_set(err, rc, ZU_PHASE_NONE, "could not build the request");
+        }
+        /* A body that fits beside the headers goes in the same write: one
+         * write means one TCP segment for a small request. A larger one is
+         * written after them, under the same deadline. It used to be appended
+         * regardless, so the header cap limited every upload to 64 KiB. */
+        sent_bytes = wire.len + body_len;
+        if (rc == ZU_OK && body_len > 0 && body_len <= wire.max - wire.len &&
+            !zu_buf_append(&wire, body, body_len)) {
+            zu_error_set(err, ZU_ERR_NOMEM, ZU_PHASE_NONE, "out of memory");
             rc = ZU_ERR_NOMEM;
-        if (rc == ZU_OK && !zu_stream_write_all(s, wire.data, wire.len, total, err))
+        } else if (rc == ZU_OK && body_len > 0 && body_len > wire.max - wire.len) {
+            if (!zu_stream_write_all(s, wire.data, wire.len, total, err))
+                rc = err->code ? err->code : ZU_ERR_IO;
+            else
+                wire.len = 0;
+            if (rc == ZU_OK && !zu_stream_write_all(s, body, body_len, total, err))
+                rc = err->code ? err->code : ZU_ERR_IO;
+        }
+        if (rc == ZU_OK && wire.len &&
+            !zu_stream_write_all(s, wire.data, wire.len, total, err))
             rc = err->code ? err->code : ZU_ERR_IO;
         if (rc == ZU_OK) {
             out->timings.request_write = (long)(zu_now_ms() - t_start);
-            zu_trace_add(o->trace, ZU_EV_REQUEST_SENT, method, wire.len);
+            zu_trace_add(o->trace, ZU_EV_REQUEST_SENT, method, (uint64_t)sent_bytes);
         }
         zu_buf_free(&wire);
         if (have_absform) { zu_buf_free(&absform); have_absform = 0; }
@@ -717,9 +741,9 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
              * the response the caller receives and its body is theirs. Held
              * bytes are bounded by ZU_MAX_REDIRECT_BODY, so this is not a
              * route back to buffering a large body. */
-            int may_follow = zu_status_is_redirect(resp.status) &&
-                             o->max_redirects > 0 &&
-                             zu_headers_get(&resp.headers, "Location") != NULL;
+            may_follow = zu_status_is_redirect(resp.status) &&
+                         o->max_redirects > 0 &&
+                         zu_headers_get(&resp.headers, "Location") != NULL;
             uint64_t cap = o->max_body ? o->max_body : ZU_DEFAULT_MAX_BODY;
 
             fr = resp.framing;
@@ -731,8 +755,17 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
             if (may_follow) cap = ZU_MAX_REDIRECT_BODY;
             /* Per hop, not cumulative: the limit describes one body. */
             hop_sink->written = 0;
+            /* Two responses are never decoded. A bodiless one (HEAD, 204,
+             * 304): its Content-Encoding and Content-Length describe the
+             * representation, not bytes that follow (RFC 9112 §6.3), so
+             * decoding nothing failed on an unsupported coding and stripped
+             * both headers from the rest. And a redirect about to be
+             * followed: its body is thrown away, so decoding it could only
+             * turn an irrelevant body into a failed request. */
             rc = zu_body_pipe_init(&pipe, hop_sink, &resp.headers,
-                                   o->no_decode, cap, err);
+                                   o->no_decode || may_follow ||
+                                   resp.framing.kind == ZU_FRAME_NONE,
+                                   cap, err);
             if (rc == ZU_OK)
                 rc = zu_body_read(s, &fr, &pipe,
                                (const char *)raw.data + consumed, raw.len - consumed,
@@ -754,6 +787,16 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
         {
             zu_reuse reason = zu_reuse_decide(rc, &fr, &resp.headers,
                                               resp.minor_version);
+            /* §19.5: a redirect body that cannot be drained — over the
+             * ZU_MAX_REDIRECT_BODY budget, or cut short — costs the
+             * connection, not the request. The headers are complete and the
+             * Location is valid; `reason` already refuses reuse, since the
+             * framing position is unknown. Failures that concern the request
+             * rather than this body (a timeout, an interrupt) still stop it. */
+            if (may_follow && (rc == ZU_ERR_BODY_LIMIT || rc == ZU_ERR_PARSE)) {
+                rc = ZU_OK;
+                zu_error_clear(err);
+            }
             /* §27.2: a sink that asked to stop ended the transfer CLEANLY —
              * the caller gets their response. The connection still cannot be
              * reused, because the body was not read to its end and the

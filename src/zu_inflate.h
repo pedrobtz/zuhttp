@@ -50,7 +50,15 @@ void    zu_inflate_free(zu_inflate *z);
  *   ZU_ERR_WOULDBLOCK  more input needed
  *   ZU_ERR_BODY_DECODE malformed compressed data
  *   ZU_ERR_BODY_LIMIT  a §21.4 limit was hit
- */
+ *
+ * A gzip body may hold several members (RFC 1952 §2.2); each is decoded in
+ * turn. Bytes after the end of a deflate stream are malformed data.
+ *
+ * `in == NULL` marks the end of the body (D-76): ZU_OK if the stream reached
+ * its end, or if there was no body at all; otherwise ZU_ERR_BODY_DECODE,
+ * because a stream cut short is a truncated body, not a shorter one. A call
+ * rather than a separate function, so the zu_inflate_ names stay as they are
+ * until the W2 rename (#15). */
 zu_code zu_inflate_run(zu_inflate *z, const void *in, size_t in_len,
                        zu_buffer *out, zu_error *err);
 

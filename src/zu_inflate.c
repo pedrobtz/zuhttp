@@ -76,6 +76,22 @@ static zu_code start_deflate(zu_inflate *z) {
 
 static zu_code check_limits(zu_inflate *z, zu_error *err);
 
+/* A stream has ended and input remains. RFC 1952 §2.2 lets a gzip body be
+ * several members, decoded one after another — stopping at the first
+ * returned a prefix of the body as if it were all of it. Deflate has no such
+ * form, so what follows its stream is malformed, not ignorable. inflateReset
+ * keeps next_in/avail_in, so the caller's loop carries on with the rest. */
+static zu_code next_member(zu_inflate *z, zu_error *err) {
+    if (z->enc == ZU_ENC_GZIP && z->strm &&
+        inflateReset((z_stream *)z->strm) == Z_OK) {
+        z->finished = 0;
+        return ZU_OK;
+    }
+    zu_error_set(err, ZU_ERR_BODY_DECODE, ZU_PHASE_DECODE,
+                 "data after the end of the compressed stream");
+    return ZU_ERR_BODY_DECODE;
+}
+
 /* How many more output bytes the §21.4 caps still permit. UINT64_MAX means
  * unlimited. Both caps are consulted, because either can be the binding one. */
 static uint64_t remaining_allowance(const zu_inflate *z) {
@@ -155,16 +171,31 @@ zu_code zu_inflate_run(zu_inflate *z, const void *in, size_t in_len,
     z_stream *s;
     const unsigned char *p = (const unsigned char *)in;
     unsigned char chunk[16384];
+    zu_code rc0;
 
     if (!z || !out) return ZU_ERR_PARSE;
 
     if (z->enc == ZU_ENC_IDENTITY) {
+        if (!in) return ZU_OK;
         if (in_len && !zu_buf_append(out, in, in_len)) return ZU_ERR_NOMEM;
         z->in_total += in_len;
         z->out_total += in_len;
         return check_limits(z, err);
     }
-    if (z->finished) return ZU_OK;
+    /* D-76: the end of the body. Success needs the end of the stream, and
+     * nothing checked for it: a gzip body cut after its header decoded to
+     * nothing and was reported as a complete, empty 200. */
+    if (!in) {
+        if (z->finished || z->in_total == 0) return ZU_OK;
+        zu_error_set(err, ZU_ERR_BODY_DECODE, ZU_PHASE_DECODE,
+                     "compressed body ended before the end of its stream");
+        return ZU_ERR_BODY_DECODE;
+    }
+    if (z->finished) {
+        if (in_len == 0) return ZU_OK;
+        rc0 = next_member(z, err);
+        if (rc0 != ZU_OK) return rc0;
+    }
     if (!z->strm) return ZU_ERR_BODY_DECODE;
 
     /* Hold back the first two bytes until the deflate wrapping is known. */
@@ -202,7 +233,12 @@ zu_code zu_inflate_run(zu_inflate *z, const void *in, size_t in_len,
                     zu_code lrc = deliver(z, chunk, produced, out, err);
                     if (lrc != ZU_OK) return lrc;
                 }
-                if (ret == Z_STREAM_END) { z->finished = 1; return ZU_OK; }
+                if (ret == Z_STREAM_END) {
+                    /* Only deflate reaches here (gzip decides its wrapping
+                     * at init), so anything after is trailing data. */
+                    z->finished = 1;
+                    return in_len ? next_member(z, err) : ZU_OK;
+                }
                 if (s->avail_in == 0 || produced == 0) break;
             }
         }
@@ -232,7 +268,15 @@ zu_code zu_inflate_run(zu_inflate *z, const void *in, size_t in_len,
             if (lrc != ZU_OK) return lrc;
         }
 
-        if (ret == Z_STREAM_END) { z->finished = 1; return ZU_OK; }
+        if (ret == Z_STREAM_END) {
+            z->finished = 1;
+            if (s->avail_in == 0) return ZU_OK;
+            /* More input after this stream: the next gzip member, or, for
+             * deflate, data that does not belong to the body. */
+            rc0 = next_member(z, err);
+            if (rc0 != ZU_OK) return rc0;
+            continue;
+        }
         if (s->avail_in == 0 && produced == 0) break;
         if (produced == 0 && ret == Z_BUF_ERROR) break;
     }
