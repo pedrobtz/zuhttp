@@ -132,6 +132,7 @@ accepted when that work package's PR merges.
 | D-78 | **The body decides a request's framing.** A caller `Transfer-Encoding` header is refused, and a caller `Content-Length` that does not match the body is refused, both before connecting; a matching one is accepted. The engine emits the framing of each hop's own body, so a length never outlives a 303 that dropped the body | Accepted 2026-09-28 (#77) | 17.4 | — |
 | D-79 | **One list of secret headers.** A cross-origin redirect strips exactly the headers §42.1 redacts — the defaults and any configured with `zu_redact_headers()` — so a header hidden from every printout is never sent to an origin the caller did not name | Accepted 2026-09-28 (#77) | 19.2, 42.1 | — |
 | D-80 | A download's **temporary file is created exclusively** beside the destination, trying `<path>.zudl<pid>` then `.1`, `.2`…; nothing already at a candidate name is opened, so a planted symlink or a second download to the same path is never written through | Accepted 2026-09-28 (#77) | 27.1 | — |
+| D-81 | **No automatic retry after a callback has received bytes.** The callback API has no attempt boundary, and delivered bytes and their side effects cannot be taken back; an attempt that delivered nothing is retried as before | Accepted 2026-09-28 (#77) | 33.1 | — |
 
 ---
 
@@ -1312,6 +1313,12 @@ the default policy is `attempts = 1` (D-42).
 All three: the failure is retryable (§33.2); the request is replay-safe (an
 idempotent method, `zu_req_replay_safe()`, or an `Idempotency-Key` header);
 the body is rewindable. Decided once, before the first attempt.
+
+And one more, decided after each attempt: no `callback` byte was delivered
+(D-81). Replay safety is a property of the request; a streaming callback's
+side effects are a property of the response already under way, and they
+cannot be rolled back. Once a callback has received bytes, the attempt's
+outcome is the caller's, whatever its status.
 
 #### 33.2 Retryable conditions
 

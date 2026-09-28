@@ -310,11 +310,18 @@ attempt_with_retries <- function(r, client, hooks, deadline_at) {
   repeat {
     fire_hook(hooks, "before_request", list(request = r, attempt = attempt))
     resp <- NULL; cnd <- NULL
-    resp <- tryCatch(zu_transport_perform(client$transport,
-                                          attempt_request(r, policy, deadline_at)),
+    ar <- attempt_request(r, policy, deadline_at)
+    delivered <- watch_delivery(ar)
+    resp <- tryCatch(zu_transport_perform(client$transport, delivered$request),
                      zu_error = function(e) { cnd <<- e; NULL })
 
     if (!may_replay || attempt >= policy$attempts) break
+    # D-81: bytes a callback has received, and whatever it did with them,
+    # cannot be taken back. A retry after that handed it a second body
+    # behind the first — a 503's "ERROR" then a 200's "OK", as "ERROROK",
+    # reported as one clean 200. Replay safety is a property of the request;
+    # this is a property of what already happened to the response.
+    if (delivered$any()) break
     v <- retry_verdict(resp, cnd, policy)
     if (!isTRUE(v$retry)) break
 
@@ -363,6 +370,20 @@ attempt_request <- function(r, policy, deadline_at) {
   r$attempt_budget <- max(0.001, min(r$resolved$timeout, left,
                                      policy$attempt_timeout %||% Inf))
   r
+}
+
+# D-81: whether this attempt's callback was handed any bytes. Wraps the
+# callback of the attempt's copy only, so the request hooks and conditions see
+# is the caller's.
+watch_delivery <- function(req) {
+  seen <- FALSE
+  f <- req$callback
+  if (is.function(f))
+    req$callback <- function(chunk) {
+      if (length(chunk)) seen <<- TRUE
+      f(chunk)
+    }
+  list(request = req, any = function() seen)
 }
 
 # §27.4: mark the client as "inside a callback" for exactly as long as the

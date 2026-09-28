@@ -14,6 +14,12 @@
 #'
 #' Retrying is **off by default**: the package default is `attempts = 1`.
 #'
+#' A request with a streaming `callback` is not retried once the callback has
+#' been handed any bytes: what it received, and did with them, cannot be taken
+#' back, so a retry would give it a second body after the first. A retryable
+#' failure that delivered nothing, such as a 503 with an empty body, is still
+#' retried.
+#'
 #' @param attempts Total attempts *including the first*, so `attempts = 1`
 #'   means no retrying and `attempts = 3` means at most two retries. (An
 #'   earlier draft of the design used `attempts` and `max_attempts` with
