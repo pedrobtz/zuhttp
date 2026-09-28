@@ -99,10 +99,12 @@ zu_transport_perform.zu_native_transport <- function(transport, req) {
                p$proxy,
                check_tls(p$tls),
                isTRUE(req$trace),
-               # §42.1's configurable parameter list, for the URLs the engine
-               # traces. The engine redacts them itself (§42.2) rather than
-               # handing R something to remember to clean.
-               zu_redact_opt("zuhttp.redact_params"))
+               # §42.1's configurable names. Parameters for the URLs the engine
+               # traces and puts in messages, which it redacts itself (§42.2)
+               # rather than handing R something to remember to clean; headers
+               # for what a cross-origin redirect must not carry on (§19.2).
+               list(zu_redact_opt("zuhttp.redact_params"),
+                    zu_redact_opt("zuhttp.redact_headers")))
   # §27.1: by here the sink has been committed, so the destination is a fact
   # about this response rather than something that was merely asked for. Set
   # in the transport and not in zu_perform() because only a transport that

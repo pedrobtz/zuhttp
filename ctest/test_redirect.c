@@ -163,7 +163,7 @@ void suite_redirect(void) {
         zu_headers_add_str(&h, "Cookie", "b=2");
         zu_headers_add_str(&h, "Proxy-Authorization", "Basic x");
         zu_headers_add_str(&h, "Accept", "*/*");
-        ZU_CHECK_EQ_INT(zu_redirect_strip_credentials(&h), 4);
+        ZU_CHECK_EQ_INT(zu_redirect_strip_credentials(&h, NULL), 4);
         ZU_CHECK_EQ_INT(h.n, 1);
         ZU_CHECK(zu_headers_has(&h, "Accept"));
         ZU_CHECK(!zu_headers_has(&h, "authorization"));

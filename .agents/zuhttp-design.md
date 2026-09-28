@@ -130,6 +130,7 @@ accepted when that work package's PR merges.
 | D-76 | A compressed body succeeds only if its **stream is complete** when the framing ends: every framing mode then asks the decoder, and a stream cut short is `zu_body_decode_error`. Consecutive gzip members are all decoded (RFC 1952 §2.2); bytes after a deflate stream are malformed. An empty body under a coding decodes to nothing, successfully | Accepted 2026-09-28 (#77) | 21.5 | — |
 | D-77 | A redirect that will be followed has its body **drained undecoded**; a body that cannot be drained — over `max_redirect_body` or cut short — closes the connection and the redirect is still followed. Timeouts and interrupts still stop the request | Accepted 2026-09-28 (#77) | 19.5 | — |
 | D-78 | **The body decides a request's framing.** A caller `Transfer-Encoding` header is refused, and a caller `Content-Length` that does not match the body is refused, both before connecting; a matching one is accepted. The engine emits the framing of each hop's own body, so a length never outlives a 303 that dropped the body | Accepted 2026-09-28 (#77) | 17.4 | — |
+| D-79 | **One list of secret headers.** A cross-origin redirect strips exactly the headers §42.1 redacts — the defaults and any configured with `zu_redact_headers()` — so a header hidden from every printout is never sent to an origin the caller did not name | Accepted 2026-09-28 (#77) | 19.2, 42.1 | — |
 
 ---
 
@@ -763,8 +764,11 @@ buffer grows.
 
 #### 19.2 Header stripping
 
-On any change of scheme, host or port, strip `Authorization`, `Cookie`,
-`Proxy-Authorization` and any header marked sensitive.
+On any change of scheme, host or port, strip every header §42.1 calls secret:
+`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`,
+`X-Auth-Token` and any name configured with `zu_redact_headers()` (D-79). The
+list is the redactor's, in `zu_redact.c`; the redirect module has none of its
+own. The decision is permanent for the chain.
 
 #### 19.3 Downgrade policy
 
@@ -1004,6 +1008,10 @@ the whole TLS configuration (verify flags, CA source, `ca_extra`, pins,
 minimum version, revocation, ALPN), and the owning PID. A coarse key is a
 security bug: without the TLS fields a pinned request is served over an
 unpinned connection and the pin is never checked (asserted in `test-tls.R`).
+The proxy identity is encoded field by field, each as its length and its
+bytes, never truncated: a fixed-size rendering once let two proxies with long
+credentials share a key, and a delimiter-joined one lets decoded credentials
+containing `:` or `@` do the same.
 
 #### 26.2 Policy
 
@@ -1499,8 +1507,9 @@ or a bare `u:p@host:port`); query and
 form parameters named `access_token`, `api_key`, `apikey`, `signature`, `sig`,
 `client_secret`, `password`, `passwd`, `pwd`, `secret`, `token`,
 `refresh_token`, `id_token`, `private_key`, `auth_token`, `session_token`
-(exact, case-insensitive; extend with `zuhttp.redact_params`). Values render
-as `<redacted>`, never a prefix. The redactor does not use the URI parser —
+(exact, case-insensitive, on the percent-decoded name, so `%74oken` is
+`token`; extend with `zuhttp.redact_params`). Values render as `<redacted>`,
+never a prefix, and the name keeps its original spelling. The redactor does not use the URI parser —
 the malformed URL is the one an error is about — and anchors the scheme
 match. Known gap: a URL nested inside a query value is not descended into.
 

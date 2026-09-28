@@ -208,13 +208,33 @@ static int pool_key_for(zu_pool_key *k, const zu_uri *u, const zu_get_opts *o,
      * credentials are part of the key and never part of anything printable —
      * zu_pool_key is internal and has no formatter. */
     if (px && px->in_use) {
-        char buf[512];
-        snprintf(buf, sizeof buf, "%s://%s:%s@%s:%u",
-                 px->scheme ? px->scheme : "http",
-                 px->username ? px->username : "",
-                 px->password ? px->password : "",
-                 px->host ? px->host : "", (unsigned)px->port);
-        k->proxy = dup_str(buf);
+        /* Each field is written as its length, ':', then its bytes, so the
+         * key is complete and unambiguous. It used to be formatted into 512
+         * bytes with the truncation ignored — a 510-byte username dropped
+         * the password, host and port, and a request for one proxy reused
+         * another's connection — and joined with ':' and '@', which decoded
+         * credentials may themselves contain. */
+        const char *f[5];
+        char port[16];
+        size_t i;
+        zu_buffer b;
+        const char *joined = NULL;
+        snprintf(port, sizeof port, "%u", (unsigned)px->port);
+        f[0] = px->scheme ? px->scheme : "http";
+        f[1] = px->username ? px->username : "";
+        f[2] = px->password ? px->password : "";
+        f[3] = px->host ? px->host : "";
+        f[4] = port;
+        if (!zu_buf_init(&b, 128, 0)) { zu_pool_key_free(k); return 0; }
+        for (i = 0; i < 5; i++) {
+            if (!zu_buf_append_u64(&b, (uint64_t)strlen(f[i])) ||
+                !zu_buf_append_byte(&b, ':') || !zu_buf_append_str(&b, f[i])) {
+                zu_buf_free(&b); zu_pool_key_free(k); return 0;
+            }
+        }
+        if (!zu_buf_cstr(&b, &joined)) { zu_buf_free(&b); zu_pool_key_free(k); return 0; }
+        k->proxy = dup_str(joined);
+        zu_buf_free(&b);
         if (!k->proxy) { zu_pool_key_free(k); return 0; }
     }
     return 1;
@@ -554,7 +574,18 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
 
     rc = zu_uri_parse(&cur, url, url + strlen(url));
     if (rc != ZU_OK) {
-        zu_error_set(err, ZU_ERR_URL, ZU_PHASE_NONE, "not a usable URL: %s", url);
+        /* §42.2: the message is an egress like the URL field, and the URL
+         * that failed to parse is the one most likely to be pasted with its
+         * credentials. The redactor works on unparsed text for this case. */
+        zu_buffer shown;
+        const char *txt = NULL;
+        if (zu_buf_init(&shown, 128, 0) &&
+            zu_redact_url(o->redact, url, strlen(url), &shown) &&
+            zu_buf_cstr(&shown, &txt))
+            zu_error_set(err, ZU_ERR_URL, ZU_PHASE_NONE, "not a usable URL: %s", txt);
+        else
+            zu_error_set(err, ZU_ERR_URL, ZU_PHASE_NONE, "not a usable URL");
+        zu_buf_free(&shown);
         return ZU_ERR_URL;
     }
 
@@ -685,7 +716,8 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
              * on every hop, which is why the filter has to be here: until
              * 2026-09-26 nothing read dec.strip_credentials at all, and an
              * Authorization header followed a redirect to any origin. */
-            if (strip_creds && zu_redirect_is_credential_header(req->header_names[hi]))
+            if (strip_creds &&
+                zu_redirect_is_credential_header(o->redact, req->header_names[hi]))
                 continue;
             /* D-78: framing comes from this hop's body, which a 303 may have
              * dropped; the caller's length, checked above, is never sent. */

@@ -163,6 +163,32 @@ void suite_redact(void) {
     ZU_CHECK(streq(s, "https://h/?api_key&x=1"));
     zu_buf_free(&b);
 
+    ZU_CASE("a percent-encoded secret name is still a secret name (§42.1)");
+    {
+        /* Matching compared raw bytes, so "%74oken" — token, spelled with an
+         * escape any server decodes — passed through with its value. The
+         * name is decoded to classify it and written back as it was. */
+        static const char *const extra[] = { "session_key", NULL };
+        zu_redact_policy px;
+        zu_redact_policy_init(&px);
+        px.extra_params = extra;
+        s = red_url(&b, &p, "https://h/?%74oken=S&%61PI_KEY=S&x%3D=1&%zz=2&tok%=3");
+        ZU_CHECK(streq(s, "https://h/?%74oken=<redacted>&%61PI_KEY=<redacted>&x%3D=1&%zz=2&tok%=3"));
+        zu_buf_free(&b);
+        s = red_url(&b, &px, "https://h/?session%5fkey=S&%73ession_key=S");
+        ZU_CHECK(streq(s, "https://h/?session%5fkey=<redacted>&%73ession_key=<redacted>"));
+        zu_buf_free(&b);
+        ZU_CHECK(zu_buf_init(&b, 64, 1 << 20));
+        {
+            static const char body[] = "%70assword=S&user=a";
+            const char *out = NULL;
+            ZU_CHECK(zu_redact_form_body(&p, body, sizeof body - 1, &b));
+            ZU_CHECK(zu_buf_cstr(&b, &out));
+            ZU_CHECK(streq(out, "%70assword=<redacted>&user=a"));
+        }
+        zu_buf_free(&b);
+    }
+
     ZU_CASE("form bodies use the same policy");
     ZU_CHECK(zu_buf_init(&b, 64, 1 << 20));
     {

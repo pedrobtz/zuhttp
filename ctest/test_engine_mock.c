@@ -286,6 +286,84 @@ void suite_engine_mock(void) {
         zu_result_free(&r); dialer_free(&d);
     }
 
+    ZU_CASE("engine: a cross-origin redirect drops every header §42 calls secret, configured ones too (§19.2)");
+    {
+        /* The filter knew three names; the redactor knows six and whatever
+         * the caller configures. X-API-Key and X-Auth-Token followed a 302
+         * to another port. One list now decides both. */
+        static const char *hn[] = { "X-API-Key", "x-auth-token", "Set-Cookie", "X-Tenant-Secret", "X-Keep" };
+        static const char *hv[] = { "k", "t", "c", "s", "yes" };
+        static const char *const extra[] = { "X-Tenant-Secret", NULL };
+        zu_redact_policy pol;
+        zu_req_spec spec;
+        int k;
+        const char *targets[3] = { "http://example.test:8080/next",   /* port */
+                                   "http://other.test/next",          /* host */
+                                   "https://example.test/next" };     /* scheme */
+        for (k = 0; k < 3; k++) {
+            char loc[200];
+            conn_script sc[2];
+            snprintf(loc, sizeof loc, "HTTP/1.1 302 Found\r\nLocation: %s\r\n"
+                     "Content-Length: 0\r\nConnection: close\r\n\r\n", targets[k]);
+            sc[0].bytes = loc; sc[0].len = 0; sc[0].max_read = 0; sc[0].not_readable = 0; sc[0].next = NULL;
+            sc[1].bytes = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok";
+            sc[1].len = 0; sc[1].max_read = 0; sc[1].not_readable = 0; sc[1].next = NULL;
+            zu_redact_policy_init(&pol); pol.extra_headers = extra;
+            memset(&spec, 0, sizeof spec);
+            spec.header_names = hn; spec.header_values = hv; spec.n_headers = 5;
+            dialer_init(&d, sc, 2); opts_for(&o, &d); o.redact = &pol;
+            rc = zu_engine_perform(&r, "http://example.test/start", &spec, &o, &e);
+            /* https has no TLS in this build; what matters is what was sent. */
+            ZU_CHECK(has(sent(&d, 0), "X-API-Key: k") && has(sent(&d, 0), "X-Tenant-Secret: s"));
+            if (k < 2) {
+                ZU_CHECK_EQ_INT(rc, ZU_OK);
+                ZU_CHECK(!has(sent(&d, 1), "X-API-Key") && !has(sent(&d, 1), "x-auth-token"));
+                ZU_CHECK(!has(sent(&d, 1), "Set-Cookie") && !has(sent(&d, 1), "X-Tenant-Secret"));
+                ZU_CHECK(has(sent(&d, 1), "X-Keep: yes"));
+            }
+            if (rc == ZU_OK) zu_result_free(&r);
+            dialer_free(&d);
+        }
+    }
+
+    ZU_CASE("engine: two proxies that differ only past 512 bytes of credentials never share a connection (§26.1)");
+    {
+        /* The pool key's proxy identity was formatted into 512 bytes and the
+         * truncation ignored, so a 510-byte username left host, port and
+         * password out of it: a request meant for proxy B reused A's
+         * connection. And ':' / '@' inside decoded credentials made two
+         * different identities spell the same key. */
+        static char a[700], b2[700], c1[700], c2[700];
+        static char user[520];
+        zu_pool *pool = zu_pool_new(NULL);
+        zu_pool_stats st;
+        conn_script sc[] = { { OK200(1) "A", 0, 0, 1, NULL }, { OK200(1) "B", 0, 0, 1, NULL },
+                             { OK200(1) "C", 0, 0, 1, NULL }, { OK200(1) "D", 0, 0, 1, NULL } };
+        memset(user, 'u', 510); user[510] = '\0';
+        snprintf(a,  sizeof a,  "http://%s:pa@proxy-a.test:3128", user);
+        snprintf(b2, sizeof b2, "http://%s:pb@proxy-b.test:3129", user);
+        /* Decoded, user "a:b" password "c" and user "a" password "b:c" both
+         * joined as "a:b:c" in the old key. */
+        snprintf(c1, sizeof c1, "http://a%%3Ab:c@proxy-c.test:3128");
+        snprintf(c2, sizeof c2, "http://a:b%%3Ac@proxy-c.test:3128");
+        dialer_init(&d, sc, 4); opts_for(&o, &d); o.pool = pool;
+        o.proxy = a;
+        ZU_CHECK_EQ_INT(zu_engine_get(&r, "http://origin.test/", &o, &e), ZU_OK); zu_result_free(&r);
+        o.proxy = b2;
+        ZU_CHECK_EQ_INT(zu_engine_get(&r, "http://origin.test/", &o, &e), ZU_OK);
+        ZU_CHECK(r.body.len == 1 && r.body.data[0] == 'B');
+        zu_result_free(&r);
+        ZU_CHECK(strcmp(d.host[1], "proxy-b.test") == 0);
+        o.proxy = c1;
+        ZU_CHECK_EQ_INT(zu_engine_get(&r, "http://origin.test/", &o, &e), ZU_OK); zu_result_free(&r);
+        o.proxy = c2;
+        ZU_CHECK_EQ_INT(zu_engine_get(&r, "http://origin.test/", &o, &e), ZU_OK); zu_result_free(&r);
+        ZU_CHECK_EQ_INT(d.next, 4);
+        zu_pool_stats_get(pool, &st);
+        ZU_CHECK_EQ_INT(st.hits, 0);
+        dialer_free(&d); zu_pool_free(pool);
+    }
+
     ZU_CASE("engine: a same-origin redirect on a pooled connection reuses it and keeps credentials");
     {
         static const char *hn[] = { "Authorization" };
