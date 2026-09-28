@@ -549,7 +549,12 @@ argument (§31.9, D-49), not a `zu_tls()` field. `zu_tls()` carries `ca_file`,
 
 `ca_file` **replaces** the system trust store; `ca_extra` **adds** to it
 (D-12). They are two arguments and never one overloaded `ca =`, and each help
-text says "replaces" or "adds to" in its first sentence.
+text says "replaces" or "adds to" in its first sentence. With both, `ca_extra`
+adds to the `ca_file` store, and the system store stays out: on OpenSSL a
+second load into the chosen store, on macOS one anchor set built from both
+files with system anchors disabled. macOS once dropped `ca_extra` whenever
+`ca_file` was set, which D-56 forbids — a setting is honoured or refused,
+never silently ignored.
 
 #### 14.3 Custom CAs and native trust stores
 
