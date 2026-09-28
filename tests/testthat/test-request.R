@@ -124,3 +124,19 @@ test_that("a transport must return a response", {
   api <- zu_client(transport = zu_mock_transport(function(req) "not a response"))
   expect_error(zu_get("https://x/", client = api), "must return a zu_response")
 })
+
+test_that("the body decides the framing: a conflicting header is refused before connecting (D-78)", {
+  # Port 1 on loopback: were anything sent, this would be a connect error.
+  url <- "http://127.0.0.1:1/"
+  cli <- zu_client(pool = NULL, proxy = FALSE, retry = zu_retry(1))
+  expect_error(zu_post(url, body = "hello", headers = c(`Content-Length` = "1"),
+                       client = cli),
+               class = "zu_http_parse_error", regexp = "does not match the 5-byte body")
+  expect_error(zu_post(url, body = "hello", headers = c(`Transfer-Encoding` = "chunked"),
+                       client = cli),
+               class = "zu_http_parse_error", regexp = "Transfer-Encoding")
+  # A matching length is not a conflict, so the request proceeds to connect.
+  expect_error(zu_post(url, body = "hello", headers = c(`Content-Length` = "5"),
+                       client = cli, timeout = 5),
+               class = "zu_connect_error")
+})

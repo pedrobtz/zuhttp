@@ -5,6 +5,15 @@
  * grow with the body", and proving that needs a 100 MB response, which is
  * exactly the thing you cannot ask a real server for on every CI run.
  */
+/* symlink() and getpid() are POSIX; -std=c99 hides them without this, as it
+ * does in src/ (tools/check-feature-macros). Before every system header. */
+#if !defined(_WIN32)
+#  if defined(__APPLE__)
+#    define _DARWIN_C_SOURCE
+#  else
+#    define _POSIX_C_SOURCE 200112L
+#  endif
+#endif
 #include "zu_test.h"
 #include "zu_body.h"
 #include "zu_sink.h"
@@ -12,6 +21,7 @@
 #include "zu_tls.h"
 #include "zu_trace.h"
 #include "zu_alloc.h"
+#include "zu_fork.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -167,6 +177,97 @@ void suite_body(void) {
         if (fp) { n = fread(buf, 1, sizeof buf, fp); fclose(fp);
                   ZU_CHECK_EQ_INT((int)n, 4);
                   ZU_CHECK(memcmp(buf, "new!", 4) == 0); }
+        remove(path);
+    }
+
+    ZU_CASE("§27.1: the temporary file is created, never opened: nothing at its name is written through");
+    {
+        /* The temporary name was predictable (<path>.zudl<pid>) and opened
+         * with fopen("wb"), which truncates a file already there and follows
+         * a symlink planted there — writing the download into whatever the
+         * link named. Creation is now exclusive, and a taken name moves the
+         * sink on to another. */
+        const char *path = "zu_test_dl_excl.bin";
+        char base[256];
+        zu_sink *f1, *f2;
+        FILE *fp;
+        char buf[16];
+        size_t n;
+        snprintf(base, sizeof base, "%s.zudl%ld", path, (long)zu_pid_current());
+        fp = fopen(base, "wb");
+        if (fp) { fwrite("KEEP", 1, 4, fp); fclose(fp); }
+        f1 = zu_sink_file(path, &e);
+        f2 = zu_sink_file(path, &e);
+        ZU_CHECK(f1 != NULL && f2 != NULL);
+        if (f1 && f2) {
+            ZU_CHECK(strcmp(zu_sink_file_tmp_path(f1), base) != 0);
+            ZU_CHECK(strcmp(zu_sink_file_tmp_path(f1), zu_sink_file_tmp_path(f2)) != 0);
+            ZU_CHECK_EQ_INT(zu_sink_write(f1, "new!", 4, &e), ZU_OK);
+            ZU_CHECK_EQ_INT(zu_sink_finish(f1, &e), ZU_OK);
+        }
+        zu_sink_free(f1); zu_sink_free(f2);
+        fp = fopen(base, "rb");                       /* the squatter survives */
+        ZU_CHECK(fp != NULL);
+        if (fp) { n = fread(buf, 1, sizeof buf, fp); fclose(fp);
+                  ZU_CHECK(n == 4 && memcmp(buf, "KEEP", 4) == 0); }
+        remove(base); remove(path);
+#if defined(ZU_POSIX)
+        {
+            const char *victim = "zu_test_dl_victim.txt";
+            fp = fopen(victim, "wb");
+            if (fp) { fwrite("KEEP ME", 1, 7, fp); fclose(fp); }
+            ZU_CHECK_EQ_INT(symlink(victim, base), 0);
+            f1 = zu_sink_file(path, &e);
+            ZU_CHECK(f1 != NULL);
+            if (f1) {
+                ZU_CHECK_EQ_INT(zu_sink_write(f1, "OK", 2, &e), ZU_OK);
+                ZU_CHECK_EQ_INT(zu_sink_finish(f1, &e), ZU_OK);
+            }
+            zu_sink_free(f1);
+            fp = fopen(victim, "rb");
+            ZU_CHECK(fp != NULL);
+            if (fp) { n = fread(buf, 1, sizeof buf, fp); fclose(fp);
+                      ZU_CHECK(n == 7 && memcmp(buf, "KEEP ME", 7) == 0); }
+            {
+                char lbuf[64];
+                ZU_CHECK(readlink(path, lbuf, sizeof lbuf) < 0);   /* a file, not a link */
+            }
+            remove(base); remove(victim); remove(path);
+        }
+#endif
+    }
+
+    ZU_CASE("§27.1: a commit that fails keeps the previous download (D-53)");
+    {
+        /* The destination was removed before the rename, on every platform,
+         * so a rename that then failed destroyed the last good file. */
+        const char *path = "zu_test_dl_keep.bin";
+        zu_sink *f;
+        FILE *fp = fopen(path, "wb");
+        char buf[16];
+        size_t n;
+        if (fp) { fwrite("old", 1, 3, fp); fclose(fp); }
+        f = zu_sink_file(path, &e);
+        ZU_CHECK(f != NULL);
+        if (f) {
+            /* The fault: point the sink at a temporary name that does not
+             * exist, so the rename itself fails. Deleting the real temporary
+             * file would be the obvious injection, but Windows refuses to
+             * delete a file that is still open, and the commit then simply
+             * succeeds. The real file is removed afterwards. */
+            char real_tmp[512];
+            char *t = (char *)(uintptr_t)zu_sink_file_tmp_path(f);
+            snprintf(real_tmp, sizeof real_tmp, "%s", t);
+            t[strlen(t) - 1] = (char)(t[strlen(t) - 1] ^ 1);
+            ZU_CHECK_EQ_INT(zu_sink_write(f, "new!", 4, &e), ZU_OK);
+            ZU_CHECK_EQ_INT(zu_sink_finish(f, &e), ZU_ERR_IO);
+            zu_sink_free(f);
+            remove(real_tmp);
+        }
+        fp = fopen(path, "rb");
+        ZU_CHECK(fp != NULL);
+        if (fp) { n = fread(buf, 1, sizeof buf, fp); fclose(fp);
+                  ZU_CHECK(n == 3 && memcmp(buf, "old", 3) == 0); }
         remove(path);
     }
 

@@ -64,11 +64,44 @@ int zu_redact_is_secret_header(const zu_redact_policy *p,
     return p ? in_list(p->extra_headers, name, nlen) : 0;
 }
 
-int zu_redact_is_secret_param(const zu_redact_policy *p,
-                              const char *name, size_t nlen) {
-    if (!name || nlen == 0) return 0;
+static int hexval(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static int param_listed(const zu_redact_policy *p, const char *name, size_t nlen) {
     if (in_list(k_params, name, nlen)) return 1;
     return p ? in_list(p->extra_params, name, nlen) : 0;
+}
+
+/* A parameter name is classified by what a server reads, which is its
+ * percent-decoded form: "%74oken" is "token" to every server, and matching
+ * the raw bytes let its value through (§42.1). Only the name is decoded, only
+ * for the comparison, and only after the caller has split on '&' and '=' —
+ * an encoded separator stays part of the name. A malformed escape is kept as
+ * written. No secret name is long, so a name that does not fit is compared
+ * raw only. */
+int zu_redact_is_secret_param(const zu_redact_policy *p,
+                              const char *name, size_t nlen) {
+    char dec[128];
+    size_t i, n = 0;
+    if (!name || nlen == 0) return 0;
+    if (param_listed(p, name, nlen)) return 1;
+    if (!memchr(name, '%', nlen)) return 0;
+    for (i = 0; i < nlen; i++) {
+        int hi, lo;
+        if (n == sizeof dec) return 0;
+        if (name[i] == '%' && i + 2 < nlen &&
+            (hi = hexval(name[i + 1])) >= 0 && (lo = hexval(name[i + 2])) >= 0) {
+            dec[n++] = (char)(hi * 16 + lo);
+            i += 2;
+        } else {
+            dec[n++] = name[i];
+        }
+    }
+    return param_listed(p, dec, n);
 }
 
 /* Rewrite "a=1&token=SECRET&b=2" with secret values replaced. Separators are

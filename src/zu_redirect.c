@@ -13,27 +13,35 @@ int zu_status_is_redirect(int status) {
            status == 307 || status == 308;
 }
 
-/* §19.2: fields that must never survive a cross-origin redirect.
- * Proxy-Authorization is here for completeness; §20.4 additionally forbids it
- * from ever reaching an origin at all. */
-static const char *const k_credential_headers[] = {
-    "Authorization", "Cookie", "Proxy-Authorization", NULL
-};
-
-size_t zu_redirect_strip_credentials(zu_headers *h) {
-    size_t i, removed = 0;
-    if (!h) return 0;
-    for (i = 0; k_credential_headers[i]; i++)
-        removed += zu_headers_remove(h, k_credential_headers[i]);
-    return removed;
+/* §19.2: fields that must never survive a cross-origin redirect are the
+ * fields §42.1 calls secret — one list, in zu_redact.c. This file kept its
+ * own three names, so X-API-Key and X-Auth-Token, which the redactor hid from
+ * every printout, were sent to whatever origin a redirect named; and a header
+ * the caller had configured as secret was never consulted here at all. */
+int zu_redirect_is_credential_header(const zu_redact_policy *p, const char *name) {
+    return name ? zu_redact_is_secret_header(p, name, strlen(name)) : 0;
 }
 
-int zu_redirect_is_credential_header(const char *name) {
-    size_t i;
-    if (!name) return 0;
-    for (i = 0; k_credential_headers[i]; i++)
-        if (zu_ascii_casecmp(name, k_credential_headers[i]) == 0) return 1;
-    return 0;
+size_t zu_redirect_strip_credentials(zu_headers *h, const zu_redact_policy *p) {
+    size_t i = 0, removed = 0;
+    if (!h) return 0;
+    while (i < h->n) {
+        if (zu_redact_is_secret_header(p, h->items[i].name, h->items[i].nlen)) {
+            /* zu_headers_remove() takes a name and removes every field so
+             * named, freeing the one we would be pointing into; copy it,
+             * then start over. */
+            char name[ZU_DEFAULT_MAX_HEADER_NAME + 1];
+            size_t n = h->items[i].nlen < sizeof name - 1 ? h->items[i].nlen
+                                                          : sizeof name - 1;
+            memcpy(name, h->items[i].name, n);
+            name[n] = '\0';
+            removed += zu_headers_remove(h, name);
+            i = 0;
+            continue;
+        }
+        i++;
+    }
+    return removed;
 }
 
 zu_code zu_redirect_decide(const zu_redirect_policy *p, int status,

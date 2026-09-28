@@ -162,6 +162,30 @@ static zu_code check_trust(SecTrustRef trust, const char *hostname,
                          "cannot read CA file '%s'", cfg->ca_file);
             return ZU_ERR_TLS;
         }
+        /* §14.2: ca_extra ADDS to whatever was selected, and a ca_file is a
+         * selection too. This used to be the `else` of the branch below, so
+         * with both set the extra roots were silently dropped — a refusal
+         * that looked like a certificate error. OpenSSL loads the extra file
+         * on top of the chosen store; this does the same with one anchor
+         * set, still exclusive of the system store. */
+        if (cfg->ca_extra_file) {
+            CFArrayRef extra = anchors_from_pem_file(cfg->ca_extra_file);
+            CFMutableArrayRef all = NULL;
+            if (extra) {
+                all = CFArrayCreateMutableCopy(kCFAllocatorDefault, 0, anchors);
+                if (all)
+                    CFArrayAppendArray(all, extra,
+                                       CFRangeMake(0, CFArrayGetCount(extra)));
+                CFRelease(extra);
+            }
+            CFRelease(anchors);
+            if (!all) {
+                zu_error_set(err, ZU_ERR_TLS, ZU_PHASE_TLS,
+                             "cannot read additional CA file '%s'", cfg->ca_extra_file);
+                return ZU_ERR_TLS;
+            }
+            anchors = all;
+        }
         SecTrustSetAnchorCertificates(trust, anchors);
         /* S0 F-6: true REPLACES the system store (ca_file), false ADDS to it
          * (ca_extra_file). D-12 keeps these separate so they cannot be

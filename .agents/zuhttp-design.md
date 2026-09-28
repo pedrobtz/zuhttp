@@ -127,6 +127,12 @@ accepted when that work package's PR merges.
 | D-73 | Bytes received **past a response's framing** — after `Content-Length`, after a chunked body's trailers, or on a bodiless response — keep that connection out of the pool | Accepted 2026-09-26 (#58) | 26.3 | — |
 | D-74 | The interrupt checkpoint runs `R_CheckUserInterrupt()` under `R_tryCatch` and keeps the condition: a user interrupt becomes `zu_interrupted_error`; any other error raised there (a time limit) is re-raised unchanged after the engine unwinds. Its context lives in a per-call slot, never in a pooled stream | Accepted 2026-09-26 (#57) | 25.2 | — |
 | D-75 | A client derived with **different `pool` settings gets a pool of its own**; any other derived client shares its parent's. One shared slot made parent and child each rebuild the pool the other had built, dropping every idle connection on each alternation | Accepted 2026-09-26 (#74) | 26.5, 31.10 | — |
+| D-76 | A compressed body succeeds only if its **stream is complete** when the framing ends: every framing mode then asks the decoder, and a stream cut short is `zu_body_decode_error`. Consecutive gzip members are all decoded (RFC 1952 §2.2); bytes after a deflate stream are malformed. An empty body under a coding decodes to nothing, successfully | Accepted 2026-09-28 (#77) | 21.5 | — |
+| D-77 | A redirect that will be followed has its body **drained undecoded**; a body that cannot be drained — over `max_redirect_body` or cut short — closes the connection and the redirect is still followed. Timeouts and interrupts still stop the request | Accepted 2026-09-28 (#77) | 19.5 | — |
+| D-78 | **The body decides a request's framing.** A caller `Transfer-Encoding` header is refused, and a caller `Content-Length` that does not match the body is refused, both before connecting; a matching one is accepted. The engine emits the framing of each hop's own body, so a length never outlives a 303 that dropped the body | Accepted 2026-09-28 (#77) | 17.4 | — |
+| D-79 | **One list of secret headers.** A cross-origin redirect strips exactly the headers §42.1 redacts — the defaults and any configured with `zu_redact_headers()` — so a header hidden from every printout is never sent to an origin the caller did not name | Accepted 2026-09-28 (#77) | 19.2, 42.1 | — |
+| D-80 | A download's **temporary file is created exclusively** beside the destination, trying `<path>.zudl<pid>` then `.1`, `.2`…; nothing already at a candidate name is opened, so a planted symlink or a second download to the same path is never written through | Accepted 2026-09-28 (#77) | 27.1 | — |
+| D-81 | **No automatic retry after a callback has received bytes.** The callback API has no attempt boundary, and delivered bytes and their side effects cannot be taken back; an attempt that delivered nothing is retried as before | Accepted 2026-09-28 (#77) | 33.1 | — |
 
 ---
 
@@ -543,7 +549,12 @@ argument (§31.9, D-49), not a `zu_tls()` field. `zu_tls()` carries `ca_file`,
 
 `ca_file` **replaces** the system trust store; `ca_extra` **adds** to it
 (D-12). They are two arguments and never one overloaded `ca =`, and each help
-text says "replaces" or "adds to" in its first sentence.
+text says "replaces" or "adds to" in its first sentence. With both, `ca_extra`
+adds to the `ca_file` store, and the system store stays out: on OpenSSL a
+second load into the chosen store, on macOS one anchor set built from both
+files with system anchors disabled. macOS once dropped `ca_extra` whenever
+`ca_file` was set, which D-56 forbids — a setting is honoured or refused,
+never silently ignored.
 
 #### 14.3 Custom CAs and native trust stores
 
@@ -672,7 +683,10 @@ environment variables and explicit arguments are.
 
 The builder writes the request line (origin-form, or absolute-form to an HTTP
 proxy), `Host`, headers, and `Content-Length` into a checked buffer with
-overflow-safe integer formatting.
+overflow-safe integer formatting. That buffer is the header block and is
+capped at 64 KiB; exceeding it raises `zu_overflow_error` before a byte is
+sent. The body is not part of the cap: it goes in the same write when it fits
+beside the headers, and in a second write under the same deadline otherwise.
 
 #### 17.1 Header injection
 
@@ -690,6 +704,16 @@ credentials.
 #### 17.3 `Expect: 100-continue`
 
 Never sent automatically. Informational `1xx` responses are skipped.
+
+#### 17.4 Framing headers (D-78)
+
+`Content-Length` and `Transfer-Encoding` describe the body, so the body
+decides them. zuhttp sends a body with `Content-Length` and never chunks one,
+so a caller `Transfer-Encoding` raises `zu_http_parse_error` before
+connecting, as does a caller `Content-Length` that disagrees with the body.
+One that agrees is accepted and not sent: the engine emits the framing of each
+hop's own body, which after a 303 is no body at all (RFC 9112 §6.2 forbids the
+two together; a wrong length puts the connection out of step with the server).
 
 ### 18. Response Parsing and Body Framing
 
@@ -747,8 +771,11 @@ buffer grows.
 
 #### 19.2 Header stripping
 
-On any change of scheme, host or port, strip `Authorization`, `Cookie`,
-`Proxy-Authorization` and any header marked sensitive.
+On any change of scheme, host or port, strip every header §42.1 calls secret:
+`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`,
+`X-Auth-Token` and any name configured with `zu_redact_headers()` (D-79). The
+list is the redactor's, in `zu_redact.c`; the redirect module has none of its
+own. The decision is permanent for the chain.
 
 #### 19.3 Downgrade policy
 
@@ -762,9 +789,11 @@ chain; a repeated (method, URL) pair is a loop and raises.
 
 #### 19.5 Interaction with sinks
 
-Redirect bodies never reach the caller's sink. They are drained into a
-discard sink up to `max_redirect_body` (64 KiB); beyond it the connection is
-closed instead.
+Redirect bodies never reach the caller's sink. They are drained, without
+decoding, up to `max_redirect_body` (64 KiB); a body beyond it, or one cut
+short, closes the connection instead, and the redirect is followed on a new
+one (D-77). Decoding a body that is thrown away could only fail a request whose
+`Location` is valid.
 
 #### 19.6 Resolving the `Location` header
 
@@ -846,6 +875,19 @@ the connection. **The ratio check exists in `zu_inflate.c` but is passed 0
 by `zu_body.c:35` and so never runs; D-69 turns it on at 1000.** The absolute
 cap bounds a bomb today; the ratio makes it fail after kilobytes, not
 megabytes. `Transfer-Encoding: gzip` is rejected (§18.1).
+
+#### 21.5 Completeness (D-76)
+
+A body is decoded only if it exists: a bodyless response (HEAD, 204, 304)
+keeps its `Content-Encoding` and `Content-Length`, which describe the
+representation rather than bytes that follow (RFC 9112 §6.3). A body that
+exists succeeds only when its compressed stream ends: each framing mode asks
+the decoder at the end, and a stream cut short — a missing gzip trailer, a
+body truncated inside its deflate data — is `zu_body_decode_error`, which
+discards a download rather than committing it. A gzip body may be several
+members, decoded in turn; anything after a deflate stream, or after a gzip
+member that is not another member, is malformed. The byte limits of §21.4 are
+not an integrity check and were never meant as one.
 
 ### 22. Cookies
 
@@ -973,6 +1015,10 @@ the whole TLS configuration (verify flags, CA source, `ca_extra`, pins,
 minimum version, revocation, ALPN), and the owning PID. A coarse key is a
 security bug: without the TLS fields a pinned request is served over an
 unpinned connection and the pin is never checked (asserted in `test-tls.R`).
+The proxy identity is encoded field by field, each as its length and its
+bytes, never truncated: a fixed-size rendering once let two proxies with long
+credentials share a key, and a delimiter-joined one lets decoded credentials
+containing `:` or `@` do the same.
 
 #### 26.2 Policy
 
@@ -1031,7 +1077,12 @@ at ~100 MB).
 
 `max_body` applies to every sink. A file sink writes beside its destination
 and renames on success, so failure never leaves a truncated file and an
-existing destination is replaced only at the rename (D-53). A non-2xx
+existing destination is replaced only at the rename (D-53): `rename()` over
+it on POSIX, `MoveFileEx(MOVEFILE_REPLACE_EXISTING)` on Windows, never a
+delete first, so a failed commit keeps the last good file. The temporary name
+is predictable, so the file is created exclusively (`O_EXCL`) and a taken
+name — a stale file, another download to the same path, a planted symlink —
+moves on to the next rather than being truncated or written through (D-80). A non-2xx
 response still writes; `check` runs after the sink commits. `path` and
 `callback` are mutually exclusive, and a committed path is `zu_resp_path()`.
 
@@ -1268,6 +1319,12 @@ All three: the failure is retryable (§33.2); the request is replay-safe (an
 idempotent method, `zu_req_replay_safe()`, or an `Idempotency-Key` header);
 the body is rewindable. Decided once, before the first attempt.
 
+And one more, decided after each attempt: no `callback` byte was delivered
+(D-81). Replay safety is a property of the request; a streaming callback's
+side effects are a property of the response already under way, and they
+cannot be rolled back. Once a callback has received bytes, the attempt's
+outcome is the caller's, whatever its status.
+
 #### 33.2 Retryable conditions
 
 | Condition | Retry |
@@ -1468,8 +1525,9 @@ or a bare `u:p@host:port`); query and
 form parameters named `access_token`, `api_key`, `apikey`, `signature`, `sig`,
 `client_secret`, `password`, `passwd`, `pwd`, `secret`, `token`,
 `refresh_token`, `id_token`, `private_key`, `auth_token`, `session_token`
-(exact, case-insensitive; extend with `zuhttp.redact_params`). Values render
-as `<redacted>`, never a prefix. The redactor does not use the URI parser —
+(exact, case-insensitive, on the percent-decoded name, so `%74oken` is
+`token`; extend with `zuhttp.redact_params`). Values render as `<redacted>`,
+never a prefix, and the name keeps its original spelling. The redactor does not use the URI parser —
 the malformed URL is the one an error is about — and anchors the scheme
 match. Known gap: a URL nested inside a query value is not descended into.
 

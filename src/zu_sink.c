@@ -18,8 +18,15 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <errno.h>
+#include <fcntl.h>
 #if defined(ZU_POSIX)
 #  include <unistd.h>
+#endif
+#if defined(_WIN32)
+#  include <io.h>
+#  include <sys/stat.h>
+#  include <windows.h>
 #endif
 
 zu_code zu_sink_write(zu_sink *s, const void *data, size_t n, zu_error *err) {
@@ -131,19 +138,29 @@ static zu_code file_finish(zu_sink *s, zu_error *err) {
     if (!c->fp) return ZU_OK;
     /* Flush before rename, or the rename can publish a file whose tail is
      * still in a stdio buffer. */
-    if (fflush(c->fp) != 0 || fclose(c->fp) != 0) {
+    {
+        /* Both, always: a failed flush must still close the stream, which the
+         * short-circuit form `fflush() || fclose()` skipped. */
+        int flushed = fflush(c->fp) == 0;
+        int closed  = fclose(c->fp) == 0;
+        if (flushed && closed) goto flushed_ok;
         c->fp = NULL;
         zu_error_set(err, ZU_ERR_IO, ZU_PHASE_READ,
                      "could not flush %s", c->tmp ? c->tmp : "(download)");
         return ZU_ERR_IO;
     }
+flushed_ok:
     c->fp = NULL;
-    /* rename() refuses to replace an existing file on Windows, so the target
-     * is removed first. The window this opens is accepted: the alternative,
-     * MoveFileEx, is not available through plain C89 stdio, and the caller
-     * asked for the file to be replaced. */
-    remove(c->final);
+    /* D-53: the previous file is replaced only by the rename. It used to be
+     * removed first, on every platform, so a rename that then failed left no
+     * download at all, and even a successful one opened a window with no
+     * file. POSIX rename() replaces atomically; Windows needs MoveFileEx to
+     * replace, since its rename() refuses an existing target. */
+#if defined(_WIN32)
+    if (!MoveFileExA(c->tmp, c->final, MOVEFILE_REPLACE_EXISTING)) {
+#else
     if (rename(c->tmp, c->final) != 0) {
+#endif
         zu_error_set(err, ZU_ERR_IO, ZU_PHASE_READ,
                      "could not move the download into place at %s", c->final);
         return ZU_ERR_IO;
@@ -181,7 +198,8 @@ zu_sink *zu_sink_file(const char *path, zu_error *err) {
     if (!s || !c) goto nomem;
 
     c->final = (char *)zu_alloc(n + 1);
-    /* ".zudl" plus a long's digits plus NUL. The first draft allowed 16,
+    /* ".zudl", a long's digits, ".NN" for a taken name, and NUL: 29 at
+     * most, within the 32 allowed. The first draft allowed 16,
      * which is not enough for a 20-digit pid — and snprintf, not sprintf:
      * CRAN forbids the latter outright, and here it would have been a real
      * overflow rather than a policy violation. */
@@ -189,14 +207,43 @@ zu_sink *zu_sink_file(const char *path, zu_error *err) {
     c->tmp   = (char *)zu_alloc(tmp_len);
     if (!c->final || !c->tmp) goto nomem;
     memcpy(c->final, path, n + 1);
-    /* Same directory as the destination, and a name unlikely to collide with
-     * a real file the caller cares about. */
-    snprintf(c->tmp, tmp_len, "%s.zudl%ld", path, zu_pid_current());
-
-    c->fp = fopen(c->tmp, "wb");
+    /* Same directory as the destination (see above). The name is
+     * predictable, so it is CREATED, exclusively: fopen("wb") truncated a
+     * file already there and followed a symlink planted there, writing the
+     * download wherever it pointed. O_EXCL fails on any existing name, a
+     * dangling or live symlink included, and the sink tries the next one —
+     * which is also what keeps two downloads to one path apart. */
+    {
+        unsigned attempt;
+        int fd = -1;
+        for (attempt = 0; attempt < 100 && fd < 0; attempt++) {
+            if (attempt == 0)
+                snprintf(c->tmp, tmp_len, "%s.zudl%ld", path, zu_pid_current());
+            else
+                snprintf(c->tmp, tmp_len, "%s.zudl%ld.%u", path, zu_pid_current(),
+                         attempt);
+#if defined(_WIN32)
+            fd = _open(c->tmp, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
+                       _S_IREAD | _S_IWRITE);
+#else
+            fd = open(c->tmp, O_WRONLY | O_CREAT | O_EXCL, 0666);
+#endif
+            if (fd < 0 && errno != EEXIST) break;
+        }
+        if (fd >= 0) {
+#if defined(_WIN32)
+            c->fp = _fdopen(fd, "wb");
+            if (!c->fp) _close(fd);
+#else
+            c->fp = fdopen(fd, "wb");
+            if (!c->fp) close(fd);
+#endif
+            if (!c->fp) remove(c->tmp);
+        }
+    }
     if (!c->fp) {
         zu_error_set(err, ZU_ERR_IO, ZU_PHASE_NONE,
-                     "cannot write to %s", c->tmp);
+                     "cannot create a temporary file beside %s", path);
         goto fail;
     }
 

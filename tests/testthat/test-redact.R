@@ -294,6 +294,26 @@ test_that("the canary does not reach zu_info() (§39, §42.2)", {
   expect_false(any(grepl(CANARY, capture.output(print(i)), fixed = TRUE)))
 })
 
+test_that("the canary does not leak through the message of a URL that does not parse (§42.2)", {
+  # The native path, not the helper: the engine put the raw URL into its
+  # message, and redacting the separate `url` field did not touch it.
+  for (u in c(paste0("http://example.test:bad/?token=", CANARY),
+              paste0("http://u:", CANARY, "@example.test:bad/"))) {
+    e <- tryCatch(zu_get(u, proxy = FALSE), error = function(e) e)
+    expect_s3_class(e, "zu_url_error")
+    expect_no_canary(e, paste("a malformed URL's condition:", u))
+    expect_false(grepl(CANARY, conditionMessage(e), fixed = TRUE))
+  }
+})
+
+test_that("a percent-encoded secret name is redacted like the plain one (§42.1)", {
+  expect_no_canary(zu_redact_url(paste0("https://h/?%74oken=", CANARY)), "an encoded token")
+  expect_no_canary(zu_redact_url(paste0("https://h/?%61PI_KEY=", CANARY)), "an encoded api_key")
+  expect_no_canary(zu_redact_form(paste0("%70assword=", CANARY)), "an encoded password")
+  # The spelling is kept; only the value goes.
+  expect_identical(zu_redact_url("https://h/?%74oken=x&a=1"), "https://h/?%74oken=<redacted>&a=1")
+})
+
 test_that("the canary does not leak through a configured proxy URL (§42.1, §42.2)", {
   # The proxy is a policy value like `timeout`, so every egress that shows
   # policy showed it verbatim: a printed client, a printed request, the

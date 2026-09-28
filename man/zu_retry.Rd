@@ -50,6 +50,13 @@ A \code{zu_retry_policy}, for \code{zu_client(retry = )} or
 \description{
 Retrying is \strong{off by default}: the package default is \code{attempts = 1}.
 }
+\details{
+A request with a streaming \code{callback} is not retried once the callback has
+been handed any bytes: what it received, and did with them, cannot be taken
+back, so a retry would give it a second body after the first. A retryable
+failure that delivered nothing, such as a 503 with an empty body, is still
+retried.
+}
 \examples{
 zu_retry(attempts = 3)
 zu_client(retry = zu_retry(attempts = 5, max_delay = 10))

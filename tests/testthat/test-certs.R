@@ -109,6 +109,19 @@ test_that("ca_extra ADDS: a locally signed host validates without losing system 
   })
 })
 
+test_that("ca_extra adds to a ca_file too, not only to the system store (§14.2)", {
+  skip_unless_local_tls()
+  fx <- tls_fixture()
+  # Two independent roots: ca_file names the one that did NOT sign the
+  # server, ca_extra the one that did. On macOS the ca_extra branch was an
+  # `else if` of the ca_file one, so the extra root was silently dropped and
+  # this failed; OpenSSL has always added it on top.
+  with_tls_server("good", function(url) {
+    r <- zu_get(url, tls = zu_tls(ca_file = fx$rogue_ca, ca_extra = fx$ca), timeout = 10)
+    expect_identical(zu_resp_status(r), 200L)
+  })
+})
+
 test_that("the system store alone does not trust a locally signed host", {
   skip_unless_local_tls()
   # The other half of the ca_extra test: without the extra root the same

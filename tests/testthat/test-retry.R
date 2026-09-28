@@ -531,3 +531,41 @@ test_that("a backoff sleep responds to Ctrl-C", {
   expect_lt(elapsed, 5)
   expect_false(any(grepl("DONE", readLines(outf, warn = FALSE))))
 })
+
+test_that("no automatic retry once a callback has been handed bytes (§27, §33.1, D-81)", {
+  skip_on_cran()
+  skip_if_not_installed("webfakes")
+  # A callback's bytes, and whatever it did with them, cannot be taken back,
+  # so a retry after delivery handed it a second body behind the first: a 503
+  # "ERROR" and then a 200 "OK" arrived as "ERROROK", reported as one 200.
+  # The same 503 with nothing delivered is still retried.
+  app <- webfakes::new_app()
+  app$locals$n <- c(body = 0, empty = 0)
+  app$get("/body", function(req, res) {
+    req$app$locals$n[["body"]] <- req$app$locals$n[["body"]] + 1
+    if (req$app$locals$n[["body"]] == 1) res$set_status(503L)$send("ERROR")
+    else res$send("OK")
+  })
+  app$get("/empty", function(req, res) {
+    req$app$locals$n[["empty"]] <- req$app$locals$n[["empty"]] + 1
+    if (req$app$locals$n[["empty"]] == 1) res$set_status(503L)$send("")
+    else res$send("OK")
+  })
+  web <- webfakes::local_app_process(app)
+  cli <- zu_client(pool = NULL, proxy = FALSE, check = FALSE,
+                   retry = zu_retry(2, base = 0, jitter = FALSE))
+
+  got <- raw()
+  r <- zu_get(web$url("/body"), callback = function(x) { got <<- c(got, x); TRUE },
+              client = cli)
+  expect_identical(rawToChar(got), "ERROR")
+  expect_identical(zu_resp_status(r), 503L)
+  expect_identical(r$attempts, 1L)
+
+  got <- raw()
+  r <- zu_get(web$url("/empty"), callback = function(x) { got <<- c(got, x); TRUE },
+              client = cli)
+  expect_identical(rawToChar(got), "OK")
+  expect_identical(zu_resp_status(r), 200L)
+  expect_identical(r$attempts, 2L)
+})

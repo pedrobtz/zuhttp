@@ -10,6 +10,7 @@
 #include "zu_platform.h"
 #include "zu_uri.h"
 #include "zu_headers.h"
+#include "zu_redact.h"
 #include "zu_error.h"
 
 typedef struct {
@@ -47,13 +48,14 @@ zu_code zu_redirect_decide(const zu_redirect_policy *p, int status,
                            zu_redirect_decision *out, zu_error *err);
 
 /* Apply §19.2 to a header set: remove every credential-bearing field.
- * Returns how many were removed. */
-size_t zu_redirect_strip_credentials(zu_headers *h);
+ * Returns how many were removed. "Credential-bearing" is §42.1's list of
+ * secret headers plus whatever `p` adds (NULL: the defaults). */
+size_t zu_redirect_strip_credentials(zu_headers *h, const zu_redact_policy *p);
 
 /* Nonzero if `name` is one of the headers §19.2 strips on a cross-origin
  * redirect. The engine rebuilds each hop's headers from the caller's list,
  * so it filters with this while adding them rather than stripping after. */
-int zu_redirect_is_credential_header(const char *name);
+int zu_redirect_is_credential_header(const zu_redact_policy *p, const char *name);
 
 /* Loop detection (§19.4): has this (method, absolute URL) pair been seen? */
 typedef struct {

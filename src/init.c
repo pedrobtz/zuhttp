@@ -592,7 +592,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
                          SEXP max_redirects, SEXP verify, SEXP max_body,
                          SEXP user_agent, SEXP decode, SEXP pool,
                          SEXP path, SEXP callback, SEXP proxy, SEXP tls,
-                         SEXP trace, SEXP redact_params) {
+                         SEXP trace, SEXP redact) {
     zu_get_opts o;
     tick_ctx tick = { NULL };
     zu_req_spec spec;
@@ -600,7 +600,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
     zu_sink cb_sink;
     zu_tls_config tlscfg;
     zu_trace tracebuf;
-    zu_redact_policy redact;
+    zu_redact_policy redact_policy;
     zu_result r;
     zu_error e;
     zu_code rc;
@@ -687,13 +687,19 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
         if (tlscfg.ca_file) o.ca_file = tlscfg.ca_file;
     }
 
-    /* §42. The engine redacts the URLs it traces, so the caller's extra
-     * parameter names have to reach it. Set unconditionally rather than only
-     * when tracing: a policy that depends on another option is one an added
-     * egress can silently miss. The R_alloc storage behind the lists lives
-     * until this .Call returns, which outlasts the engine call. */
-    policy_from(R_NilValue, redact_params, &redact);
-    o.redact = &redact;
+    /* §42. The engine redacts the URLs it traces and its error messages,
+     * and strips secret headers at a cross-origin redirect (§19.2), so the
+     * caller's extra names have to reach it: `redact` is list(params,
+     * headers). Set unconditionally rather than only when tracing: a policy
+     * that depends on another option is one an added egress can silently
+     * miss. The R_alloc storage behind the lists lives until this .Call
+     * returns, which outlasts the engine call. */
+    policy_from(Rf_isNewList(redact) && XLENGTH(redact) == 2 ? VECTOR_ELT(redact, 1)
+                                                            : R_NilValue,
+                Rf_isNewList(redact) && XLENGTH(redact) == 2 ? VECTOR_ELT(redact, 0)
+                                                            : redact,
+                &redact_policy);
+    o.redact = &redact_policy;
 
     /* §35: opt-in. Without this the trace pointer stays NULL and every
      * zu_trace_add() in the connect, handshake and read paths is one branch. */
@@ -787,7 +793,17 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
         }
         /* No C resources are live here: zu_engine_get frees everything it
          * owns before returning non-OK, which is what makes it safe to raise
-         * an R condition (and longjmp) from this point. */
+         * an R condition (and longjmp) from this point.
+         *
+         * The return code is the authority. A path that returned an error
+         * without filling `e` once reached R as "unknown zuhttp error code:
+         * 0" — a plain simpleError no handler for zu_error would catch. */
+        if (e.code == ZU_OK) {
+            e.code = rc;
+            if (!e.message[0])
+                snprintf(e.message, sizeof e.message, "request failed (%s)",
+                         zu_code_class(rc));
+        }
         raise_zu_error(&e, u);
         return R_NilValue;   /* not reached */
     }

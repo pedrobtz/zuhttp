@@ -134,6 +134,49 @@ static const char *env_get(void *ctx, const char *name) {
 
 #define OK200(body) "HTTP/1.1 200 OK\r\nContent-Length: " #body "\r\n\r\n"
 
+/* zlib-compress `n` bytes: `window` 31 for gzip, 15 for the zlib wrapper. */
+static size_t squeeze(const void *in, size_t n, int window, unsigned char *out, size_t cap) {
+    z_stream zs;
+    size_t len;
+    memset(&zs, 0, sizeof zs);
+    deflateInit2(&zs, Z_BEST_COMPRESSION, Z_DEFLATED, window, 8, Z_DEFAULT_STRATEGY);
+    zs.next_in = (Bytef *)(uintptr_t)in; zs.avail_in = (uInt)n;
+    zs.next_out = out; zs.avail_out = (uInt)cap;
+    deflate(&zs, Z_FINISH);
+    len = cap - zs.avail_out;
+    deflateEnd(&zs);
+    return len;
+}
+
+/* A 200 carrying `body` under `coding`, framed three ways (§18.1): 0 by
+ * Content-Length, 1 chunked (in two chunks, so a boundary falls inside the
+ * compressed stream), 2 until close. Returns the response's length. */
+static size_t framed(char *out, size_t cap, int how, const char *coding,
+                     const unsigned char *body, size_t n) {
+    size_t h, half = n / 2;
+    if (how == 0) {
+        h = (size_t)snprintf(out, cap, "HTTP/1.1 200 OK\r\nContent-Encoding: %s\r\n"
+                             "Content-Length: %lu\r\nConnection: close\r\n\r\n",
+                             coding, (unsigned long)n);
+        memcpy(out + h, body, n);
+        return h + n;
+    }
+    if (how == 1) {
+        h = (size_t)snprintf(out, cap, "HTTP/1.1 200 OK\r\nContent-Encoding: %s\r\n"
+                             "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n", coding);
+        h += (size_t)snprintf(out + h, cap - h, "%lx\r\n", (unsigned long)half);
+        memcpy(out + h, body, half); h += half;
+        h += (size_t)snprintf(out + h, cap - h, "\r\n%lx\r\n", (unsigned long)(n - half));
+        memcpy(out + h, body + half, n - half); h += n - half;
+        h += (size_t)snprintf(out + h, cap - h, "\r\n0\r\n\r\n");
+        return h;
+    }
+    h = (size_t)snprintf(out, cap, "HTTP/1.1 200 OK\r\nContent-Encoding: %s\r\n"
+                         "Connection: close\r\n\r\n", coding);
+    memcpy(out + h, body, n);
+    return h + n;
+}
+
 void suite_engine_mock(void) {
     zu_get_opts o;
     zu_result r;
@@ -168,6 +211,59 @@ void suite_engine_mock(void) {
         zu_result_free(&r); dialer_free(&d);
     }
 
+    ZU_CASE("engine: the body decides a request's framing, not the caller's headers (RFC 9112 §6.2)");
+    {
+        /* A caller Content-Length of 1 on a five-byte body went out as
+         * written, followed by all five bytes; a caller Transfer-Encoding
+         * went out beside the generated Content-Length over an unchunked
+         * body. Either leaves the connection out of step with the server.
+         * Both are refused before connecting; a matching Content-Length is
+         * accepted and sent once. */
+        static const char *te_n[] = { "Transfer-Encoding" }, *te_v[] = { "chunked" };
+        static const char *bad_n[] = { "Content-Length" },   *bad_v[] = { "1" };
+        static const char *ok_n[] = { "content-length", "Content-Length" };
+        static const char *ok_v[] = { " 5 ", "5" };
+        zu_req_spec spec;
+        memset(&spec, 0, sizeof spec);
+        spec.method = "POST"; spec.body = "hello"; spec.body_len = 5;
+
+        spec.header_names = bad_n; spec.header_values = bad_v; spec.n_headers = 1;
+        dialer_init(&d, NULL, 0); opts_for(&o, &d); zu_error_clear(&e);
+        ZU_CHECK_EQ_INT(zu_engine_perform(&r, "http://example.test/", &spec, &o, &e), ZU_ERR_PARSE);
+        ZU_CHECK_EQ_INT(e.code, ZU_ERR_PARSE);
+        ZU_CHECK_EQ_INT(d.next, 0);
+        dialer_free(&d);
+
+        spec.header_names = te_n; spec.header_values = te_v;
+        dialer_init(&d, NULL, 0); opts_for(&o, &d); zu_error_clear(&e);
+        ZU_CHECK_EQ_INT(zu_engine_perform(&r, "http://example.test/", &spec, &o, &e), ZU_ERR_PARSE);
+        ZU_CHECK_EQ_INT(e.code, ZU_ERR_PARSE);
+        ZU_CHECK_EQ_INT(d.next, 0);
+        dialer_free(&d);
+
+        /* Matching, twice and with whitespace: one Content-Length on the
+         * wire. Then a 303 turns the POST into a GET and drops the body, and
+         * the caller's length must not follow it. */
+        {
+            conn_script sc[] = {
+                { "HTTP/1.1 303 See Other\r\nLocation: /done\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", 0, 0, 0, NULL },
+                { OK200(2) "ok", 0, 0, 0, NULL } };
+            const char *w0, *first;
+            spec.header_names = ok_n; spec.header_values = ok_v; spec.n_headers = 2;
+            dialer_init(&d, sc, 2); opts_for(&o, &d);
+            rc = zu_engine_perform(&r, "http://example.test/", &spec, &o, &e);
+            ZU_CHECK_EQ_INT(rc, ZU_OK);
+            w0 = sent(&d, 0);
+            first = strstr(w0, "ontent-Length");
+            ZU_CHECK(first != NULL && strstr(first + 1, "ontent-Length") == NULL);
+            ZU_CHECK(has(w0, "Content-Length: 5\r\n") && has(w0, "\r\n\r\nhello"));
+            ZU_CHECK(has(sent(&d, 1), "GET /done HTTP/1.1\r\n"));
+            ZU_CHECK(!has(sent(&d, 1), "ontent-Length"));
+            if (rc == ZU_OK) zu_result_free(&r);
+            dialer_free(&d);
+        }
+    }
+
     ZU_CASE("engine: a cross-origin redirect drops credentials, keeps other headers (§19.2)");
     {
         static const char *hn[] = { "Authorization", "Cookie", "X-Keep" };
@@ -188,6 +284,84 @@ void suite_engine_mock(void) {
         ZU_CHECK(has(sent(&d, 1), "X-Keep: yes"));
         ZU_CHECK(strcmp(d.host[1], "other.test") == 0);
         zu_result_free(&r); dialer_free(&d);
+    }
+
+    ZU_CASE("engine: a cross-origin redirect drops every header §42 calls secret, configured ones too (§19.2)");
+    {
+        /* The filter knew three names; the redactor knows six and whatever
+         * the caller configures. X-API-Key and X-Auth-Token followed a 302
+         * to another port. One list now decides both. */
+        static const char *hn[] = { "X-API-Key", "x-auth-token", "Set-Cookie", "X-Tenant-Secret", "X-Keep" };
+        static const char *hv[] = { "k", "t", "c", "s", "yes" };
+        static const char *const extra[] = { "X-Tenant-Secret", NULL };
+        zu_redact_policy pol;
+        zu_req_spec spec;
+        int k;
+        const char *targets[3] = { "http://example.test:8080/next",   /* port */
+                                   "http://other.test/next",          /* host */
+                                   "https://example.test/next" };     /* scheme */
+        for (k = 0; k < 3; k++) {
+            char loc[200];
+            conn_script sc[2];
+            snprintf(loc, sizeof loc, "HTTP/1.1 302 Found\r\nLocation: %s\r\n"
+                     "Content-Length: 0\r\nConnection: close\r\n\r\n", targets[k]);
+            sc[0].bytes = loc; sc[0].len = 0; sc[0].max_read = 0; sc[0].not_readable = 0; sc[0].next = NULL;
+            sc[1].bytes = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok";
+            sc[1].len = 0; sc[1].max_read = 0; sc[1].not_readable = 0; sc[1].next = NULL;
+            zu_redact_policy_init(&pol); pol.extra_headers = extra;
+            memset(&spec, 0, sizeof spec);
+            spec.header_names = hn; spec.header_values = hv; spec.n_headers = 5;
+            dialer_init(&d, sc, 2); opts_for(&o, &d); o.redact = &pol;
+            rc = zu_engine_perform(&r, "http://example.test/start", &spec, &o, &e);
+            /* https has no TLS in this build; what matters is what was sent. */
+            ZU_CHECK(has(sent(&d, 0), "X-API-Key: k") && has(sent(&d, 0), "X-Tenant-Secret: s"));
+            if (k < 2) {
+                ZU_CHECK_EQ_INT(rc, ZU_OK);
+                ZU_CHECK(!has(sent(&d, 1), "X-API-Key") && !has(sent(&d, 1), "x-auth-token"));
+                ZU_CHECK(!has(sent(&d, 1), "Set-Cookie") && !has(sent(&d, 1), "X-Tenant-Secret"));
+                ZU_CHECK(has(sent(&d, 1), "X-Keep: yes"));
+            }
+            if (rc == ZU_OK) zu_result_free(&r);
+            dialer_free(&d);
+        }
+    }
+
+    ZU_CASE("engine: two proxies that differ only past 512 bytes of credentials never share a connection (§26.1)");
+    {
+        /* The pool key's proxy identity was formatted into 512 bytes and the
+         * truncation ignored, so a 510-byte username left host, port and
+         * password out of it: a request meant for proxy B reused A's
+         * connection. And ':' / '@' inside decoded credentials made two
+         * different identities spell the same key. */
+        static char a[700], b2[700], c1[700], c2[700];
+        static char user[520];
+        zu_pool *pool = zu_pool_new(NULL);
+        zu_pool_stats st;
+        conn_script sc[] = { { OK200(1) "A", 0, 0, 1, NULL }, { OK200(1) "B", 0, 0, 1, NULL },
+                             { OK200(1) "C", 0, 0, 1, NULL }, { OK200(1) "D", 0, 0, 1, NULL } };
+        memset(user, 'u', 510); user[510] = '\0';
+        snprintf(a,  sizeof a,  "http://%s:pa@proxy-a.test:3128", user);
+        snprintf(b2, sizeof b2, "http://%s:pb@proxy-b.test:3129", user);
+        /* Decoded, user "a:b" password "c" and user "a" password "b:c" both
+         * joined as "a:b:c" in the old key. */
+        snprintf(c1, sizeof c1, "http://a%%3Ab:c@proxy-c.test:3128");
+        snprintf(c2, sizeof c2, "http://a:b%%3Ac@proxy-c.test:3128");
+        dialer_init(&d, sc, 4); opts_for(&o, &d); o.pool = pool;
+        o.proxy = a;
+        ZU_CHECK_EQ_INT(zu_engine_get(&r, "http://origin.test/", &o, &e), ZU_OK); zu_result_free(&r);
+        o.proxy = b2;
+        ZU_CHECK_EQ_INT(zu_engine_get(&r, "http://origin.test/", &o, &e), ZU_OK);
+        ZU_CHECK(r.body.len == 1 && r.body.data[0] == 'B');
+        zu_result_free(&r);
+        ZU_CHECK(strcmp(d.host[1], "proxy-b.test") == 0);
+        o.proxy = c1;
+        ZU_CHECK_EQ_INT(zu_engine_get(&r, "http://origin.test/", &o, &e), ZU_OK); zu_result_free(&r);
+        o.proxy = c2;
+        ZU_CHECK_EQ_INT(zu_engine_get(&r, "http://origin.test/", &o, &e), ZU_OK); zu_result_free(&r);
+        ZU_CHECK_EQ_INT(d.next, 4);
+        zu_pool_stats_get(pool, &st);
+        ZU_CHECK_EQ_INT(st.hits, 0);
+        dialer_free(&d); zu_pool_free(pool);
     }
 
     ZU_CASE("engine: a same-origin redirect on a pooled connection reuses it and keeps credentials");
@@ -326,6 +500,170 @@ void suite_engine_mock(void) {
             ZU_CHECK(r.body.len == gzlen && memcmp(r.body.data, gz, gzlen) == 0);
             ZU_CHECK(has(sent(&d, 0), "Accept-Encoding: identity"));
             zu_result_free(&r); dialer_free(&d);
+        }
+    }
+
+    ZU_CASE("engine: a compressed body succeeds only when its stream is complete (§21, D-76)");
+    {
+        /* Each variant under each framing, and once more one byte per read.
+         * A byte limit is not an integrity check: before D-76 the first three
+         * returned 200 with an empty, a trailer-less and a half body. */
+        static unsigned char plain[10000], gz[12000], two[200], zl[200];
+        static char resp[16000];
+        size_t gzlen, twolen, zllen, i;
+        int how, slow;
+        struct { const unsigned char *b; size_t n; zu_code want; const char *body; } v[5];
+        for (i = 0; i < sizeof plain; i++) plain[i] = (unsigned char)("abcdefghij"[i % 10]);
+        gzlen  = squeeze(plain, sizeof plain, 31, gz, sizeof gz);
+        twolen = squeeze("hello", 5, 31, two, sizeof two);
+        twolen += squeeze("world", 5, 31, two + twolen, sizeof two - twolen);
+        zllen  = squeeze("hello", 5, 15, zl, sizeof zl - 1);
+        zl[zllen++] = 'X';                                     /* after the stream */
+        v[0].b = gz;  v[0].n = 30;         v[0].want = ZU_ERR_BODY_DECODE; v[0].body = NULL;
+        v[1].b = gz;  v[1].n = gzlen - 8;  v[1].want = ZU_ERR_BODY_DECODE; v[1].body = NULL;
+        v[2].b = two; v[2].n = twolen;     v[2].want = ZU_OK;              v[2].body = "helloworld";
+        v[3].b = zl;  v[3].n = zllen;      v[3].want = ZU_ERR_BODY_DECODE; v[3].body = NULL;
+        v[4].b = gz;  v[4].n = gzlen;      v[4].want = ZU_OK;              v[4].body = NULL;
+        for (slow = 0; slow < 2; slow++)
+        for (how = 0; how < 3; how++)
+        for (i = 0; i < 5; i++) {
+            const char *coding = (i == 3) ? "deflate" : "gzip";
+            conn_script sc[1];
+            sc[0].bytes = resp; sc[0].len = framed(resp, sizeof resp, how, coding, v[i].b, v[i].n);
+            sc[0].max_read = slow ? 1 : 0; sc[0].not_readable = 0; sc[0].next = NULL;
+            dialer_init(&d, sc, 1); opts_for(&o, &d);
+            rc = zu_engine_get(&r, "http://example.test/", &o, &e);
+            ZU_CHECK_EQ_INT(rc, v[i].want);
+            if (rc == ZU_OK) {
+                if (v[i].body)
+                    ZU_CHECK(r.body.len == strlen(v[i].body) &&
+                             memcmp(r.body.data, v[i].body, r.body.len) == 0);
+                else
+                    ZU_CHECK(r.body.len == sizeof plain &&
+                             memcmp(r.body.data, plain, sizeof plain) == 0);
+                zu_result_free(&r);
+            } else {
+                ZU_CHECK_EQ_INT(e.code, rc);
+            }
+            dialer_free(&d);
+        }
+        /* An empty body under a coding decodes to nothing, successfully:
+         * there is no stream to be incomplete. */
+        {
+            conn_script sc[] = {{ "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: 0\r\n"
+                                  "Connection: close\r\n\r\n", 0, 0, 0, NULL }};
+            dialer_init(&d, sc, 1); opts_for(&o, &d);
+            ZU_CHECK_EQ_INT(zu_engine_get(&r, "http://example.test/", &o, &e), ZU_OK);
+            ZU_CHECK_EQ_INT(r.body.len, 0);
+            zu_result_free(&r); dialer_free(&d);
+        }
+    }
+
+    ZU_CASE("engine: a body larger than the header budget is sent whole (§17)");
+    {
+        /* The body used to be appended to the 64 KiB header buffer, so any
+         * upload of 64 KiB or more failed before a byte was sent, with no
+         * error object filled in. */
+        static unsigned char big[200000];
+        static const size_t sizes[3] = { 60000, 65536, sizeof big };
+        zu_req_spec spec;
+        int k;
+        for (k = 0; k < (int)sizeof big; k++) big[k] = (unsigned char)(k * 7);
+        for (k = 0; k < 3; k++) {
+            conn_script sc[] = {{ "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok", 0, 0, 0, NULL }};
+            memset(&spec, 0, sizeof spec);
+            spec.method = "POST"; spec.body = big; spec.body_len = sizes[k];
+            dialer_init(&d, sc, 1); opts_for(&o, &d);
+            rc = zu_engine_perform(&r, "http://example.test/up", &spec, &o, &e);
+            ZU_CHECK_EQ_INT(rc, ZU_OK);
+            ZU_CHECK(d.sent[0].len > sizes[k] &&
+                     memcmp(d.sent[0].data + d.sent[0].len - sizes[k], big, sizes[k]) == 0);
+            if (rc == ZU_OK) zu_result_free(&r);
+            dialer_free(&d);
+        }
+        /* A request line and headers over the 64 KiB block are refused
+         * before a byte is sent, as an overflow and with the error filled
+         * in: each header is under its own limit, and the long target is
+         * what tips the block over. */
+        {
+            static char val[8000], url[2100];
+            static const char *hn[] = { "X-A", "X-B", "X-C", "X-D", "X-E", "X-F", "X-G", "X-H" };
+            const char *hv[8];
+            conn_script sc[] = {{ OK200(2) "ok", 0, 0, 0, NULL }};
+            memset(val, 'v', sizeof val - 1); val[sizeof val - 1] = '\0';
+            for (k = 0; k < 8; k++) hv[k] = val;
+            memcpy(url, "http://example.test/", 20);
+            memset(url + 20, 'a', sizeof url - 21); url[sizeof url - 1] = '\0';
+            memset(&spec, 0, sizeof spec);
+            spec.header_names = hn; spec.header_values = hv; spec.n_headers = 8;
+            dialer_init(&d, sc, 1); opts_for(&o, &d);
+            zu_error_clear(&e);
+            rc = zu_engine_perform(&r, url, &spec, &o, &e);
+            ZU_CHECK_EQ_INT(rc, ZU_ERR_OVERFLOW);
+            ZU_CHECK_EQ_INT(e.code, ZU_ERR_OVERFLOW);
+            ZU_CHECK_EQ_INT(d.sent[0].len, 0);
+            dialer_free(&d);
+        }
+    }
+
+    ZU_CASE("engine: HEAD and 304 keep their representation headers and decode nothing (RFC 9112 §6.3)");
+    {
+        zu_req_spec spec;
+        conn_script br[]  = {{ "HTTP/1.1 200 OK\r\nContent-Encoding: br\r\nContent-Length: 123\r\n\r\n", 0, 0, 0, NULL }};
+        conn_script gz[]  = {{ "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: 123\r\n\r\n", 0, 0, 0, NULL }};
+        conn_script nm[]  = {{ "HTTP/1.1 304 Not Modified\r\nContent-Encoding: gzip\r\nContent-Length: 123\r\n\r\n", 0, 0, 0, NULL }};
+        memset(&spec, 0, sizeof spec); spec.method = "HEAD";
+        dialer_init(&d, br, 1); opts_for(&o, &d);
+        ZU_CHECK_EQ_INT(zu_engine_perform(&r, "http://example.test/", &spec, &o, &e), ZU_OK);
+        ZU_CHECK(zu_headers_get(&r.headers, "Content-Encoding") != NULL);
+        zu_result_free(&r); dialer_free(&d);
+        dialer_init(&d, gz, 1); opts_for(&o, &d);
+        ZU_CHECK_EQ_INT(zu_engine_perform(&r, "http://example.test/", &spec, &o, &e), ZU_OK);
+        ZU_CHECK(zu_headers_get(&r.headers, "Content-Encoding") != NULL);
+        ZU_CHECK(zu_headers_get(&r.headers, "Content-Length") != NULL &&
+                 strcmp(zu_headers_get(&r.headers, "Content-Length"), "123") == 0);
+        zu_result_free(&r); dialer_free(&d);
+        dialer_init(&d, nm, 1); opts_for(&o, &d);
+        ZU_CHECK_EQ_INT(zu_engine_get(&r, "http://example.test/", &o, &e), ZU_OK);
+        ZU_CHECK_EQ_INT(r.status, 304);
+        ZU_CHECK(zu_headers_get(&r.headers, "Content-Encoding") != NULL);
+        zu_result_free(&r); dialer_free(&d);
+    }
+
+    ZU_CASE("engine: a redirect body is drained undecoded, and one that cannot be drained closes the connection (§19.5)");
+    {
+        /* Three intermediate bodies that must not stop a valid Location being
+         * followed: one over the 64 KiB drain budget, one in a coding this
+         * client cannot decode, and one cut short. Each hop is on a pool: the
+         * two that could not be drained must not be reused, while the
+         * undecodable one drained cleanly and must be. */
+        static char big[72000];
+        size_t hl = (size_t)snprintf(big, sizeof big,
+            "HTTP/1.1 302 Found\r\nLocation: /ok\r\nContent-Length: 70000\r\n\r\n");
+        const char *firsts[3] = { big,
+            "HTTP/1.1 302 Found\r\nLocation: /ok\r\nContent-Encoding: br\r\nContent-Length: 4\r\n\r\n\x01\x02\x03\x04",
+            "HTTP/1.1 302 Found\r\nLocation: /ok\r\nContent-Length: 10\r\n\r\nabc" };
+        const size_t lens[3] = { hl + 70000, 0, 0 };
+        int k;
+        memset(big + hl, 'x', 70000);
+        for (k = 0; k < 3; k++) {
+            zu_pool *pool = zu_pool_new(NULL);
+            conn_script sc[2];
+            sc[0].bytes = firsts[k]; sc[0].len = lens[k]; sc[0].max_read = 0;
+            sc[0].not_readable = 1; sc[0].next = (k == 1) ? OK200(2) "ok" : NULL;
+            sc[1].bytes = OK200(2) "ok"; sc[1].len = 0; sc[1].max_read = 0;
+            sc[1].not_readable = 1; sc[1].next = NULL;
+            dialer_init(&d, sc, 2); opts_for(&o, &d); o.pool = pool;
+            rc = zu_engine_get(&r, "http://example.test/start", &o, &e);
+            ZU_CHECK_EQ_INT(rc, ZU_OK);
+            if (rc == ZU_OK) {
+                ZU_CHECK_EQ_INT(r.status, 200);
+                ZU_CHECK_EQ_INT(r.redirects, 1);
+                ZU_CHECK(r.body.len == 2 && memcmp(r.body.data, "ok", 2) == 0);
+                zu_result_free(&r);
+            }
+            ZU_CHECK_EQ_INT(d.next, k == 1 ? 1 : 2);   /* a new connection unless drained */
+            dialer_free(&d); zu_pool_free(pool);
         }
     }
 

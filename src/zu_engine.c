@@ -208,13 +208,33 @@ static int pool_key_for(zu_pool_key *k, const zu_uri *u, const zu_get_opts *o,
      * credentials are part of the key and never part of anything printable —
      * zu_pool_key is internal and has no formatter. */
     if (px && px->in_use) {
-        char buf[512];
-        snprintf(buf, sizeof buf, "%s://%s:%s@%s:%u",
-                 px->scheme ? px->scheme : "http",
-                 px->username ? px->username : "",
-                 px->password ? px->password : "",
-                 px->host ? px->host : "", (unsigned)px->port);
-        k->proxy = dup_str(buf);
+        /* Each field is written as its length, ':', then its bytes, so the
+         * key is complete and unambiguous. It used to be formatted into 512
+         * bytes with the truncation ignored — a 510-byte username dropped
+         * the password, host and port, and a request for one proxy reused
+         * another's connection — and joined with ':' and '@', which decoded
+         * credentials may themselves contain. */
+        const char *f[5];
+        char port[16];
+        size_t i;
+        zu_buffer b;
+        const char *joined = NULL;
+        snprintf(port, sizeof port, "%u", (unsigned)px->port);
+        f[0] = px->scheme ? px->scheme : "http";
+        f[1] = px->username ? px->username : "";
+        f[2] = px->password ? px->password : "";
+        f[3] = px->host ? px->host : "";
+        f[4] = port;
+        if (!zu_buf_init(&b, 128, 0)) { zu_pool_key_free(k); return 0; }
+        for (i = 0; i < 5; i++) {
+            if (!zu_buf_append_u64(&b, (uint64_t)strlen(f[i])) ||
+                !zu_buf_append_byte(&b, ':') || !zu_buf_append_str(&b, f[i])) {
+                zu_buf_free(&b); zu_pool_key_free(k); return 0;
+            }
+        }
+        if (!zu_buf_cstr(&b, &joined)) { zu_buf_free(&b); zu_pool_key_free(k); return 0; }
+        k->proxy = dup_str(joined);
+        zu_buf_free(&b);
         if (!k->proxy) { zu_pool_key_free(k); return 0; }
     }
     return 1;
@@ -473,6 +493,49 @@ zu_code zu_engine_get(zu_result *out, const char *url,
     return zu_engine_perform(out, url, NULL, o, err);
 }
 
+/* RFC 9112 §6.2 (D-78): the body decides the framing. A caller's
+ * Content-Length used to go out as written, so "1" on a five-byte body sent
+ * five bytes the server would read as one plus the start of the next
+ * request; a caller's Transfer-Encoding went out beside the generated
+ * Content-Length over a body that was never chunked. Either leaves the
+ * connection out of step with the server. A Content-Length that matches the
+ * body is harmless and is accepted — the engine emits its own either way. */
+static zu_code check_caller_framing(const zu_req_spec *req, size_t body_len,
+                                    zu_error *err) {
+    size_t i;
+    if (!req) return ZU_OK;
+    for (i = 0; i < req->n_headers; i++) {
+        const char *name = req->header_names ? req->header_names[i] : NULL;
+        const char *v    = req->header_values ? req->header_values[i] : NULL;
+        if (!name) continue;
+        if (zu_ascii_casecmp(name, "Transfer-Encoding") == 0) {
+            zu_error_set(err, ZU_ERR_PARSE, ZU_PHASE_NONE,
+                         "a Transfer-Encoding header cannot be set: zuhttp "
+                         "frames the body itself, with Content-Length");
+            return ZU_ERR_PARSE;
+        }
+        if (zu_ascii_casecmp(name, "Content-Length") == 0) {
+            uint64_t n = 0;
+            int digits = 0, ok = 1;
+            const char *c = v ? v : "";
+            while (*c == ' ' || *c == '\t') c++;
+            for (; *c >= '0' && *c <= '9'; c++, digits++) {
+                if (n > (UINT64_MAX - 9) / 10) { ok = 0; break; }
+                n = n * 10 + (uint64_t)(*c - '0');
+            }
+            while (*c == ' ' || *c == '\t') c++;
+            if (!ok || !digits || *c || n != (uint64_t)body_len) {
+                zu_error_set(err, ZU_ERR_PARSE, ZU_PHASE_NONE,
+                             "a Content-Length header of '%.40s' does not "
+                             "match the %lu-byte body",
+                             v ? v : "", (unsigned long)body_len);
+                return ZU_ERR_PARSE;
+            }
+        }
+    }
+    return ZU_OK;
+}
+
 zu_code zu_engine_perform(zu_result *out, const char *url,
                           const zu_req_spec *req, const zu_get_opts *o,
                           zu_error *err) {
@@ -511,9 +574,23 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
 
     rc = zu_uri_parse(&cur, url, url + strlen(url));
     if (rc != ZU_OK) {
-        zu_error_set(err, ZU_ERR_URL, ZU_PHASE_NONE, "not a usable URL: %s", url);
+        /* §42.2: the message is an egress like the URL field, and the URL
+         * that failed to parse is the one most likely to be pasted with its
+         * credentials. The redactor works on unparsed text for this case. */
+        zu_buffer shown;
+        const char *txt = NULL;
+        if (zu_buf_init(&shown, 128, 0) &&
+            zu_redact_url(o->redact, url, strlen(url), &shown) &&
+            zu_buf_cstr(&shown, &txt))
+            zu_error_set(err, ZU_ERR_URL, ZU_PHASE_NONE, "not a usable URL: %s", txt);
+        else
+            zu_error_set(err, ZU_ERR_URL, ZU_PHASE_NONE, "not a usable URL");
+        zu_buf_free(&shown);
         return ZU_ERR_URL;
     }
+
+    rc = check_caller_framing(req, body_len, err);
+    if (rc != ZU_OK) { zu_uri_free(&cur); zu_result_free(out); return rc; }
 
     /* §27: where the final body goes. `o->sink` is the caller's; without one
      * the body is buffered into the result, which is the pre-S17 behaviour and
@@ -533,6 +610,8 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
         zu_body_pipe pipe;
         zu_sink *hop_sink = NULL;
         size_t consumed = 0;
+        size_t sent_bytes = 0;
+        int may_follow = 0;
         uint64_t surplus = 0;
         char hosthdr[300];
 
@@ -637,7 +716,12 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
              * on every hop, which is why the filter has to be here: until
              * 2026-09-26 nothing read dec.strip_credentials at all, and an
              * Authorization header followed a redirect to any origin. */
-            if (strip_creds && zu_redirect_is_credential_header(req->header_names[hi]))
+            if (strip_creds &&
+                zu_redirect_is_credential_header(o->redact, req->header_names[hi]))
+                continue;
+            /* D-78: framing comes from this hop's body, which a 303 may have
+             * dropped; the caller's length, checked above, is never sent. */
+            if (zu_ascii_casecmp(req->header_names[hi], "Content-Length") == 0)
                 continue;
             rc = zu_headers_add_str(&rq.headers, req->header_names[hi],
                                     req->header_values[hi]);
@@ -656,16 +740,38 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
         }
         rc = zu_request_add_defaults(&rq, o->user_agent);
         if (rc == ZU_OK) rc = zu_request_write(&rq, &wire);
-        /* The body is appended to the same buffer rather than written
-         * separately: one write means one TCP segment for a small request,
-         * and it keeps the "headers sent but body not" window closed. */
-        if (rc == ZU_OK && body_len > 0 && !zu_buf_append(&wire, body, body_len))
+        /* The 64 KiB cap is on the header block (§17.1), so running into it
+         * is the caller's headers being too large, not memory running out. */
+        if (rc == ZU_ERR_NOMEM && zu_buf_hit_limit(&wire)) {
+            zu_error_set(err, ZU_ERR_OVERFLOW, ZU_PHASE_NONE,
+                         "request headers exceed the 64 KiB limit");
+            rc = ZU_ERR_OVERFLOW;
+        } else if (rc != ZU_OK && !err->code) {
+            zu_error_set(err, rc, ZU_PHASE_NONE, "could not build the request");
+        }
+        /* A body that fits beside the headers goes in the same write: one
+         * write means one TCP segment for a small request. A larger one is
+         * written after them, under the same deadline. It used to be appended
+         * regardless, so the header cap limited every upload to 64 KiB. */
+        sent_bytes = wire.len + body_len;
+        if (rc == ZU_OK && body_len > 0 && body_len <= wire.max - wire.len &&
+            !zu_buf_append(&wire, body, body_len)) {
+            zu_error_set(err, ZU_ERR_NOMEM, ZU_PHASE_NONE, "out of memory");
             rc = ZU_ERR_NOMEM;
-        if (rc == ZU_OK && !zu_stream_write_all(s, wire.data, wire.len, total, err))
+        } else if (rc == ZU_OK && body_len > 0 && body_len > wire.max - wire.len) {
+            if (!zu_stream_write_all(s, wire.data, wire.len, total, err))
+                rc = err->code ? err->code : ZU_ERR_IO;
+            else
+                wire.len = 0;
+            if (rc == ZU_OK && !zu_stream_write_all(s, body, body_len, total, err))
+                rc = err->code ? err->code : ZU_ERR_IO;
+        }
+        if (rc == ZU_OK && wire.len &&
+            !zu_stream_write_all(s, wire.data, wire.len, total, err))
             rc = err->code ? err->code : ZU_ERR_IO;
         if (rc == ZU_OK) {
             out->timings.request_write = (long)(zu_now_ms() - t_start);
-            zu_trace_add(o->trace, ZU_EV_REQUEST_SENT, method, wire.len);
+            zu_trace_add(o->trace, ZU_EV_REQUEST_SENT, method, (uint64_t)sent_bytes);
         }
         zu_buf_free(&wire);
         if (have_absform) { zu_buf_free(&absform); have_absform = 0; }
@@ -717,9 +823,9 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
              * the response the caller receives and its body is theirs. Held
              * bytes are bounded by ZU_MAX_REDIRECT_BODY, so this is not a
              * route back to buffering a large body. */
-            int may_follow = zu_status_is_redirect(resp.status) &&
-                             o->max_redirects > 0 &&
-                             zu_headers_get(&resp.headers, "Location") != NULL;
+            may_follow = zu_status_is_redirect(resp.status) &&
+                         o->max_redirects > 0 &&
+                         zu_headers_get(&resp.headers, "Location") != NULL;
             uint64_t cap = o->max_body ? o->max_body : ZU_DEFAULT_MAX_BODY;
 
             fr = resp.framing;
@@ -731,8 +837,17 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
             if (may_follow) cap = ZU_MAX_REDIRECT_BODY;
             /* Per hop, not cumulative: the limit describes one body. */
             hop_sink->written = 0;
+            /* Two responses are never decoded. A bodiless one (HEAD, 204,
+             * 304): its Content-Encoding and Content-Length describe the
+             * representation, not bytes that follow (RFC 9112 §6.3), so
+             * decoding nothing failed on an unsupported coding and stripped
+             * both headers from the rest. And a redirect about to be
+             * followed: its body is thrown away, so decoding it could only
+             * turn an irrelevant body into a failed request. */
             rc = zu_body_pipe_init(&pipe, hop_sink, &resp.headers,
-                                   o->no_decode, cap, err);
+                                   o->no_decode || may_follow ||
+                                   resp.framing.kind == ZU_FRAME_NONE,
+                                   cap, err);
             if (rc == ZU_OK)
                 rc = zu_body_read(s, &fr, &pipe,
                                (const char *)raw.data + consumed, raw.len - consumed,
@@ -754,6 +869,16 @@ zu_code zu_engine_perform(zu_result *out, const char *url,
         {
             zu_reuse reason = zu_reuse_decide(rc, &fr, &resp.headers,
                                               resp.minor_version);
+            /* §19.5: a redirect body that cannot be drained — over the
+             * ZU_MAX_REDIRECT_BODY budget, or cut short — costs the
+             * connection, not the request. The headers are complete and the
+             * Location is valid; `reason` already refuses reuse, since the
+             * framing position is unknown. Failures that concern the request
+             * rather than this body (a timeout, an interrupt) still stop it. */
+            if (may_follow && (rc == ZU_ERR_BODY_LIMIT || rc == ZU_ERR_PARSE)) {
+                rc = ZU_OK;
+                zu_error_clear(err);
+            }
             /* §27.2: a sink that asked to stop ended the transfer CLEANLY —
              * the caller gets their response. The connection still cannot be
              * reused, because the body was not read to its end and the

@@ -84,8 +84,11 @@ zu_code zu_request_write(const zu_request *r, zu_buffer *out) {
 
     if (!zu_headers_write(&r->headers, out)) return ZU_ERR_NOMEM;
 
-    /* Body framing headers are emitted from the struct, not trusted from the
-     * caller's header list, so the two can never disagree on the wire. */
+    /* Body framing headers are emitted from the struct. A framing header
+     * already in the list is kept instead, so agreement between the two is
+     * the caller's to guarantee: the engine does, by refusing a caller
+     * Transfer-Encoding or mismatched Content-Length and never passing a
+     * caller Content-Length through (D-78). */
     if (r->body == ZU_BODY_LENGTH) {
         if (!zu_headers_has(&r->headers, "Content-Length")) {
             if (!zu_buf_append_str(out, "Content-Length: ")) return ZU_ERR_NOMEM;

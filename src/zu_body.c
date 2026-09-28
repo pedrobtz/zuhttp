@@ -93,9 +93,34 @@ zu_code zu_body_pipe_feed(zu_body_pipe *p, const void *data, size_t n, zu_error 
     return zu_sink_write(p->sink, p->staging.data, p->staging.len, err);
 }
 
+/* D-76: the framing says the body is over; the decoder has to agree. Every
+ * framing mode ends here, because each of them used to report success on a
+ * compressed stream that stopped short — the byte count was right and the
+ * body was not. Whatever the decoder still holds is delivered first. */
+static zu_code pipe_finish(zu_body_pipe *p, zu_error *err) {
+    zu_code rc;
+    if (!p->inflating) return ZU_OK;
+    p->staging.len = 0;
+    rc = zu_inflate_run(&p->inflate, NULL, 0, &p->staging, err);
+    if (rc != ZU_OK) return rc;
+    return p->staging.len
+        ? zu_sink_write(p->sink, p->staging.data, p->staging.len, err) : ZU_OK;
+}
+
+static zu_code body_read_framed(zu_stream *s, const zu_framing *fr, zu_body_pipe *p,
+                                const char *seed, size_t seed_len,
+                                uint64_t max_body, zu_deadline dl, zu_error *err);
+
 zu_code zu_body_read(zu_stream *s, const zu_framing *fr, zu_body_pipe *p,
                          const char *seed, size_t seed_len,
                          uint64_t max_body, zu_deadline dl, zu_error *err) {
+    zu_code rc = body_read_framed(s, fr, p, seed, seed_len, max_body, dl, err);
+    return rc == ZU_OK ? pipe_finish(p, err) : rc;
+}
+
+static zu_code body_read_framed(zu_stream *s, const zu_framing *fr, zu_body_pipe *p,
+                                const char *seed, size_t seed_len,
+                                uint64_t max_body, zu_deadline dl, zu_error *err) {
     if (fr->kind == ZU_FRAME_NONE) {
         /* HEAD, 204, 304: no body, so anything already read is surplus. */
         p->surplus += (uint64_t)seed_len;
