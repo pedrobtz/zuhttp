@@ -94,6 +94,8 @@ for the next minor.
 - [x] Fix the seven tag blockers of the 2026-09-26 architecture review (#73):
       C-1, R-1, R-2, R-3, R-4, CI-1, CI-2, each with a test that failed
       first (#74).
+- [x] Fix the 13 findings of the 2026-09-27 package review (#76), each with a
+      test that failed first (#77): D-76 to D-81.
 - [ ] Tag `v0.1.0` on the merge commit and publish the GitHub release (#40).
 - [ ] Close #21 and #40; retitle #22 to track M3.
 - [ ] Create milestone issues for M1–M3 and one issue per work package, each
@@ -706,3 +708,20 @@ changed the plan or the design.
   as the request's own `attempt_budget` field (§24.3) and `resolved` is the
   §31.9 merge and nothing else. Rule 6 in the other direction: a test that
   was right, and a fix that made it flicker.
+- **2026-09-28 — a package review (#76) found 13 defects that every suite
+  passed.** Silent truncation (a gzip body cut short returned a complete,
+  empty 200, and replaced a download with an empty file), credential
+  disclosure (secret headers across a cross-origin redirect, a URL's password
+  in an error message, percent-encoded parameter names), malformed outbound
+  framing, a proxy pool key truncated at 512 bytes that reused the wrong
+  proxy, a download temporary file that followed a planted symlink, a commit
+  that deleted the old file before replacing it, retries that fed a callback
+  two bodies, uploads capped at 64 KiB, bodyless responses run through the
+  decoder, redirect bodies over 64 KiB failing the redirect, and macOS
+  dropping `ca_extra` beside `ca_file`. All reproduced against local
+  servers, all fixed with a test that failed first (#77), D-76 to D-81. The
+  shared cause is the one the review named: the suites proved mechanisms one
+  at a time and not their combinations — decoding and completion, retries and
+  callbacks, the pool key and long credentials — and several comments
+  asserted an invariant ("can never disagree", "replaced only at the rename")
+  that no test tried to break. Rule 6, by combination.
