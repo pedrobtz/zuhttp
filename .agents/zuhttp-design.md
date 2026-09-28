@@ -131,6 +131,7 @@ accepted when that work package's PR merges.
 | D-77 | A redirect that will be followed has its body **drained undecoded**; a body that cannot be drained — over `max_redirect_body` or cut short — closes the connection and the redirect is still followed. Timeouts and interrupts still stop the request | Accepted 2026-09-28 (#77) | 19.5 | — |
 | D-78 | **The body decides a request's framing.** A caller `Transfer-Encoding` header is refused, and a caller `Content-Length` that does not match the body is refused, both before connecting; a matching one is accepted. The engine emits the framing of each hop's own body, so a length never outlives a 303 that dropped the body | Accepted 2026-09-28 (#77) | 17.4 | — |
 | D-79 | **One list of secret headers.** A cross-origin redirect strips exactly the headers §42.1 redacts — the defaults and any configured with `zu_redact_headers()` — so a header hidden from every printout is never sent to an origin the caller did not name | Accepted 2026-09-28 (#77) | 19.2, 42.1 | — |
+| D-80 | A download's **temporary file is created exclusively** beside the destination, trying `<path>.zudl<pid>` then `.1`, `.2`…; nothing already at a candidate name is opened, so a planted symlink or a second download to the same path is never written through | Accepted 2026-09-28 (#77) | 27.1 | — |
 
 ---
 
@@ -1070,7 +1071,12 @@ at ~100 MB).
 
 `max_body` applies to every sink. A file sink writes beside its destination
 and renames on success, so failure never leaves a truncated file and an
-existing destination is replaced only at the rename (D-53). A non-2xx
+existing destination is replaced only at the rename (D-53): `rename()` over
+it on POSIX, `MoveFileEx(MOVEFILE_REPLACE_EXISTING)` on Windows, never a
+delete first, so a failed commit keeps the last good file. The temporary name
+is predictable, so the file is created exclusively (`O_EXCL`) and a taken
+name — a stale file, another download to the same path, a planted symlink —
+moves on to the next rather than being truncated or written through (D-80). A non-2xx
 response still writes; `check` runs after the sink commits. `path` and
 `callback` are mutually exclusive, and a committed path is `zu_resp_path()`.
 
