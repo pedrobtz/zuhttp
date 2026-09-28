@@ -250,10 +250,19 @@ void suite_body(void) {
         f = zu_sink_file(path, &e);
         ZU_CHECK(f != NULL);
         if (f) {
+            /* The fault: point the sink at a temporary name that does not
+             * exist, so the rename itself fails. Deleting the real temporary
+             * file would be the obvious injection, but Windows refuses to
+             * delete a file that is still open, and the commit then simply
+             * succeeds. The real file is removed afterwards. */
+            char real_tmp[512];
+            char *t = (char *)(uintptr_t)zu_sink_file_tmp_path(f);
+            snprintf(real_tmp, sizeof real_tmp, "%s", t);
+            t[strlen(t) - 1] = (char)(t[strlen(t) - 1] ^ 1);
             ZU_CHECK_EQ_INT(zu_sink_write(f, "new!", 4, &e), ZU_OK);
-            remove(zu_sink_file_tmp_path(f));        /* the rename will fail */
             ZU_CHECK_EQ_INT(zu_sink_finish(f, &e), ZU_ERR_IO);
             zu_sink_free(f);
+            remove(real_tmp);
         }
         fp = fopen(path, "rb");
         ZU_CHECK(fp != NULL);
