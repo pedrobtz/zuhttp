@@ -52,7 +52,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     # A commit, not the floating tag: this job holds `contents: write`, so a
     # moved tag in another repository could commit to this one. The same
-    # commit zucrypt pins; coverage.yml is unchanged from it through v1.16.0.
-    uses: pedrobtz/r-actions/.github/workflows/coverage.yml@68c22c173f9ddbb7e51284fe230053174e941afc # v1.15.0
+    # commit every family repo pins coverage.yml to.
+    uses: pedrobtz/r-actions/.github/workflows/coverage.yml@59c917ddee2cd0191f8f015016c4c76c4f2a8c87 # v1.18.0
     permissions:
       contents: write
