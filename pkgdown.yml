@@ -9,7 +9,7 @@ articles:
   articles/streaming: streaming.html
   articles/testing: testing.html
   articles/tls: tls.html
-last_built: 2026-09-28T11:57Z
+last_built: 2026-09-29T14:25Z
 urls:
   reference: https://pedrobtz.github.io/zuhttp/reference
   article: https://pedrobtz.github.io/zuhttp/articles
