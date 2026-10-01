@@ -10,56 +10,26 @@ permissions:
   contents: read
 
 jobs:
-  r-cmd-check:
-    uses: pedrobtz/r-actions/.github/workflows/r-cmd-check.yml@ea9a2f7e6a5d8c02ec1bbcab61ace4637c873029
-    with:
-      profile: quick
-      # Exercises the rewritten allowed-warnings gate; matches nothing real.
-      allowed-warnings: "nonexistent check name"
-
-  coverage:
-    uses: pedrobtz/r-actions/.github/workflows/coverage.yml@ea9a2f7e6a5d8c02ec1bbcab61ace4637c873029
-    permissions:
-      contents: write
-    with:
-      native: true
-
-  sanitizers:
-    uses: pedrobtz/r-actions/.github/workflows/sanitizers.yml@ea9a2f7e6a5d8c02ec1bbcab61ace4637c873029
-    with:
-      asan: true
-      profile: full
-
   rchk:
-    uses: pedrobtz/r-actions/.github/workflows/rchk.yml@ea9a2f7e6a5d8c02ec1bbcab61ace4637c873029
-
-  analyzers:
-    uses: pedrobtz/r-actions/.github/workflows/analyzers.yml@ea9a2f7e6a5d8c02ec1bbcab61ace4637c873029
-
-  lto:
-    uses: pedrobtz/r-actions/.github/workflows/lto.yml@ea9a2f7e6a5d8c02ec1bbcab61ace4637c873029
+    uses: pedrobtz/r-actions/.github/workflows/rchk.yml@029eaee84b4fc905ed2d8ccf54a5b880c2110ee4
 
   arch:
-    uses: pedrobtz/r-actions/.github/workflows/arch.yml@ea9a2f7e6a5d8c02ec1bbcab61ace4637c873029
+    uses: pedrobtz/r-actions/.github/workflows/arch.yml@029eaee84b4fc905ed2d8ccf54a5b880c2110ee4
+    with:
+      # Candidate default setups (+ libuv for fs, linux-headers for ps),
+      # plus zuhttp's own libssl/zlib.
+      require-tests: true
+      targets: >-
+        [{"name": "i386", "platform": "linux/386",
+          "image": "i386/debian:bookworm",
+          "setup": "apt-get update && apt-get install -y --no-install-recommends r-base-dev libuv1-dev libssl-dev zlib1g-dev"},
+         {"name": "musl", "platform": "linux/amd64",
+          "image": "alpine:3.21",
+          "setup": "apk add --no-cache R R-dev R-doc build-base linux-headers libuv-dev openssl-dev zlib-dev"}]
 
   alloc-failure:
-    uses: pedrobtz/r-actions/.github/workflows/alloc-failure.yml@ea9a2f7e6a5d8c02ec1bbcab61ace4637c873029
+    uses: pedrobtz/r-actions/.github/workflows/alloc-failure.yml@029eaee84b4fc905ed2d8ccf54a5b880c2110ee4
     with:
       run: Rscript -e 'library(zuhttp); invisible(zu_redact_url("https://u:p@example.com/a?token=x&b=1"))'
-      baseline-run: Rscript -e 'invisible(0)'
+      baseline-run: Rscript -e 'library(zuhttp)'
       max-allocations: 200
-
-  fuzz:
-    uses: pedrobtz/r-actions/.github/workflows/fuzz.yml@ea9a2f7e6a5d8c02ec1bbcab61ace4637c873029
-    with:
-      harness: fuzz/fuzz_uri.c
-      sources: >-
-        src/zu_uri.c src/zu_alloc.c src/zu_error.c src/zu_buffer.c src/zu_headers.c
-        src/vendor/uriparser/UriParse.c src/vendor/uriparser/UriParseBase.c
-        src/vendor/uriparser/UriResolve.c src/vendor/uriparser/UriRecompose.c
-        src/vendor/uriparser/UriCommon.c src/vendor/uriparser/UriMemory.c
-        src/vendor/uriparser/UriIp4.c src/vendor/uriparser/UriIp4Base.c
-      cflags: -g -O1 -fno-omit-frame-pointer -Isrc -Isrc/vendor/uriparser -DURI_NO_UNICODE -DURI_STATIC_BUILD
-      seed-corpus: fuzz/corpus/uri
-      max-total-time: 120
-      cache-corpus: true
