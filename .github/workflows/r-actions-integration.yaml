@@ -1,0 +1,65 @@
+# TEMPORARY: exercises pedrobtz/r-actions PRs #59, #60 and #61 (merged on
+# its test/integration branch) against a real package. Not for merging.
+on:
+  push:
+    branches: [test/r-actions-integration]
+
+name: r-actions-integration
+
+permissions:
+  contents: read
+
+jobs:
+  r-cmd-check:
+    uses: pedrobtz/r-actions/.github/workflows/r-cmd-check.yml@ea9a2f7e6a5d8c02ec1bbcab61ace4637c873029
+    with:
+      profile: quick
+      # Exercises the rewritten allowed-warnings gate; matches nothing real.
+      allowed-warnings: "nonexistent check name"
+
+  coverage:
+    uses: pedrobtz/r-actions/.github/workflows/coverage.yml@ea9a2f7e6a5d8c02ec1bbcab61ace4637c873029
+    permissions:
+      contents: write
+    with:
+      native: true
+
+  sanitizers:
+    uses: pedrobtz/r-actions/.github/workflows/sanitizers.yml@ea9a2f7e6a5d8c02ec1bbcab61ace4637c873029
+    with:
+      asan: true
+      profile: full
+
+  rchk:
+    uses: pedrobtz/r-actions/.github/workflows/rchk.yml@ea9a2f7e6a5d8c02ec1bbcab61ace4637c873029
+
+  analyzers:
+    uses: pedrobtz/r-actions/.github/workflows/analyzers.yml@ea9a2f7e6a5d8c02ec1bbcab61ace4637c873029
+
+  lto:
+    uses: pedrobtz/r-actions/.github/workflows/lto.yml@ea9a2f7e6a5d8c02ec1bbcab61ace4637c873029
+
+  arch:
+    uses: pedrobtz/r-actions/.github/workflows/arch.yml@ea9a2f7e6a5d8c02ec1bbcab61ace4637c873029
+
+  alloc-failure:
+    uses: pedrobtz/r-actions/.github/workflows/alloc-failure.yml@ea9a2f7e6a5d8c02ec1bbcab61ace4637c873029
+    with:
+      run: Rscript -e 'library(zuhttp); invisible(zu_redact_url("https://u:p@example.com/a?token=x&b=1"))'
+      baseline-run: Rscript -e 'invisible(0)'
+      max-allocations: 200
+
+  fuzz:
+    uses: pedrobtz/r-actions/.github/workflows/fuzz.yml@ea9a2f7e6a5d8c02ec1bbcab61ace4637c873029
+    with:
+      harness: fuzz/fuzz_uri.c
+      sources: >-
+        src/zu_uri.c src/zu_alloc.c src/zu_error.c src/zu_buffer.c src/zu_headers.c
+        src/vendor/uriparser/UriParse.c src/vendor/uriparser/UriParseBase.c
+        src/vendor/uriparser/UriResolve.c src/vendor/uriparser/UriRecompose.c
+        src/vendor/uriparser/UriCommon.c src/vendor/uriparser/UriMemory.c
+        src/vendor/uriparser/UriIp4.c src/vendor/uriparser/UriIp4Base.c
+      cflags: -g -O1 -fno-omit-frame-pointer -Isrc -Isrc/vendor/uriparser -DURI_NO_UNICODE -DURI_STATIC_BUILD
+      seed-corpus: fuzz/corpus/uri
+      max-total-time: 120
+      cache-corpus: true
