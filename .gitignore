@@ -3,10 +3,13 @@
 # R package build artifacts
 *.tar.gz
 *.Rcheck/
-src/*.o
-src/*.so
-src/*.dll
-src/vendor/**/*.o
+# Compiled objects at any depth: anchored patterns (src/*.o) miss the next
+# subfolder.
+*.o
+*.so
+*.dll
+*.dylib
+*.a
 
 # ctest binaries — committed by mistake in 5510a4e, untracked since.
 ctest/zu_ctest
