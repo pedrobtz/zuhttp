@@ -105,6 +105,23 @@ root or a corporate proxy CA already installed on the machine simply works.
 The package is small enough to audit, and its behaviour under malformed input
 is fuzzed rather than assumed.
 
+The [eMudhra incident](https://emudhra.we-have-a-problem.com/) of October
+2026 is the dated example. Eight intermediate CA certificates had private
+keys anyone could recover from the certificates themselves. The root programs
+distrusted them within five days of the report: Firefox and Chrome on 17
+October, Microsoft on 20 October, Apple on 22 October. Six days after Apple's
+block, git, curl and python3 on macOS still trusted them, because those tools
+read the PEM file at `/etc/ssl/cert.pem`, which changes only with a macOS
+release. So the real division is not a bundled list against the platform; it
+is the platform's trust evaluator against the platform's file. zuhttp asks
+the evaluator: `SecTrust` on macOS and Schannel on Windows, and both received
+the distrust. R's `curl` package is on the other side on macOS, where its
+CRAN build defaults to LibreSSL reading that same PEM file; on Windows it
+uses Schannel and was protected. Two limits follow and are listed below: on
+Linux zuhttp reads the distribution's bundle, which is a file too, and a
+client that checked revocation would have rejected the revoked intermediates
+whatever its trust store said.
+
 **When `curl` is the better choice**, stated plainly rather than left to
 inference:
 
@@ -132,6 +149,7 @@ before any connection is made, never downgrades.
 | No custom CA | Windows | Neither `ca_file` (replace) nor `ca_extra` (add) is implemented on Schannel yet. Both **raise** rather than falling back to the Windows store. They work on macOS and OpenSSL. |
 | HTTPS in a forked child fails | macOS | The system trust evaluator does not survive `fork()`. Raises `zu_fork_error` instead of killing the worker. Use a `PSOCK` cluster or `future::plan("multisession")`. `?zuhttp_fork` |
 | Revocation off by default, and opting in is backend-dependent | all | No platform checks revocation by default. `zu_tls(revocation = TRUE)` opts in on macOS and Windows; macOS also rejects valid certificates from CAs that no longer answer revocation queries. On OpenSSL, which has no CRL or OCSP source, it **raises** rather than failing every chain. `?zuhttp_tls` |
+| Trust freshness on Linux | Linux | Trust comes from the distribution's `ca-certificates` bundle through OpenSSL's default verify paths, a file updated at the distribution's pace. A distrust that Apple and Microsoft push to their evaluators reaches Linux only when the distribution ships a new bundle. The eMudhra paragraph above is the worked example. |
 | No parallel or async requests | all | One request at a time. Parallelism is the caller's, via a non-forking plan. |
 | Only a total timeout | all | `timeout` bounds the whole request, redirects and retries included. There are no separate connect, first-byte or inactivity timeouts yet. |
 | DNS ignores `timeout` and Ctrl-C | all | Name resolution calls the system resolver synchronously (`getaddrinfo`), so a stalled resolver can hold R until it gives up. Every later phase is bounded. `?zuhttp_tls` |
