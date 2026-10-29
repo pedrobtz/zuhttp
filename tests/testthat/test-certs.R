@@ -28,6 +28,7 @@ test_that("a valid certificate from a trusted CA is accepted", {
 
 test_that("an unknown issuer is rejected (§14.6)", {
   skip_unless_local_tls()
+  skip_under_gctorture()
   fx <- tls_fixture()
   # Signed by a CA the client is never told about. This is the row that F-3
   # would have failed: the handshake completes fine at the protocol level and

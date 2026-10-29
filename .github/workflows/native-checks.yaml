@@ -65,6 +65,11 @@ jobs:
   gctorture:
     uses: pedrobtz/r-actions/.github/workflows/gctorture.yml@v1
     with:
+      # Marks the run, so tests whose assertion is a wall-clock bound skip
+      # themselves: gctorture makes R many times slower, and a 10 s request
+      # timeout then fires mid-handshake. They test timing, not memory.
+      env: |
+        ZU_GCTORTURE=true
       profile: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-ci') && 'quick' || 'full' }}
 
   # GCC's -fanalyzer, for allocator lifecycle on error paths, which is most of

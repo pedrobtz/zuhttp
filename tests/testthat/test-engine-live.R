@@ -251,6 +251,7 @@ test_that("a name that does not resolve is a DNS error", {
 })
 
 test_that("a time limit during a request surfaces as itself (§25.2)", {
+  skip_under_gctorture()
   # setTimeLimit() -- and R.utils::withTimeout(), built on it -- raises its
   # error from inside R_CheckUserInterrupt(), the checkpoint the engine calls
   # every poll tick. Until 2026-09-26 that checkpoint ran under
