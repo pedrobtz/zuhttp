@@ -219,7 +219,7 @@ from this repository runs nothing. That comes first. The rest is #18.
 
 ### W2 — Internal C prefix `zuh_`, hidden symbols
 
-**Status:** not started. **Milestone:** M0. **Closes:** #15. **Implements:**
+**Status:** done (#85, merged 2026-10-29). **Milestone:** M0. **Closes:** #15. **Implements:**
 D-66, D-54. **Estimate:** 1 day, high. **Depends on:** W1.
 
 A mechanical rename of internal C identifiers from `zu_`/`ZU_` to
@@ -228,16 +228,16 @@ A mechanical rename of internal C identifiers from `zu_`/`ZU_` to
 
 **Exit criteria**
 
-- [ ] No `zu_`/`ZU_` identifier remains in `src/` outside comments that cite
+- [x] No `zu_`/`ZU_` identifier remains in `src/` outside comments that cite
       R functions; `ctest/` and `fuzz/` follow.
-- [ ] `test-abi.R`: the shared object exports only `R_init_zuhttp`.
-- [ ] A CI step compiles `src/zuh_error.h` and `src/zuh_buffer.h` together
+- [x] `test-abi.R`: the shared object exports only `R_init_zuhttp`.
+- [x] A CI step compiles `src/zuh_error.h` and `src/zuh_buffer.h` together
       with `zukomp.h` (fetched at a pinned commit) and succeeds.
-- [ ] Design §1.1 and §11 updated in the same PR.
+- [x] Design §1.1 and §11 updated in the same PR.
 
 ### W3 — Export surface and `zuhttp_error`
 
-**Status:** not started. **Milestone:** M0. **Closes:** #19. **Implements:**
+**Status:** done (#86). **Milestone:** M0. **Closes:** #19. **Implements:**
 D-65, §53, §34.1. **Estimate:** 1.5 days, high.
 
 **Exit criteria**
