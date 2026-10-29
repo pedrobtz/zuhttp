@@ -19,12 +19,12 @@ INC     := -I$(SRC) -I$(VENDOR) -I$(URIDIR)
 URIFLAGS := -DURI_NO_UNICODE -DURI_STATIC_BUILD
 BASE    := -std=c99 -g -O1 $(INC) $(URIFLAGS)
 
-CORE := $(SRC)/zu_alloc.c $(SRC)/zu_buffer.c $(SRC)/zu_error.c \
-        $(SRC)/zu_time.c $(SRC)/zu_stream.c $(SRC)/zu_headers.c \
-        $(SRC)/zu_request.c $(SRC)/zu_framing.c $(SRC)/zu_response.c \
-        $(SRC)/zu_uri.c $(SRC)/zu_redirect.c $(SRC)/zu_inflate.c \
-        $(SRC)/zu_proxy.c $(SRC)/zu_redact.c \
-        $(SRC)/zu_sink.c $(SRC)/zu_body.c $(SRC)/zu_mock_stream.c $(SRC)/zu_fork.c \
+CORE := $(SRC)/zuh_alloc.c $(SRC)/zuh_buffer.c $(SRC)/zuh_error.c \
+        $(SRC)/zuh_time.c $(SRC)/zuh_stream.c $(SRC)/zuh_headers.c \
+        $(SRC)/zuh_request.c $(SRC)/zuh_framing.c $(SRC)/zuh_response.c \
+        $(SRC)/zuh_uri.c $(SRC)/zuh_redirect.c $(SRC)/zuh_inflate.c \
+        $(SRC)/zuh_proxy.c $(SRC)/zuh_redact.c \
+        $(SRC)/zuh_sink.c $(SRC)/zuh_body.c $(SRC)/zuh_mock_stream.c $(SRC)/zuh_fork.c \
         $(VENDOR)/picohttpparser.c \
         $(URIDIR)/UriParse.c $(URIDIR)/UriParseBase.c $(URIDIR)/UriResolve.c \
         $(URIDIR)/UriRecompose.c $(URIDIR)/UriCommon.c $(URIDIR)/UriMemory.c \
@@ -32,17 +32,17 @@ CORE := $(SRC)/zu_alloc.c $(SRC)/zu_buffer.c $(SRC)/zu_error.c \
 
 TARGETS := response chunked headers uri redirect inflate proxy redact body engine
 
-# The engine target links the whole request path. zu_net.c is compiled but
+# The engine target links the whole request path. zuh_net.c is compiled but
 # never dialled (the harness supplies connections through the §50.1 seam), and
 # ctest/tls_none.c stands in for a TLS backend.
-# zu_net.c needs Winsock on Windows (Rtools), as in ctest/Makefile.
+# zuh_net.c needs Winsock on Windows (Rtools), as in ctest/Makefile.
 ifeq ($(OS),Windows_NT)
 NETLIBS := -lws2_32
 else
 NETLIBS :=
 endif
-ENGINE_EXTRA := $(SRC)/zu_engine.c $(SRC)/zu_net.c $(SRC)/zu_pool.c \
-                $(SRC)/zu_trace.c $(SRC)/zu_tls.c ../ctest/tls_none.c
+ENGINE_EXTRA := $(SRC)/zuh_engine.c $(SRC)/zuh_net.c $(SRC)/zuh_pool.c \
+                $(SRC)/zuh_trace.c $(SRC)/zuh_tls.c ../ctest/tls_none.c
 
 # --- libFuzzer -------------------------------------------------------------
 FUZZ_CC     ?= clang

@@ -2,9 +2,9 @@
  *
  * Splits NAME\0VALUE so both validators see attacker-controlled bytes,
  * including embedded CR, LF and NUL — the request-splitting alphabet. */
-#include "zu_headers.h"
-#include "zu_buffer.h"
-#include "zu_alloc.h"
+#include "zuh_headers.h"
+#include "zuh_buffer.h"
+#include "zuh_alloc.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -12,8 +12,8 @@
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-    zu_headers h;
-    zu_buffer out;
+    zuh_headers h;
+    zuh_buffer out;
     const uint8_t *sep;
     size_t nlen, vlen;
 
@@ -23,22 +23,22 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     nlen = sep ? (size_t)(sep - data) : size;
     vlen = sep ? size - nlen - 1 : 0;
 
-    (void)zu_header_name_valid((const char *)data, nlen);
-    (void)zu_header_value_valid((const char *)(sep ? sep + 1 : data), vlen);
+    (void)zuh_header_name_valid((const char *)data, nlen);
+    (void)zuh_header_value_valid((const char *)(sep ? sep + 1 : data), vlen);
 
-    zu_headers_init(&h);
-    if (zu_headers_add(&h, (const char *)data, nlen,
-                       (const char *)(sep ? sep + 1 : data), vlen) == ZU_OK) {
+    zuh_headers_init(&h);
+    if (zuh_headers_add(&h, (const char *)data, nlen,
+                       (const char *)(sep ? sep + 1 : data), vlen) == ZUH_OK) {
         /* Only reached for headers we accepted, which is exactly the set that
          * must survive being counted, fetched and re-serialised. */
-        (void)zu_headers_count(&h, "content-length");
-        (void)zu_headers_get(&h, "transfer-encoding");
-        (void)zu_headers_has(&h, "connection");
-        if (zu_buf_init(&out, 64, 1u << 20)) {
-            (void)zu_headers_write(&h, &out);
-            zu_buf_free(&out);
+        (void)zuh_headers_count(&h, "content-length");
+        (void)zuh_headers_get(&h, "transfer-encoding");
+        (void)zuh_headers_has(&h, "connection");
+        if (zuh_buf_init(&out, 64, 1u << 20)) {
+            (void)zuh_headers_write(&h, &out);
+            zuh_buf_free(&out);
         }
     }
-    zu_headers_free(&h);
+    zuh_headers_free(&h);
     return 0;
 }

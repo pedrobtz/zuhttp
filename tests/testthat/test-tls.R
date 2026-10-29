@@ -123,7 +123,7 @@ test_that("zu_info() reports the zu_tls() capabilities from C", {
   caps <- zu_info()$tls_capabilities
   expect_type(caps, "character")
   expect_true(all(caps %in% names(unsupported_cases())))
-  # Pinned to what each backend's zu_tls_backend_caps() says, so a change to a
+  # Pinned to what each backend's zuh_tls_backend_caps() says, so a change to a
   # backend's support has to be made here on purpose.
   expected <- switch(zu_tls_backend(),
     openssl         = c("pins", "tls13", "ca_file", "ca_extra"),

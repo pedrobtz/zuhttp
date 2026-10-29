@@ -42,7 +42,7 @@ skip_unless_online <- function() {
 
 # D-56: a zu_tls() setting the linked backend cannot honour is refused before
 # any network I/O, so a test that needs the setting to WORK must skip where it
-# is refused. The capability list comes from C (zu_tls_backend_caps), the one
+# is refused. The capability list comes from C (zuh_tls_backend_caps), the one
 # definition; a table of backends here would drift the first time one gained
 # a capability.
 tls_supports <- function(cap) cap %in% zu_info()$tls_capabilities

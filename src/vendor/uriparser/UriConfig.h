@@ -9,7 +9,7 @@
  * URI_CHECK_ALLOC_OVERFLOW before calling realloc(). That path is portable to
  * every platform zuhttp targets and needs no probe, whereas defining the macro
  * would require reallocarray(3) (glibc >= 2.26, BSD) and would drag in
- * _GNU_SOURCE — which would collide with the feature-test macros zu_platform.h
+ * _GNU_SOURCE — which would collide with the feature-test macros zuh_platform.h
  * sets for strict C99 (see the 2230b11 portability fix).
  *
  * HAVE_WPRINTF is irrelevant here: it is only used by the wide-char code, and

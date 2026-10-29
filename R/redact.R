@@ -1,6 +1,6 @@
 # §42 secret redaction.
 #
-# The policy itself is in C (src/zu_redact.c) so that there is ONE definition
+# The policy itself is in C (src/zuh_redact.c) so that there is ONE definition
 # applied at every egress. These are the R-visible entry points.
 #
 # §42.3: nothing here mutates a request. Redaction is a property of the
@@ -78,7 +78,7 @@ zu_redact_url <- function(url) {
 
 # §42.1 applied to a proxy setting, which is a URL and routinely carries
 # userinfo. The engine also accepts a bare "user:pw@host:port", as curl does
-# (zu_proxy_parse() supplies "http://"); without a scheme the URL redactor
+# (zuh_proxy_parse() supplies "http://"); without a scheme the URL redactor
 # cannot tell userinfo from a path, so the same default is supplied here and
 # taken off again. `FALSE`, `NULL` and a reset marker are settings, not URLs,
 # and pass through.

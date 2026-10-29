@@ -1,5 +1,5 @@
-#include "zu_test.h"
-#include "zu_trace.h"
+#include "zuh_test.h"
+#include "zuh_trace.h"
 #include <string.h>
 
 void suite_trace(void);
@@ -32,33 +32,33 @@ static int utf8_wellformed(const char *s) {
  * redacted on the way in.
  */
 void suite_trace(void) {
-    ZU_CASE("a detail that fits is copied whole");
+    ZUH_CASE("a detail that fits is copied whole");
     {
-        zu_trace t;
-        zu_trace_init(&t);
-        zu_trace_add(&t, ZU_EV_REQUEST_SENT, "GET", 0);
-        ZU_CHECK_EQ_INT(t.n, 1);
-        ZU_CHECK(strcmp(t.ev[0].detail, "GET") == 0);
+        zuh_trace t;
+        zuh_trace_init(&t);
+        zuh_trace_add(&t, ZUH_EV_REQUEST_SENT, "GET", 0);
+        ZUH_CHECK_EQ_INT(t.n, 1);
+        ZUH_CHECK(strcmp(t.ev[0].detail, "GET") == 0);
     }
 
-    ZU_CASE("a detail too long is truncated AND says so");
+    ZUH_CASE("a detail too long is truncated AND says so");
     {
         /* A silently shortened URL reads as a complete one, which is the
          * failure this marker exists to prevent. */
-        char big[ZU_TRACE_DETAIL * 2];
-        zu_trace t;
+        char big[ZUH_TRACE_DETAIL * 2];
+        zuh_trace t;
         size_t len;
         memset(big, 'a', sizeof big - 1);
         big[sizeof big - 1] = '\0';
-        zu_trace_init(&t);
-        zu_trace_add(&t, ZU_EV_REQUEST_START, big, 0);
+        zuh_trace_init(&t);
+        zuh_trace_add(&t, ZUH_EV_REQUEST_START, big, 0);
         len = strlen(t.ev[0].detail);
-        ZU_CHECK(len < ZU_TRACE_DETAIL);
-        ZU_CHECK(len == ZU_TRACE_DETAIL - 1);
-        ZU_CHECK(strcmp(t.ev[0].detail + len - 3, ZU_TRACE_TRUNC) == 0);
+        ZUH_CHECK(len < ZUH_TRACE_DETAIL);
+        ZUH_CHECK(len == ZUH_TRACE_DETAIL - 1);
+        ZUH_CHECK(strcmp(t.ev[0].detail + len - 3, ZUH_TRACE_TRUNC) == 0);
     }
 
-    ZU_CASE("truncation never splits a UTF-8 character");
+    ZUH_CASE("truncation never splits a UTF-8 character");
     {
         /* The regression this guards: init.c hands `detail` straight to
          * mkChar(), so a cut through a multi-byte character puts a string
@@ -70,11 +70,11 @@ void suite_trace(void) {
          * offset happened to divide exactly, so it passed with the
          * boundary logic deleted. Sweeping an ASCII prefix of 0..3 bytes
          * moves the cut through every alignment, so at least one iteration
-         * must land inside a character whatever ZU_TRACE_DETAIL becomes. */
+         * must land inside a character whatever ZUH_TRACE_DETAIL becomes. */
         int shift;
         for (shift = 0; shift < 4; shift++) {
-            char big[ZU_TRACE_DETAIL * 2];
-            zu_trace t;
+            char big[ZUH_TRACE_DETAIL * 2];
+            zuh_trace t;
             size_t i = 0, len;
 
             while ((int)i < shift) big[i++] = 'x';
@@ -83,71 +83,71 @@ void suite_trace(void) {
             }
             big[i] = '\0';
 
-            zu_trace_init(&t);
-            zu_trace_add(&t, ZU_EV_REQUEST_START, big, 0);
+            zuh_trace_init(&t);
+            zuh_trace_add(&t, ZUH_EV_REQUEST_START, big, 0);
             len = strlen(t.ev[0].detail);
-            ZU_CHECK(len > 0);
-            ZU_CHECK(len < ZU_TRACE_DETAIL);
-            ZU_CHECK(utf8_wellformed(t.ev[0].detail));
+            ZUH_CHECK(len > 0);
+            ZUH_CHECK(len < ZUH_TRACE_DETAIL);
+            ZUH_CHECK(utf8_wellformed(t.ev[0].detail));
             /* ...and it still says it was cut. */
-            ZU_CHECK(strcmp(t.ev[0].detail + len - 3, ZU_TRACE_TRUNC) == 0);
+            ZUH_CHECK(strcmp(t.ev[0].detail + len - 3, ZUH_TRACE_TRUNC) == 0);
         }
     }
 
-    ZU_CASE("a traced URL has its userinfo and secrets redacted (§42.2)");
+    ZUH_CASE("a traced URL has its userinfo and secrets redacted (§42.2)");
     {
-        zu_trace t;
-        zu_trace_init(&t);
-        zu_trace_add_url(&t, ZU_EV_REQUEST_START, NULL,
+        zuh_trace t;
+        zuh_trace_init(&t);
+        zuh_trace_add_url(&t, ZUH_EV_REQUEST_START, NULL,
                          "https://user:pw@h/x?api_key=SECRET&page=2", 0);
-        ZU_CHECK_EQ_INT(t.n, 1);
+        ZUH_CHECK_EQ_INT(t.n, 1);
         /* Not merely "different from the input": the specific secrets must be
          * gone and the useful parts must survive, or a redactor that returned
          * the empty string would pass. */
-        ZU_CHECK(strstr(t.ev[0].detail, "pw") == NULL);
-        ZU_CHECK(strstr(t.ev[0].detail, "SECRET") == NULL);
-        ZU_CHECK(strstr(t.ev[0].detail, "page=2") != NULL);
-        ZU_CHECK(strstr(t.ev[0].detail, "h/x") != NULL);
+        ZUH_CHECK(strstr(t.ev[0].detail, "pw") == NULL);
+        ZUH_CHECK(strstr(t.ev[0].detail, "SECRET") == NULL);
+        ZUH_CHECK(strstr(t.ev[0].detail, "page=2") != NULL);
+        ZUH_CHECK(strstr(t.ev[0].detail, "h/x") != NULL);
     }
 
-    ZU_CASE("a NULL policy still applies the §42.1 defaults");
+    ZUH_CASE("a NULL policy still applies the §42.1 defaults");
     {
         /* An un-set policy must mean "the defaults", not "no redaction":
          * every caller that forgets to pass one would otherwise leak. */
-        zu_trace t;
-        zu_trace_init(&t);
-        zu_trace_add_url(&t, ZU_EV_REDIRECT_FOLLOWED, NULL,
+        zuh_trace t;
+        zuh_trace_init(&t);
+        zuh_trace_add_url(&t, ZUH_EV_REDIRECT_FOLLOWED, NULL,
                          "https://h/x?access_token=SECRET", 1);
-        ZU_CHECK(strstr(t.ev[0].detail, "SECRET") == NULL);
+        ZUH_CHECK(strstr(t.ev[0].detail, "SECRET") == NULL);
     }
 
-    ZU_CASE("the caller's extra parameter names are honoured");
+    ZUH_CASE("the caller's extra parameter names are honoured");
     {
         static const char *const extra[] = { "next", NULL };
-        zu_redact_policy p;
-        zu_trace t;
-        zu_redact_policy_init(&p);
+        zuh_redact_policy p;
+        zuh_trace t;
+        zuh_redact_policy_init(&p);
         p.extra_params = extra;
-        zu_trace_init(&t);
-        zu_trace_add_url(&t, ZU_EV_REQUEST_START, &p, "https://h/x?next=SECRET", 0);
-        ZU_CHECK(strstr(t.ev[0].detail, "SECRET") == NULL);
+        zuh_trace_init(&t);
+        zuh_trace_add_url(&t, ZUH_EV_REQUEST_START, &p, "https://h/x?next=SECRET", 0);
+        ZUH_CHECK(strstr(t.ev[0].detail, "SECRET") == NULL);
     }
 
-    ZU_CASE("a NULL URL is an empty detail, not a crash");
+    ZUH_CASE("a NULL URL is an empty detail, not a crash");
     {
-        zu_trace t;
-        zu_trace_init(&t);
-        zu_trace_add_url(&t, ZU_EV_REQUEST_START, NULL, NULL, 0);
-        ZU_CHECK_EQ_INT(t.n, 1);
-        ZU_CHECK_EQ_INT((int)strlen(t.ev[0].detail), 0);
+        zuh_trace t;
+        zuh_trace_init(&t);
+        zuh_trace_add_url(&t, ZUH_EV_REQUEST_START, NULL, NULL, 0);
+        ZUH_CHECK_EQ_INT(t.n, 1);
+        ZUH_CHECK_EQ_INT((int)strlen(t.ev[0].detail), 0);
     }
 
-    ZU_CASE("tracing off does no work at all");
+    ZUH_CASE("tracing off does no work at all");
     {
-        /* §35.4's claim. zu_trace_add_url() allocates, so a NULL trace has to
+        /* §35.4's claim. zuh_trace_add_url() allocates, so a NULL trace has to
          * return before it does, not after. */
-        zu_trace_add_url(NULL, ZU_EV_REQUEST_START, NULL, "https://h/x", 0);
-        zu_trace_add(NULL, ZU_EV_REQUEST_START, "x", 0);
-        ZU_CHECK(1);
+        zuh_trace_add_url(NULL, ZUH_EV_REQUEST_START, NULL, "https://h/x", 0);
+        zuh_trace_add(NULL, ZUH_EV_REQUEST_START, "x", 0);
+        ZUH_CHECK(1);
     }
 }

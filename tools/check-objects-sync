@@ -2,10 +2,10 @@
 # src/Makevars.in and src/Makevars.win.in carry the same OBJECTS list, and
 # nothing about the build makes them agree.
 #
-# This exists because they did not. zu_sink.o and zu_body.o (S17) and
-# zu_trace.o (§35) were added to the Unix list only, so the package failed to
-# link on Windows — undefined references to zu_sink_finish, zu_sink_free and
-# zu_event_name — for two stages. No local build catches it: a maintainer on
+# This exists because they did not. zuh_sink.o and zuh_body.o (S17) and
+# zuh_trace.o (§35) were added to the Unix list only, so the package failed to
+# link on Windows — undefined references to zuh_sink_finish, zuh_sink_free and
+# zuh_event_name — for two stages. No local build catches it: a maintainer on
 # macOS or Linux never compiles the other list.
 #
 # @TLS_OBJ@ is the one legitimate difference: ./configure substitutes the

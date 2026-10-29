@@ -52,7 +52,7 @@ test_that("zu_interrupted_error is a distinct, catchable class (§34.1)", {
 
 test_that("an interrupted request would report as interrupted, not cancelled", {
   # The mapping C_zu_perform applies: our tick returns 1 only for a user interrupt,
-  # so ZU_ERR_CANCELLED arriving from the engine means exactly that. This tests
+  # so ZUH_ERR_CANCELLED arriving from the engine means exactly that. This tests
   # the classification, which is the part that does not need a real signal.
   expect_true(zu_code_retryable("zu_connect_error"))
   expect_false(zu_code_retryable("zu_interrupted_error"))

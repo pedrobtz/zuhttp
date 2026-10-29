@@ -14,5 +14,5 @@ local modification makes every future security update a manual merge (§48).
 
 Note on scope. picohttpparser parses; it makes NO framing decisions. Every
 rule in design §18.1 — Content-Length/Transfer-Encoding conflicts, duplicate
-Content-Length, chunk-size overflow — lives in src/zu_framing.c and is tested
+Content-Length, chunk-size overflow — lives in src/zuh_framing.c and is tested
 there. Do not assume this library rejects a smuggling attempt on our behalf.

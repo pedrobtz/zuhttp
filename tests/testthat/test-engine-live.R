@@ -2,7 +2,7 @@
 #
 # Written from a coverage map (2026-09-26): every behaviour below was reached
 # by no suite at all — not the 1,541 ctest checks, which do not compile
-# zu_engine.c or init.c, and not the R suite, where the only tests reaching
+# zuh_engine.c or init.c, and not the R suite, where the only tests reaching
 # them needed the internet. The same method, run while writing the pkgdown
 # articles, found a credential leak on cross-origin redirects and four other
 # engine defects (#55, #56).
@@ -158,7 +158,7 @@ test_that("a pooled connection is reused, offline, and says so", {
 })
 
 test_that("a reused connection reads slow chunked bodies, before and after a callback", {
-  # A pooled stream keeps the zu_net_opts of the request that opened it, so
+  # A pooled stream keeps the zuh_net_opts of the request that opened it, so
   # anything per-request stored there is stale on reuse. /stream sends its
   # chunks with pauses, which makes every read wait on the poll tick — the
   # path where a stale tick context was read (a regression caught while

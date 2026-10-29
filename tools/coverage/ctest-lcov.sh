@@ -1,5 +1,5 @@
 #!/bin/sh
-# Line coverage of the offline C suite (ctest/zu_ctest), as lcov, for
+# Line coverage of the offline C suite (ctest/zuh_ctest), as lcov, for
 # tools/coverage/measure.R to merge with the R suite's coverage.
 #
 # Clang source-based coverage: accurate per line and needs no gcov version
@@ -19,11 +19,11 @@ else
 fi
 
 make clean >/dev/null
-make zu_ctest CC="$cc -fprofile-instr-generate -fcoverage-mapping" >/dev/null
+make zuh_ctest CC="$cc -fprofile-instr-generate -fcoverage-mapping" >/dev/null
 raw="$(mktemp -d)/ctest.profraw"
-LLVM_PROFILE_FILE="$raw" ./zu_ctest >/dev/null
+LLVM_PROFILE_FILE="$raw" ./zuh_ctest >/dev/null
 $profdata merge -sparse "$raw" -o "$raw.profdata"
-$llvmcov export ./zu_ctest -instr-profile="$raw.profdata" -format=lcov \
+$llvmcov export ./zuh_ctest -instr-profile="$raw.profdata" -format=lcov \
     -ignore-filename-regex='(vendor|ctest)/' > "$out"
 make clean >/dev/null
 echo "wrote $out"

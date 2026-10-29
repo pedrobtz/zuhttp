@@ -6,8 +6,8 @@
  * untrusted input.
  *
  * Layout: first byte selects the sub-target, then NAME\0VALUE where useful. */
-#include "zu_proxy.h"
-#include "zu_alloc.h"
+#include "zuh_proxy.h"
+#include "zuh_alloc.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -33,7 +33,7 @@ static char *dupz(const uint8_t *d, size_t n) {
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-    zu_error e;
+    zuh_error e;
     if (size < 2 || size > 8 * 1024) return 0;
 
     switch (data[0] % 3) {
@@ -41,15 +41,15 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         const uint8_t *sep = (const uint8_t *)memchr(data + 1, 0, size - 1);
         char *list = dupz(data + 1, sep ? (size_t)(sep - data - 1) : size - 1);
         char *host = sep ? dupz(sep + 1, (size_t)(data + size - sep - 1)) : dupz((const uint8_t *)"h", 1);
-        if (list && host) (void)zu_no_proxy_matches(list, host, 443);
+        if (list && host) (void)zuh_no_proxy_matches(list, host, 443);
         free(list); free(host);
         break;
     }
     case 1: {   /* proxy URL parsing, including percent-decoding */
         char *url = dupz(data + 1, size - 1);
-        zu_proxy p;
-        if (url && zu_proxy_parse(&p, url, &e) == ZU_OK && p.in_use) {
-            zu_buffer b;
+        zuh_proxy p;
+        if (url && zuh_proxy_parse(&p, url, &e) == ZUH_OK && p.in_use) {
+            zuh_buffer b;
             if (!p.host) abort();
             /* §20.4: credentials are moved OUT of the URL, so the host can
              * never still carry them. */
@@ -68,31 +68,31 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
                     if (all_digits) abort();
                 }
             }
-            if (zu_buf_init(&b, 64, 1 << 20)) {
-                (void)zu_proxy_auth_value(&p, &b);
-                zu_buf_free(&b);
+            if (zuh_buf_init(&b, 64, 1 << 20)) {
+                (void)zuh_proxy_auth_value(&p, &b);
+                zuh_buf_free(&b);
             }
         }
-        if (url) zu_proxy_free(&p), free(url);
+        if (url) zuh_proxy_free(&p), free(url);
         break;
     }
     default: {  /* full resolution: env -> proxy decision */
         const uint8_t *sep = (const uint8_t *)memchr(data + 1, 0, size - 1);
-        zu_uri t;
+        zuh_uri t;
         static const char k_target[] = "https://target.example/x";
         g_http_proxy = dupz(data + 1, sep ? (size_t)(sep - data - 1) : size - 1);
         g_no_proxy   = sep ? dupz(sep + 1, (size_t)(data + size - sep - 1)) : NULL;
-        if (zu_uri_parse(&t, k_target, k_target + sizeof k_target - 1) == ZU_OK) {
-            zu_env env;
-            zu_proxy p;
+        if (zuh_uri_parse(&t, k_target, k_target + sizeof k_target - 1) == ZUH_OK) {
+            zuh_env env;
+            zuh_proxy p;
             env.get = fz_getenv;
             env.ctx = NULL;
-            if (zu_proxy_resolve(&p, &t, &env, NULL, 0, &e) == ZU_OK && p.in_use) {
+            if (zuh_proxy_resolve(&p, &t, &env, NULL, 0, &e) == ZUH_OK && p.in_use) {
                 if (!p.host || !p.scheme) abort();
                 if (strcmp(p.scheme, "http") != 0) abort();   /* never downgraded */
             }
-            zu_proxy_free(&p);
-            zu_uri_free(&t);
+            zuh_proxy_free(&p);
+            zuh_uri_free(&t);
         }
         free(g_http_proxy); free(g_no_proxy);
         g_http_proxy = g_no_proxy = NULL;

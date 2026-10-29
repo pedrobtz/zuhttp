@@ -1,6 +1,6 @@
 # §26 — the connection pool, from R.
 #
-# The pool itself is C (src/zu_pool.c) and has been since S16's first half.
+# The pool itself is C (src/zuh_pool.c) and has been since S16's first half.
 # This file is only the part §26.5 puts in R: deciding WHEN a client needs a
 # native pool, and re-creating one that did not survive a saveRDS().
 #

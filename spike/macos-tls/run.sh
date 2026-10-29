@@ -46,8 +46,16 @@ check 1 "untrusted root rejected"        ./tls_spike --host untrusted-root.badss
 check 1 "self-signed rejected"           ./tls_spike --host self-signed.badssl.com --quiet
 
 echo
-echo "== 3. revocation is NOT checked by default (finding F-4) =="
-check 0 "revoked ACCEPTED without policy" ./tls_spike --host revoked.badssl.com --quiet
+echo "== 3. revocation without a policy is the platform's call (F-4, revised) =="
+# F-4 measured macOS accepting a revoked certificate with no revocation
+# policy. Since 2026-10-29 it may reject it -- on one run and not the next --
+# because SecTrust consults Apple's revocation data when it has it (design
+# §14.5). Reported, not asserted: either outcome is the platform's.
+if ./tls_spike --host revoked.badssl.com --quiet >/dev/null 2>&1; then
+    echo "  info revoked accepted without policy (the 2026-09 F-4 behaviour)"
+else
+    echo "  info revoked rejected without policy (Apple's revocation data)"
+fi
 check 1 "revoked rejected with policy"    ./tls_spike --host revoked.badssl.com --revocation --quiet
 
 # ------------------------------------------------------------------

@@ -36,8 +36,8 @@ jobs:
   #   TWO THINGS MOVE IT, so compare like with like before reading a change as
   #   progress or regression:
   #
-  #   * The backend. This job runs on Linux and so compiles zu_tls_openssl.c;
-  #     a macOS run compiles zu_tls_sectransport.c instead. Same suite,
+  #   * The backend. This job runs on Linux and so compiles zuh_tls_openssl.c;
+  #     a macOS run compiles zuh_tls_sectransport.c instead. Same suite,
   #     different denominator — 54.2% here against 46.3% measured on macOS.
   #   * NOT_CRAN. covr itself never sets it, but the r-actions job does
   #     (`NOT_CRAN: true` in its log), so the loopback

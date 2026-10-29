@@ -374,7 +374,7 @@ jobs:
           echo "compiler: $CC"
           $CC --version | head -1
           $CC -std=c99 -Wall -Wextra -c -Isrc -Isrc/vendor/picohttpparser \
-              -o /tmp/sch.o src/zu_tls_schannel.c
+              -o /tmp/sch.o src/zuh_tls_schannel.c
 
       # Run the slice in C BEFORE involving R. The previous attempt segfaulted
       # inside Rscript, which reports exit 139 and nothing else; a crash here

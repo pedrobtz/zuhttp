@@ -1,15 +1,15 @@
 /* Target 8 — secret redaction (§42, §43).
  *
- * zu_redact_url deliberately does NOT use the URI parser: it must work on a
+ * zuh_redact_url deliberately does NOT use the URI parser: it must work on a
  * URL that failed to parse, because that is the URL an error message is
  * about. That means a hand-rolled scanner over attacker-controlled bytes,
  * which is exactly what belongs here.
  *
  * The assertion is the security property, not just "no crash": whatever the
  * input, no userinfo may survive into the output. */
-#include "zu_redact.h"
-#include "zu_buffer.h"
-#include "zu_alloc.h"
+#include "zuh_redact.h"
+#include "zuh_buffer.h"
+#include "zuh_alloc.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -18,23 +18,23 @@
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-    zu_redact_policy p;
-    zu_buffer out;
+    zuh_redact_policy p;
+    zuh_buffer out;
     unsigned char *exact;
 
     if (size < 1 || size > 16 * 1024) return 0;
 
-    zu_redact_policy_init(&p);
+    zuh_redact_policy_init(&p);
 
     /* Exact-size allocation: a read past the end is a heap overflow here. */
     exact = (unsigned char *)malloc(size);
     if (!exact) return 0;
     memcpy(exact, data, size);
 
-    if (zu_buf_init(&out, 64, 1 << 20)) {
-        if (zu_redact_url(&p, (const char *)exact, size, &out)) {
+    if (zuh_buf_init(&out, 64, 1 << 20)) {
+        if (zuh_redact_url(&p, (const char *)exact, size, &out)) {
             const char *s = NULL;
-            if (zu_buf_cstr(&out, &s) && s) {
+            if (zuh_buf_cstr(&out, &s) && s) {
                 /* §42.1: userinfo is removed outright, so the output's
                  * authority must contain no '@'.
                  *
@@ -66,12 +66,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
                 }
             }
         }
-        zu_buf_free(&out);
+        zuh_buf_free(&out);
     }
 
-    if (zu_buf_init(&out, 64, 1 << 20)) {
-        (void)zu_redact_form_body(&p, (const char *)exact, size, &out);
-        zu_buf_free(&out);
+    if (zuh_buf_init(&out, 64, 1 << 20)) {
+        (void)zuh_redact_form_body(&p, (const char *)exact, size, &out);
+        zuh_buf_free(&out);
     }
 
     free(exact);
