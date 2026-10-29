@@ -2,7 +2,7 @@
  *
  * SEPARATE from the c-core suite on purpose: these require a real TLS peer and
  * therefore the network, and c-core must stay deterministic and offline.
- * Built as its own binary and run by the tls-spike workflow.
+ * Built as its own binary and run by the network workflow.
  *
  * The endpoints are the same ones the S0 spike used, so a regression here is
  * directly comparable to the spike's recorded results.

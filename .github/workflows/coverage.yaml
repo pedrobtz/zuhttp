@@ -1,6 +1,6 @@
 on:
   push:
-    branches: [main, master, develop]
+    branches: [main]
   pull_request:
 
 name: coverage.yaml
@@ -13,14 +13,12 @@ permissions:
   contents: write
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
-  # Same-repo pull requests are already covered by the push run; without this
-  # a push to `develop` with a PR open fires both and two runs race to commit
-  # the same badge. Forked PRs still run, because those produce no push event
-  # here (and cannot write the badge anyway).
+  # Every pull request runs this, from a fork or from a branch here (W1); the
+  # badge is committed only on a push to main, by the reusable workflow.
   #
   # WHAT THIS NUMBER MEANS, because it is lower than the suite deserves and
   # the gap is structural rather than a gap in testing:
@@ -49,7 +47,6 @@ jobs:
   #     does not inherit caller env, so this repo cannot set it: closing that
   #     gap means an input, or an env block, in pedrobtz/r-actions.
   coverage:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     # A commit, not the floating tag: this job holds `contents: write`, so a
     # moved tag in another repository could commit to this one. The same
     # commit every family repo pins coverage.yml to.

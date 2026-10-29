@@ -4,6 +4,7 @@
 [![R-CMD-check](https://github.com/pedrobtz/zuhttp/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pedrobtz/zuhttp/actions/workflows/R-CMD-check.yaml)
 [![c-core](https://github.com/pedrobtz/zuhttp/actions/workflows/c-core.yaml/badge.svg)](https://github.com/pedrobtz/zuhttp/actions/workflows/c-core.yaml)
 [![fuzz](https://github.com/pedrobtz/zuhttp/actions/workflows/fuzz.yaml/badge.svg)](https://github.com/pedrobtz/zuhttp/actions/workflows/fuzz.yaml)
+[![network](https://github.com/pedrobtz/zuhttp/actions/workflows/network.yaml/badge.svg)](https://github.com/pedrobtz/zuhttp/actions/workflows/network.yaml)
 ![coverage](https://raw.githubusercontent.com/pedrobtz/zuhttp/main/.github/badges/coverage.svg)
 <!-- badges: end -->
 
