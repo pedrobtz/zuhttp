@@ -132,6 +132,7 @@
 <a class="anchor" aria-label="anchor" href="#why-this-rather-than-curl"></a>
 </h2>
 <p>Because the trust decision is the platform’s. There is no bundled CA bundle to go stale, and no vendored TLS library to track for CVEs — an enterprise MDM root or a corporate proxy CA already installed on the machine simply works. The package is small enough to audit, and its behaviour under malformed input is fuzzed rather than assumed.</p>
+<p>The <a href="https://emudhra.we-have-a-problem.com/" class="external-link">eMudhra incident</a> of October 2026 is the dated example. Eight intermediate CA certificates had private keys anyone could recover from the certificates themselves. The root programs distrusted them within five days of the report: Firefox and Chrome on 17 October, Microsoft on 20 October, Apple on 22 October. Six days after Apple’s block, git, curl and python3 on macOS still trusted them, because those tools read the PEM file at <code>/etc/ssl/cert.pem</code>, which changes only with a macOS release. So the real division is not a bundled list against the platform; it is the platform’s trust evaluator against the platform’s file. zuhttp asks the evaluator: <code>SecTrust</code> on macOS and Schannel on Windows, and both received the distrust. R’s <code>curl</code> package is on the other side on macOS, where its CRAN build defaults to LibreSSL reading that same PEM file; on Windows it uses Schannel and was protected. Two limits follow and are listed below: on Linux zuhttp reads the distribution’s bundle, which is a file too, and a client that checked revocation would have rejected the revoked intermediates whatever its trust store said.</p>
 <p><strong>When <code>curl</code> is the better choice</strong>, stated plainly rather than left to inference:</p>
 <ul>
 <li>Anything needing HTTP/2, HTTP/3, or a non-HTTP protocol.</li>
@@ -186,6 +187,11 @@
 <td>all</td>
 <td>No platform checks revocation by default. <code>zu_tls(revocation = TRUE)</code> opts in on macOS and Windows; macOS also rejects valid certificates from CAs that no longer answer revocation queries. On OpenSSL, which has no CRL or OCSP source, it <strong>raises</strong> rather than failing every chain. <code><a href="reference/zuhttp_tls.html">?zuhttp_tls</a></code>
 </td>
+</tr>
+<tr>
+<td>Trust freshness on Linux</td>
+<td>Linux</td>
+<td>Trust comes from the distribution’s <code>ca-certificates</code> bundle through OpenSSL’s default verify paths, a file updated at the distribution’s pace. A distrust that Apple and Microsoft push to their evaluators reaches Linux only when the distribution ships a new bundle. The eMudhra paragraph above is the worked example.</td>
 </tr>
 <tr>
 <td>No parallel or async requests</td>
