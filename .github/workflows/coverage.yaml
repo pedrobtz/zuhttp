@@ -49,6 +49,9 @@ jobs:
   #     stopping it can truncate its trace file: `readRDS(f)` then fails the
   #     whole run (W1). Build such apps in an environment parented on
   #     globalenv(), as test-retry.R does.
+  #     The same goes for mclapply() children, which write their own trace as
+  #     they exit: the tests pass mc.cleanup = FALSE so the parent does not
+  #     SIGTERM them while they do.
   coverage:
     # A commit, not the floating tag: this job holds `contents: write`, so a
     # moved tag in another repository could commit to this one. The same

@@ -44,7 +44,7 @@ test_that("HTTPS in a forked child raises zu_fork_error and does not kill the wo
       { zu_get("https://example.com"); "UNEXPECTED SUCCESS" },
       condition = function(e) list(classes = class(e), message = conditionMessage(e))
     )
-  }, mc.cores = 2)
+  }, mc.cores = 2, mc.cleanup = FALSE)
 
   for (r in res) {
     # (1) The worker came back at all. NULL here means it died on a signal.
@@ -65,7 +65,7 @@ test_that("the parent's own requests still work after a child has tripped the gu
   expect_identical(zu_resp_status(zu_get("https://example.com")), 200L)
   parallel::mclapply(1, function(i)
     tryCatch(zu_get("https://example.com"), condition = function(e) "tripped"),
-    mc.cores = 1)
+    mc.cores = 1, mc.cleanup = FALSE)
 
   # The guard is per-process state; a child tripping it must not disarm the
   # parent, which never forked and whose trustd connection is intact.

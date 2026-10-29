@@ -180,7 +180,7 @@ test_that("a pooled client under mclapply() drops inherited connections (§26.4)
     st <- zu_pool_stats(api)
     list(status = zu_resp_status(r), forks = st[["forks_detected"]],
          dropped = st[["discarded_fork"]], hits = st[["hits"]])
-  }, mc.cores = 2)
+  }, mc.cores = 2, mc.cleanup = FALSE)  # coverage.yaml: no SIGTERM mid-trace under covr
 
   for (r in res) {
     expect_false(is.null(r))               # the child survived
