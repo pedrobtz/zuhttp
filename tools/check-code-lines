@@ -1,0 +1,25 @@
+#!/bin/sh
+# Project-owned C, in code lines, against the §51.3 budget (R-4).
+#
+# "Code lines" are cloc's: no blanks, no comments -- this codebase's comments
+# carry the design citations and should never count against it. "Project-
+# owned" is src/ minus src/vendor/. The measurement of record (6,379 on
+# 2026-09-25, design §51.3) was taken the same way.
+#
+#   > 8,000   fail: cut before adding (R-4's trigger)
+#   > 12,000  the abort threshold; §1 is revised publicly
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$ROOT"
+LIMIT=${1:-8000}
+
+command -v cloc >/dev/null 2>&1 || { echo "cloc is not installed" >&2; exit 2; }
+lines=$(cloc --quiet --csv --include-lang='C,C/C++ Header' --exclude-dir=vendor src \
+        | awk -F, '$2 == "SUM" { print $5 }')
+[ -n "$lines" ] || { echo "cloc reported nothing for src/" >&2; exit 2; }
+
+echo "project-owned C: $lines code lines (budget $LIMIT, design §51.3)"
+if [ "$lines" -gt "$LIMIT" ]; then
+    echo "over budget by $((lines - LIMIT)): R-4 says cut before adding" >&2
+    exit 1
+fi
