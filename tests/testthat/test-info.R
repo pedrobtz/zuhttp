@@ -10,13 +10,13 @@ test_that("zu_info() reports the build, not what R believes about it", {
   expect_s3_class(i, "zu_info")
   expect_identical(i$http, "HTTP/1.1")
   expect_identical(i$tls_backend, zu_tls_backend())
-  expect_true(i$tls_backend %in% c("openssl", "schannel", "securetransport", "none"))
+  expect_true(i$tls_backend %in% c("openssl", "schannel", "network-framework", "none"))
   expect_type(i$version, "character")
 
   # §13.1 splits the engine from the trust evaluator, so they are reported
   # separately and must actually agree with the backend that is linked.
   expect_match(i$trust, switch(i$tls_backend,
-    securetransport = "Keychain", schannel = "Windows", openssl = "OpenSSL", "none"))
+    `network-framework` = "Keychain", schannel = "Windows", openssl = "OpenSSL", "none"))
 })
 
 test_that("§14.5's revocation policy is reported", {

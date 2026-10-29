@@ -1,20 +1,21 @@
 # §26.4 hazard 2 / D-32 / R-12 — HTTPS in a forked child on macOS.
 #
-# Security.framework opens an XPC connection to trustd on first use, and that
-# connection does not survive fork(): the child SIGSEGVs rather than failing.
-# S0 measured it as finding F-5. The PID guard in zuh_tls_connect() cannot make
-# forked HTTPS work; it converts an un-catchable crash into a named condition.
+# Network.framework runs on libdispatch, which refuses to run after fork():
+# the child dies with SIGILL rather than failing (F-19; Security.framework's
+# trustd connection did the same with SIGSEGV, S0 F-5). The PID guard in
+# zuh_tls_dial() cannot make forked HTTPS work; it converts an un-catchable
+# crash into a named condition.
 # So this file asserts two things, and the first one is the point:
 #
 #   1. the worker SURVIVES  — mccollect() gets a value back, not a dead child;
 #   2. what it gets back inherits zu_fork_error, with the canonical message.
 #
 # Non-vacuity: comment out the zuh_fork_guard_tripped() branch in
-# src/zuh_tls_sectransport.c and assertion 1 fails — mccollect() returns NULL
+# src/zuh_tls_nw.c and assertion 1 fails — mccollect() returns NULL
 # for a child killed by a signal. That is what makes this a test of the
 # mechanism rather than of the error text.
 
-# The guard is armed on the first zuh_tls_connect() in the process, so the
+# The guard is armed on the first zuh_tls_dial() in the process, so the
 # parent must have completed an HTTPS request before forking. A child forked
 # from a parent that never armed it arms it fresh and is not in a child at all
 # as far as the guard is concerned — which is correct, and would make this
@@ -24,9 +25,9 @@ skip_unless_forked_https_is_testable <- function() {
   if (!identical(Sys.getenv("ZU_TEST_NETWORK"), "1"))
     testthat::skip("set ZU_TEST_NETWORK=1 to run network tests")
   if (!identical(Sys.info()[["sysname"]], "Darwin"))
-    testthat::skip("R-12 is a macOS Security.framework hazard")
-  if (!identical(zu_tls_backend(), "securetransport"))
-    testthat::skip("guard lives in the Secure Transport backend")
+    testthat::skip("R-12 is a macOS Network.framework hazard")
+  if (!identical(zu_tls_backend(), "network-framework"))
+    testthat::skip("guard lives in the Network.framework backend")
   testthat::skip_if_not_installed("parallel")
   if (!zu_have_network()) testthat::skip("no network")
 }
