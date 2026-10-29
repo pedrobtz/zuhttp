@@ -84,9 +84,9 @@ collect_policy <- function(env = parent.frame()) {
 #' @param check Raise a condition for 4xx and 5xx responses (§31.14). `FALSE`
 #'   returns the response whatever its status.
 #' @param decode Decompress the body transparently (§21.2).
-#' @param transport The object that actually performs requests. Defaults to
-#'   [zu_native_transport()]; [zu_mock_transport()] replaces the network in
-#'   tests.
+#' @param transport The object that actually performs requests. The default
+#'   is the network; [zu_mock_transport()] and [zu_cassette_transport()] replace
+#'   it in tests.
 #' @param pool Connection reuse settings from [zu_pool()], or `NULL` to open a
 #'   fresh connection for every request.
 #' @param retry A [zu_retry()] policy. The default retries nothing.
@@ -115,8 +115,6 @@ collect_policy <- function(env = parent.frame()) {
 #' `zu_get(url, ..., client = api)`, never `zu_get(api, url)`. Overloading
 #' argument one by type breaks autocomplete, makes dispatch murky, and turns a
 #' misplaced argument into a confusing error instead of a clear one (§31.3).
-#' For client-first phrasing there are thin wrappers: `api |>
-#' zu_client_get("/users")`.
 #'
 #' @seealso [zu_client_update()] to derive a client without mutating it.
 #' @export

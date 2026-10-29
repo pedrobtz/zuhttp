@@ -34,6 +34,13 @@ A \code{zu_response}.
 Mostly for mock transports (§31.12) and for tests. Real responses come back
 from \code{\link[=zu_perform]{zu_perform()}}.
 }
+\section{Lifecycle}{
+
+Experimental (D-65). The testing tools are exported so that package tests can
+run without a network, and may still change before 1.0; the request
+functions, response accessors and conditions are the stable API.
+}
+
 \examples{
 zu_response(200L, c("Content-Type" = "text/plain"), "hello")
 }

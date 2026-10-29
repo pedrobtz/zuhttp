@@ -141,12 +141,6 @@ sent(zu_get("headers", client = admin))$headers[["Authorization"]]
 "Authorization" %in% names(sent(zu_get("headers", client = api))$headers)
 ```
 
-If you prefer the client first, pipe-friendly wrappers read that way:
-
-```{r client-first}
-api |> zu_client_get("get") |> zu_resp_status()
-```
-
 ## Build a request now, send it later
 
 Everything the verbs do is available as a pipeline over a request object. No

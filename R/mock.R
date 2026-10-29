@@ -18,6 +18,11 @@
 #' A stub pairs a matcher with a response. Every supplied criterion must match
 #' (they are ANDed); an omitted criterion matches anything.
 #'
+#' @section Lifecycle:
+#' Experimental (D-65). The testing tools are exported so that package tests can
+#' run without a network, and may still change before 1.0; the request
+#' functions, response accessors and conditions are the stable API.
+#'
 #' @param response A [zu_response()], or a function of one request returning
 #'   one. The function form is for stubs whose reply depends on the request.
 #' @param method HTTP method to match, case-insensitive. `NULL` matches any.

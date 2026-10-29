@@ -43,6 +43,13 @@ A \code{zu_stub}, for \code{\link[=zu_mock_transport]{zu_mock_transport()}}.
 A stub pairs a matcher with a response. Every supplied criterion must match
 (they are ANDed); an omitted criterion matches anything.
 }
+\section{Lifecycle}{
+
+Experimental (D-65). The testing tools are exported so that package tests can
+run without a network, and may still change before 1.0; the request
+functions, response accessors and conditions are the stable API.
+}
+
 \examples{
 stub <- zu_stub(zu_response(201L), method = "POST", regex = "/users$")
 api  <- zu_client(transport = zu_mock_transport(stub))

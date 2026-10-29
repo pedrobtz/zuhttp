@@ -199,47 +199,6 @@ zu_delete <- function(url, query = NULL, headers = NULL, body = NULL,
            body = body, json = json, form = form, file = file, path = path, callback = callback, trace = trace)
 }
 
-#' Client-first wrappers
-#'
-#' A thin layer for readers who prefer `api |> zu_client_get("/users")`. These
-#' are wrappers, not overloads: [zu_get()] and friends never accept a client
-#' as their first argument (§31.3).
-#'
-#' @param client A `zu_client`.
-#' @param url A URL or path.
-#' @param ... Passed to [zu_get()] and friends.
-#' @return A `zu_response`.
-#' @name zu_client_methods
-#' @examples
-#' fake <- zu_mock_transport(function(req) zu_response(200L, body = "ok"))
-#' api <- zu_client(base_url = "https://api.example.com", transport = fake)
-#' zu_resp_text(zu_client_get(api, "/users"))
-NULL
-
-#' @rdname zu_client_methods
-#' @export
-zu_client_get <- function(client, url, ...) zu_get(url, ..., client = client)
-
-#' @rdname zu_client_methods
-#' @export
-zu_client_head <- function(client, url, ...) zu_head(url, ..., client = client)
-
-#' @rdname zu_client_methods
-#' @export
-zu_client_post <- function(client, url, ...) zu_post(url, ..., client = client)
-
-#' @rdname zu_client_methods
-#' @export
-zu_client_put <- function(client, url, ...) zu_put(url, ..., client = client)
-
-#' @rdname zu_client_methods
-#' @export
-zu_client_patch <- function(client, url, ...) zu_patch(url, ..., client = client)
-
-#' @rdname zu_client_methods
-#' @export
-zu_client_delete <- function(client, url, ...) zu_delete(url, ..., client = client)
-
 #' Which TLS backend was this build linked against?
 #'
 #' @return A short backend identifier, e.g. `"openssl"`, `"schannel"`,

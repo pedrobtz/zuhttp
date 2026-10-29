@@ -2,12 +2,9 @@
 % Please edit documentation in R/perform.R
 \name{zu_transport}
 \alias{zu_transport}
-\alias{zu_native_transport}
 \alias{zu_mock_transport}
 \title{Transports}
 \usage{
-zu_native_transport()
-
 zu_mock_transport(handler = NULL, ...)
 }
 \arguments{
@@ -22,11 +19,18 @@ A transport object, for \code{zu_client(transport = )}.
 }
 \description{
 A transport is the object that actually performs a request.
-\code{zu_native_transport()} is the real one. \code{zu_mock_transport()} takes a
+The default is the network. \code{zu_mock_transport()} takes a
 function of one argument — the resolved request — and returns whatever that
 function returns, so package tests can exercise their own code without a
 network, a server, or an internet-dependent CRAN check.
 }
+\section{Lifecycle}{
+
+Experimental (D-65). The testing tools are exported so that package tests can
+run without a network, and may still change before 1.0; the request
+functions, response accessors and conditions are the stable API.
+}
+
 \examples{
 fake <- zu_mock_transport(function(req) {
   zu_response(status = 200L, body = charToRaw('{"ok":true}'),

@@ -27,6 +27,13 @@ with \code{request}, \code{response} and \code{recorded_at}, all already redacte
 \description{
 Inspect or delete a cassette
 }
+\section{Lifecycle}{
+
+Experimental (D-65). The testing tools are exported so that package tests can
+run without a network, and may still change before 1.0; the request
+functions, response accessors and conditions are the stable API.
+}
+
 \examples{
 zu_cassette_interactions(tempdir(), "no-such-cassette")
 }

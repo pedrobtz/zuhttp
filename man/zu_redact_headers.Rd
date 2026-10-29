@@ -20,6 +20,7 @@ cannot remove a default.
 \examples{
 old <- getOption("zuhttp.redact_headers")
 zu_redact_headers("X-Session")
-zu_is_secret_header("X-Session")
+# Printed requests, traces, cassettes and conditions now hide it:
+zu_headers(zu_request("GET", "https://api.example.com"), `X-Session` = "abc123")
 options(zuhttp.redact_headers = old)   # restore
 }

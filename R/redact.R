@@ -25,7 +25,8 @@ zu_redact_opt <- function(name, default = character()) {
 #' @examples
 #' old <- getOption("zuhttp.redact_headers")
 #' zu_redact_headers("X-Session")
-#' zu_is_secret_header("X-Session")
+#' # Printed requests, traces, cassettes and conditions now hide it:
+#' zu_headers(zu_request("GET", "https://api.example.com"), `X-Session` = "abc123")
 #' options(zuhttp.redact_headers = old)   # restore
 zu_redact_headers <- function(...) {
   v <- unique(as.character(unlist(list(...), use.names = FALSE)))
@@ -100,7 +101,7 @@ redact_request_proxy <- function(req) {
 #'
 #' @param body A single `application/x-www-form-urlencoded` string.
 #' @return The redacted string.
-#' @export
+#' @noRd
 #' @examples
 #' zu_redact_form("user=alice&password=hunter2&remember=1")
 zu_redact_form <- function(body) {
@@ -114,7 +115,7 @@ zu_redact_form <- function(body) {
 #'
 #' @param name A character vector of header names.
 #' @return A logical vector.
-#' @export
+#' @noRd
 #' @examples
 #' zu_is_secret_header(c("Authorization", "cookie", "Accept"))
 zu_is_secret_header <- function(name) {
@@ -126,7 +127,7 @@ zu_is_secret_header <- function(name) {
 #'
 #' @param name A character vector of parameter names.
 #' @return A logical vector.
-#' @export
+#' @noRd
 #' @examples
 #' # Exact matches only: `token` is secret, `page_token` is not.
 #' zu_is_secret_param(c("token", "page_token", "api_key", "page"))
@@ -145,7 +146,7 @@ zu_is_secret_param <- function(name) {
 #'
 #' @param headers A named character vector or list.
 #' @return The same shape, with secret values replaced by `<redacted>`.
-#' @export
+#' @noRd
 #' @examples
 #' zu_redact_headers_for_display(c(Authorization = "Bearer abc123",
 #'                                 Accept = "application/json"))

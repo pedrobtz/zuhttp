@@ -18,7 +18,7 @@ NULL
 #' The code is part of the public API; message wording is not.
 #'
 #' @return A named integer vector.
-#' @export
+#' @noRd
 #' @examples
 #' zu_error_codes()[["zu_tls_certificate_error"]]
 zu_error_codes <- function() {
@@ -29,7 +29,7 @@ zu_error_codes <- function() {
 #'
 #' @param code An integer code, or the class name of a zuhttp condition.
 #' @return `TRUE`, `FALSE`, or `NA` if the code is unknown.
-#' @export
+#' @noRd
 #' @examples
 #' zu_code_retryable("zu_connect_error")          # a transport failure: yes
 #' zu_code_retryable("zu_tls_certificate_error")  # will not fix itself: no

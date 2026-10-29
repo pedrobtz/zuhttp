@@ -8,10 +8,15 @@
 #' Transports
 #'
 #' A transport is the object that actually performs a request.
-#' `zu_native_transport()` is the real one. `zu_mock_transport()` takes a
+#' The default is the network. `zu_mock_transport()` takes a
 #' function of one argument — the resolved request — and returns whatever that
 #' function returns, so package tests can exercise their own code without a
 #' network, a server, or an internet-dependent CRAN check.
+#'
+#' @section Lifecycle:
+#' Experimental (D-65). The testing tools are exported so that package tests can
+#' run without a network, and may still change before 1.0; the request
+#' functions, response accessors and conditions are the stable API.
 #'
 #' @param handler A function of one argument (a `zu_request` with client
 #'   configuration already merged in) returning a [zu_response()]; or one or
@@ -29,8 +34,7 @@
 #' if (requireNamespace("jsonlite", quietly = TRUE)) zu_resp_json(r)
 NULL
 
-#' @rdname zu_transport
-#' @export
+#' @noRd
 zu_native_transport <- function() {
   structure(list(), class = c("zu_native_transport", "zu_transport"))
 }
@@ -67,7 +71,7 @@ zu_mock_transport <- function(handler = NULL, ...) {
 #' @param transport A transport object.
 #' @param req A resolved `zu_request`.
 #' @return A `zu_response`.
-#' @export
+#' @noRd
 #' @examples
 #' # This is what zu_perform() calls after resolving the request. Calling it
 #' # directly shows the contract: one request in, one zu_response out.
@@ -157,7 +161,7 @@ check_mock_response <- function(resp) {
 
 #' @export
 zu_transport_perform.default <- function(transport, req) {
-  stop("`transport` must be a transport object, e.g. zu_native_transport(); got ",
+  stop("`transport` must be a transport object, e.g. zu_mock_transport(); got ",
        class(transport)[[1]], call. = FALSE)
 }
 
