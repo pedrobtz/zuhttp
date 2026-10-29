@@ -41,5 +41,5 @@ spike/windows-schannel/*.exe
 spike/macos-engine/st_probe
 src/Makevars
 src/Makevars.win
-ctest/zuh_engtest_st
+ctest/zuh_engtest_nw
 docs/

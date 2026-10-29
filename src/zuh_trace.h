@@ -104,6 +104,14 @@ void zuh_trace_init(zuh_trace *t);
  * ZUH_TRACE_DETAIL. */
 void zuh_trace_add(zuh_trace *t, zuh_event e, const char *detail, uint64_t n);
 
+/* The same, at a moment already past (`at`, on zuh_now_ms()'s clock). For a
+ * layer that learns where phase boundaries fell only after the fact: Network.
+ * framework resolves, connects and handshakes inside one call and reports the
+ * durations afterwards (D-71). Never earlier than the last event, so at_ms
+ * stays monotonic whatever the report says. */
+void zuh_trace_add_at(zuh_trace *t, zuh_event e, const char *detail, uint64_t n,
+                      zuh_millis at);
+
 /* Append an event whose detail is a URL.
  *
  * §42.2 lists trace payloads as a redacted egress, and a URL is the payload

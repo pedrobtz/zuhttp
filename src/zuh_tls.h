@@ -6,16 +6,18 @@
  *   2. who decides the chain is trusted?  -> the TRUST EVALUATOR
  *
  * Only (2) must be native for zuhttp to deliver on "system trust". Keeping
- * them separate is what makes macOS tractable: S0 proved an OpenSSL engine can
- * hand its chain to SecTrustEvaluateWithError and get Keychain trust while the
- * caller keeps its own poll loop.
+ * them separate is what makes macOS tractable: Network.framework runs the
+ * protocol and hands the chain to our verify block, which asks
+ * SecTrustEvaluateWithError (D-63, F-13).
  *
- *   Windows  Schannel        + Windows cert store
- *   macOS    portable engine + Keychain via SecTrust      (S0: validated)
- *   Unix     OpenSSL         + OpenSSL default verify paths
+ *   Windows  Schannel          + Windows cert store
+ *   macOS    Network.framework + Keychain via SecTrust
+ *   Unix     OpenSSL           + OpenSSL default verify paths
  *
- * A TLS stream WRAPS a zuh_stream rather than owning a socket, so the same
- * engine serves a direct connection and a CONNECT tunnel (§20.3) unchanged.
+ * On Windows and Unix a TLS stream WRAPS a zuh_stream rather than owning a
+ * socket, so the same engine serves a direct connection and a CONNECT tunnel
+ * (§20.3) unchanged. Network.framework owns its socket, so on macOS the
+ * backend DIALS instead (D-71, zuh_tls_dial() below).
  */
 #ifndef ZUHTTP_TLS_H
 #define ZUHTTP_TLS_H
@@ -24,6 +26,8 @@
 #include "zuh_stream.h"
 #include "zuh_error.h"
 #include "zuh_time.h"
+#include "zuh_net.h"
+#include "zuh_proxy.h"
 
 /* --- trust configuration (§14) --- */
 
@@ -82,6 +86,18 @@ zuh_code zuh_tls_connect(zuh_stream **out, zuh_stream *inner, const char *hostna
                        const zuh_tls_config *cfg, zuh_deadline deadline,
                        zuh_error *err);
 
+/* D-71: open a TLS connection to host:port, through `proxy` when it is in
+ * use, for a backend that reports ZUH_TLS_CAP_DIALS. Only Network.framework
+ * does: it owns the socket, resolves the name and runs CONNECT itself, while
+ * the trust decision stays ours (§13.1). `opts` supplies the §25.1 tick and
+ * the §35 trace and timings, exactly as for zuh_net_connect(). A backend that
+ * does not dial returns ZUH_ERR_TLS and is never asked. */
+zuh_code zuh_tls_dial(zuh_stream **out, const char *host, uint16_t port,
+                      const zuh_proxy *proxy, const zuh_tls_config *cfg,
+                      zuh_deadline deadline, const zuh_net_opts *opts,
+                      zuh_error *err);
+/* §35.2 remote_ip of a dialled stream; 0 when unknown or not dialled. */
+int zuh_tls_peer_ip(const zuh_stream *s, char *buf, size_t n);
 void zuh_tls_stream_free(zuh_stream *s);
 int  zuh_tls_get_info(const zuh_stream *s, zuh_tls_info *out);
 
@@ -108,6 +124,12 @@ int         zuh_tls_available(void);
 #define ZUH_TLS_CAP_CA_FILE    0x04u   /* §14.2 replace */
 #define ZUH_TLS_CAP_CA_EXTRA   0x08u   /* §14.2 add */
 #define ZUH_TLS_CAP_REVOCATION 0x10u   /* §14.5 */
+
+/* Not a zu_tls() setting: the backend OPENS its own connection for https://
+ * rather than wrapping a TCP stream the engine opened (D-71, §13.2). The
+ * engine then skips its TCP connect and CONNECT tunnel and calls
+ * zuh_tls_dial(). zu_info() maps only the five bits above to names. */
+#define ZUH_TLS_CAP_DIALS      0x20u
 
 unsigned zuh_tls_backend_caps(void);
 

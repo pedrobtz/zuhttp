@@ -6,13 +6,13 @@
 # script therefore picks the SYSTEM backend where one exists and only falls
 # back to linking OpenSSL where the platform provides nothing usable.
 #
-#   macOS   Secure Transport + SecTrust   nothing to install, nothing bundled
+#   macOS   Network.framework + SecTrust  nothing to install, nothing bundled
 #   Linux   system OpenSSL (dynamic)      the platform's own shared library
 #
-# See spike/macos-engine/FINDINGS.md for why macOS is Secure Transport and not
-# OpenSSL or Network.framework: it is the only macOS API that both reaches TLS
-# over a socket the caller owns (§9, and §20.3 proxy CONNECT needs it) and
-# does not require bundling ~4.6 MB of cryptography.
+# macOS is Network.framework (D-63, W13): Secure Transport was deprecated,
+# stopped at TLS 1.2 and cost an --as-cran NOTE. Network.framework owns the
+# socket, so on macOS the TLS backend dials HTTPS itself, CONNECT included
+# (D-71); see spike/network-framework/FINDINGS.md.
 set -eu
 
 : "${R_HOME:=$(R RHOME)}"
@@ -26,37 +26,30 @@ TLS_OBJ=""
 
 if [ "$UNAME" = "Darwin" ]; then
     # --- macOS: the system stack. No OpenSSL, nothing to install. ----------
-    TLS_OBJ="zuh_tls_sectransport.o"
-    SSL_LIBS="-framework Security -framework CoreFoundation"
-    # Deprecation warnings from Secure Transport are NOT suppressed. Both
-    # ways of doing so are worse: --as-cran NOTEs a #pragma that suppresses
-    # diagnostics and WARNs on -Wno-* in PKG_CPPFLAGS. And they should not be
-    # suppressed on the merits either — R-15 is "Apple may remove this API",
-    # so a warning on every build is the signal, not noise.
-    echo "configure: TLS backend = Secure Transport + SecTrust (system)"
-    echo "configure: NOTE macOS tops out at TLS 1.2; see ?zuhttp_tls"
+    TLS_OBJ="zuh_tls_nw.o"
+    SSL_LIBS="-framework Network -framework Security -framework CoreFoundation"
+    echo "configure: TLS backend = Network.framework + SecTrust (system)"
 
     tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
     cat > "$tmp/t.c" <<'CEOF'
-#include <Security/SecureTransport.h>
+#include <Network/Network.h>
 #include <Security/Security.h>
 int main(void) {
-    SSLContextRef c = SSLCreateContext(NULL, kSSLClientSide, kSSLStreamType);
-    /* SecTrustEvaluateWithError is the non-deprecated trust API the whole
-       §13.1 split depends on; requiring it here fails early rather than at
-       the first HTTPS request. */
+    /* The verify block that keeps trust ours (§13.1), and the non-deprecated
+       trust API it calls. Checked here so a toolchain without them fails at
+       install rather than at the first HTTPS request. */
+    (void)&sec_protocol_options_set_verify_block;
     (void)&SecTrustEvaluateWithError;
-    if (c) CFRelease(c);
-    return c ? 0 : 1;
+    return nw_parameters_create_secure_tcp(NW_PARAMETERS_DEFAULT_CONFIGURATION,
+                                           NW_PARAMETERS_DEFAULT_CONFIGURATION) ? 0 : 1;
 }
 CEOF
     # shellcheck disable=SC2086
-    if ! $CC $CFLAGS -Wno-deprecated-declarations -o "$tmp/t" "$tmp/t.c" \
-             $SSL_LIBS >/dev/null 2>&1; then
-        echo "configure: Security.framework did not link. This is unexpected on macOS." >&2
+    if ! $CC $CFLAGS -o "$tmp/t" "$tmp/t.c" $SSL_LIBS >/dev/null 2>&1; then
+        echo "configure: Network.framework did not link. This is unexpected on macOS." >&2
         exit 1
     fi
-    echo "configure: Security.framework links, SecTrustEvaluateWithError present"
+    echo "configure: Network.framework links; SecTrustEvaluateWithError present"
 else
     # --- everything else: the system OpenSSL, dynamically linked ----------
     TLS_OBJ="zuh_tls_openssl.o"
