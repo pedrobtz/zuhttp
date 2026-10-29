@@ -18,12 +18,16 @@ json_state <- new.env(parent = emptyenv())
 #' @return The previous backend, invisibly.
 #' @export
 #' @examples
-#' \dontrun{
-#' zu_set_json_backend(
-#'   encode = function(x, ...) RcppSimdJson::serialize(x),
-#'   decode = function(txt, ...) RcppSimdJson::fparse(txt)
+#' # Any pair of functions will do; a real one would wrap a JSON package,
+#' # e.g. encode = function(x, ...) RcppSimdJson::serialize(x).
+#' old <- zu_set_json_backend(
+#'   encode = function(x, ...) sprintf('{"n":%d}', length(x)),
+#'   decode = function(txt, ...) list(text = txt)
 #' )
-#' }
+#' req <- zu_body_json(zu_request("POST", "https://api.example.com"), list(1, 2))
+#' rawToChar(req$body)
+#'
+#' zu_set_json_backend(old$encode, old$decode)   # restore
 zu_set_json_backend <- function(encode = NULL, decode = NULL) {
   old <- list(encode = json_state$encode, decode = json_state$decode)
   if (!is.null(encode)) stopifnot(is.function(encode))
