@@ -7,8 +7,8 @@
  *
  * S12 registers the first routines: the §34.1 condition hierarchy and the
  * §42 redaction policy. Both are deliberately C-side rather than
- * reimplemented in R, so there is one definition of each (see zu_error.c and
- * zu_redact.c for why).
+ * reimplemented in R, so there is one definition of each (see zuh_error.c and
+ * zuh_redact.c for why).
  */
 #include <R.h>
 #include <Rinternals.h>
@@ -16,20 +16,20 @@
 #include <R_ext/Visibility.h>
 
 
-#include "zu_error.h"
-#include "zu_redact.h"
-#include "zu_buffer.h"
-#include "zu_engine.h"
-#include "zu_headers.h"
-#include "zu_tls.h"
-#include "zu_pool.h"
-#include "zu_sink.h"
-#include "zu_trace.h"
+#include "zuh_error.h"
+#include "zuh_redact.h"
+#include "zuh_buffer.h"
+#include "zuh_engine.h"
+#include "zuh_headers.h"
+#include "zuh_tls.h"
+#include "zuh_pool.h"
+#include "zuh_sink.h"
+#include "zuh_trace.h"
 #include <string.h>
 
 /* Anything a caller could make arbitrarily large is bounded here rather than
  * in the R layer, so the bound cannot be bypassed by a different caller. */
-#define ZU_R_TEXT_MAX (1u << 20)
+#define ZUH_R_TEXT_MAX (1u << 20)
 
 /* --- §27 the R callback sink ----------------------------------------------
  *
@@ -74,13 +74,13 @@ static SEXP cb_handler(SEXP cond, void *data) {
     return R_NilValue;
 }
 
-static zu_code cb_write(zu_sink *s, const unsigned char *d, size_t n,
-                        zu_error *err) {
+static zuh_code cb_write(zuh_sink *s, const unsigned char *d, size_t n,
+                        zuh_error *err) {
     cb_ctx *c = (cb_ctx *)s->ctx;
     cb_call cc;
     SEXP classes, res;
 
-    if (c->caught || c->stopped) return ZU_ERR_CANCELLED;
+    if (c->caught || c->stopped) return ZUH_ERR_CANCELLED;
 
     cc.c = c;
     cc.chunk = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t)n));
@@ -108,23 +108,23 @@ static zu_code cb_write(zu_sink *s, const unsigned char *d, size_t n,
     if (c->caught) {
         /* Not reported as a transport error: the caller gets the original
          * condition re-signalled once the loop has unwound (§27.3). */
-        zu_error_set(err, ZU_ERR_CANCELLED, ZU_PHASE_READ,
+        zuh_error_set(err, ZUH_ERR_CANCELLED, ZUH_PHASE_READ,
                      "the body callback raised a condition");
-        return ZU_ERR_CANCELLED;
+        return ZUH_ERR_CANCELLED;
     }
     /* §27.2: "the callback's return value controls flow: a sentinel return
      * stops the transfer cleanly", which then makes the connection
-     * unpoolable (§26.3) — zu_reuse_decide() maps ZU_ERR_CANCELLED to
-     * ZU_NOREUSE_CANCELLED, so that happens without a special case. */
+     * unpoolable (§26.3) — zuh_reuse_decide() maps ZUH_ERR_CANCELLED to
+     * ZUH_NOREUSE_CANCELLED, so that happens without a special case. */
     if (res != R_NilValue && TYPEOF(res) == LGLSXP && Rf_length(res) == 1 &&
         LOGICAL(res)[0] == FALSE) {
         c->stopped = 1;
         s->stopped = 1;
-        zu_error_set(err, ZU_ERR_CANCELLED, ZU_PHASE_READ,
+        zuh_error_set(err, ZUH_ERR_CANCELLED, ZUH_PHASE_READ,
                      "the body callback stopped the transfer");
-        return ZU_ERR_CANCELLED;
+        return ZUH_ERR_CANCELLED;
     }
-    return ZU_OK;
+    return ZUH_OK;
 }
 
 /* --- §26 the connection pool, as an R object ------------------------------
@@ -138,44 +138,44 @@ static zu_code cb_write(zu_sink *s, const unsigned char *d, size_t n,
  *     pointer to .Call, so "is this ours and is it alive" is one question
  *     answered in one place (pool_ptr_get).
  *   - a finalizer frees the pool when the client is collected. §26.4 requires
- *     the PID guard in every finalizer; zu_pool_free() runs it, which is why
+ *     the PID guard in every finalizer; zuh_pool_free() runs it, which is why
  *     the finalizer body is just that call and not a hand-rolled teardown.
  */
-static SEXP zu_pool_tag = NULL;   /* install()ed once in R_init_zuhttp */
+static SEXP zuh_pool_tag = NULL;   /* install()ed once in R_init_zuhttp */
 
 static void pool_finalizer(SEXP ptr) {
-    zu_pool *p = (zu_pool *)R_ExternalPtrAddr(ptr);
+    zuh_pool *p = (zuh_pool *)R_ExternalPtrAddr(ptr);
     if (!p) return;
     /* Runs the §26.4 fork guard internally: a finalizer in a forked child
      * must not gracefully close sockets the parent still owns. */
-    zu_pool_free(p);
+    zuh_pool_free(p);
     R_ClearExternalPtr(ptr);
 }
 
 /* The pool behind `ptr`, or NULL if there is none, it is not ours, or it did
  * not survive serialization. NULL is not an error here — it is the signal the
  * R layer turns into "create one now" (§26.5). */
-static zu_pool *pool_ptr_get(SEXP ptr) {
+static zuh_pool *pool_ptr_get(SEXP ptr) {
     if (TYPEOF(ptr) != EXTPTRSXP) return NULL;
-    if (R_ExternalPtrTag(ptr) != zu_pool_tag) return NULL;
-    return (zu_pool *)R_ExternalPtrAddr(ptr);
+    if (R_ExternalPtrTag(ptr) != zuh_pool_tag) return NULL;
+    return (zuh_pool *)R_ExternalPtrAddr(ptr);
 }
 
 static SEXP C_zu_pool_new(SEXP max_idle, SEXP max_per_host, SEXP idle_timeout_ms) {
-    zu_pool_config cfg;
-    zu_pool *p;
+    zuh_pool_config cfg;
+    zuh_pool *p;
     SEXP ptr;
 
-    zu_pool_config_init(&cfg);
+    zuh_pool_config_init(&cfg);
     if (Rf_asInteger(max_idle) > 0)     cfg.max_idle        = (size_t)Rf_asInteger(max_idle);
     if (Rf_asInteger(max_per_host) > 0) cfg.max_per_host    = (size_t)Rf_asInteger(max_per_host);
     if (Rf_asInteger(idle_timeout_ms) > 0)
         cfg.idle_timeout_ms = (long)Rf_asInteger(idle_timeout_ms);
 
-    p = zu_pool_new(&cfg);
+    p = zuh_pool_new(&cfg);
     if (!p) Rf_error("could not allocate a connection pool");
 
-    ptr = PROTECT(R_MakeExternalPtr(p, zu_pool_tag, R_NilValue));
+    ptr = PROTECT(R_MakeExternalPtr(p, zuh_pool_tag, R_NilValue));
     R_RegisterCFinalizerEx(ptr, pool_finalizer, TRUE);
     UNPROTECT(1);
     return ptr;
@@ -197,14 +197,14 @@ static SEXP C_zu_pool_stats(SEXP ptr) {
         "discarded_capacity", "discarded_unusable", "discarded_fork",
         "forks_detected", NULL
     };
-    zu_pool *p = pool_ptr_get(ptr);
-    zu_pool_stats st;
+    zuh_pool *p = pool_ptr_get(ptr);
+    zuh_pool_stats st;
     SEXP out, names;
     int i, n = 0;
 
     while (nm[n]) n++;
     if (!p) return R_NilValue;
-    zu_pool_stats_get(p, &st);
+    zuh_pool_stats_get(p, &st);
 
     out = PROTECT(Rf_allocVector(REALSXP, n));
     REAL(out)[0] = (double)st.idle;
@@ -225,8 +225,8 @@ static SEXP C_zu_pool_stats(SEXP ptr) {
 }
 
 static SEXP C_zu_pool_clear(SEXP ptr) {
-    zu_pool *p = pool_ptr_get(ptr);
-    if (p) zu_pool_clear(p);
+    zuh_pool *p = pool_ptr_get(ptr);
+    if (p) zuh_pool_clear(p);
     return R_NilValue;
 }
 
@@ -235,14 +235,14 @@ static SEXP C_zu_pool_clear(SEXP ptr) {
 /* The class chain for one code, most specific first, with "error" and
  * "condition" appended — those two are R's names, so R is where they belong. */
 static SEXP C_zu_condition_classes(SEXP code_sexp) {
-    const char *chain[ZU_CLASS_CHAIN_MAX];
+    const char *chain[ZUH_CLASS_CHAIN_MAX];
     int n, i;
     SEXP out;
 
     if (!Rf_isInteger(code_sexp) || Rf_length(code_sexp) != 1)
         Rf_error("code must be a single integer");
 
-    n = zu_code_class_chain((zu_code)INTEGER(code_sexp)[0], chain, ZU_CLASS_CHAIN_MAX);
+    n = zuh_code_class_chain((zuh_code)INTEGER(code_sexp)[0], chain, ZUH_CLASS_CHAIN_MAX);
     if (n == 0) Rf_error("unknown zuhttp error code: %d", INTEGER(code_sexp)[0]);
 
     out = PROTECT(Rf_allocVector(STRSXP, n + 2));
@@ -255,15 +255,15 @@ static SEXP C_zu_condition_classes(SEXP code_sexp) {
 }
 
 /* Every code, as a named integer vector: names are the leaf class, values the
- * stable zu_code. Lets the R layer build its constants from the C enum rather
+ * stable zuh_code. Lets the R layer build its constants from the C enum rather
  * than restating it. */
 static SEXP C_zu_error_codes(void) {
-    int i, n = (int)ZU_CODE_COUNT;
+    int i, n = (int)ZUH_CODE_COUNT;
     SEXP out = PROTECT(Rf_allocVector(INTSXP, n));
     SEXP nms = PROTECT(Rf_allocVector(STRSXP, n));
     for (i = 0; i < n; i++) {
         INTEGER(out)[i] = i;
-        SET_STRING_ELT(nms, i, Rf_mkChar(zu_code_class((zu_code)i)));
+        SET_STRING_ELT(nms, i, Rf_mkChar(zuh_code_class((zuh_code)i)));
     }
     Rf_setAttrib(out, R_NamesSymbol, nms);
     UNPROTECT(2);
@@ -273,7 +273,7 @@ static SEXP C_zu_error_codes(void) {
 static SEXP C_zu_code_retryable(SEXP code_sexp) {
     if (!Rf_isInteger(code_sexp) || Rf_length(code_sexp) != 1)
         Rf_error("code must be a single integer");
-    return Rf_ScalarLogical(zu_code_retryable((zu_code)INTEGER(code_sexp)[0]));
+    return Rf_ScalarLogical(zuh_code_retryable((zuh_code)INTEGER(code_sexp)[0]));
 }
 
 /* --- §42 redaction -------------------------------------------------------- */
@@ -299,19 +299,19 @@ static const char **str_list(SEXP v, int *n_out) {
     return list;
 }
 
-static void policy_from(SEXP extra_headers, SEXP extra_params, zu_redact_policy *p) {
+static void policy_from(SEXP extra_headers, SEXP extra_params, zuh_redact_policy *p) {
     int nh = 0, np = 0;
-    zu_redact_policy_init(p);
+    zuh_redact_policy_init(p);
     p->extra_headers = str_list(extra_headers, &nh);
     p->extra_params  = str_list(extra_params,  &np);
 }
 
-/* One scalar string in, one scalar string out, through a zu_buffer. */
+/* One scalar string in, one scalar string out, through a zuh_buffer. */
 static SEXP redact_one(SEXP text, SEXP extra_headers, SEXP extra_params,
-                       int (*fn)(const zu_redact_policy *, const char *, size_t,
-                                 zu_buffer *)) {
-    zu_redact_policy p;
-    zu_buffer b;
+                       int (*fn)(const zuh_redact_policy *, const char *, size_t,
+                                 zuh_buffer *)) {
+    zuh_redact_policy p;
+    zuh_buffer b;
     SEXP e, out;
     const char *s;
     size_t n;
@@ -325,31 +325,31 @@ static SEXP redact_one(SEXP text, SEXP extra_headers, SEXP extra_params,
      * translating to the native encoding could mangle what we must show. */
     s = Rf_translateCharUTF8(e);
     n = strlen(s);
-    if (n > ZU_R_TEXT_MAX) Rf_error("input is too long to redact (%lu bytes)",
+    if (n > ZUH_R_TEXT_MAX) Rf_error("input is too long to redact (%lu bytes)",
                                     (unsigned long)n);
 
     policy_from(extra_headers, extra_params, &p);
-    if (!zu_buf_init(&b, n + 32, ZU_R_TEXT_MAX * 2)) Rf_error("out of memory");
-    if (!fn(&p, s, n, &b)) { zu_buf_free(&b); Rf_error("redaction failed"); }
+    if (!zuh_buf_init(&b, n + 32, ZUH_R_TEXT_MAX * 2)) Rf_error("out of memory");
+    if (!fn(&p, s, n, &b)) { zuh_buf_free(&b); Rf_error("redaction failed"); }
 
     out = PROTECT(Rf_allocVector(STRSXP, 1));
     SET_STRING_ELT(out, 0, Rf_mkCharLenCE((const char *)b.data, (int)b.len, CE_UTF8));
-    zu_buf_free(&b);
+    zuh_buf_free(&b);
     UNPROTECT(1);
     return out;
 }
 
 static SEXP C_zu_redact_url(SEXP url, SEXP extra_params) {
-    return redact_one(url, R_NilValue, extra_params, zu_redact_url);
+    return redact_one(url, R_NilValue, extra_params, zuh_redact_url);
 }
 
 static SEXP C_zu_redact_form(SEXP body, SEXP extra_params) {
-    return redact_one(body, R_NilValue, extra_params, zu_redact_form_body);
+    return redact_one(body, R_NilValue, extra_params, zuh_redact_form_body);
 }
 
 /* Vectorised: which of these header names carry a secret value? */
 static SEXP C_zu_is_secret_header(SEXP names, SEXP extra_headers) {
-    zu_redact_policy p;
+    zuh_redact_policy p;
     int i, n;
     SEXP out;
 
@@ -362,7 +362,7 @@ static SEXP C_zu_is_secret_header(SEXP names, SEXP extra_headers) {
         if (e == NA_STRING) { LOGICAL(out)[i] = NA_LOGICAL; continue; }
         {
             const char *s = Rf_translateCharUTF8(e);
-            LOGICAL(out)[i] = zu_redact_is_secret_header(&p, s, strlen(s));
+            LOGICAL(out)[i] = zuh_redact_is_secret_header(&p, s, strlen(s));
         }
     }
     UNPROTECT(1);
@@ -370,7 +370,7 @@ static SEXP C_zu_is_secret_header(SEXP names, SEXP extra_headers) {
 }
 
 static SEXP C_zu_is_secret_param(SEXP names, SEXP extra_params) {
-    zu_redact_policy p;
+    zuh_redact_policy p;
     int i, n;
     SEXP out;
 
@@ -383,7 +383,7 @@ static SEXP C_zu_is_secret_param(SEXP names, SEXP extra_params) {
         if (e == NA_STRING) { LOGICAL(out)[i] = NA_LOGICAL; continue; }
         {
             const char *s = Rf_translateCharUTF8(e);
-            LOGICAL(out)[i] = zu_redact_is_secret_param(&p, s, strlen(s));
+            LOGICAL(out)[i] = zuh_redact_is_secret_param(&p, s, strlen(s));
         }
     }
     UNPROTECT(1);
@@ -400,7 +400,7 @@ static SEXP C_zu_is_secret_param(SEXP names, SEXP extra_params) {
  * So the tick never calls it directly. R_ToplevelExec runs a function and
  * returns FALSE if that function longjmped, catching the unwind at a frame
  * where nothing of ours is live. The tick then returns 1, the poll loop in
- * zu_net.c gives up, and the engine unwinds through its OWN error paths,
+ * zuh_net.c gives up, and the engine unwinds through its OWN error paths,
  * closing the socket and freeing every buffer on the way out.
  *
  * That is §25.2's discipline (b) — no native allocation lives only in a C
@@ -418,7 +418,7 @@ typedef struct { SEXP caught; } tick_ctx;
 static SEXP g_tick_classes = NULL;   /* c("interrupt", "error"), preserved */
 
 /* The tick of the request running now. Not the stream's tick_ctx: a pooled
- * connection keeps the zu_net_opts of the request that OPENED it, so a
+ * connection keeps the zuh_net_opts of the request that OPENED it, so a
  * context stored there points into a .Call frame that has already returned
  * the next time the connection is used — a dangling stack pointer read on
  * every poll tick of a reused connection (found 2026-09-26). C_zu_perform
@@ -468,24 +468,24 @@ static void tick_release(tick_ctx *t) {
  * passes one pointer. Bundling them beats a file-scope pointer, which would
  * be wrong the moment a callback issued a nested request (§27.4 permits that
  * on a different client). */
-typedef struct { zu_result *r; zu_trace *t; } resp_ctx;
+typedef struct { zuh_result *r; zuh_trace *t; } resp_ctx;
 
 static SEXP build_response(void *data);
-static SEXP timings_to_r(const zu_timings *t);
-static SEXP trace_to_r(const zu_trace *t);
+static SEXP timings_to_r(const zuh_timings *t);
+static SEXP trace_to_r(const zuh_trace *t);
 
 /* Runs whether build_response returned or longjmped (§25.2 mechanism (a)).
  * `jump` is TRUE only on the unwind path; the work is identical either way,
  * so it is deliberately not branched on. */
 static void free_result_on_unwind(void *data, Rboolean jump) {
     (void)jump;
-    zu_result_free(((resp_ctx *)data)->r);
+    zuh_result_free(((resp_ctx *)data)->r);
 }
 
-/* Raise the §34.1 condition for a zu_error by calling back into R. Building
+/* Raise the §34.1 condition for a zuh_error by calling back into R. Building
  * the condition in R rather than in C keeps the class hierarchy in one place
  * (zu_condition()) and keeps this file free of condition construction. */
-static void raise_zu_error(const zu_error *e, const char *url) {
+static void raise_zu_error(const zuh_error *e, const char *url) {
     /* zuhttp:::zu_stop_from_c(code, message, url, phase, backend, backend_code)
      *
      * Six arguments, and R only provides Rf_lang1..Rf_lang6 (function plus
@@ -506,7 +506,7 @@ static void raise_zu_error(const zu_error *e, const char *url) {
     SETCAR(p, Rf_ScalarInteger((int)e->code));                          p = CDR(p);
     SETCAR(p, Rf_mkString(e->message[0] ? e->message : "request failed")); p = CDR(p);
     SETCAR(p, url ? Rf_mkString(url) : R_NilValue);                     p = CDR(p);
-    SETCAR(p, Rf_mkString(zu_phase_name(e->phase)));                    p = CDR(p);
+    SETCAR(p, Rf_mkString(zuh_phase_name(e->phase)));                    p = CDR(p);
     SETCAR(p, e->backend[0] ? Rf_mkString(e->backend) : R_NilValue);    p = CDR(p);
     SETCAR(p, Rf_ScalarInteger(e->backend_code));
 
@@ -514,13 +514,13 @@ static void raise_zu_error(const zu_error *e, const char *url) {
     UNPROTECT(5);
 }
 
-static SEXP headers_to_r(const zu_headers *h) {
-    size_t n = zu_headers_total(h), i;
+static SEXP headers_to_r(const zuh_headers *h) {
+    size_t n = zuh_headers_total(h), i;
     SEXP out = PROTECT(Rf_allocVector(STRSXP, (R_xlen_t)n));
     SEXP nms = PROTECT(Rf_allocVector(STRSXP, (R_xlen_t)n));
     for (i = 0; i < n; i++) {
         const char *name = NULL, *value = NULL;
-        zu_headers_at(h, i, &name, &value);
+        zuh_headers_at(h, i, &name, &value);
         SET_STRING_ELT(nms, (R_xlen_t)i, Rf_mkChar(name ? name : ""));
         SET_STRING_ELT(out, (R_xlen_t)i, Rf_mkCharCE(value ? value : "", CE_UTF8));
     }
@@ -534,7 +534,7 @@ static SEXP headers_to_r(const zu_headers *h) {
  * name which of ca_file and ca_extra was wrong. Returns 0 when `tls` is not a
  * configuration (NULL: system defaults). Strings are borrowed from `tls` and
  * the pin array is R_alloc'd, so both live until the .Call returns. */
-static int tls_from_r(SEXP tls, zu_tls_config *cfg) {
+static int tls_from_r(SEXP tls, zuh_tls_config *cfg) {
     SEXP names;
     R_xlen_t i, n;
     if (tls == R_NilValue || !Rf_isVectorList(tls)) return 0;
@@ -543,7 +543,7 @@ static int tls_from_r(SEXP tls, zu_tls_config *cfg) {
      * more than one PROTECT (W1). */
     names = PROTECT(Rf_getAttrib(tls, R_NamesSymbol));
     n = Rf_xlength(tls);
-    zu_tls_config_init(cfg);
+    zuh_tls_config_init(cfg);
     for (i = 0; i < n; i++) {
         const char *nm = (names == R_NilValue) ? ""
                          : Rf_translateCharUTF8(STRING_ELT(names, i));
@@ -551,7 +551,7 @@ static int tls_from_r(SEXP tls, zu_tls_config *cfg) {
         if (v == R_NilValue) continue;
         if (strcmp(nm, "ca_file") == 0 && Rf_isString(v) && Rf_length(v) == 1) {
             cfg->ca_file = Rf_translateCharUTF8(STRING_ELT(v, 0));
-            cfg->source  = ZU_TRUST_FILE;   /* §14.2: REPLACES */
+            cfg->source  = ZUH_TRUST_FILE;   /* §14.2: REPLACES */
         } else if (strcmp(nm, "ca_extra") == 0 && Rf_isString(v) && Rf_length(v) == 1) {
             /* §14.2: ADDS. Deliberately does NOT touch `source`, which is
              * the whole difference between the two arguments. */
@@ -576,15 +576,15 @@ static int tls_from_r(SEXP tls, zu_tls_config *cfg) {
 
 /* D-56: refuse a TLS configuration the linked backend cannot honour, from R,
  * before DNS or TCP. The engine makes the same check again inside
- * zu_tls_connect(), so a caller that bypasses the R layer is still refused;
+ * zuh_tls_connect(), so a caller that bypasses the R layer is still refused;
  * this copy exists so the refusal costs no network round trip. */
 static SEXP C_zu_tls_check(SEXP tls) {
-    zu_tls_config cfg;
-    zu_error e;
-    zu_error_clear(&e);
+    zuh_tls_config cfg;
+    zuh_error e;
+    zuh_error_clear(&e);
     if (!tls_from_r(tls, &cfg)) return R_NilValue;
-    if (zu_tls_config_check(&cfg, zu_tls_backend_caps(), zu_tls_backend_name(),
-                            &e) != ZU_OK)
+    if (zuh_tls_config_check(&cfg, zuh_tls_backend_caps(), zuh_tls_backend_name(),
+                            &e) != ZUH_OK)
         raise_zu_error(&e, NULL);
     return R_NilValue;
 }
@@ -597,17 +597,17 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
                          SEXP user_agent, SEXP decode, SEXP pool,
                          SEXP path, SEXP callback, SEXP proxy, SEXP tls,
                          SEXP trace, SEXP redact) {
-    zu_get_opts o;
+    zuh_get_opts o;
     tick_ctx tick = { NULL };
-    zu_req_spec spec;
+    zuh_req_spec spec;
     cb_ctx cb;
-    zu_sink cb_sink;
-    zu_tls_config tlscfg;
-    zu_trace tracebuf;
-    zu_redact_policy redact_policy;
-    zu_result r;
-    zu_error e;
-    zu_code rc;
+    zuh_sink cb_sink;
+    zuh_tls_config tlscfg;
+    zuh_trace tracebuf;
+    zuh_redact_policy redact_policy;
+    zuh_result r;
+    zuh_error e;
+    zuh_code rc;
     const char *u;
     int nh = 0, i;
 
@@ -649,7 +649,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
         spec.body_len = (size_t)Rf_xlength(body);
     }
 
-    zu_get_opts_init(&o);
+    zuh_get_opts_init(&o);
     o.timeout_ms    = (long)Rf_asInteger(timeout_ms);
     o.max_redirects = Rf_asInteger(max_redirects);
     o.verify        = Rf_asLogical(verify) == TRUE;
@@ -706,9 +706,9 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
     o.redact = &redact_policy;
 
     /* §35: opt-in. Without this the trace pointer stays NULL and every
-     * zu_trace_add() in the connect, handshake and read paths is one branch. */
+     * zuh_trace_add() in the connect, handshake and read paths is one branch. */
     if (Rf_asLogical(trace) == TRUE) {
-        zu_trace_init(&tracebuf);
+        zuh_trace_init(&tracebuf);
         o.trace = &tracebuf;
     }
 
@@ -722,7 +722,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
     } else if (Rf_isString(path) && Rf_length(path) == 1 &&
                STRING_ELT(path, 0) != NA_STRING) {
         const char *dest = Rf_translateCharUTF8(STRING_ELT(path, 0));
-        o.sink = zu_sink_file(dest, &e);
+        o.sink = zuh_sink_file(dest, &e);
         if (!o.sink) { raise_zu_error(&e, u); return R_NilValue; }
     }
 
@@ -731,11 +731,11 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
     o.tick     = r_interrupt_tick;
     o.tick_ctx = NULL;       /* never per-request state in a pooled object */
 
-    zu_error_clear(&e);
+    zuh_error_clear(&e);
     {
         tick_ctx *prev = g_tick_current;
         g_tick_current = &tick;
-        rc = zu_engine_perform(&r, u, &spec, &o, &e);
+        rc = zuh_engine_perform(&r, u, &spec, &o, &e);
         g_tick_current = prev;
     }
 
@@ -748,7 +748,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
         SEXP call;
         tick_release(&tick);
         cb.caught = NULL;
-        zu_result_free(&r);
+        zuh_result_free(&r);
         PROTECT(cond);
         R_ReleaseObject(cond);
         call = PROTECT(Rf_lang2(Rf_install("stop"), cond));
@@ -760,14 +760,14 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
         /* Commit or discard, then release. A failure to rename is a failure
          * of the request: the caller asked for a file at that path and there
          * is not one, so reporting success would be a lie. */
-        if (rc == ZU_OK) rc = zu_sink_finish(o.sink, &e);
-        else             zu_sink_abort(o.sink);
-        if (rc != ZU_OK) zu_sink_abort(o.sink);
+        if (rc == ZUH_OK) rc = zuh_sink_finish(o.sink, &e);
+        else             zuh_sink_abort(o.sink);
+        if (rc != ZUH_OK) zuh_sink_abort(o.sink);
         r.body.len = 0;              /* the bytes went to the file, not here */
-        zu_sink_free(o.sink);
+        zuh_sink_free(o.sink);
         o.sink = NULL;
     }
-    if (rc != ZU_OK) {
+    if (rc != ZUH_OK) {
         /* Our tick returns 1 only for a pending user interrupt, so a
          * cancellation reaching here is always that (§34.1 separates
          * zu_interrupted_error from zu_cancelled_error because a person
@@ -775,7 +775,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
         /* Not an interrupt: an error R raised at the checkpoint, such as a
          * time limit. Re-raise it as it was; the sink above is already
          * discarded and the engine holds nothing. */
-        if (rc == ZU_ERR_CANCELLED && tick.caught &&
+        if (rc == ZUH_ERR_CANCELLED && tick.caught &&
             !Rf_inherits(tick.caught, "interrupt")) {
             SEXP cond = PROTECT(tick.caught);
             SEXP call;
@@ -787,26 +787,26 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
             return R_NilValue;   /* not reached */
         }
         tick_release(&tick);
-        if (rc == ZU_ERR_CANCELLED) {
-            zu_error err2 = e;
-            err2.code = ZU_ERR_INTERRUPTED;
+        if (rc == ZUH_ERR_CANCELLED) {
+            zuh_error err2 = e;
+            err2.code = ZUH_ERR_INTERRUPTED;
             snprintf(err2.message, sizeof err2.message,
                      "request interrupted by the user");
             raise_zu_error(&err2, u);
             return R_NilValue;   /* not reached */
         }
-        /* No C resources are live here: zu_engine_get frees everything it
+        /* No C resources are live here: zuh_engine_get frees everything it
          * owns before returning non-OK, which is what makes it safe to raise
          * an R condition (and longjmp) from this point.
          *
          * The return code is the authority. A path that returned an error
          * without filling `e` once reached R as "unknown zuhttp error code:
          * 0" — a plain simpleError no handler for zu_error would catch. */
-        if (e.code == ZU_OK) {
+        if (e.code == ZUH_OK) {
             e.code = rc;
             if (!e.message[0])
                 snprintf(e.message, sizeof e.message, "request failed (%s)",
-                         zu_code_class(rc));
+                         zuh_code_class(rc));
         }
         raise_zu_error(&e, u);
         return R_NilValue;   /* not reached */
@@ -830,8 +830,8 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
  * than at the next GC. */
 static SEXP build_response(void *data) {
     resp_ctx  *ctx = (resp_ctx *)data;
-    zu_result *rp = ctx->r;
-    zu_result r = *rp;
+    zuh_result *rp = ctx->r;
+    zuh_result r = *rp;
     SEXP out, nms, body;
 
     body = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t)r.body.len));
@@ -883,7 +883,7 @@ static SEXP build_response(void *data) {
  * mean(), plotting, comparison. Handing back -1 would put a guard in every
  * caller and eventually produce a chart with a bar below the axis.
  */
-static SEXP timings_to_r(const zu_timings *t) {
+static SEXP timings_to_r(const zuh_timings *t) {
     static const char *nm[] = {
         "dns", "connect", "tls", "request_write", "ttfb", "response_read",
         "total", "body_bytes_wire", "body_bytes_decoded", NULL
@@ -909,7 +909,7 @@ static SEXP timings_to_r(const zu_timings *t) {
 /* A data-frame-shaped list: event, at_ms, bytes, detail. Columns rather than
  * a list of rows, because the first thing anyone does with a trace is look at
  * it as a table. */
-static SEXP trace_to_r(const zu_trace *t) {
+static SEXP trace_to_r(const zuh_trace *t) {
     SEXP out, names, ev, at, n_, detail;
     size_t i;
     if (!t) return R_NilValue;
@@ -919,7 +919,7 @@ static SEXP trace_to_r(const zu_trace *t) {
     n_     = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t)t->n));
     detail = PROTECT(Rf_allocVector(STRSXP,  (R_xlen_t)t->n));
     for (i = 0; i < t->n; i++) {
-        SET_STRING_ELT(ev, (R_xlen_t)i, Rf_mkChar(zu_event_name(t->ev[i].ev)));
+        SET_STRING_ELT(ev, (R_xlen_t)i, Rf_mkChar(zuh_event_name(t->ev[i].ev)));
         REAL(at)[i] = (double)t->ev[i].at_ms;
         REAL(n_)[i] = (double)t->ev[i].n;
         SET_STRING_ELT(detail, (R_xlen_t)i, Rf_mkChar(t->ev[i].detail));
@@ -960,16 +960,16 @@ static SEXP C_zu_build_info(void) {
      * before any connection, and a user deciding whether a setting will work
      * should be able to ask rather than find out from an error. */
     static const struct { unsigned bit; const char *name; } caps_tab[] = {
-        { ZU_TLS_CAP_PINS,       "pins" },
-        { ZU_TLS_CAP_TLS13,      "tls13" },
-        { ZU_TLS_CAP_CA_FILE,    "ca_file" },
-        { ZU_TLS_CAP_CA_EXTRA,   "ca_extra" },
-        { ZU_TLS_CAP_REVOCATION, "revocation" }
+        { ZUH_TLS_CAP_PINS,       "pins" },
+        { ZUH_TLS_CAP_TLS13,      "tls13" },
+        { ZUH_TLS_CAP_CA_FILE,    "ca_file" },
+        { ZUH_TLS_CAP_CA_EXTRA,   "ca_extra" },
+        { ZUH_TLS_CAP_REVOCATION, "revocation" }
     };
-    unsigned caps = zu_tls_available() ? zu_tls_backend_caps() : 0u;
+    unsigned caps = zuh_tls_available() ? zuh_tls_backend_caps() : 0u;
     SEXP capv;
     int nc = 0, k;
-    const char *backend = zu_tls_backend_name();
+    const char *backend = zuh_tls_backend_name();
     const char *trust;
     SEXP out, names;
     int i, n = 0;
@@ -988,7 +988,7 @@ static SEXP C_zu_build_info(void) {
 
     SET_VECTOR_ELT(out, 0, Rf_mkString(backend));
     SET_VECTOR_ELT(out, 1, Rf_mkString(trust));
-    SET_VECTOR_ELT(out, 2, Rf_ScalarLogical(zu_tls_available()));
+    SET_VECTOR_ELT(out, 2, Rf_ScalarLogical(zuh_tls_available()));
     /* §14.5 / D-31: off by default on every platform, measured in S0 (F-4). */
     SET_VECTOR_ELT(out, 3, Rf_ScalarLogical(FALSE));
     for (k = 0; k < (int)(sizeof caps_tab / sizeof caps_tab[0]); k++)
@@ -1013,7 +1013,7 @@ static SEXP C_zu_build_info(void) {
 }
 
 static SEXP C_zu_tls_backend(void) {
-    return Rf_mkString(zu_tls_backend_name());
+    return Rf_mkString(zuh_tls_backend_name());
 }
 
 /* --- registration --------------------------------------------------------- */
@@ -1040,7 +1040,7 @@ static const R_CallMethodDef call_methods[] = {
 void attribute_visible R_init_zuhttp(DllInfo *dll) {
     /* Interned once. Pointer identity against this symbol is what tells our
      * external pointers from another package's (§26.5). */
-    zu_pool_tag = Rf_install("zu_pool");
+    zuh_pool_tag = Rf_install("zu_pool");
     g_tick_classes = Rf_allocVector(STRSXP, 2);
     R_PreserveObject(g_tick_classes);
     SET_STRING_ELT(g_tick_classes, 0, Rf_mkChar("interrupt"));

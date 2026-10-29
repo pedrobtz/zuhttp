@@ -1,118 +1,118 @@
-#include "zu_test.h"
-#include "zu_headers.h"
-#include "zu_alloc.h"
+#include "zuh_test.h"
+#include "zuh_headers.h"
+#include "zuh_alloc.h"
 #include <string.h>
 
 void suite_headers(void);
 
 void suite_headers(void) {
-    zu_headers h;
+    zuh_headers h;
 
-    ZU_CASE("§17.1: CR/LF in a name or value is rejected, never stripped");
-    zu_headers_init(&h);
-    ZU_CHECK_EQ_INT(zu_headers_add_str(&h, "X-Evil", "a\r\nInjected: 1"), ZU_ERR_PARSE);
-    ZU_CHECK_EQ_INT(zu_headers_add_str(&h, "X-Evil", "a\nInjected: 1"),   ZU_ERR_PARSE);
-    ZU_CHECK_EQ_INT(zu_headers_add_str(&h, "X-Evil", "a\rb"),             ZU_ERR_PARSE);
-    ZU_CHECK_EQ_INT(zu_headers_add_str(&h, "X\r\nEvil", "v"),             ZU_ERR_PARSE);
-    ZU_CHECK_EQ_INT(zu_headers_add_str(&h, "X Evil", "v"),                ZU_ERR_PARSE);
-    ZU_CHECK_EQ_INT(zu_headers_add_str(&h, "X:Evil", "v"),                ZU_ERR_PARSE);
-    ZU_CHECK_EQ_INT(zu_headers_add_str(&h, "", "v"),                      ZU_ERR_PARSE);
-    ZU_CHECK_EQ_INT(h.n, 0);                    /* nothing was stored */
-    zu_headers_free(&h);
+    ZUH_CASE("§17.1: CR/LF in a name or value is rejected, never stripped");
+    zuh_headers_init(&h);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "X-Evil", "a\r\nInjected: 1"), ZUH_ERR_PARSE);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "X-Evil", "a\nInjected: 1"),   ZUH_ERR_PARSE);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "X-Evil", "a\rb"),             ZUH_ERR_PARSE);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "X\r\nEvil", "v"),             ZUH_ERR_PARSE);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "X Evil", "v"),                ZUH_ERR_PARSE);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "X:Evil", "v"),                ZUH_ERR_PARSE);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "", "v"),                      ZUH_ERR_PARSE);
+    ZUH_CHECK_EQ_INT(h.n, 0);                    /* nothing was stored */
+    zuh_headers_free(&h);
 
-    ZU_CASE("valid token names and printable values are accepted");
-    zu_headers_init(&h);
-    ZU_CHECK_EQ_INT(zu_headers_add_str(&h, "Content-Type", "application/json"), ZU_OK);
-    ZU_CHECK_EQ_INT(zu_headers_add_str(&h, "X-Api-Key!#$%&'*+-.^_`|~", "v"), ZU_OK);
-    ZU_CHECK_EQ_INT(zu_headers_add_str(&h, "X-Tab", "a\tb"), ZU_OK);   /* HTAB is legal */
-    ZU_CHECK_EQ_INT(h.n, 3);
-    zu_headers_free(&h);
+    ZUH_CASE("valid token names and printable values are accepted");
+    zuh_headers_init(&h);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "Content-Type", "application/json"), ZUH_OK);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "X-Api-Key!#$%&'*+-.^_`|~", "v"), ZUH_OK);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "X-Tab", "a\tb"), ZUH_OK);   /* HTAB is legal */
+    ZUH_CHECK_EQ_INT(h.n, 3);
+    zuh_headers_free(&h);
 
-    ZU_CASE("lookup is case-insensitive and ASCII-only");
-    zu_headers_init(&h);
-    zu_headers_add_str(&h, "Content-Type", "text/plain");
-    ZU_CHECK(strcmp(zu_headers_get(&h, "content-type"), "text/plain") == 0);
-    ZU_CHECK(strcmp(zu_headers_get(&h, "CONTENT-TYPE"), "text/plain") == 0);
-    ZU_CHECK(zu_headers_get(&h, "Content-Typ") == NULL);
-    ZU_CHECK(zu_headers_get(&h, "Content-Types") == NULL);
-    zu_headers_free(&h);
+    ZUH_CASE("lookup is case-insensitive and ASCII-only");
+    zuh_headers_init(&h);
+    zuh_headers_add_str(&h, "Content-Type", "text/plain");
+    ZUH_CHECK(strcmp(zuh_headers_get(&h, "content-type"), "text/plain") == 0);
+    ZUH_CHECK(strcmp(zuh_headers_get(&h, "CONTENT-TYPE"), "text/plain") == 0);
+    ZUH_CHECK(zuh_headers_get(&h, "Content-Typ") == NULL);
+    ZUH_CHECK(zuh_headers_get(&h, "Content-Types") == NULL);
+    zuh_headers_free(&h);
 
-    ZU_CASE("§18.3: duplicates are preserved and addressable, never joined");
-    zu_headers_init(&h);
-    zu_headers_add_str(&h, "Set-Cookie", "a=1");
-    zu_headers_add_str(&h, "Set-Cookie", "b=2");
-    zu_headers_add_str(&h, "Set-Cookie", "c=3");
-    ZU_CHECK_EQ_INT(zu_headers_count(&h, "set-cookie"), 3);
-    ZU_CHECK(strcmp(zu_headers_get_at(&h, "Set-Cookie", 0), "a=1") == 0);
-    ZU_CHECK(strcmp(zu_headers_get_at(&h, "Set-Cookie", 1), "b=2") == 0);
-    ZU_CHECK(strcmp(zu_headers_get_at(&h, "Set-Cookie", 2), "c=3") == 0);
-    ZU_CHECK(zu_headers_get_at(&h, "Set-Cookie", 3) == NULL);
-    ZU_CHECK(strcmp(zu_headers_get(&h, "Set-Cookie"), "a=1") == 0);  /* first */
-    zu_headers_free(&h);
+    ZUH_CASE("§18.3: duplicates are preserved and addressable, never joined");
+    zuh_headers_init(&h);
+    zuh_headers_add_str(&h, "Set-Cookie", "a=1");
+    zuh_headers_add_str(&h, "Set-Cookie", "b=2");
+    zuh_headers_add_str(&h, "Set-Cookie", "c=3");
+    ZUH_CHECK_EQ_INT(zuh_headers_count(&h, "set-cookie"), 3);
+    ZUH_CHECK(strcmp(zuh_headers_get_at(&h, "Set-Cookie", 0), "a=1") == 0);
+    ZUH_CHECK(strcmp(zuh_headers_get_at(&h, "Set-Cookie", 1), "b=2") == 0);
+    ZUH_CHECK(strcmp(zuh_headers_get_at(&h, "Set-Cookie", 2), "c=3") == 0);
+    ZUH_CHECK(zuh_headers_get_at(&h, "Set-Cookie", 3) == NULL);
+    ZUH_CHECK(strcmp(zuh_headers_get(&h, "Set-Cookie"), "a=1") == 0);  /* first */
+    zuh_headers_free(&h);
 
-    ZU_CASE("set replaces every instance; remove removes every instance");
-    zu_headers_init(&h);
-    zu_headers_add_str(&h, "Accept", "a");
-    zu_headers_add_str(&h, "Accept", "b");
-    zu_headers_add_str(&h, "Other", "keep");
-    ZU_CHECK_EQ_INT(zu_headers_set(&h, "accept", "only"), ZU_OK);
-    ZU_CHECK_EQ_INT(zu_headers_count(&h, "Accept"), 1);
-    ZU_CHECK(strcmp(zu_headers_get(&h, "Accept"), "only") == 0);
-    ZU_CHECK(strcmp(zu_headers_get(&h, "Other"), "keep") == 0);
-    ZU_CHECK_EQ_INT(zu_headers_remove(&h, "ACCEPT"), 1);
-    ZU_CHECK_EQ_INT(zu_headers_count(&h, "Accept"), 0);
-    ZU_CHECK_EQ_INT(h.n, 1);
-    zu_headers_free(&h);
+    ZUH_CASE("set replaces every instance; remove removes every instance");
+    zuh_headers_init(&h);
+    zuh_headers_add_str(&h, "Accept", "a");
+    zuh_headers_add_str(&h, "Accept", "b");
+    zuh_headers_add_str(&h, "Other", "keep");
+    ZUH_CHECK_EQ_INT(zuh_headers_set(&h, "accept", "only"), ZUH_OK);
+    ZUH_CHECK_EQ_INT(zuh_headers_count(&h, "Accept"), 1);
+    ZUH_CHECK(strcmp(zuh_headers_get(&h, "Accept"), "only") == 0);
+    ZUH_CHECK(strcmp(zuh_headers_get(&h, "Other"), "keep") == 0);
+    ZUH_CHECK_EQ_INT(zuh_headers_remove(&h, "ACCEPT"), 1);
+    ZUH_CHECK_EQ_INT(zuh_headers_count(&h, "Accept"), 0);
+    ZUH_CHECK_EQ_INT(h.n, 1);
+    zuh_headers_free(&h);
 
-    ZU_CASE("a rejected set does not destroy the existing value");
-    zu_headers_init(&h);
-    zu_headers_add_str(&h, "Authorization", "Bearer good");
-    ZU_CHECK_EQ_INT(zu_headers_set(&h, "Authorization", "bad\r\nX: 1"), ZU_ERR_PARSE);
-    ZU_CHECK(strcmp(zu_headers_get(&h, "Authorization"), "Bearer good") == 0);
-    zu_headers_free(&h);
+    ZUH_CASE("a rejected set does not destroy the existing value");
+    zuh_headers_init(&h);
+    zuh_headers_add_str(&h, "Authorization", "Bearer good");
+    ZUH_CHECK_EQ_INT(zuh_headers_set(&h, "Authorization", "bad\r\nX: 1"), ZUH_ERR_PARSE);
+    ZUH_CHECK(strcmp(zuh_headers_get(&h, "Authorization"), "Bearer good") == 0);
+    zuh_headers_free(&h);
 
-    ZU_CASE("§40: count, name, value and total-byte limits are enforced");
-    zu_headers_init_limited(&h, 2, 8, 16, 0);
-    ZU_CHECK_EQ_INT(zu_headers_add_str(&h, "A", "1"), ZU_OK);
-    ZU_CHECK_EQ_INT(zu_headers_add_str(&h, "B", "2"), ZU_OK);
-    ZU_CHECK_EQ_INT(zu_headers_add_str(&h, "C", "3"), ZU_ERR_BODY_LIMIT);  /* count */
-    zu_headers_free(&h);
+    ZUH_CASE("§40: count, name, value and total-byte limits are enforced");
+    zuh_headers_init_limited(&h, 2, 8, 16, 0);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "A", "1"), ZUH_OK);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "B", "2"), ZUH_OK);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "C", "3"), ZUH_ERR_BODY_LIMIT);  /* count */
+    zuh_headers_free(&h);
 
-    zu_headers_init_limited(&h, 0, 8, 16, 0);
-    ZU_CHECK_EQ_INT(zu_headers_add_str(&h, "ThisNameIsWayTooLong", "v"), ZU_ERR_BODY_LIMIT);
-    ZU_CHECK_EQ_INT(zu_headers_add_str(&h, "Ok", "0123456789abcdefghij"), ZU_ERR_BODY_LIMIT);
-    zu_headers_free(&h);
+    zuh_headers_init_limited(&h, 0, 8, 16, 0);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "ThisNameIsWayTooLong", "v"), ZUH_ERR_BODY_LIMIT);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "Ok", "0123456789abcdefghij"), ZUH_ERR_BODY_LIMIT);
+    zuh_headers_free(&h);
 
-    zu_headers_init_limited(&h, 0, 0, 0, 20);
-    ZU_CHECK_EQ_INT(zu_headers_add_str(&h, "AAAA", "bbbb"), ZU_OK);        /* 12 bytes */
-    ZU_CHECK_EQ_INT(zu_headers_add_str(&h, "CCCC", "dddd"), ZU_ERR_BODY_LIMIT);
-    zu_headers_free(&h);
+    zuh_headers_init_limited(&h, 0, 0, 0, 20);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "AAAA", "bbbb"), ZUH_OK);        /* 12 bytes */
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "CCCC", "dddd"), ZUH_ERR_BODY_LIMIT);
+    zuh_headers_free(&h);
 
-    ZU_CASE("removal reclaims the byte budget");
-    zu_headers_init_limited(&h, 0, 0, 0, 20);
-    ZU_CHECK_EQ_INT(zu_headers_add_str(&h, "AAAA", "bbbb"), ZU_OK);
-    ZU_CHECK_EQ_INT(zu_headers_remove(&h, "AAAA"), 1);
-    ZU_CHECK_EQ_INT(zu_headers_add_str(&h, "CCCC", "dddd"), ZU_OK);
-    zu_headers_free(&h);
+    ZUH_CASE("removal reclaims the byte budget");
+    zuh_headers_init_limited(&h, 0, 0, 0, 20);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "AAAA", "bbbb"), ZUH_OK);
+    ZUH_CHECK_EQ_INT(zuh_headers_remove(&h, "AAAA"), 1);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "CCCC", "dddd"), ZUH_OK);
+    zuh_headers_free(&h);
 
-    ZU_CASE("serialisation preserves order and original case");
+    ZUH_CASE("serialisation preserves order and original case");
     {
-        zu_buffer b; const char *s;
-        zu_headers_init(&h);
-        zu_headers_add_str(&h, "Host", "example.com");
-        zu_headers_add_str(&h, "X-Second", "2");
-        zu_buf_init(&b, 0, 0);
-        ZU_CHECK(zu_headers_write(&h, &b));
-        ZU_CHECK(zu_buf_cstr(&b, &s));
-        ZU_CHECK(strcmp(s, "Host: example.com\r\nX-Second: 2\r\n") == 0);
-        zu_buf_free(&b);
-        zu_headers_free(&h);
+        zuh_buffer b; const char *s;
+        zuh_headers_init(&h);
+        zuh_headers_add_str(&h, "Host", "example.com");
+        zuh_headers_add_str(&h, "X-Second", "2");
+        zuh_buf_init(&b, 0, 0);
+        ZUH_CHECK(zuh_headers_write(&h, &b));
+        ZUH_CHECK(zuh_buf_cstr(&b, &s));
+        ZUH_CHECK(strcmp(s, "Host: example.com\r\nX-Second: 2\r\n") == 0);
+        zuh_buf_free(&b);
+        zuh_headers_free(&h);
     }
 
-    ZU_CASE("no leaks across the suite");
+    ZUH_CASE("no leaks across the suite");
     {
-        zu_alloc_stats st;
-        zu_alloc_stats_get(&st);
-        ZU_CHECK_EQ_INT(st.live_blocks, 0);
+        zuh_alloc_stats st;
+        zuh_alloc_stats_get(&st);
+        ZUH_CHECK_EQ_INT(st.live_blocks, 0);
     }
 }

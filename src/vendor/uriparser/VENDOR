@@ -16,7 +16,7 @@ Subset
 --------------------------------------------------------------------------
 
 This is NOT all of uriparser. zuhttp vendors the parse / resolve / recompose
-closure only, which is the minimum that satisfies src/zu_uri.h:
+closure only, which is the minimum that satisfies src/zuh_uri.h:
 
     UriParse.c  UriParseBase.c      parse a URI reference
     UriResolve.c                    resolve a relative ref against a base (§19.5)
@@ -49,7 +49,7 @@ concatenate — while the retained ones mostly SCAN a caller-owned buffer and
 record ranges into it. Allocation arithmetic is where the overflow bugs were.
 
 zuhttp does not need any excluded function. Case normalisation happens in
-zu_uri.c against our own flat struct, and we deliberately do NOT normalise
+zuh_uri.c against our own flat struct, and we deliberately do NOT normalise
 percent-encoding in the path: rewriting a request target can change what the
 origin server resolves, and neither curl nor httr2 does it either.
 
@@ -69,7 +69,7 @@ Required build flags
                           URI_PUBLIC is empty regardless, but set it anyway so
                           an MSVC build cannot pick up __declspec(dllimport).
 
-src/zu_uriparser.h sets both before including <uriparser/Uri.h>, so zuhttp's
+src/zuh_uriparser.h sets both before including <uriparser/Uri.h>, so zuhttp's
 own translation units are correct even if a build file forgets the flags.
 
 --------------------------------------------------------------------------
@@ -86,12 +86,12 @@ Behaviour notes that cost time to discover
 2. uriCompleteMemoryManager(m, backend) needs TWO DISTINCT structs. It stores
    `backend` in m->userData and installs decorating functions that call
    through it, so passing one struct as both arguments makes uriDecorateMalloc
-   recurse into itself until the stack dies. zuhttp does not call it: zu_alloc
+   recurse into itself until the stack dies. zuhttp does not call it: zuh_alloc
    already size-headers its blocks, so we fill all five slots directly and use
    the library's uriEmulateReallocarray for the fifth.
 
 3. The parser is RFC 3986, not WHATWG URL. It accepts things an HTTP client
-   must still reject — a port of 65536, a host of "example.com..". zu_uri.c
+   must still reject — a port of 65536, a host of "example.com..". zuh_uri.c
    applies that validation layer; see its header comment for the full list.
    It is correspondingly stricter than a browser in useful ways: a backslash,
    a space, a tab or a newline in the authority is a syntax error.

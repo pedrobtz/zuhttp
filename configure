@@ -26,7 +26,7 @@ TLS_OBJ=""
 
 if [ "$UNAME" = "Darwin" ]; then
     # --- macOS: the system stack. No OpenSSL, nothing to install. ----------
-    TLS_OBJ="zu_tls_sectransport.o"
+    TLS_OBJ="zuh_tls_sectransport.o"
     SSL_LIBS="-framework Security -framework CoreFoundation"
     # Deprecation warnings from Secure Transport are NOT suppressed. Both
     # ways of doing so are worse: --as-cran NOTEs a #pragma that suppresses
@@ -59,7 +59,7 @@ CEOF
     echo "configure: Security.framework links, SecTrustEvaluateWithError present"
 else
     # --- everything else: the system OpenSSL, dynamically linked ----------
-    TLS_OBJ="zu_tls_openssl.o"
+    TLS_OBJ="zuh_tls_openssl.o"
     if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists openssl 2>/dev/null; then
         SSL_CFLAGS=$(pkg-config --cflags openssl)
         SSL_LIBS=$(pkg-config --libs openssl)

@@ -244,7 +244,7 @@ D-65, §53, §34.1. **Estimate:** 1.5 days, high.
 
 - [ ] 58 exports: the 75 of 0.1.0 minus exactly the 17 removals in design §53.
 - [ ] Every condition inherits `zuhttp_error` directly above `error`, from the
-      C chain (`zu_code_class_chain()`), not from R.
+      C chain (`zuh_code_class_chain()`), not from R.
 - [ ] Testing tools carry an "experimental" lifecycle note in their help.
 - [ ] README's "the API is expected to be stable" becomes true, and says
       which functions are experimental.
@@ -283,7 +283,7 @@ groups A–D). **Implements:** §50.4, §50.6. **Estimate:** 3 days, medium.
 - [x] `redirects` defaults to 10; a 3-hop redirect chain succeeds with the
       default client. (#55; an exhausted chain now raises.)
 - [ ] `max_decompression_ratio` defaults to 1000 and is passed at
-      `zu_body.c:35`; a 1 KB → 100 MB bomb fails after less than 1 MB of
+      `zuh_body.c:35`; a 1 KB → 100 MB bomb fails after less than 1 MB of
       output, with the absolute cap raised out of the way to prove it is the
       ratio that fired.
 - [ ] Both in NEWS as behaviour changes.
@@ -345,7 +345,7 @@ implementation half), #42, #44 (pin rows). **Implements:** D-60, §14.4.
 
 **Exit criteria**
 
-- [ ] `src/zu_spki.c` (or `zuh_spki.c` after W2): the bounded DER walker, no
+- [ ] `src/zuh_spki.c` (or `zuh_spki.c` after W2): the bounded DER walker, no
       allocation, ≤ 150 lines.
 - [ ] `ctest`: the walker and OpenSSL's `i2d_X509_PUBKEY` agree on a corpus of
       at least 20 real certificates (RSA, EC P-256, P-384, Ed25519); every
@@ -412,14 +412,14 @@ timeout documents.
 **Milestone:** M0, after W2, W3 and W6. **Closes:** #16, #44.
 **Implements:** D-63, D-71, §13.2, §9, §20.3. **Estimate:** 6 days, medium.
 
-This replaces `zu_tls_sectransport.c` with a Network.framework backend and
+This replaces `zuh_tls_sectransport.c` with a Network.framework backend and
 deletes Secure Transport, which removes the `--as-cran` NOTE. It runs early in
 M1 so that W7 (timeouts), W9 (pinning) and W11 (cancellation) are built once,
 on the engine that ships, and not twice.
 
 **Exit criteria**
 
-- [ ] `zu_tls_nw.c` implements `zu_tls_dial()`. The engine skips its own TCP
+- [ ] `zuh_tls_nw.c` implements `zu_tls_dial()`. The engine skips its own TCP
       and CONNECT for `https://` when the backend reports `ZU_TLS_CAP_DIALS`.
       Plain HTTP and the other backends are untouched.
 - [ ] Trust runs in the verify block with `SecTrustEvaluateWithError`. The
@@ -444,7 +444,7 @@ on the engine that ships, and not twice.
       child; `tools/ci-fork-guard.R` passes (SIGILL otherwise, F-19).
 - [ ] `zu_resp_timings()` reports `dns`, `connect` and `tls` from the
       establishment report, and `zu_resp_connection()` reports `remote_ip`.
-- [ ] `zu_tls_sectransport.c` is deleted, and `configure` links
+- [ ] `zuh_tls_sectransport.c` is deleted, and `configure` links
       `-framework Network`. `R CMD check --as-cran` on macOS shows no pragma
       or deprecation NOTE.
 - [ ] Design §13.2 has its "still to settle" list emptied.

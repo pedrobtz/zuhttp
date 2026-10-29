@@ -16,7 +16,7 @@ set -eu
 CC=$("${R_HOME}/bin/R" CMD config CC)
 CFLAGS=$("${R_HOME}/bin/R" CMD config CFLAGS)
 
-TLS_OBJ="zu_tls_schannel.o"
+TLS_OBJ="zuh_tls_schannel.o"
 SSL_CFLAGS=""
 SSL_LIBS="-lsecur32 -lcrypt32 -lws2_32"
 

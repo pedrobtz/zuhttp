@@ -105,7 +105,7 @@ print.zu_tls_config <- function(x, ...) {
 # setting it cannot raises zu_tls_unsupported_error here, before DNS. Not in
 # zu_tls() itself: a zu_tls_config is data that can be saved and loaded on
 # another platform, so the check belongs where the backend is known — the
-# request. The capability table lives in C (zu_tls_backend_caps), not here.
+# request. The capability table lives in C (zuh_tls_backend_caps), not here.
 # Every backend reads PEM; none reads DER. A certificate file's extension says
 # nothing about which it is (.crt and .cer are both used for both), and the
 # backends' own errors ("cannot read CA file") do not say which was wrong, so

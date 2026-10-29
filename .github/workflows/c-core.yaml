@@ -2,8 +2,8 @@
 #
 # These link no R headers, so a failure here means the core itself is broken
 # rather than the R packaging. They run on all three target platforms because
-# the core contains the portability layer (zu_platform.h) and the monotonic
-# clock shims (zu_time.c), which are exactly the code most likely to differ.
+# the core contains the portability layer (zuh_platform.h) and the monotonic
+# clock shims (zuh_time.c), which are exactly the code most likely to differ.
 #
 # Windows compiles with the toolchain R itself uses (`R CMD config CC`), so a
 # green run here means the core builds under Rtools, not merely under some gcc.
@@ -140,6 +140,6 @@ jobs:
         env:
           ZU_TEST_TRACE: "1"
         run: |
-          make zu_ctest
+          make zuh_ctest
           valgrind --error-exitcode=1 --leak-check=full --show-leak-kinds=all \
-                   --errors-for-leak-kinds=definite,indirect ./zu_ctest
+                   --errors-for-leak-kinds=definite,indirect ./zuh_ctest

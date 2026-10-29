@@ -12,10 +12,10 @@
 *.a
 
 # ctest binaries — committed by mistake in 5510a4e, untracked since.
-ctest/zu_ctest
-ctest/zu_ctest_asan
-ctest/zu_tlstest
-ctest/zu_engtest
+ctest/zuh_ctest
+ctest/zuh_ctest_asan
+ctest/zuh_tlstest
+ctest/zuh_engtest
 ctest/build/
 ctest/build-asan/
 *.dSYM/
@@ -41,5 +41,5 @@ spike/windows-schannel/*.exe
 spike/macos-engine/st_probe
 src/Makevars
 src/Makevars.win
-ctest/zu_engtest_st
+ctest/zuh_engtest_st
 docs/

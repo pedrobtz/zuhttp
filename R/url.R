@@ -1,4 +1,4 @@
-# URL assembly for the R layer. Parsing and validation stay in C (src/zu_uri.c,
+# URL assembly for the R layer. Parsing and validation stay in C (src/zuh_uri.c,
 # §8) — this is only what has to happen before a URL can be handed over: the
 # base_url join and query-string encoding.
 

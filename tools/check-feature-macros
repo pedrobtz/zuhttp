@@ -4,8 +4,8 @@
 #
 # This exists because the class has bitten twice:
 #
-#   2230b11  zu_net.c   -std=c99 hid struct addrinfo and getnameinfo
-#   3d2bd18  zu_time.c  -std=c99 hid CLOCK_MONOTONIC, so zu_now_ms() returned
+#   2230b11  zuh_net.c   -std=c99 hid struct addrinfo and getnameinfo
+#   3d2bd18  zuh_time.c  -std=c99 hid CLOCK_MONOTONIC, so zuh_now_ms() returned
 #                       0 forever on Linux and NO DEADLINE EVER EXPIRED
 #
 # The second one did not fail to build. It compiled, passed every test that
@@ -31,7 +31,7 @@ done
 
 if [ "$bad" -ne 0 ]; then
     echo >&2
-    echo "Add the preamble used by src/zu_net.c and src/zu_time.c, BEFORE any" >&2
+    echo "Add the preamble used by src/zuh_net.c and src/zuh_time.c, BEFORE any" >&2
     echo "system header. Without it glibc hides POSIX declarations under" >&2
     echo "-std=c99, and the symptom can be a silent wrong answer rather than a" >&2
     echo "build failure." >&2

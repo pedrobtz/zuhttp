@@ -8,7 +8,7 @@ NULL
 # conditions are still well-formed for rlang::catch_cnd() because the class
 # vector and the message/call fields follow the standard layout.
 #
-# The class chain comes from C (zu_code_class_chain) rather than from a table
+# The class chain comes from C (zuh_code_class_chain) rather than from a table
 # here, so the hierarchy has one definition. A parent map maintained in R
 # would drift from the C enum the first time a code was added.
 

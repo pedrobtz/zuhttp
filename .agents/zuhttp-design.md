@@ -71,7 +71,7 @@ Five rules keep it that way:
 | D-25 | `jsonlite` in Suggests; pluggable JSON backend | Accepted | 31.7 |
 | D-26 | Conditions built with base R; no rlang | Accepted | 34.3 |
 | D-27 | Redaction is one policy applied at every egress | Accepted | 42 |
-| D-28 | zuhttp's own tests use the `zu_stream` mock, not the R transport mock | Accepted | 50.1 |
+| D-28 | zuhttp's own tests use the `zuh_stream` mock, not the R transport mock | Accepted | 50.1 |
 | D-29 | Concurrency, if ever built, integrates with `later` — **not before 1.0 (D-67)** | Proposed | 30.2 |
 | D-30 | DNS is not interruptible in 0.x; documented — **superseded by D-59 when W14 lands** | Accepted | 8.4, 25.4 |
 | D-31 | Revocation checking off by default, opt-in | Accepted | 14.5 |
@@ -89,12 +89,12 @@ Five rules keep it that way:
 | D-43 | Retry admissibility is decided once, before the first attempt | Accepted | 33.1 |
 | D-44 | The retry loop sits inside middleware | Accepted | 31.13 |
 | D-45 | The response sink argument is `path =`; `file =` is a request body | Accepted | 27, 31.6 |
-| D-46 | The body path lives in `zu_body.c`, so it is mock-testable | Accepted | 27, 50.1 |
+| D-46 | The body path lives in `zuh_body.c`, so it is mock-testable | Accepted | 27, 50.1 |
 | D-47 | A callback is caught on error and interrupt only | Accepted | 27.3 |
 | D-48 | Proxying is disabled with `proxy = FALSE`, not `NULL` | Accepted | 20.1, 31.9 |
 | D-49 | `verify` is a merged policy argument; `zu_tls()` carries `ca_file`, `ca_extra`, `pins`, `revocation`, `min_version` | Accepted | 14.1, 31.9 |
 | D-50 | `redirect.followed` carries the resolved target, built like `final_url` | Accepted | 35.3 |
-| D-51 | A URL enters the trace only through `zu_trace_add_url()`, which redacts in C | Accepted | 35.3, 42.2 |
+| D-51 | A URL enters the trace only through `zuh_trace_add_url()`, which redacts in C | Accepted | 35.3, 42.2 |
 | D-52 | `final_url` is redacted in the engine | Accepted | 42.1, 42.2 |
 | D-53 | One response sink: `path` and `callback` are mutually exclusive | Accepted | 27.1 |
 | D-54 | zuhttp consumes no `zu*` sibling in 0.x; internal C moves off `zu_` | Accepted 2026-09-25 | 5.1 |
@@ -118,12 +118,12 @@ accepted when that work package's PR merges.
 | D-71 | On macOS an HTTPS stream is **dialled** by the TLS backend (`zu_tls_dial()`, `ZU_TLS_CAP_DIALS`), which does TCP, DNS and CONNECT itself; everywhere else, and for plain HTTP, the engine still opens the socket and the backend wraps it | Proposed | 9, 13.2, 20.3 | W13 |
 | D-64 | Windows TLS 1.3 ships only behind a CI job that proves the local `SCH_CREDENTIALS` / `TLS_PARAMETERS` layout equals MSVC's; otherwise Windows stays TLS 1.2 and scope cut 4 is recorded as taken | Proposed | 13.4, 47.4 | W15 |
 | D-65 | Export surface: exactly the **17** removals in §53, leaving **58** functions at 0.2.0 (75 today); every condition also inherits **`zuhttp_error`**, directly above `error` | Proposed | 34.1, 53 | W3 |
-| D-66 | Internal C identifiers become `zuh_` / `ZUH_`; only `R_init_zuhttp` is exported from the shared object | Proposed | 1.1, 11 | W2 |
+| D-66 | Internal C identifiers are `zuh_` / `ZUH_`; only `R_init_zuhttp` is exported from the shared object | Accepted (W2) | 1.1, 11 | W2 |
 | D-67 | No asynchronous or concurrent requests before 1.0 (answers §62 Q15 for 0.x). R connection sinks (§27.5) are **rejected** — `callback` covers them. Client certificates are post-1.0, on demand | Proposed | 27.5, 30, 38 | — |
 | D-68 | Default `redirects` is **10**, as §19.4 always said; the shipped default of 1 was a leftover of the §63.2 slice. An exhausted chain raises `zu_too_many_redirects`; `redirects = 0` returns the 3xx | Accepted 2026-09-26 (#55) | 19.4, 31.9 | — |
-| D-69 | The decompression-ratio limit is enforced by default (`max_decompression_ratio = 1000`), as §21.4 requires; today it is implemented in `zu_inflate.c` and switched off at `zu_body.c:35` | Proposed | 21.4, 40 | W6 |
+| D-69 | The decompression-ratio limit is enforced by default (`max_decompression_ratio = 1000`), as §21.4 requires; today it is implemented in `zuh_inflate.c` and switched off at `zuh_body.c:35` | Proposed | 21.4, 40 | W6 |
 | D-70 | Process: CI runs on every pull request; one PR per work package; a work package's test lands before or with it, `skip()`ped with the package named until then | Proposed | 50 | W1 |
-| D-72 | A **connection seam**, `zu_get_opts.dial`: NULL opens real TCP (always, in the package); set, it supplies every connection while everything above it runs for real. It is how the offline suite and fuzz target 10 drive the whole engine | Accepted 2026-09-26 (#58) | 50.1 | — |
+| D-72 | A **connection seam**, `zuh_get_opts.dial`: NULL opens real TCP (always, in the package); set, it supplies every connection while everything above it runs for real. It is how the offline suite and fuzz target 10 drive the whole engine | Accepted 2026-09-26 (#58) | 50.1 | — |
 | D-73 | Bytes received **past a response's framing** — after `Content-Length`, after a chunked body's trailers, or on a bodiless response — keep that connection out of the pool | Accepted 2026-09-26 (#58) | 26.3 | — |
 | D-74 | The interrupt checkpoint runs `R_CheckUserInterrupt()` under `R_tryCatch` and keeps the condition: a user interrupt becomes `zu_interrupted_error`; any other error raised there (a time limit) is re-raised unchanged after the engine unwinds. Its context lives in a per-call slot, never in a pooled stream | Accepted 2026-09-26 (#57) | 25.2 | — |
 | D-75 | A client derived with **different `pool` settings gets a pool of its own**; any other derived client shares its parent's. One shared slot made parent and child each rebuild the pool the other had built, dropping every idle connection on each alternation | Accepted 2026-09-26 (#74) | 26.5, 31.10 | — |
@@ -167,13 +167,15 @@ on macOS, 89.4% on Linux (`tools/coverage/`, floors enforced in CI).
 | R functions | `zu_` | `zu_get()`, `zu_client()` |
 | R response accessors | `zu_resp_` | `zu_resp_status()` |
 | R condition classes | `zu_`, root `zuhttp_error` (D-65) | `zu_tls_certificate_error` |
-| C identifiers, internal | `zu_` today; `zuh_` after W2 (D-66) | `zu_stream` → `zuh_stream` |
+| C identifiers, internal | `zuh_` / `ZUH_` (D-66) | `zuh_stream`, `ZUH_ERR_TLS` |
 | C macros | `ZUHTTP_` | `ZUHTTP_NO_COMPRESSION` |
 
 `zu_resp_` exists because httr2 exports `resp_status()` and friends and the
-two packages are attached together (D-2). The C prefix moves because `zu_` /
-`ZU_` is `zukomp`'s public ABI, and `ZU_OK` and `zu_buffer` already collide
-with `zukomp.h` (D-54, #15).
+two packages are attached together (D-2). The C prefix is not `zu_` because
+`zu_` / `ZU_` is `zukomp`'s public ABI: until W2, zuhttp's `ZU_OK` and
+`zu_buffer` collided with `zukomp.h` (D-54, #15). `tools/check-c-prefix` keeps
+`zu_` out of C code, and `tools/check-zukomp-headers` compiles zuhttp's
+headers beside zukomp's. Never `zu_int_`, which is also zukomp's.
 
 #### 1.2 Honest claims
 
@@ -290,7 +292,7 @@ R API: verbs, zu_request() |> ..., zu_client()        (§31)
                   ├─ URI + redirects                   (§8.2, §19)
                   ├─ proxy + CONNECT                   (§20)
                   ├─ pool + PID guard                  (§26)
-                  └─ zu_stream vtable                  (§9)
+                  └─ zuh_stream vtable                  (§9)
                       ├─ TCP (poll, non-blocking)      (§8.5)
                       ├─ TLS engine │ trust evaluator  (§13)
                       └─ mock stream                   (§50.1)
@@ -316,25 +318,25 @@ sits between framing and the sink (§21, §27).
 #### 8.1 HTTP parser — picohttpparser (D-10)
 
 picohttpparser splits the status line and header block and makes **no framing
-decisions**. Every §18.1 rule lives in `zu_framing.c` and every header is
+decisions**. Every §18.1 rule lives in `zuh_framing.c` and every header is
 re-validated by `zu_headers`, so anything §18.1 does not reject, nothing
-does. The parser type never crosses `zu_response.c`. It needs the whole header
+does. The parser type never crosses `zuh_response.c`. It needs the whole header
 block contiguous and re-scans from offset 0, so `max_header_bytes` (§40)
 bounds both the allocation and the quadratic re-scan.
 
 #### 8.2 URI parser
 
 The uriparser 0.9.8 parse/resolve/recompose closure (eight `.c` files) plus
-the policy layer in `zu_uri.c`. Six of uriparser's eight CVEs are in the
-excluded modules. Allocations route through `zu_alloc`, so OOM injection
-covers the parser. `src/zu_uriparser.h` is the only includer of uriparser.
+the policy layer in `zuh_uri.c`. Six of uriparser's eight CVEs are in the
+excluded modules. Allocations route through `zuh_alloc`, so OOM injection
+covers the parser. `src/zuh_uriparser.h` is the only includer of uriparser.
 
 The policy layer rejects what RFC 3986 accepts but a client must not:
 ports above 65535, empty DNS labels, IPvFuture hosts, non-HTTP schemes and
 embedded NUL; it strips a root dot, drops fragments and moves userinfo out of
 the URL (§20.4). Supplied paths are preserved verbatim, never normalised.
 `zu_query()` encodes values from UTF-8, space as `%20`, everything outside
-`unreserved` percent-encoded. The boundary is the flat `zu_uri` struct.
+`unreserved` percent-encoded. The boundary is the flat `zuh_uri` struct.
 
 #### 8.3 Compression
 
@@ -368,13 +370,13 @@ rather than the kernel.
 
 ### 9. Generic Stream Interface
 
-**Status:** Built — `src/zu_stream.h`. On macOS after W13, HTTPS streams are
+**Status:** Built — `src/zuh_stream.h`. On macOS after W13, HTTPS streams are
 dialled rather than wrapped (D-71); the vtable is the same.
 
-The HTTP engine depends only on the `zu_stream` vtable: `read`, `write`,
+The HTTP engine depends only on the `zuh_stream` vtable: `read`, `write`,
 `close`, `destroy`, and `readable(timeout_ms)`, the non-consuming liveness
-probe the pool needs (§26.2). Each call takes a `zu_deadline` and a
-`zu_error *`. Implementations: plain TCP, TLS (which wraps another stream, so
+probe the pool needs (§26.2). Each call takes a `zuh_deadline` and a
+`zuh_error *`. Implementations: plain TCP, TLS (which wraps another stream, so
 the same engine serves a direct connection and a CONNECT tunnel), and the
 mock. This is the most important boundary in the codebase.
 
@@ -382,7 +384,7 @@ mock. This is the most important boundary in the codebase.
 
 **Status:** Built.
 
-Platform differences live in `zu_platform.h`, `zu_net.c`, `zu_time.c` and one
+Platform differences live in `zuh_platform.h`, `zuh_net.c`, `zuh_time.c` and one
 `zu_tls_<backend>.c` per TLS stack selected by `configure`. Generic HTTP
 logic contains no `#ifdef _WIN32`.
 
@@ -392,19 +394,20 @@ logic contains no `#ifdef _WIN32`.
 
 ```text
 src/init.c                    R glue; the only file including R headers
-src/zu_{engine,request,response,framing,headers,body,sink,inflate}.c
-src/zu_{uri,redirect,proxy,pool,fork,net,time,trace,redact,error,alloc,buffer}.c
-src/zu_stream.{c,h}, zu_mock_stream.c
-src/zu_tls.c                  backend-neutral policy (defaults, D-56 check)
-src/zu_tls_{openssl,sectransport,schannel}.c   one per backend
+src/zuh_{engine,request,response,framing,headers,body,sink,inflate}.c
+src/zuh_{uri,redirect,proxy,pool,fork,net,time,trace,redact,error,alloc,buffer}.c
+src/zuh_stream.{c,h}, zuh_mock_stream.c
+src/zuh_tls.c                 backend-neutral policy (defaults, D-56 check)
+src/zuh_tls_{openssl,sectransport,schannel}.c  one per backend
 src/vendor/{picohttpparser,uriparser}/         D-10, D-11
 inst/COPYRIGHTS, inst/licenses/                §49.2
 ctest/  fuzz/  tools/                          not in the tarball
 ```
 
 The C core compiles without R headers; that is what makes `ctest/` and
-`fuzz/` possible and it MUST stay true. After W2 every non-static symbol
-except `R_init_zuhttp` is hidden (D-66), checked by `test-abi.R`.
+`fuzz/` possible and it MUST stay true. Every symbol except `R_init_zuhttp` is
+hidden (D-66): `$(C_VISIBILITY)` on Unix, `src/zuhttp-win.def` on Windows,
+vendored code included; `test-abi.R` checks the shared object.
 
 ### 12. Recommended Architectural Decision
 
@@ -507,7 +510,7 @@ before trust evaluation.
 #### 13.3 TLS is hidden behind the stream interface
 
 The HTTP layer never knows whether a stream is TCP, TLS, a tunnel or a mock
-(§9). `zu_tls_connect()` wraps an inner stream; on failure the inner stream is
+(§9). `zuh_tls_connect()` wraps an inner stream; on failure the inner stream is
 left to the caller, so a failed handshake never double-frees a socket.
 
 #### 13.4 Windows / Schannel
@@ -642,10 +645,10 @@ code fails §61.9.
 
 **Status:** Built 2026-09-25.
 
-Each backend exports `zu_tls_backend_caps()`, a mask over `pins`, `tls13`,
-`ca_file`, `ca_extra` and `revocation`. `zu_tls_config_check()` in `zu_tls.c`
+Each backend exports `zuh_tls_backend_caps()`, a mask over `pins`, `tls13`,
+`ca_file`, `ca_extra` and `revocation`. `zuh_tls_config_check()` in `zuh_tls.c`
 applies it — from the R request path before DNS, and again first thing in
-`zu_tls_connect()` — raising `zu_tls_unsupported_error` with the setting and
+`zuh_tls_connect()` — raising `zu_tls_unsupported_error` with the setting and
 the backend named. `zu_info()$tls_capabilities` reports the mask. Tests read it
 through `skip_unless_tls_supports()`; no R code keeps a table of backends.
 
@@ -658,12 +661,12 @@ through `skip_unless_tls_supports()`; no R code keeps a table of backends.
 
 ### 15. Native TLS Backend Interface
 
-**Status:** Built — `src/zu_tls.h`.
+**Status:** Built — `src/zuh_tls.h`.
 
-`zu_tls_connect(out, inner, hostname, cfg, deadline, err)` wraps an inner
-stream and returns a TLS stream; `zu_tls_get_info()` reports protocol, cipher
-and trust backend (§35.2); `zu_tls_backend_name()`, `zu_tls_available()` and
-`zu_tls_backend_caps()` describe the build. Backends normalise their retry
+`zuh_tls_connect(out, inner, hostname, cfg, deadline, err)` wraps an inner
+stream and returns a TLS stream; `zuh_tls_get_info()` reports protocol, cipher
+and trust backend (§35.2); `zuh_tls_backend_name()`, `zuh_tls_available()` and
+`zuh_tls_backend_caps()` describe the build. Backends normalise their retry
 states to would-block, closed and fatal before anything above them sees one.
 
 ### 16. Native System Configuration
@@ -680,7 +683,7 @@ environment variables and explicit arguments are.
 
 ### 17. HTTP Request Construction
 
-**Status:** Built — `src/zu_request.c`.
+**Status:** Built — `src/zuh_request.c`.
 
 The builder writes the request line (origin-form, or absolute-form to an HTTP
 proxy), `Host`, headers, and `Content-Length` into a checked buffer with
@@ -718,7 +721,7 @@ two together; a wrong length puts the connection out of step with the server).
 
 ### 18. Response Parsing and Body Framing
 
-**Status:** Built — `src/zu_framing.c`, the primary fuzz target.
+**Status:** Built — `src/zuh_framing.c`, the primary fuzz target.
 
 Handles the status line, repeated `1xx`, headers, `Content-Length`, chunked,
 close-delimited bodies, HEAD, and body-less `204`/`304`.
@@ -760,7 +763,7 @@ buffer grows.
 
 ### 19. Redirect Handling
 
-**Status:** Built — `src/zu_redirect.c`.
+**Status:** Built — `src/zuh_redirect.c`.
 
 #### 19.1 Method and body rewriting (D-17)
 
@@ -775,7 +778,7 @@ buffer grows.
 On any change of scheme, host or port, strip every header §42.1 calls secret:
 `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`,
 `X-Auth-Token` and any name configured with `zu_redact_headers()` (D-79). The
-list is the redactor's, in `zu_redact.c`; the redirect module has none of its
+list is the redactor's, in `zuh_redact.c`; the redirect module has none of its
 own. The decision is permanent for the chain.
 
 #### 19.3 Downgrade policy
@@ -804,7 +807,7 @@ userinfo. The result passes the full §8.2 policy layer.
 
 ### 20. Proxy Support
 
-**Status:** Built — `src/zu_proxy.c`.
+**Status:** Built — `src/zuh_proxy.c`.
 
 #### 20.1 Environment variables
 
@@ -872,8 +875,8 @@ zlib-wrapped first, raw DEFLATE on a header error.
 Enforced during inflation, not after: `max_body` caps decoded output
 (16 MiB by default), and `max_decompression_ratio` caps output ÷ input once
 32 input bytes have been seen. Either raises `zu_body_limit_error` and closes
-the connection. **The ratio check exists in `zu_inflate.c` but is passed 0
-by `zu_body.c:35` and so never runs; D-69 turns it on at 1000.** The absolute
+the connection. **The ratio check exists in `zuh_inflate.c` but is passed 0
+by `zuh_body.c:35` and so never runs; D-69 turns it on at 1000.** The absolute
 cap bounds a bomb today; the ratio makes it fail after kilobytes, not
 megabytes. `Transfer-Encoding: gzip` is rejected (§18.1).
 
@@ -954,7 +957,7 @@ transport driven outside the retry loop finds no `attempt_budget` and spends
 
 Monotonic only. A platform with no monotonic clock fails to **build**; the
 suite asserts the clock advances, and `tools/check-feature-macros` guards the
-feature-macro class of bug that once made `zu_now_ms()` return 0 on Linux.
+feature-macro class of bug that once made `zuh_now_ms()` return 0 on Linux.
 
 #### 24.5 Defaults (D-58)
 
@@ -1006,7 +1009,7 @@ reuse the §25.1 checkpoint.
 
 ### 26. Connection Pool
 
-**Status:** Built — `src/zu_pool.c`, `src/zu_fork.c`.
+**Status:** Built — `src/zuh_pool.c`, `src/zuh_fork.c`.
 
 #### 26.1 Pool key
 
@@ -1067,7 +1070,7 @@ would rebuild it on every switch between the two.
 
 ### 27. Streaming Model
 
-**Status:** Built — `src/zu_sink.c`, `src/zu_body.c`.
+**Status:** Built — `src/zuh_sink.c`, `src/zuh_body.c`.
 
 One sink contract — write, finish, abort, destroy — for memory, file, discard
 and callback. No whole-body allocation outside the memory sink: 100 MiB to a
@@ -1359,7 +1362,7 @@ Retired: see edition 1 §33.5.
 
 #### 34.1 Condition hierarchy
 
-The one definition is `src/zu_error.c` (`k_class[]`, `class_parent()`); R
+The one definition is `src/zuh_error.c` (`k_class[]`, `class_parent()`); R
 reads it through `zu_condition()`. This tree is its documentation.
 
 ```text
@@ -1406,7 +1409,7 @@ backend code comes last. §61.9 audits the catalogue at 1.0.
 
 ### 35. Observability
 
-**Status:** Built — `src/zu_trace.c`, `R/verbose.R`.
+**Status:** Built — `src/zuh_trace.c`, `R/verbose.R`.
 
 #### 35.1 Timings
 
@@ -1428,7 +1431,7 @@ report.
 `request.start`, `dns.*`, `connect.*`, `tls.*`, `headers.received`,
 `body.chunk`, `retry.scheduled`, `redirect.followed`, `request.done`, read
 with `zu_resp_trace()` and printed by `zu_verbose()`. Payloads are redacted
-before any handler sees them; URLs enter only through `zu_trace_add_url()`
+before any handler sees them; URLs enter only through `zuh_trace_add_url()`
 (D-51), and `redirect.followed` carries the resolved target (D-50).
 
 #### 35.4 Cost
@@ -1505,16 +1508,16 @@ across origins, proxy credentials confined to the proxy.
 
 ### 41. Memory Management
 
-**Status:** Built — `src/zu_alloc.c`.
+**Status:** Built — `src/zuh_alloc.c`.
 
-All allocations go through `zu_alloc`/`zu_realloc`/`zu_free` with overflow
+All allocations go through `zuh_alloc`/`zuh_realloc`/`zuh_free` with overflow
 checks, accounting, and OOM injection for the offline suite (0 leaks at every
 injection point on the URI resolve path). No pointer into R memory is kept
 across calls.
 
 ### 42. Secret Redaction (D-27)
 
-**Status:** Built — `src/zu_redact.c`, called from R so the policy has one
+**Status:** Built — `src/zuh_redact.c`, called from R so the policy has one
 definition.
 
 #### 42.1 What is redacted
@@ -1674,7 +1677,7 @@ named in `COPYRIGHTS` for the reader.
 | Level | Substitutes | Exercises | Used for |
 |---|---|---|---|
 | R transport mock | everything below R | API, merging, middleware | ergonomics; downstream packages |
-| `zu_stream` mock | sockets and TLS | parser, framing, pool, redirects, decompression, body path — and, through the D-72 seam, the whole engine | most of zuhttp's own tests (`ctest/`, 1,630 checks) |
+| `zuh_stream` mock | sockets and TLS | parser, framing, pool, redirects, decompression, body path — and, through the D-72 seam, the whole engine | most of zuhttp's own tests (`ctest/`, 1,630 checks) |
 | local servers | nothing | the whole stack | integration: webfakes, a raw-bytes server, `openssl s_server`, a logging proxy |
 
 #### 50.2 Unit tests
