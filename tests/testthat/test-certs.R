@@ -28,7 +28,6 @@ test_that("a valid certificate from a trusted CA is accepted", {
 
 test_that("an unknown issuer is rejected (§14.6)", {
   skip_unless_local_tls()
-  skip_under_gctorture()
   fx <- tls_fixture()
   # Signed by a CA the client is never told about. This is the row that F-3
   # would have failed: the handshake completes fine at the protocol level and
@@ -213,13 +212,24 @@ test_that("a matching pin does not bypass chain verification (§14.4)", {
 # claimed they did and that claim was false — so of everything in this file,
 # this is the claim with the most riding on a test and, until now, the least.
 
-test_that("revocation is off by default: a revoked certificate is accepted (§14.5)", {
+test_that("revocation off by default: what each platform then does (§14.5)", {
   skip_unless_online()
   # Not a bug and not an endorsement — it is what the platform does, and what
-  # §14.5 documents. If a future macOS or OpenSSL started checking by default
-  # this fails, which is exactly when the section needs rewriting.
-  r <- zu_get("https://revoked.badssl.com", timeout = 20)
-  expect_identical(zu_resp_status(r), 200L)
+  # §14.5 documents. If a platform changes its default, this fails, which is
+  # exactly when the section needs rewriting.
+  #
+  # macOS did: measured 2026-10-29 on macOS 15.7.9 and on the macOS CI
+  # runner, SecTrust rejects revoked.badssl.com with no revocation policy
+  # set, under Secure Transport and Network.framework alike, so the system
+  # consults Apple's revocation data by default. zuhttp adds no check and
+  # cannot remove that one.
+  if (identical(Sys.info()[["sysname"]], "Darwin")) {
+    expect_error(zu_get("https://revoked.badssl.com", timeout = 20),
+                 class = "zu_tls_certificate_error")
+  } else {
+    r <- zu_get("https://revoked.badssl.com", timeout = 20)
+    expect_identical(zu_resp_status(r), 200L)
+  }
 })
 
 test_that("zu_tls(revocation = TRUE) changes the outcome for a revoked host", {

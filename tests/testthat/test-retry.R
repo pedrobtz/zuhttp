@@ -534,6 +534,7 @@ test_that("a backoff sleep responds to Ctrl-C", {
 
 test_that("no automatic retry once a callback has been handed bytes (§27, §33.1, D-81)", {
   skip_on_cran()
+  skip_under_gctorture()
   skip_if_not_installed("webfakes")
   # A callback's bytes, and whatever it did with them, cannot be taken back,
   # so a retry after delivery handed it a second body behind the first: a 503

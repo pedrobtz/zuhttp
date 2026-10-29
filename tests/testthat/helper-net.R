@@ -57,6 +57,10 @@ skip_unless_tls_supports <- function(cap) {
 # not fire, an elapsed time under N seconds -- cannot hold under gctorture,
 # which makes R many times slower. native-checks.yaml sets ZU_GCTORTURE there.
 # Such a test checks timing, which gctorture neither tests nor needs.
+# The local-server families -- the TLS fixture, the helper proxy, raw
+# servers and webfakes -- skip as a whole: at that speed each of them races a
+# timeout somewhere, and what gctorture exists to check, the PROTECT
+# discipline of init.c, is exercised by every other test.
 skip_under_gctorture <- function() {
   if (identical(Sys.getenv("ZU_GCTORTURE"), "true"))
     testthat::skip("a wall-clock bound, under gctorture")
