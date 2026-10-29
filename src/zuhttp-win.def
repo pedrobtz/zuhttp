@@ -1,0 +1,5 @@
+; The DLL's whole export table (D-66). $(C_VISIBILITY) is empty on Windows,
+; and without this file R generates a .def exporting every global symbol.
+LIBRARY zuhttp.dll
+EXPORTS
+ R_init_zuhttp
