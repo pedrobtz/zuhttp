@@ -1,0 +1,26 @@
+# The vendored tree matches its manifest, from pedrobtz/r-actions (W1, #18).
+#
+# Two halves. tools/vendor/verify answers "is src/vendor/ byte-for-byte what was
+# recorded" -- and a hand edit whose checksum was re-recorded passes that. The
+# pull-request half asks the other question: did a change under src/vendor/
+# come with a manifest and checksums change, which is the only way the tree
+# is reproducible from upstream (§48: no local modifications).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+name: vendor.yaml
+
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  # The defaults -- src/vendor, tools/vendor/verify, manifest.tsv plus
+  # checksums.sha256 -- are the family layout this package adopted.
+  vendor:
+    uses: pedrobtz/r-actions/.github/workflows/vendor.yml@v1

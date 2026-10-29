@@ -1,0 +1,69 @@
+#!/bin/sh
+# Offline check that src/vendor/ is exactly what was recorded (§48, #18).
+#
+# Fails if a vendored file was edited, added or removed without going through
+# tools/update-* and tools/vendor/record, or if the manifest and the tree
+# disagree about which sources are vendored. Needs no network and no compiler.
+#
+# What it cannot see is a hand edit whose checksum was re-recorded to match;
+# vendor.yaml's pull-request half catches that, by failing a change under
+# src/vendor/ that does not also change the manifest and the checksums.
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+cd "$ROOT"
+. tools/vendor/common.sh
+
+sums=tools/vendor/checksums.sha256
+status=0
+
+if [ ! -f "$sums" ]; then
+    echo "FAIL missing $sums; run tools/vendor/record" >&2
+    exit 1
+fi
+
+# 1. every recorded file still hashes to the recorded value
+while read -r want path; do
+    [ -n "$want" ] || continue
+    if [ ! -f "$path" ]; then
+        printf 'FAIL missing vendored file: %s\n' "$path" >&2
+        status=1
+        continue
+    fi
+    got=$(sha256_of "$path")
+    if [ "$got" != "$want" ]; then
+        printf 'FAIL modified vendored file: %s\n      expected %s\n      got      %s\n' \
+            "$path" "$want" "$got" >&2
+        status=1
+    fi
+done < "$sums"
+
+# 2. no vendored file the checksums do not know about
+for f in $(vendored_files); do
+    if ! grep -q "  $f\$" "$sums"; then
+        printf 'FAIL unrecorded vendored file: %s\n' "$f" >&2
+        status=1
+    fi
+done
+
+# 3. the manifest and src/vendor/ name the same sources, each with a licence
+#    and its VENDOR provenance file (§48)
+listed=$(manifest_sources | LC_ALL=C sort)
+present=$(find src/vendor -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | LC_ALL=C sort)
+if [ "$listed" != "$present" ]; then
+    printf 'FAIL manifest.tsv and src/vendor/ disagree:\n  manifest: %s\n  tree:     %s\n' \
+        "$(echo $listed)" "$(echo $present)" >&2
+    status=1
+fi
+for src in $listed; do
+    for f in LICENSE VENDOR; do
+        [ -f "src/vendor/$src/$f" ] || {
+            printf 'FAIL src/vendor/%s has no %s\n' "$src" "$f" >&2
+            status=1
+        }
+    done
+done
+
+if [ "$status" -eq 0 ]; then
+    echo "ok: $(wc -l < "$sums" | tr -d ' ') vendored files match $sums"
+fi
+exit "$status"
