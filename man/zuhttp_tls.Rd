@@ -14,7 +14,7 @@ install time and reported by \code{\link[=zu_tls_backend]{zu_tls_backend()}}:
 \tabular{lll}{
 \strong{Platform} \tab \strong{Engine} \tab \strong{Trust store} \cr
 Windows \tab Schannel \tab the system certificate stores \cr
-macOS \tab Secure Transport \tab Keychain, via \code{SecTrustEvaluateWithError} \cr
+macOS \tab Network.framework \tab Keychain, via \code{SecTrustEvaluateWithError} \cr
 elsewhere \tab system OpenSSL \tab the system CA directory \cr
 }
 
@@ -32,7 +32,7 @@ this build honours:
 \tabular{llll}{
 \strong{Setting} \tab \strong{OpenSSL} \tab \strong{macOS} \tab \strong{Windows} \cr
 \code{pins} \tab yes \tab refused \tab refused \cr
-\code{min_version = 13} \tab yes \tab refused \tab refused \cr
+\code{min_version = 13} \tab yes \tab yes \tab refused \cr
 \code{ca_file} \tab yes \tab yes \tab refused \cr
 \code{ca_extra} \tab yes \tab yes \tab refused \cr
 \code{revocation = TRUE} \tab refused \tab yes, with caveats \tab yes \cr
@@ -45,19 +45,20 @@ cannot pin" is never mistaken for "the pin was checked and failed".
 
 \section{Maximum TLS version}{
 
-\code{zu_tls(min_version = 13)} is refused rather than silently downgraded on
-both macOS and Windows: Secure Transport has no TLS 1.3 constant, and the
-Schannel build available through Rtools lacks \code{SCH_CREDENTIALS}. Asking for
-1.3 there raises rather than quietly giving you 1.2 — silently weakening a
+TLS 1.3 is negotiated wherever the server offers it, except on Windows,
+where \code{zu_tls(min_version = 13)} is refused rather than silently
+downgraded: the Schannel build available through Rtools lacks
+\code{SCH_CREDENTIALS}. Asking for 1.3 there raises rather than quietly giving
+you 1.2 — silently weakening a
 security setting is worse than failing. Connections still negotiate the
 highest version both ends support; it is the \emph{floor} that cannot be raised.
 }
 
 \section{Certificate pinning}{
 
-\code{\link[=zu_tls]{zu_tls()}}'s \code{pins} works on \strong{OpenSSL only}. On macOS,
-Security.framework will not hand over the SubjectPublicKeyInfo without
-hand-parsing DER; on Windows the CryptoAPI path is not written yet. Both
+\code{\link[=zu_tls]{zu_tls()}}'s \code{pins} works on \strong{OpenSSL only}. On macOS and Windows the
+platform will not hand over the SubjectPublicKeyInfo without hand-parsing
+DER, and that parser is not written yet. Both
 refuse, because a pin that silently compares the wrong bytes is worse than
 no pin. A pinned request either enforces the pin or raises; it never quietly
 succeeds unpinned.
@@ -74,9 +75,12 @@ than verifying against the Windows store and ignoring the file.
 
 \section{Revocation}{
 
-Off by default, on every platform, because none of them checks revocation
-by default and pretending otherwise would misrepresent what verification
-means here.
+Off by default: \code{zuhttp} asks for no revocation check unless told to. What
+the platform then does differs. OpenSSL and Schannel check nothing. \strong{macOS
+checks anyway}: as of macOS 15 the system's trust evaluation consults
+Apple's own revocation data with no policy asking for it, so a certificate
+Apple knows to be revoked is rejected even with \code{revocation = FALSE}.
+\code{zuhttp} cannot switch that off and does not try.
 
 \code{zu_tls(revocation = TRUE)} opts in, and what that buys you is
 backend-dependent in a way worth knowing before you rely on it:
@@ -97,13 +101,31 @@ revocation is not merely off by default but is a setting to reach for
 deliberately.
 }
 
+\section{HTTPS through a proxy on macOS}{
+
+On macOS the TLS engine is Network.framework, which opens the connection
+and runs the proxy's \code{CONNECT} itself. Its API for that starts with
+\strong{macOS 14}: on macOS 11 to 13, HTTPS through a proxy raises
+\code{zu_proxy_error} saying so, rather than going direct. Plain \verb{http://}
+through a proxy, and direct HTTPS, work on every macOS R supports.
+
+Three smaller differences. A proxy that refuses the tunnel is reported as
+refused but without its HTTP status, which Network.framework does not pass
+on; a 407 is still \code{zu_proxy_auth_error}. Credentials go to the proxy when
+it asks for them, after its 407, rather than with the first request. And
+with \code{proxy = FALSE}, \code{zuhttp} asks for a direct connection, which on a Mac
+with a system-wide proxy configured is a preference the system may
+override.
+}
+
 \section{Name resolution is not bounded}{
 
 DNS resolution uses the system resolver (\code{getaddrinfo()}), which is
 synchronous. \strong{Neither \code{timeout} nor Ctrl-C interrupts it}, so a host whose
 resolver stalls can hold R for as long as the resolver takes — on a
 misconfigured network, minutes. Every later phase (connect, handshake,
-response) is bounded by both.
+response) is bounded by both. The exception is HTTPS on macOS, where
+Network.framework resolves the name itself and both apply.
 }
 
 \seealso{

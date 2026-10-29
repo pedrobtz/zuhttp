@@ -122,11 +122,11 @@ zu_resp_method <- function(resp) resp$method
 #' `tls_cipher` reads `"ECDHE-ECDSA-CHACHA20-POLY1305"`, not `"0xcca9"`. The
 #' question someone opens this list to ask is whether the connection has
 #' forward secrecy and an AEAD mode, and the name answers it while the number
-#' does not. Secure Transport and Schannel both report a numeric suite code;
+#' does not. Network.framework and Schannel both report a numeric suite code;
 #' it is mapped in C so all three backends say the same kind of thing.
 #'
 #' `trust_backend` is separate from the TLS engine because §13.1 splits them —
-#' on macOS the protocol is Secure Transport and the trust decision is
+#' on macOS the protocol is Network.framework and the trust decision is
 #' SecTrust, and "which store trusted this?" is a question users genuinely
 #' arrive with.
 #'

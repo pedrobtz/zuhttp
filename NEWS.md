@@ -3,7 +3,7 @@
 First release.
 
 A minimal HTTP/1.1 client that uses the platform's own TLS stack and trust
-store — Schannel, Secure Transport with `SecTrust`, or system OpenSSL — and
+store — Schannel, Network.framework with `SecTrust`, or system OpenSSL — and
 bundles neither cryptography nor a CA bundle. No hard R dependencies.
 
 ## What is in it
@@ -30,6 +30,10 @@ bundles neither cryptography nor a CA bundle. No hard R dependencies.
 * Retry policies, middleware, and observability hooks.
 * Structured conditions (`zu_tls_certificate_error`, `zu_timeout_error`,
   `zu_fork_error`, …) rather than parsed message strings.
+* On macOS the TLS engine is Network.framework, with trust still decided by
+  `SecTrustEvaluateWithError`: TLS 1.3, and DNS and connection setup that
+  `timeout` and Ctrl-C both interrupt. It replaced Secure Transport, which
+  Apple deprecated, before this release.
 * A `zu_tls()` setting the linked backend cannot honour — pins, TLS 1.3, a
   custom CA, or revocation — raises `zu_tls_unsupported_error` before any
   connection, rather than connecting without it. `zu_info()$tls_capabilities`
@@ -92,10 +96,11 @@ have used: the client-first wrappers `zu_client_get()` and friends (use
 
 ## Known limitations
 
-See the README. In brief: TLS 1.2 maximum on macOS and Windows; pinning on
-OpenSSL only; no custom CA on Windows; revocation off by default and refused
-on OpenSSL; a single total timeout, which DNS resolution ignores; HTTPS in a
-forked child raises on macOS; and no parallel or asynchronous requests.
+See the README. In brief: TLS 1.2 maximum on Windows; pinning on OpenSSL
+only; no custom CA on Windows; HTTPS through a proxy needs macOS 14 on macOS;
+revocation off by default and refused on OpenSSL; a single total timeout,
+which DNS resolution ignores outside HTTPS on macOS; HTTPS in a forked child
+raises on macOS; and no parallel or asynchronous requests.
 
 ## Not in this release
 

@@ -8,7 +8,7 @@ zu_tls_backend()
 }
 \value{
 A short backend identifier, e.g. \code{"openssl"}, \code{"schannel"},
-\code{"sectransport"}.
+\code{"network-framework"}.
 }
 \description{
 Which TLS backend was this build linked against?

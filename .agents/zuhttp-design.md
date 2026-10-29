@@ -47,7 +47,7 @@ Five rules keep it that way:
 | D-1 | R prefix `zu_`, response accessors `zu_resp_`; C macros `ZUHTTP_` (internal C prefix: D-66) | Accepted | 1.1 |
 | D-2 | No `zuhttp` export may collide with an httr2 export | Accepted | 1.1, 5 |
 | D-3 | Separate the TLS protocol engine from trust evaluation | Accepted | 13.1 |
-| D-4 | macOS: Secure Transport engine + `SecTrustEvaluateWithError` trust — **superseded by D-63 when W13 lands** | Accepted | 13.2 |
+| D-4 | macOS: Secure Transport engine + `SecTrustEvaluateWithError` trust — **superseded by D-63**; Secure Transport was removed in W13 | Superseded | 13.2 |
 | D-5 | Windows: Schannel for engine and trust — required, not preferred | Accepted | 13.4 |
 | D-6 | Unix: system OpenSSL for engine and trust | Accepted | 13.5 |
 | D-7 | Link system zlib; do not vendor miniz | Accepted | 21.1 |
@@ -111,11 +111,11 @@ accepted when that work package's PR merges.
 | D-57 | Timeout phases are **`connect`**, **`read`**, **`write`** and **`total`**. `connect` covers TCP and the TLS handshake (per hop, elapsed); `read`/`write` are inactivity timers; `tls` and `pool` are dropped | Proposed | 24.1 | W7 |
 | D-58 | Defaults: `total = 30` s, `connect = 10` s, `read`/`write` unset (bounded by `total`). §24.5's 300 s is rejected: 30 s is what shipped and what an API client wants | Proposed | 24.5 | W7 |
 | D-59 | DNS becomes cancellable: `getaddrinfo()` on a **detached helper thread** that never touches R, handing its result back through a pipe the poll loop watches. A scoped exception to §29.1, the same model as libcurl's threaded resolver | Proposed | 8.4, 25.4, 29.1 | W14 |
-| D-60 | SubjectPublicKeyInfo is extracted by **one project-owned, bounded DER walker** shared by Secure Transport and Schannel; the digest comes from the platform (CommonCrypto, CNG). The walker is fuzz target 11 | Proposed | 14.4 | W9 |
+| D-60 | SubjectPublicKeyInfo is extracted by **one project-owned, bounded DER walker** shared by the macOS and Windows backends; the digest comes from the platform (CommonCrypto, CNG). The walker is fuzz target 11 | Proposed | 14.4 | W9 |
 | D-61 | Windows custom trust: `ca_file` builds a chain engine with an exclusive root store; `ca_extra` evaluates against the system engine first and, on an untrusted-root result only, against an exclusive-root engine over the extra store | Proposed | 14.3 | W8 |
 | D-62 | Revocation stays **platform-provided**. OpenSSL refuses `revocation = TRUE` unless `zu_tls(crl_file = )` supplies CRLs; zuhttp never fetches OCSP or CRLs, and offers no soft-fail mode | Proposed | 14.5 | W10 |
 | D-63 | macOS uses **Network.framework**, Apple's native, non-deprecated TLS, with trust still from our `SecTrustEvaluateWithError`. Direct HTTPS works on every macOS that R supports; HTTPS **through a proxy requires macOS 14**. Secure Transport is removed rather than kept as a fallback, because keeping it would keep the `--as-cran` NOTE. zuhttp vendors no TLS library; a bundled engine, if ever needed, comes from **`zucrypt`** | Accepted 2026-09-26 (maintainer; measured in `spike/network-framework/`) | 13.2, 5.1, 56 | W13 |
-| D-71 | On macOS an HTTPS stream is **dialled** by the TLS backend (`zu_tls_dial()`, `ZU_TLS_CAP_DIALS`), which does TCP, DNS and CONNECT itself; everywhere else, and for plain HTTP, the engine still opens the socket and the backend wraps it | Proposed | 9, 13.2, 20.3 | W13 |
+| D-71 | On macOS an HTTPS stream is **dialled** by the TLS backend (`zuh_tls_dial()`, `ZUH_TLS_CAP_DIALS`), which does TCP, DNS and CONNECT itself; everywhere else, and for plain HTTP, the engine still opens the socket and the backend wraps it | Accepted 2026-10-29 (W13) | 9, 13.2, 20.3 | W13 |
 | D-64 | Windows TLS 1.3 ships only behind a CI job that proves the local `SCH_CREDENTIALS` / `TLS_PARAMETERS` layout equals MSVC's; otherwise Windows stays TLS 1.2 and scope cut 4 is recorded as taken | Proposed | 13.4, 47.4 | W15 |
 | D-65 | Export surface: exactly the **14** removals in §53, leaving **61** functions (75 before W3); every condition also inherits **`zuhttp_error`**, directly above `error`. Amended 2026-10-29 by the maintainer: `zu_redact_headers()`, `zu_redact_params()` and `zu_set_json_backend()` stay exported, because each is the only supported way to do what it does | Accepted 2026-10-29 (W3) | 34.1, 53 | W3 |
 | D-66 | Internal C identifiers are `zuh_` / `ZUH_`; only `R_init_zuhttp` is exported from the shared object | Accepted (W2) | 1.1, 11 | W2 |
@@ -398,7 +398,7 @@ src/zuh_{engine,request,response,framing,headers,body,sink,inflate}.c
 src/zuh_{uri,redirect,proxy,pool,fork,net,time,trace,redact,error,alloc,buffer}.c
 src/zuh_stream.{c,h}, zuh_mock_stream.c
 src/zuh_tls.c                 backend-neutral policy (defaults, D-56 check)
-src/zuh_tls_{openssl,sectransport,schannel}.c  one per backend
+src/zuh_tls_{openssl,nw,schannel}.c           one per backend
 src/vendor/{picohttpparser,uriparser}/         D-10, D-11
 inst/COPYRIGHTS, inst/licenses/                §49.2
 ctest/  fuzz/  tools/                          not in the tarball
@@ -424,7 +424,7 @@ transports, safe retries and observability, not on protocol breadth.
 
 ### 13. TLS Architecture
 
-**Status:** Built on three backends. On macOS, Network.framework replaces Secure Transport in W13 (D-63).
+**Status:** Built on three backends: Schannel, Network.framework (D-63, W13) and OpenSSL.
 
 #### 13.1 Separate the protocol engine from trust evaluation
 
@@ -434,20 +434,22 @@ chain is trusted. Only the second must be native to deliver "system trust".
 | Platform | Engine | Trust |
 |---|---|---|
 | Windows | Schannel | `CertGetCertificateChain` + `CertVerifyCertificateChainPolicy`, Windows store |
-| macOS | Secure Transport (D-4) → Network.framework (D-63, W13) | `SecTrustEvaluateWithError`, Keychain — from the verify block after W13 |
+| macOS | Network.framework (D-63) | `SecTrustEvaluateWithError`, Keychain, from the verify block |
 | Unix | system OpenSSL | OpenSSL default verify paths |
 
 Every backend breaks the handshake at the server-authentication step, runs
-the trust evaluator, and resumes. Each backend declares which `zu_tls()`
+the trust evaluator, and resumes: Network.framework through
+`sec_protocol_options_set_verify_block`, on the connection's own queue. Each backend declares which `zu_tls()`
 settings it honours (D-56, §14.7).
 
 #### 13.2 macOS engine
 
-**Status:** Decided (D-63, 2026-09-26): **Network.framework**, measured GO in
+**Status:** Built (W13): **Network.framework** (D-63), in `src/zuh_tls_nw.c`,
+measured GO first in
 [`spike/network-framework/FINDINGS.md`](../spike/network-framework/FINDINGS.md).
-Secure Transport ships until W13 replaces it, and W13 removes it.
+Secure Transport is removed, and with it the `--as-cran` pragma NOTE.
 
-Secure Transport has to go for three reasons: it is deprecated (87 SDK
+Secure Transport went for three reasons: it is deprecated (87 SDK
 markers), it caps at TLS 1.2, and its deprecation costs an `--as-cran` NOTE.
 Edition 1 rejected Network.framework (F-11) because it owns the socket, so
 zuhttp could not run TLS over its own CONNECT tunnel. That was an API reading,
@@ -484,11 +486,24 @@ it: for HTTPS, Network.framework no longer needs our socket.
 - **Trust code carries over.** `ca_file`, `ca_extra`, revocation and pinning
   (the leaf from `SecTrustGetCertificateAtIndex`, D-60) run in the verify
   block against the same `SecTrustRef` API as today.
-- **Still to settle in W13:**
-  - per-phase timings, from `nw_connection_access_establishment_report()`;
-  - pool liveness without a descriptor (the state handler plus the idle
-    timeout, with the §26.2 probe answering "unknown");
-  - F-20 on a machine with a system proxy configured.
+- **How W13 settled what the spike left open:**
+  - per-phase timings and the §35.3 dns, connect and tls events come from
+    `nw_connection_access_establishment_report()`, laid out after the fact
+    with `zuh_trace_add_at()` at the moments the report gives;
+  - pool liveness without a descriptor: the backend keeps one receive
+    outstanding while a connection lives, so data, a close or a failure on an
+    idle connection is what `readable()` reports (§26.2);
+  - the stream's completions, including the verify block, run on one serial
+    queue per connection; each writes one byte to a pipe that the caller's
+    poll loop watches, and the shared state is reference-counted because a
+    completion can outlive the stream;
+  - F-20 is documented, not closed (scope cut 5): with `proxy = FALSE` the
+    backend sets `nw_parameters_set_prefer_no_proxy`, a preference a system
+    proxy may override, and `?zuhttp_tls` says so;
+  - Network.framework sends proxy credentials after a 407 challenge rather
+    than up front, and does not report a refusing proxy's HTTP status: a 407
+    is still `zu_proxy_auth_error` (`EAUTH`), any other refusal is
+    `zu_proxy_error` without the status (§20.3).
 
 **The later option: `zucrypt`.** If a portable engine is ever needed on
 macOS, for example because a proxied-HTTPS user cannot move to macOS 14, it
@@ -612,8 +627,8 @@ OpenSSL agree on a corpus of certificates.
 
 #### 14.5 Revocation
 
-**Status:** Partial — off by default everywhere (D-31); opt-in works on macOS
-and Windows; OpenSSL refuses (D-56).
+**Status:** Partial — zuhttp asks for no check by default (D-31); opt-in works
+on macOS and Windows; OpenSSL refuses (D-56).
 
 Off by default for two measured reasons (S0 F-4): it costs 7–15× in trust
 evaluation, and the fetch runs inside the platform evaluator where zuhttp can
@@ -630,7 +645,12 @@ against them. OCSP stapling is not pursued: the largest public CA retired OCSP
 in 2025, so stapling would check less every year.
 
 Measured caveat, macOS: under `revocation = TRUE` a valid certificate from a
-CA that no longer answers revocation queries is rejected. Windows behaviour
+CA that no longer answers revocation queries is rejected. And off is not off
+there: on macOS 15.7.9 (2026-10-29), `SecTrustEvaluateWithError` rejects
+revoked.badssl.com with no revocation policy set, under Secure Transport and
+Network.framework alike, so the system consults Apple's own revocation data
+by default. zuhttp adds nothing and cannot remove it; `test-certs.R` asserts
+it per backend so a change is noticed. Windows behaviour
 (`CERT_CHAIN_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT`) is unmeasured; W10 measures
 it with a locally generated revoked certificate and CRL.
 
@@ -835,12 +855,14 @@ status. Nothing may follow the CONNECT response header block. The proxy is
 resolved per hop, so a redirect across a `NO_PROXY` boundary goes the right
 way.
 
-On macOS after W13, the CONNECT for HTTPS is Network.framework's
+On macOS the CONNECT for HTTPS is Network.framework's
 (`nw_proxy_config_create_http_connect`, macOS 14+, D-71). zuhttp still
 decides whether a hop is proxied and which proxy to use. On macOS 11–13 a
-proxied HTTPS hop raises `zu_proxy_error`. Network.framework may also fall
-back to a *system* proxy when a direct connection fails (F-20); W13 either
-closes that gap or documents it next to `proxy = FALSE`.
+proxied HTTPS hop raises `zu_proxy_error` naming the version. Two things
+differ from the other backends: a refusal other than 407 carries no proxy
+status, which Network.framework does not report; and with `proxy = FALSE`
+the request may still use a *system* proxy when a direct connection fails
+(F-20), documented in `?zuhttp_tls` rather than closed.
 
 #### 20.4 Credentials
 
@@ -1613,7 +1635,7 @@ submission is 0.1.0, milestone M0 (D-82).
 | Platform | Link |
 |---|---|
 | Windows | `-lws2_32 -lsecur32 -lcrypt32 -lz` (+ `-lbcrypt` after W9) |
-| macOS | `-framework Network -framework Security -framework CoreFoundation -lz` (after W13) |
+| macOS | `-framework Network -framework Security -framework CoreFoundation -lz` |
 | Unix | `-lssl -lcrypto -lz` |
 
 #### 47.2 DESCRIPTION requirements
@@ -1636,8 +1658,8 @@ is the only way the local declaration ships.
 
 No network in examples or tests by default (network tests need
 `ZU_TEST_NETWORK=1`, not merely `NOT_CRAN`); no writes outside `tempdir()`;
-no compiled-code output outside R's facilities; the Secure Transport pragma
-NOTE removed by W13.
+no compiled-code output outside R's facilities. The Secure Transport pragma
+NOTE went with Secure Transport (W13).
 
 ### 48. Vendoring Policy
 

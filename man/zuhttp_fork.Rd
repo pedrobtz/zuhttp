@@ -12,18 +12,20 @@ to use instead.
 plan all work by forking the R process. Two separate things go wrong when a
 forked child makes an HTTPS request.
 
-\strong{The trust evaluator does not survive \code{fork()} (macOS).}
-Security.framework opens an XPC connection to \code{trustd} the first time it
-evaluates trust, and that connection is not inherited. A child that tries to
-use it is killed outright — measured during the design spike: a parent that
-had made one HTTPS request, then forked, produced children killed by
-\code{SIGSEGV}; a parent that had made none produced children that survived. It
-is fork-\emph{after-use}, not fork-at-all, which is why the failure looks
-intermittent and why it usually appears only once a script grows a warm-up
-request.
+\strong{The TLS engine does not survive \code{fork()} (macOS).}
+Network.framework runs on Grand Central Dispatch, which refuses to run in a
+forked child of a process that already used it, and the system's trust
+evaluator keeps a connection to \code{trustd} that is not inherited either. A
+child that tries is killed outright — measured during the design spikes: a
+parent that had made one HTTPS request, then forked, produced children
+killed by \code{SIGILL} (\code{SIGSEGV} under the earlier engine); a parent that had
+made none produced children that survived. It is fork-\emph{after-use}, not
+fork-at-all, which is why the failure looks intermittent and why it usually
+appears only once a script grows a warm-up request.
 
-\code{zuhttp} therefore records the process ID that armed the trust evaluator and
-refuses to evaluate trust in a different one, raising \code{zu_fork_error}. That
+\code{zuhttp} therefore records the process ID that first opened an HTTPS
+connection and refuses to open one in a different process, raising
+\code{zu_fork_error}. That
 does not make forked HTTPS work. It makes it diagnosable: an error naming
 the cause instead of a worker vanishing.
 

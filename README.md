@@ -9,7 +9,7 @@
 <!-- badges: end -->
 
 A minimal HTTP/1.1 client for R that uses **each platform's own TLS stack and
-trust store** — Schannel on Windows, Secure Transport with `SecTrust` on macOS,
+trust store** — Schannel on Windows, Network.framework with `SecTrust` on macOS,
 system OpenSSL elsewhere — rather than bundling cryptography or a CA bundle.
 Zero hard R dependencies.
 
@@ -145,15 +145,16 @@ before any connection is made, never downgrades.
 
 | Limitation | Where | Detail |
 |---|---|---|
-| TLS 1.2 maximum | macOS, Windows | Secure Transport has no TLS 1.3 constant; the Schannel build in Rtools lacks `SCH_CREDENTIALS`. `zu_tls(min_version = 13)` **raises** rather than silently giving you 1.2. `?zuhttp_tls` |
-| No certificate pinning | macOS, Windows | Pinning needs the leaf's SubjectPublicKeyInfo: Security.framework will not yield it without hand-parsing DER, and the Schannel path is not written yet. `zu_tls(pins = )` **raises** `zu_tls_unsupported_error` rather than connecting unpinned. OpenSSL pins. |
+| TLS 1.2 maximum | Windows | The Schannel build in Rtools lacks `SCH_CREDENTIALS`. `zu_tls(min_version = 13)` **raises** rather than silently giving you 1.2. `?zuhttp_tls` |
+| HTTPS through a proxy needs macOS 14 | macOS 11–13 | Network.framework runs the proxy's `CONNECT` itself, and its API for that starts with macOS 14. Earlier, a proxied HTTPS request **raises** `zu_proxy_error` rather than going direct. Plain HTTP through a proxy works everywhere. `?zuhttp_tls` |
+| No certificate pinning | macOS, Windows | Pinning needs the leaf's SubjectPublicKeyInfo, which neither platform yields without hand-parsing DER, and that parser is not written yet. `zu_tls(pins = )` **raises** `zu_tls_unsupported_error` rather than connecting unpinned. OpenSSL pins. |
 | No custom CA | Windows | Neither `ca_file` (replace) nor `ca_extra` (add) is implemented on Schannel yet. Both **raise** rather than falling back to the Windows store. They work on macOS and OpenSSL. |
-| HTTPS in a forked child fails | macOS | The system trust evaluator does not survive `fork()`. Raises `zu_fork_error` instead of killing the worker. Use a `PSOCK` cluster or `future::plan("multisession")`. `?zuhttp_fork` |
-| Revocation off by default, and opting in is backend-dependent | all | No platform checks revocation by default. `zu_tls(revocation = TRUE)` opts in on macOS and Windows; macOS also rejects valid certificates from CAs that no longer answer revocation queries. On OpenSSL, which has no CRL or OCSP source, it **raises** rather than failing every chain. `?zuhttp_tls` |
+| HTTPS in a forked child fails | macOS | The system TLS engine does not survive `fork()`. Raises `zu_fork_error` instead of killing the worker. Use a `PSOCK` cluster or `future::plan("multisession")`. `?zuhttp_fork` |
+| Revocation off by default, and opting in is backend-dependent | all | zuhttp asks for no revocation check by default; macOS 15 checks Apple's own revocation data anyway, and OpenSSL and Schannel check nothing. `zu_tls(revocation = TRUE)` opts in on macOS and Windows; macOS also rejects valid certificates from CAs that no longer answer revocation queries. On OpenSSL, which has no CRL or OCSP source, it **raises** rather than failing every chain. `?zuhttp_tls` |
 | Trust freshness on Linux | Linux | Trust comes from the distribution's `ca-certificates` bundle through OpenSSL's default verify paths, a file updated at the distribution's pace. A distrust that Apple and Microsoft push to their evaluators reaches Linux only when the distribution ships a new bundle. The eMudhra paragraph above is the worked example. |
 | No parallel or async requests | all | One request at a time. Parallelism is the caller's, via a non-forking plan. |
 | Only a total timeout | all | `timeout` bounds the whole request, redirects and retries included. There are no separate connect, first-byte or inactivity timeouts yet. |
-| DNS ignores `timeout` and Ctrl-C | all | Name resolution calls the system resolver synchronously (`getaddrinfo`), so a stalled resolver can hold R until it gives up. Every later phase is bounded. `?zuhttp_tls` |
+| DNS ignores `timeout` and Ctrl-C | Linux, Windows; macOS for `http://` | Name resolution calls the system resolver synchronously (`getaddrinfo`), so a stalled resolver can hold R until it gives up. Every later phase is bounded. HTTPS on macOS is bounded throughout: Network.framework resolves the name itself. `?zuhttp_tls` |
 | Ctrl-C timing unverified | all | Cancellation works once a request is past DNS; the 200 ms bound is not yet measured on every front-end. |
 
 ## Status

@@ -1,7 +1,7 @@
 # zuhttp
 
 A minimal HTTP/1.1 client for R that uses **each platform's own TLS stack and
-trust store** — Schannel on Windows, Secure Transport + SecTrust on macOS,
+trust store** — Schannel on Windows, Network.framework + SecTrust on macOS,
 system OpenSSL elsewhere — rather than bundling cryptography or a CA bundle.
 Zero hard R dependencies.
 
@@ -33,7 +33,7 @@ retire a section by saying so in its status line.
 # including the whole engine through the dial seam (test_engine_mock.c).
 make -C ctest strict          # warnings-as-errors; the one to run by default
 make -C ctest asan            # ASan + UBSan
-make -C ctest engine-st       # live engine over macOS Secure Transport (network)
+make -C ctest engine-nw       # live engine over macOS Network.framework (network)
 make -C ctest engine          # same, over OpenSSL
 make -C ctest tls             # OpenSSL backend only (network)
 

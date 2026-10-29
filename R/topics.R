@@ -1,8 +1,8 @@
 # Two help topics that shipped code already points at.
 #
 # The fork guard's error message ends "See ?zuhttp_fork", configure prints
-# "see ?zuhttp_tls", and the Secure Transport backend cites the same topic
-# when it refuses TLS 1.3 — and neither existed. §26.4 calls turning the
+# "see ?zuhttp_tls", and the TLS backends cite the same topic when they refuse
+# a setting — and neither existed. §26.4 calls turning the
 # forked-HTTPS segfault into a diagnosable error "the whole mitigation", which
 # is half-defeated when the pointer it hands the user goes nowhere.
 #
@@ -20,18 +20,20 @@
 #' plan all work by forking the R process. Two separate things go wrong when a
 #' forked child makes an HTTPS request.
 #'
-#' **The trust evaluator does not survive `fork()` (macOS).**
-#' Security.framework opens an XPC connection to `trustd` the first time it
-#' evaluates trust, and that connection is not inherited. A child that tries to
-#' use it is killed outright — measured during the design spike: a parent that
-#' had made one HTTPS request, then forked, produced children killed by
-#' `SIGSEGV`; a parent that had made none produced children that survived. It
-#' is fork-*after-use*, not fork-at-all, which is why the failure looks
-#' intermittent and why it usually appears only once a script grows a warm-up
-#' request.
+#' **The TLS engine does not survive `fork()` (macOS).**
+#' Network.framework runs on Grand Central Dispatch, which refuses to run in a
+#' forked child of a process that already used it, and the system's trust
+#' evaluator keeps a connection to `trustd` that is not inherited either. A
+#' child that tries is killed outright — measured during the design spikes: a
+#' parent that had made one HTTPS request, then forked, produced children
+#' killed by `SIGILL` (`SIGSEGV` under the earlier engine); a parent that had
+#' made none produced children that survived. It is fork-*after-use*, not
+#' fork-at-all, which is why the failure looks intermittent and why it usually
+#' appears only once a script grows a warm-up request.
 #'
-#' `zuhttp` therefore records the process ID that armed the trust evaluator and
-#' refuses to evaluate trust in a different one, raising `zu_fork_error`. That
+#' `zuhttp` therefore records the process ID that first opened an HTTPS
+#' connection and refuses to open one in a different process, raising
+#' `zu_fork_error`. That
 #' does not make forked HTTPS work. It makes it diagnosable: an error naming
 #' the cause instead of a worker vanishing.
 #'
@@ -78,7 +80,7 @@ NULL
 #' \tabular{lll}{
 #'   **Platform** \tab **Engine** \tab **Trust store** \cr
 #'   Windows \tab Schannel \tab the system certificate stores \cr
-#'   macOS \tab Secure Transport \tab Keychain, via `SecTrustEvaluateWithError` \cr
+#'   macOS \tab Network.framework \tab Keychain, via `SecTrustEvaluateWithError` \cr
 #'   elsewhere \tab system OpenSSL \tab the system CA directory \cr
 #' }
 #'
@@ -95,7 +97,7 @@ NULL
 #' \tabular{llll}{
 #'   **Setting** \tab **OpenSSL** \tab **macOS** \tab **Windows** \cr
 #'   `pins` \tab yes \tab refused \tab refused \cr
-#'   `min_version = 13` \tab yes \tab refused \tab refused \cr
+#'   `min_version = 13` \tab yes \tab yes \tab refused \cr
 #'   `ca_file` \tab yes \tab yes \tab refused \cr
 #'   `ca_extra` \tab yes \tab yes \tab refused \cr
 #'   `revocation = TRUE` \tab refused \tab yes, with caveats \tab yes \cr
@@ -106,17 +108,18 @@ NULL
 #' cannot pin" is never mistaken for "the pin was checked and failed".
 #'
 #' @section Maximum TLS version:
-#' `zu_tls(min_version = 13)` is refused rather than silently downgraded on
-#' both macOS and Windows: Secure Transport has no TLS 1.3 constant, and the
-#' Schannel build available through Rtools lacks `SCH_CREDENTIALS`. Asking for
-#' 1.3 there raises rather than quietly giving you 1.2 — silently weakening a
+#' TLS 1.3 is negotiated wherever the server offers it, except on Windows,
+#' where `zu_tls(min_version = 13)` is refused rather than silently
+#' downgraded: the Schannel build available through Rtools lacks
+#' `SCH_CREDENTIALS`. Asking for 1.3 there raises rather than quietly giving
+#' you 1.2 — silently weakening a
 #' security setting is worse than failing. Connections still negotiate the
 #' highest version both ends support; it is the *floor* that cannot be raised.
 #'
 #' @section Certificate pinning:
-#' [zu_tls()]'s `pins` works on **OpenSSL only**. On macOS,
-#' Security.framework will not hand over the SubjectPublicKeyInfo without
-#' hand-parsing DER; on Windows the CryptoAPI path is not written yet. Both
+#' [zu_tls()]'s `pins` works on **OpenSSL only**. On macOS and Windows the
+#' platform will not hand over the SubjectPublicKeyInfo without hand-parsing
+#' DER, and that parser is not written yet. Both
 #' refuse, because a pin that silently compares the wrong bytes is worse than
 #' no pin. A pinned request either enforces the pin or raises; it never quietly
 #' succeeds unpinned.
@@ -129,9 +132,12 @@ NULL
 #' than verifying against the Windows store and ignoring the file.
 #'
 #' @section Revocation:
-#' Off by default, on every platform, because none of them checks revocation
-#' by default and pretending otherwise would misrepresent what verification
-#' means here.
+#' Off by default: `zuhttp` asks for no revocation check unless told to. What
+#' the platform then does differs. OpenSSL and Schannel check nothing. **macOS
+#' checks anyway**: as of macOS 15 the system's trust evaluation consults
+#' Apple's own revocation data with no policy asking for it, so a certificate
+#' Apple knows to be revoked is rejected even with `revocation = FALSE`.
+#' `zuhttp` cannot switch that off and does not try.
 #'
 #' `zu_tls(revocation = TRUE)` opts in, and what that buys you is
 #' backend-dependent in a way worth knowing before you rely on it:
@@ -150,12 +156,28 @@ NULL
 #' revocation is not merely off by default but is a setting to reach for
 #' deliberately.
 #'
+#' @section HTTPS through a proxy on macOS:
+#' On macOS the TLS engine is Network.framework, which opens the connection
+#' and runs the proxy's `CONNECT` itself. Its API for that starts with
+#' **macOS 14**: on macOS 11 to 13, HTTPS through a proxy raises
+#' `zu_proxy_error` saying so, rather than going direct. Plain `http://`
+#' through a proxy, and direct HTTPS, work on every macOS R supports.
+#'
+#' Three smaller differences. A proxy that refuses the tunnel is reported as
+#' refused but without its HTTP status, which Network.framework does not pass
+#' on; a 407 is still `zu_proxy_auth_error`. Credentials go to the proxy when
+#' it asks for them, after its 407, rather than with the first request. And
+#' with `proxy = FALSE`, `zuhttp` asks for a direct connection, which on a Mac
+#' with a system-wide proxy configured is a preference the system may
+#' override.
+#'
 #' @section Name resolution is not bounded:
 #' DNS resolution uses the system resolver (`getaddrinfo()`), which is
 #' synchronous. **Neither `timeout` nor Ctrl-C interrupts it**, so a host whose
 #' resolver stalls can hold R for as long as the resolver takes — on a
 #' misconfigured network, minutes. Every later phase (connect, handshake,
-#' response) is bounded by both.
+#' response) is bounded by both. The exception is HTTPS on macOS, where
+#' Network.framework resolves the name itself and both apply.
 #'
 #' @seealso [zu_tls()] for the settings, [zu_tls_backend()] for what this
 #'   build linked, [zu_info()] for the whole configuration at once.
