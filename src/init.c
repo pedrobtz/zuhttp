@@ -978,7 +978,7 @@ static SEXP C_zu_build_info(void) {
 
     /* §13.1: the engine and the store are different questions, and on macOS
      * they are answered by different frameworks. */
-    if (strcmp(backend, "securetransport") == 0)   trust = "macOS Keychain (SecTrust)";
+    if (strcmp(backend, "network-framework") == 0) trust = "macOS Keychain (SecTrust)";
     else if (strcmp(backend, "schannel") == 0)     trust = "Windows Certificate Store";
     else if (strcmp(backend, "openssl") == 0)      trust = "OpenSSL system defaults";
     else                                           trust = "none";

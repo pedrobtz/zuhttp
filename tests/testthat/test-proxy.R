@@ -129,7 +129,12 @@ test_that("a non-2xx CONNECT surfaces the proxy's own status (§20.3)", {
     expect_false(inherits(e, "zu_proxy_auth_error"))
     # In a corporate environment the proxy's status is frequently the only
     # diagnostic the user gets, so flattening it into "connection failed"
-    # would remove the one useful piece of information.
-    expect_match(conditionMessage(e), "502")
+    # would remove the one useful piece of information. Network.framework runs
+    # the CONNECT itself and does not report that status (D-71, §20.3), so on
+    # macOS the message must at least say the proxy refused the tunnel.
+    if (identical(zu_tls_backend(), "network-framework"))
+      expect_match(conditionMessage(e), "proxy did not open a tunnel")
+    else
+      expect_match(conditionMessage(e), "502")
   }))
 })

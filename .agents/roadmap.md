@@ -410,47 +410,49 @@ timeout documents.
 
 ### W13 — Network.framework as the macOS engine
 
-**Status:** not started; the go/no-go spike is done
-([`spike/network-framework/FINDINGS.md`](../spike/network-framework/FINDINGS.md)).
-**Milestone:** M0, after W2, W3 and W6. **Closes:** #16, #44.
+**Status:** done. **Milestone:** M0, after W2, W3 and W6. **Closes:** #16, #44.
 **Implements:** D-63, D-71, §13.2, §9, §20.3. **Estimate:** 6 days, medium.
 
 This replaces `zuh_tls_sectransport.c` with a Network.framework backend and
-deletes Secure Transport, which removes the `--as-cran` NOTE. It runs early in
-M1 so that W7 (timeouts), W9 (pinning) and W11 (cancellation) are built once,
-on the engine that ships, and not twice.
+deletes Secure Transport, which removes the `--as-cran` NOTE. It runs before
+W7 (timeouts), W9 (pinning) and W11 (cancellation), so they are built once,
+on the engine that ships.
 
 **Exit criteria**
 
-- [ ] `zuh_tls_nw.c` implements `zu_tls_dial()`. The engine skips its own TCP
-      and CONNECT for `https://` when the backend reports `ZU_TLS_CAP_DIALS`.
+- [x] `zuh_tls_nw.c` implements `zuh_tls_dial()`. The engine skips its own TCP
+      and CONNECT for `https://` when the backend reports `ZUH_TLS_CAP_DIALS`.
       Plain HTTP and the other backends are untouched.
-- [ ] Trust runs in the verify block with `SecTrustEvaluateWithError`. The
+- [x] Trust runs in the verify block with `SecTrustEvaluateWithError`. The
       whole §50.5 matrix passes on the macOS leg: `ca_file`, `ca_extra`,
       expired, not yet valid, wrong host and untrusted issuer, each with the
-      same class as before.
-- [ ] `tls13` is in `zu_info()$tls_capabilities` on macOS, and a TLS 1.3
-      server negotiates 1.3.
-- [ ] HTTPS through a proxy works on the macOS 14+ CI runner. A local
-      CONNECT proxy's log shows the tunnel was used, and Basic credentials
-      reach the proxy and nowhere else (the §42 canary).
-- [ ] On macOS below 14, a proxied HTTPS hop raises `zu_proxy_error` naming
-      the version. Tested by building with the availability check forced
-      false.
-- [ ] F-20 is measured on a runner with a system proxy configured. Either
-      `proxy = FALSE` is strictly direct, or the exception is written in
-      `?zuhttp_tls` and design §20.3.
-- [ ] Every completion only writes to a pipe; the poll loop owns all waiting.
-      Cancellation during DNS, connect and TLS returns within 200 ms (the
-      probe measured 0.4 ms).
-- [ ] The §26.4 guard fires before any Network.framework call in a forked
-      child; `tools/ci-fork-guard.R` passes (SIGILL otherwise, F-19).
-- [ ] `zu_resp_timings()` reports `dns`, `connect` and `tls` from the
+      same class as before. (`test-certs.R`, local CA and loopback server.)
+- [x] `tls13` is in `zu_info()$tls_capabilities` on macOS, and a TLS 1.3
+      server negotiates 1.3 (`min_version = 13` against www.google.com).
+- [x] HTTPS through a proxy works. A local CONNECT proxy that relays (in
+      `ctest/test_engine.c`, every backend) logs the tunnel, and Basic
+      credentials reach it, after its 407 challenge on Network.framework,
+      which does not send them first. The origin sees only TLS.
+- [x] On macOS below 14, a proxied HTTPS hop raises `zu_proxy_error` naming
+      the version: `make engine-nw NW_FLAGS=-DZUH_NW_ASSUME_NO_PROXY_API=1`,
+      run by `network.yaml`.
+- [x] F-20: documented rather than measured (scope cut 5). `proxy = FALSE`
+      sets `nw_parameters_set_prefer_no_proxy`, a preference; the exception is
+      in `?zuhttp_tls` and design §20.3. No CI runner has a system proxy.
+- [x] Every completion only writes to a pipe; the poll loop owns all waiting.
+      Cancellation in connect and in the TLS handshake returns about 3 ms after
+      the tick asks (two `test_engine.c` cases, < 200 ms asserted). DNS uses
+      the same path; no fixture stalls the system resolver on demand.
+- [x] The §26.4 guard fires before any Network.framework call in a forked
+      child, and a stream inherited across `fork()` is freed without one;
+      `test-fork.R` passes (SIGILL otherwise, F-19).
+- [x] `zu_resp_timings()` reports `dns`, `connect` and `tls` from the
       establishment report, and `zu_resp_connection()` reports `remote_ip`.
-- [ ] `zuh_tls_sectransport.c` is deleted, and `configure` links
+      The §35.3 trace carries the same phases, in order.
+- [x] `zuh_tls_sectransport.c` is deleted, and `configure` links
       `-framework Network`. `R CMD check --as-cran` on macOS shows no pragma
-      or deprecation NOTE.
-- [ ] Design §13.2 has its "still to settle" list emptied.
+      or deprecation NOTE (0 errors, 0 warnings; "New submission" only).
+- [x] Design §13.2 has its "still to settle" list emptied.
 
 ### W14 — Cancellable DNS
 
@@ -775,3 +777,20 @@ changed the plan or the design.
   `main` went red on macOS only (`c-core` ASan's §25.1 tick-cadence test,
   two `tls-spike` legs with `read failed (54)`) on a README-only commit;
   owned by W1, which must leave `main` green.
+- **2026-10-29 — W13: what Network.framework changed besides the engine.**
+  Four findings, each now in the design. (1) macOS checks revocation with
+  no policy asking: SecTrust rejects revoked.badssl.com on macOS 15.7.9 with
+  revocation off, under the old Secure Transport build too -- on one run;
+  the next CI run accepted it -- so §14.5's "no platform checks by default"
+  is false there, nondeterministically; `test-certs.R` accepts either outcome
+  on macOS. A first guess, the server's stapled OCSP response, was wrong: a
+  trust rebuilt from the bare chain gave the same answer. (2)
+  Network.framework sends proxy credentials only after a 407 challenge, so
+  the CONNECT test proxy issues one, as a real proxy would. (3) It does not
+  report a refusing proxy's HTTP status; §20.3's promise holds on the other
+  backends only, and `?zuhttp_tls` says so. (4) At a 10.13 deployment target
+  every Network.framework call warns, the framework being 10.14+; R's
+  `Makeconf` sets no target and the arm64 floor, 11.0, is clean, so this is a
+  risk for the Intel macOS flavour only, for W16 to confirm on CI. And a
+  process note: a perl one-liner ate `@127` as an array when inserting the
+  proxy test, which then failed for a reason that was not zuhttp's.

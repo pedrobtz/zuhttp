@@ -590,3 +590,21 @@ int zuh_tls_get_info(const zuh_stream *s, zuh_tls_info *out) {
     snprintf(out->trust_backend, sizeof out->trust_backend, "wincertstore");
     return 1;
 }
+
+/* D-71: this backend wraps a stream the engine opened and never dials; it
+ * does not report ZUH_TLS_CAP_DIALS, so the engine never calls these. */
+zuh_code zuh_tls_dial(zuh_stream **out, const char *host, uint16_t port,
+                      const zuh_proxy *proxy, const zuh_tls_config *cfg,
+                      zuh_deadline deadline, const zuh_net_opts *opts,
+                      zuh_error *err) {
+    (void)host; (void)port; (void)proxy; (void)cfg; (void)deadline; (void)opts;
+    if (out) *out = NULL;
+    zuh_error_set(err, ZUH_ERR_TLS, ZUH_PHASE_TLS,
+                 "this TLS backend does not open its own connections");
+    return ZUH_ERR_TLS;
+}
+
+int zuh_tls_peer_ip(const zuh_stream *s, char *buf, size_t n) {
+    (void)s; (void)buf; (void)n;
+    return 0;
+}

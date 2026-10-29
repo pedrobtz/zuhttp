@@ -126,8 +126,8 @@ test_that("zu_info() reports the zu_tls() capabilities from C", {
   # Pinned to what each backend's zuh_tls_backend_caps() says, so a change to a
   # backend's support has to be made here on purpose.
   expected <- switch(zu_tls_backend(),
-    openssl         = c("pins", "tls13", "ca_file", "ca_extra"),
-    securetransport = c("ca_file", "ca_extra", "revocation"),
+    openssl           = c("pins", "tls13", "ca_file", "ca_extra"),
+    `network-framework` = c("tls13", "ca_file", "ca_extra", "revocation"),
     schannel        = "revocation",
     character())
   expect_setequal(caps, expected)

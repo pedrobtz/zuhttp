@@ -3,11 +3,26 @@
  * Network-dependent by nature, so this lives in its own binary and its own CI
  * job — c-core must stay deterministic and offline. Run with `make engine`.
  */
+/* The CONNECT proxy and the cancellation cases need POSIX sockets, threads
+ * and getaddrinfo(), which -std=c99 hides on glibc without this. They are
+ * POSIX-only: the Windows leg runs the rest of the slice. */
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#  define _POSIX_C_SOURCE 200809L
+#endif
 #include "zuh_test.h"
 #include "zuh_engine.h"
 #include "zuh_alloc.h"
 #include <string.h>
 #include <stdio.h>
+#ifndef _WIN32
+#  include <sys/socket.h>
+#  include <netinet/in.h>
+#  include <arpa/inet.h>
+#  include <unistd.h>
+#  include <netdb.h>
+#  include <poll.h>
+#  include <pthread.h>
+#endif
 
 int zuh_test_fails = 0;
 int zuh_test_checks = 0;
@@ -20,6 +35,139 @@ static int contains(const zuh_buffer *b, const char *needle) {
         if (memcmp(b->data + i, needle, n) == 0) return 1;
     return 0;
 }
+
+#ifndef _WIN32
+/* A real HTTP CONNECT proxy, one connection, on a thread: it records the
+ * request head, opens the tunnel and relays bytes both ways until either side
+ * closes. The fake proxy in tests/testthat answers but never tunnels; this
+ * one is what shows HTTPS actually went through it (W13, §20.3). */
+typedef struct {
+    int  listen_fd;
+    char head[2048];
+    int  tunnelled;
+    int  challenged;   /* answered 407 first, as a proxy needing auth does */
+} connect_proxy;
+
+static int dial_target(const char *authority) {
+    char host[300], *colon;
+    struct addrinfo hints, *res = NULL, *ai;
+    int fd = -1;
+    snprintf(host, sizeof host, "%s", authority);
+    colon = strrchr(host, ':');
+    if (!colon) return -1;
+    *colon = '\0';
+    memset(&hints, 0, sizeof hints);
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host, colon + 1, &hints, &res) != 0) return -1;
+    for (ai = res; ai; ai = ai->ai_next) {
+        fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (fd < 0) continue;
+        if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) break;
+        close(fd); fd = -1;
+    }
+    freeaddrinfo(res);
+    return fd;
+}
+
+static void *connect_proxy_run(void *arg) {
+    connect_proxy *p = (connect_proxy *)arg;
+    size_t n = 0;
+    int cli = -1, up = -1, attempt;
+    char authority[300];
+    /* A client that sends credentials up front (zuh_net plus a wrapping
+     * backend) gets its tunnel at once; one that waits to be asked
+     * (Network.framework) gets the 407 a real proxy would send, and comes
+     * back with them. Either way the credentials must arrive. */
+    for (attempt = 0; attempt < 2; attempt++) {
+        struct pollfd lp;
+        /* Bounded, so a request that never came this way fails the test
+         * rather than hanging it in pthread_join(). */
+        lp.fd = p->listen_fd; lp.events = POLLIN; lp.revents = 0;
+        if (poll(&lp, 1, 15000) <= 0) return NULL;
+        cli = accept(p->listen_fd, NULL, NULL);
+        if (cli < 0) return NULL;
+        n = 0;
+        p->head[0] = '\0';
+        while (n + 1 < sizeof p->head) {
+            ssize_t k = read(cli, p->head + n, 1);
+            if (k <= 0) break;
+            n++;
+            p->head[n] = '\0';
+            if (n >= 4 && memcmp(p->head + n - 4, "\r\n\r\n", 4) == 0) break;
+        }
+        if (strstr(p->head, "Proxy-Authorization:") || attempt == 1) break;
+        {
+            const char *ask = "HTTP/1.1 407 Proxy Authentication Required\r\n"
+                              "Proxy-Authenticate: Basic realm=\"zuhttp-test\"\r\n"
+                              "Content-Length: 0\r\nConnection: close\r\n\r\n";
+            (void)!write(cli, ask, strlen(ask));
+        }
+        p->challenged = 1;
+        close(cli);
+        cli = -1;
+    }
+    if (sscanf(p->head, "CONNECT %299s ", authority) == 1)
+        up = dial_target(authority);
+    if (up < 0) {
+        const char *no = "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n";
+        (void)!write(cli, no, strlen(no));
+        close(cli);
+        return NULL;
+    }
+    {
+        const char *ok = "HTTP/1.1 200 Connection established\r\n\r\n";
+        (void)!write(cli, ok, strlen(ok));
+    }
+    p->tunnelled = 1;
+    for (;;) {
+        struct pollfd fds[2];
+        char buf[16384];
+        int i, done = 0;
+        fds[0].fd = cli; fds[0].events = POLLIN; fds[0].revents = 0;
+        fds[1].fd = up;  fds[1].events = POLLIN; fds[1].revents = 0;
+        if (poll(fds, 2, 10000) <= 0) break;
+        for (i = 0; i < 2 && !done; i++) {
+            if (fds[i].revents & (POLLIN | POLLHUP | POLLERR)) {
+                ssize_t k = read(fds[i].fd, buf, sizeof buf);
+                if (k <= 0 || write(fds[1 - i].fd, buf, (size_t)k) != k) done = 1;
+            }
+        }
+        if (done) break;
+    }
+    close(up);
+    close(cli);
+    return NULL;
+}
+
+/* §25.1: a tick that asks to stop after `after_ms`, and remembers when it
+ * first did, so a test can measure how long the request took to notice. */
+static zuh_millis g_tick_start, g_tick_fired;
+static long g_tick_after;
+static int stop_after(void *ctx) {
+    zuh_millis now = zuh_now_ms();
+    (void)ctx;
+    if (now - g_tick_start < g_tick_after) return 0;
+    if (!g_tick_fired) g_tick_fired = now;
+    return 1;
+}
+
+/* Cancel a request to `url` 150 ms in, and return how long after the tick
+ * first said stop the call came back (-1 if it did not end CANCELLED). */
+static long cancel_latency(const char *url, const zuh_get_opts *base) {
+    zuh_get_opts o = *base;
+    zuh_result r;
+    zuh_error e;
+    zuh_code rc;
+    g_tick_start = zuh_now_ms(); g_tick_fired = 0; g_tick_after = 150;
+    o.tick = stop_after;
+    o.timeout_ms = 10000;
+    rc = zuh_engine_get(&r, url, &o, &e);
+    if (rc == ZUH_OK) zuh_result_free(&r);
+    printf("  -> %s after %ld ms\n", zuh_code_class(rc), (long)(zuh_now_ms() - g_tick_start));
+    if (rc != ZUH_ERR_CANCELLED || !g_tick_fired) return -1;
+    return (long)(zuh_now_ms() - g_tick_fired);
+}
+#endif /* !_WIN32 */
 
 /* badssl.com resets connections from CI runners now and then (ECONNRESET,
  * "read failed"). A transport failure is retried twice; a TLS verdict, or
@@ -232,6 +380,107 @@ int main(void) {
         printf("  -> %s\n", zuh_code_class(rc));
         if (rc == ZUH_OK) zuh_result_free(&r);
     }
+
+#ifndef _WIN32
+#if !(defined(ZUH_NW_ASSUME_NO_PROXY_API) && ZUH_NW_ASSUME_NO_PROXY_API)
+    ZUH_CASE("HTTPS through a real CONNECT proxy, credentials to it alone (§20.3, §20.4)");
+    {
+        connect_proxy p;
+        pthread_t th;
+        struct sockaddr_in sa;
+        socklen_t len = sizeof sa;
+        char purl[96];
+        memset(&p, 0, sizeof p);
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        sa.sin_addr.s_addr = htonl(0x7F000001u)   /* 127.0.0.1; INADDR_LOOPBACK is hidden by _POSIX_C_SOURCE on Darwin */;
+        p.listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (p.listen_fd >= 0 && bind(p.listen_fd, (struct sockaddr *)&sa, sizeof sa) == 0
+            && listen(p.listen_fd, 4) == 0
+            && getsockname(p.listen_fd, (struct sockaddr *)&sa, &len) == 0
+            && pthread_create(&th, NULL, connect_proxy_run, &p) == 0) {
+            zuh_get_opts px = o;
+            snprintf(purl, sizeof purl, "http://user:s3cret@127.0.0.1:%u",
+                     (unsigned)ntohs(sa.sin_port));
+            px.proxy = purl;
+            px.proxy_set = 1;
+            rc = zuh_engine_get(&r, "https://example.com/", &px, &e);
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            if (rc == ZUH_OK) {
+                ZUH_CHECK_EQ_INT(r.status, 200);
+                ZUH_CHECK(r.proxy_used);
+                ZUH_CHECK(contains(&r.body, "Example Domain"));
+                zuh_result_free(&r);
+            } else {
+                printf("  -> %s: %s\n", zuh_code_class(rc), e.message);
+            }
+            pthread_join(th, NULL);
+            printf("  proxy saw: %.*s%s\n", (int)strcspn(p.head, "\r"), p.head,
+                   p.challenged ? "  (after a 407 challenge)" : "");
+            ZUH_CHECK(p.tunnelled);
+            ZUH_CHECK(strncmp(p.head, "CONNECT example.com:443 ", 24) == 0);
+            /* Basic dXNlcjpzM2NyZXQ= is user:s3cret. */
+            ZUH_CHECK(strstr(p.head, "Proxy-Authorization: Basic dXNlcjpzM2NyZXQ=") != NULL);
+        } else {
+            ZUH_CHECK(0);
+        }
+        if (p.listen_fd >= 0) close(p.listen_fd);
+    }
+
+#endif /* the forced macOS < 14 build refuses proxied HTTPS by design */
+
+    /* --- W13: cancellation is prompt in every phase the network owns --- */
+
+    ZUH_CASE("a cancelled connect returns within 200 ms (§25.1)");
+    {
+        /* A non-routable address: the SYN goes nowhere and the connect never
+         * completes on its own. */
+        long ms = cancel_latency("https://10.255.255.1/", &o);
+        ZUH_CHECK(ms >= 0);
+        ZUH_CHECK(ms < 200);
+    }
+
+    ZUH_CASE("a cancelled TLS handshake returns within 200 ms (§25.1)");
+    {
+        /* A local listener that is never accepted: the kernel completes TCP
+         * from the backlog, and the ClientHello is never answered. */
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        struct sockaddr_in sa;
+        socklen_t len = sizeof sa;
+        char url[64];
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        sa.sin_addr.s_addr = htonl(0x7F000001u)   /* 127.0.0.1; INADDR_LOOPBACK is hidden by _POSIX_C_SOURCE on Darwin */;
+        ZUH_CHECK(fd >= 0);
+        if (fd >= 0 && bind(fd, (struct sockaddr *)&sa, sizeof sa) == 0
+            && listen(fd, 4) == 0
+            && getsockname(fd, (struct sockaddr *)&sa, &len) == 0) {
+            long ms;
+            snprintf(url, sizeof url, "https://127.0.0.1:%u/", (unsigned)ntohs(sa.sin_port));
+            ms = cancel_latency(url, &o);
+            ZUH_CHECK(ms >= 0);
+            ZUH_CHECK(ms < 200);
+        } else {
+            ZUH_CHECK(0);
+        }
+        if (fd >= 0) close(fd);
+    }
+
+#if defined(ZUH_NW_ASSUME_NO_PROXY_API) && ZUH_NW_ASSUME_NO_PROXY_API
+    ZUH_CASE("below macOS 14, proxied HTTPS is refused, naming the version (D-71)");
+    {
+        zuh_get_opts px = o;
+        px.proxy = "http://127.0.0.1:9";
+        px.proxy_set = 1;
+        rc = zuh_engine_get(&r, "https://example.com/", &px, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_ERR_PROXY);
+        ZUH_CHECK(strstr(e.message, "macOS 14") != NULL);
+        printf("  -> %s: %s\n", zuh_code_class(rc), e.message);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+    }
+#endif
+
+#endif /* !_WIN32 */
 
     ZUH_CASE("no leaks across the run");
     {

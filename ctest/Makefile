@@ -135,16 +135,18 @@ zuh_engtest: $(ENGSRC) test_engine.c
 engine: zuh_engtest
 	./zuh_engtest
 
-# The same slice on the macOS system TLS stack (§13.2, D-4): Secure Transport
-# for the protocol, SecTrust for trust, nothing bundled.
-STSRC := $(subst $(SRC)/zuh_tls_openssl.c,$(SRC)/zuh_tls_sectransport.c,$(ENGSRC))
+# The same slice on the macOS system TLS stack (§13.2, D-63): Network.framework
+# for the protocol, SecTrust for trust, nothing bundled. The backend dials
+# HTTPS itself (D-71), so this also runs the engine's dialled path.
+# NW_FLAGS=-DZUH_NW_ASSUME_NO_PROXY_API=1 builds the macOS < 14 proxy refusal.
+NWSRC := $(subst $(SRC)/zuh_tls_openssl.c,$(SRC)/zuh_tls_nw.c,$(ENGSRC))
 
-zuh_engtest_st: $(STSRC) test_engine.c
-	$(CC) $(BASE) $(URIFLAGS) -o $@ $(STSRC) test_engine.c \
-	      -framework Security -framework CoreFoundation -lz $(NETLIBS)
+zuh_engtest_nw: $(NWSRC) test_engine.c
+	$(CC) $(BASE) $(URIFLAGS) $(NW_FLAGS) -o $@ $(NWSRC) test_engine.c \
+	      -framework Network -framework Security -framework CoreFoundation -lz $(NETLIBS)
 
-engine-st: zuh_engtest_st
-	./zuh_engtest_st
+engine-nw: zuh_engtest_nw
+	./zuh_engtest_nw
 
 # The same slice on the Windows system stack (§13.4, D-5). Exists so a crash
 # in the Schannel backend reports a C location instead of taking an R process
@@ -160,6 +162,6 @@ engine-sch: zuh_engtest_sch
 	./zuh_engtest_sch
 
 clean:
-	rm -rf zuh_ctest zuh_ctest_asan zuh_tlstest zuh_engtest zuh_engtest_st zuh_engtest_sch *.dSYM build build-asan *.o
+	rm -rf zuh_ctest zuh_ctest_asan zuh_tlstest zuh_engtest zuh_engtest_nw zuh_engtest_sch *.dSYM build build-asan *.o
 
-.PHONY: all run strict asan clean tls engine engine-st engine-sch
+.PHONY: all run strict asan clean tls engine engine-nw engine-sch

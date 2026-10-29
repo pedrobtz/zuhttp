@@ -6,7 +6,7 @@
 # is what CI runs, because every CI R check in this repo runs FROM A FILE.
 #
 # The one thing this adds over `test_file()` is that IT FAILS ON A SKIP.
-# test-fork.R skips unless it is on macOS, on the Secure Transport backend and
+# test-fork.R skips unless it is on macOS, on the Network.framework backend and
 # online — correct when someone runs the suite on Linux, but on THIS job a skip
 # would mean the regression test silently did not run and the step still went
 # green. That is the same failure mode as `continue-on-error`.
@@ -15,8 +15,8 @@ library(testthat)
 library(zuhttp)
 
 cat("TLS backend: ", zu_tls_backend(), "\n", sep = "")
-if (!identical(zu_tls_backend(), "securetransport"))
-  stop("this job must build against Secure Transport, got ", zu_tls_backend())
+if (!identical(zu_tls_backend(), "network-framework"))
+  stop("this job must build against Network.framework, got ", zu_tls_backend())
 
 res <- as.data.frame(test_file("tests/testthat/test-fork.R", reporter = "summary"))
 

@@ -202,7 +202,7 @@ zu_delete <- function(url, query = NULL, headers = NULL, body = NULL,
 #' Which TLS backend was this build linked against?
 #'
 #' @return A short backend identifier, e.g. `"openssl"`, `"schannel"`,
-#'   `"sectransport"`.
+#'   `"network-framework"`.
 #' @export
 #' @examples
 #' zu_tls_backend()

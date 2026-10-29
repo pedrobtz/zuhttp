@@ -90,6 +90,18 @@ void zuh_trace_add(zuh_trace *t, zuh_event e, const char *detail, uint64_t n) {
     copy_detail(slot->detail, sizeof slot->detail, detail);
 }
 
+void zuh_trace_add_at(zuh_trace *t, zuh_event e, const char *detail, uint64_t n,
+                      zuh_millis at) {
+    long ms, floor_ms;
+    if (!t) return;
+    zuh_trace_add(t, e, detail, n);
+    if (t->n == 0 || t->ev[t->n - 1].ev != e) return;   /* dropped */
+    ms = (long)(at - t->t0);
+    floor_ms = t->n >= 2 ? t->ev[t->n - 2].at_ms : 0;
+    if (ms < floor_ms) ms = floor_ms;
+    if (ms < t->ev[t->n - 1].at_ms) t->ev[t->n - 1].at_ms = ms;
+}
+
 void zuh_trace_add_url(zuh_trace *t, zuh_event e, const zuh_redact_policy *p,
                       const char *url, uint64_t n) {
     zuh_redact_policy dflt;

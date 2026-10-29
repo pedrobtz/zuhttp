@@ -59,7 +59,7 @@ test_that("the redirect budget is respected", {
 
 test_that("certificate verification is on and raises a catchable condition", {
   skip_unless_online()
-  e <- tryCatch(zu_get("https://expired.badssl.com/"),
+  e <- tryCatch(zu_get_badssl("https://expired.badssl.com/"),
                 zu_tls_error = function(e) e)
 
   # The whole §34.1 point: a caller can catch "any TLS problem" without
@@ -74,7 +74,7 @@ test_that("certificate verification is on and raises a catchable condition", {
 
 test_that("a hostname mismatch is a distinct class from a bad chain", {
   skip_unless_online()
-  e <- tryCatch(zu_get("https://wrong.host.badssl.com/"),
+  e <- tryCatch(zu_get_badssl("https://wrong.host.badssl.com/"),
                 zu_tls_error = function(e) e)
   expect_s3_class(e, "zu_tls_hostname_error")
   # Distinct, not merely "some TLS error": a user can tell these apart.
@@ -90,7 +90,7 @@ test_that("a non-HTTP scheme is refused before any connection is made", {
 
 test_that("verify = FALSE warns loudly", {
   expect_warning(
-    tryCatch(zu_get("https://expired.badssl.com/", verify = FALSE, timeout = 5),
+    tryCatch(zu_get_badssl("https://expired.badssl.com/", verify = FALSE, timeout = 5),
              zu_error = function(e) NULL),
     "disables certificate AND hostname"
   )

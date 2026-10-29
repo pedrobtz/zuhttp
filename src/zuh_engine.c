@@ -341,6 +341,51 @@ static zuh_code proxy_tunnel(zuh_stream *tcp, const zuh_proxy *px,
     return rc;
 }
 
+/* §14 configuration for one hop: the caller's zu_tls() settings, then the
+ * two fields that have their own merged policy argument (§31.9) win, so there
+ * is one source of truth for "is this connection verified". */
+static void tls_cfg_for(zuh_tls_config *cfg, const zuh_get_opts *o) {
+    if (o->tls) *cfg = *o->tls; else zuh_tls_config_init(cfg);
+    cfg->verify_peer     = o->verify;
+    cfg->verify_hostname = o->verify;
+    if (o->ca_file) { cfg->ca_file = o->ca_file; cfg->source = ZUH_TRUST_FILE; }
+}
+
+/* D-71: a backend that dials opens HTTPS itself -- name resolution, TCP, the
+ * CONNECT tunnel and TLS -- so the engine hands it the hop and the chosen
+ * proxy instead of a socket. zuhttp still decides per hop whether to proxy
+ * (§20.1). */
+static zuh_code open_dialled(zuh_stream **out, const zuh_uri *u,
+                             const zuh_get_opts *o, const zuh_proxy *px,
+                             zuh_deadline dl, const zuh_net_opts *nopts,
+                             zuh_result *res, zuh_error *err) {
+    zuh_tls_config cfg;
+    zuh_stream *tls = NULL;
+    zuh_millis t0 = zuh_now_ms();
+    zuh_code rc;
+    int via_proxy = px && px->in_use;
+    char ip[64];
+
+    /* The backend writes dns, connect and tls events itself, at the moments
+     * its establishment report says they happened. */
+    tls_cfg_for(&cfg, o);
+    rc = zuh_tls_dial(&tls, u->host, u->port, via_proxy ? px : NULL, &cfg, dl,
+                      nopts, err);
+    if (rc != ZUH_OK) return rc;
+    /* The backend fills dns, connect and tls from what it can see; if it
+     * could not split them, the whole open counts as tls. */
+    if (res->timings.tls < 0) res->timings.tls = (long)(zuh_now_ms() - t0);
+    if (zuh_tls_peer_ip(tls, ip, sizeof ip)) {
+        zuh_free(res->remote_ip);
+        res->remote_ip = dup_str(ip);
+    }
+    res->reused_connection = 0;
+    res->proxy_used = via_proxy;
+    record_tls_info(tls, res);
+    *out = tls;
+    return ZUH_OK;
+}
+
 static zuh_code open_stream(zuh_stream **out, const zuh_uri *u,
                            const zuh_get_opts *o, const zuh_proxy *px,
                            zuh_deadline dl, zuh_result *res, zuh_error *err) {
@@ -377,6 +422,12 @@ static zuh_code open_stream(zuh_stream **out, const zuh_uri *u,
     nopts.tick_ctx = o->tick_ctx;
     nopts.trace    = o->trace;
     nopts.timings  = &res->timings;
+
+    /* The dial seam (D-72) is the engine's own TCP, so a test that sets it
+     * keeps the wrapping path whatever the backend. */
+    if (u->is_https && !o->dial && zuh_tls_available()
+        && (zuh_tls_backend_caps() & ZUH_TLS_CAP_DIALS))
+        return open_dialled(out, u, o, px, dl, &nopts, res, err);
 
     /* Through a proxy the socket goes to the PROXY, not the origin. For plain
      * HTTP that is the whole of it — the request then uses absolute-form
@@ -426,16 +477,7 @@ static zuh_code open_stream(zuh_stream **out, const zuh_uri *u,
         zuh_tls_config cfg;
         zuh_stream *tls = NULL;
 
-        /* Start from the caller's §14 configuration when there is one, so
-         * ca_extra, pins, revocation and min_version arrive intact... */
-        if (o->tls) cfg = *o->tls; else zuh_tls_config_init(&cfg);
-        /* ...then the two fields that have their own merged policy argument
-         * win, because §31.9 already owns them and two sources of truth for
-         * "is this connection verified" is not a thing to have. */
-        cfg.verify_peer     = o->verify;
-        cfg.verify_hostname = o->verify;
-        if (o->ca_file) { cfg.ca_file = o->ca_file; cfg.source = ZUH_TRUST_FILE; }
-
+        tls_cfg_for(&cfg, o);
         {
             zuh_millis t_tls = zuh_now_ms();
             zuh_trace_add(o->trace, ZUH_EV_TLS_START, u->host, 0);
