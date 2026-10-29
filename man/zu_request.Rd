@@ -23,7 +23,10 @@ the only thing that touches the network.
 }
 \examples{
 req <- zu_request("POST", "https://api.example.com/users")
-req <- zu_body_json(req, list(name = "Alice"))
+# JSON needs jsonlite, a Suggests, or your own zu_set_json_backend()
+if (requireNamespace("jsonlite", quietly = TRUE)) {
+  req <- zu_body_json(req, list(name = "Alice"))
+}
 req
 }
 \seealso{

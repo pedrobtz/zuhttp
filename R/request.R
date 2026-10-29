@@ -23,7 +23,10 @@
 #' @export
 #' @examples
 #' req <- zu_request("POST", "https://api.example.com/users")
-#' req <- zu_body_json(req, list(name = "Alice"))
+#' # JSON needs jsonlite, a Suggests, or your own zu_set_json_backend()
+#' if (requireNamespace("jsonlite", quietly = TRUE)) {
+#'   req <- zu_body_json(req, list(name = "Alice"))
+#' }
 #' req
 zu_request <- function(method, url) {
   stopifnot(is.character(method), length(method) == 1L, !is.na(method))
