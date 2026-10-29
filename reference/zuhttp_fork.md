@@ -10,18 +10,19 @@ what to use instead.
 and `future`'s `multicore` plan all work by forking the R process. Two
 separate things go wrong when a forked child makes an HTTPS request.
 
-**The trust evaluator does not survive `fork()` (macOS).**
-Security.framework opens an XPC connection to `trustd` the first time it
-evaluates trust, and that connection is not inherited. A child that
-tries to use it is killed outright — measured during the design spike: a
+**The TLS engine does not survive `fork()` (macOS).** Network.framework
+runs on Grand Central Dispatch, which refuses to run in a forked child
+of a process that already used it, and the system's trust evaluator
+keeps a connection to `trustd` that is not inherited either. A child
+that tries is killed outright — measured during the design spikes: a
 parent that had made one HTTPS request, then forked, produced children
-killed by `SIGSEGV`; a parent that had made none produced children that
-survived. It is fork-*after-use*, not fork-at-all, which is why the
-failure looks intermittent and why it usually appears only once a script
-grows a warm-up request.
+killed by `SIGILL` (`SIGSEGV` under the earlier engine); a parent that
+had made none produced children that survived. It is fork-*after-use*,
+not fork-at-all, which is why the failure looks intermittent and why it
+usually appears only once a script grows a warm-up request.
 
-`zuhttp` therefore records the process ID that armed the trust evaluator
-and refuses to evaluate trust in a different one, raising
+`zuhttp` therefore records the process ID that first opened an HTTPS
+connection and refuses to open one in a different process, raising
 `zu_fork_error`. That does not make forked HTTPS work. It makes it
 diagnosable: an error naming the cause instead of a worker vanishing.
 

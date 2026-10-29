@@ -11,7 +11,7 @@ zu_tls_backend()
 ## Value
 
 A short backend identifier, e.g. `"openssl"`, `"schannel"`,
-`"sectransport"`.
+`"network-framework"`.
 
 ## Examples
 

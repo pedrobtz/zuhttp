@@ -63,7 +63,7 @@
 </h1></div>
 <!-- badges: start -->
 
-<p>A minimal HTTP/1.1 client for R that uses <strong>each platform’s own TLS stack and trust store</strong> — Schannel on Windows, Secure Transport with <code>SecTrust</code> on macOS, system OpenSSL elsewhere — rather than bundling cryptography or a CA bundle. Zero hard R dependencies.</p>
+<p>A minimal HTTP/1.1 client for R that uses <strong>each platform’s own TLS stack and trust store</strong> — Schannel on Windows, Network.framework with <code>SecTrust</code> on macOS, system OpenSSL elsewhere — rather than bundling cryptography or a CA bundle. Zero hard R dependencies.</p>
 <p>zuhttp is not on CRAN yet. Install it from GitHub:</p>
 <div class="sourceCode" id="cb1"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># install.packages("remotes")</span></span>
@@ -162,14 +162,20 @@
 <tbody>
 <tr>
 <td>TLS 1.2 maximum</td>
-<td>macOS, Windows</td>
-<td>Secure Transport has no TLS 1.3 constant; the Schannel build in Rtools lacks <code>SCH_CREDENTIALS</code>. <code>zu_tls(min_version = 13)</code> <strong>raises</strong> rather than silently giving you 1.2. <code><a href="reference/zuhttp_tls.html">?zuhttp_tls</a></code>
+<td>Windows</td>
+<td>The Schannel build in Rtools lacks <code>SCH_CREDENTIALS</code>. <code>zu_tls(min_version = 13)</code> <strong>raises</strong> rather than silently giving you 1.2. <code><a href="reference/zuhttp_tls.html">?zuhttp_tls</a></code>
+</td>
+</tr>
+<tr>
+<td>HTTPS through a proxy needs macOS 14</td>
+<td>macOS 11–13</td>
+<td>Network.framework runs the proxy’s <code>CONNECT</code> itself, and its API for that starts with macOS 14. Earlier, a proxied HTTPS request <strong>raises</strong> <code>zu_proxy_error</code> rather than going direct. Plain HTTP through a proxy works everywhere. <code><a href="reference/zuhttp_tls.html">?zuhttp_tls</a></code>
 </td>
 </tr>
 <tr>
 <td>No certificate pinning</td>
 <td>macOS, Windows</td>
-<td>Pinning needs the leaf’s SubjectPublicKeyInfo: Security.framework will not yield it without hand-parsing DER, and the Schannel path is not written yet. <code>zu_tls(pins = )</code> <strong>raises</strong> <code>zu_tls_unsupported_error</code> rather than connecting unpinned. OpenSSL pins.</td>
+<td>Pinning needs the leaf’s SubjectPublicKeyInfo, which neither platform yields without hand-parsing DER, and that parser is not written yet. <code>zu_tls(pins = )</code> <strong>raises</strong> <code>zu_tls_unsupported_error</code> rather than connecting unpinned. OpenSSL pins.</td>
 </tr>
 <tr>
 <td>No custom CA</td>
@@ -179,13 +185,13 @@
 <tr>
 <td>HTTPS in a forked child fails</td>
 <td>macOS</td>
-<td>The system trust evaluator does not survive <code>fork()</code>. Raises <code>zu_fork_error</code> instead of killing the worker. Use a <code>PSOCK</code> cluster or <code>future::plan("multisession")</code>. <code><a href="reference/zuhttp_fork.html">?zuhttp_fork</a></code>
+<td>The system TLS engine does not survive <code>fork()</code>. Raises <code>zu_fork_error</code> instead of killing the worker. Use a <code>PSOCK</code> cluster or <code>future::plan("multisession")</code>. <code><a href="reference/zuhttp_fork.html">?zuhttp_fork</a></code>
 </td>
 </tr>
 <tr>
 <td>Revocation off by default, and opting in is backend-dependent</td>
 <td>all</td>
-<td>No platform checks revocation by default. <code>zu_tls(revocation = TRUE)</code> opts in on macOS and Windows; macOS also rejects valid certificates from CAs that no longer answer revocation queries. On OpenSSL, which has no CRL or OCSP source, it <strong>raises</strong> rather than failing every chain. <code><a href="reference/zuhttp_tls.html">?zuhttp_tls</a></code>
+<td>zuhttp asks for no revocation check by default; macOS may check Apple’s own revocation data anyway, run by run, and OpenSSL and Schannel check nothing. <code>zu_tls(revocation = TRUE)</code> opts in on macOS and Windows; macOS also rejects valid certificates from CAs that no longer answer revocation queries. On OpenSSL, which has no CRL or OCSP source, it <strong>raises</strong> rather than failing every chain. <code><a href="reference/zuhttp_tls.html">?zuhttp_tls</a></code>
 </td>
 </tr>
 <tr>
@@ -206,8 +212,9 @@
 </tr>
 <tr>
 <td>DNS ignores <code>timeout</code> and Ctrl-C</td>
-<td>all</td>
-<td>Name resolution calls the system resolver synchronously (<code>getaddrinfo</code>), so a stalled resolver can hold R until it gives up. Every later phase is bounded. <code><a href="reference/zuhttp_tls.html">?zuhttp_tls</a></code>
+<td>Linux, Windows; macOS for <code>http://</code>
+</td>
+<td>Name resolution calls the system resolver synchronously (<code>getaddrinfo</code>), so a stalled resolver can hold R until it gives up. Every later phase is bounded. HTTPS on macOS is bounded throughout: Network.framework resolves the name itself. <code><a href="reference/zuhttp_tls.html">?zuhttp_tls</a></code>
 </td>
 </tr>
 <tr>

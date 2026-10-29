@@ -44,7 +44,7 @@
 
 <div id="zuhttp" class="section level1">
 
-<p>A minimal HTTP/1.1 client for R that uses <strong>each platform’s own TLS stack and trust store</strong> — Schannel on Windows, Secure Transport + SecTrust on macOS, system OpenSSL elsewhere — rather than bundling cryptography or a CA bundle. Zero hard R dependencies.</p>
+<p>A minimal HTTP/1.1 client for R that uses <strong>each platform’s own TLS stack and trust store</strong> — Schannel on Windows, Network.framework + SecTrust on macOS, system OpenSSL elsewhere — rather than bundling cryptography or a CA bundle. Zero hard R dependencies.</p>
 <div class="section level2">
 <h2 id="the-two-documents-that-govern-this-repo">The two documents that govern this repo<a class="anchor" aria-label="anchor" href="#the-two-documents-that-govern-this-repo"></a></h2>
 <p>Both live in <a href=".agents/"><code>.agents/</code></a> and are excluded from the R package build:</p>
@@ -69,7 +69,7 @@
 <span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a><span class="co"># including the whole engine through the dial seam (test_engine_mock.c).</span></span>
 <span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest strict          <span class="co"># warnings-as-errors; the one to run by default</span></span>
 <span id="cb1-4"><a href="#cb1-4" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest asan            <span class="co"># ASan + UBSan</span></span>
-<span id="cb1-5"><a href="#cb1-5" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest engine-st       <span class="co"># live engine over macOS Secure Transport (network)</span></span>
+<span id="cb1-5"><a href="#cb1-5" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest engine-nw       <span class="co"># live engine over macOS Network.framework (network)</span></span>
 <span id="cb1-6"><a href="#cb1-6" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest engine          <span class="co"># same, over OpenSSL</span></span>
 <span id="cb1-7"><a href="#cb1-7" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest tls             <span class="co"># OpenSSL backend only (network)</span></span>
 <span id="cb1-8"><a href="#cb1-8" tabindex="-1"></a></span>

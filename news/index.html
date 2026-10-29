@@ -45,7 +45,7 @@
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.1.0" id="zuhttp-010">zuhttp 0.1.0<a class="anchor" aria-label="anchor" href="#zuhttp-010"></a></h2>
 <p>First release.</p>
-<p>A minimal HTTP/1.1 client that uses the platform’s own TLS stack and trust store — Schannel, Secure Transport with <code>SecTrust</code>, or system OpenSSL — and bundles neither cryptography nor a CA bundle. No hard R dependencies.</p>
+<p>A minimal HTTP/1.1 client that uses the platform’s own TLS stack and trust store — Schannel, Network.framework with <code>SecTrust</code>, or system OpenSSL — and bundles neither cryptography nor a CA bundle. No hard R dependencies.</p>
 <div class="section level3">
 <h3 id="what-is-in-it-0-1-0">What is in it<a class="anchor" aria-label="anchor" href="#what-is-in-it-0-1-0"></a></h3>
 <ul><li>One-shot verbs (<code><a href="../reference/zu_methods.html">zu_get()</a></code>, <code><a href="../reference/zu_methods.html">zu_post()</a></code>, <code><a href="../reference/zu_methods.html">zu_put()</a></code>, <code><a href="../reference/zu_methods.html">zu_patch()</a></code>, <code><a href="../reference/zu_methods.html">zu_delete()</a></code>, <code><a href="../reference/zu_methods.html">zu_head()</a></code>) and a composable request pipeline (<code><a href="../reference/zu_request.html">zu_request()</a></code> → <code><a href="../reference/zu_perform.html">zu_perform()</a></code>), which are the same implementation rather than two.</li>
@@ -56,6 +56,7 @@
 <li>A total timeout across a redirect chain, and Ctrl-C cancellation that unwinds without leaking sockets or TLS contexts. Neither bounds DNS resolution, which is synchronous.</li>
 <li>Retry policies, middleware, and observability hooks.</li>
 <li>Structured conditions (<code>zu_tls_certificate_error</code>, <code>zu_timeout_error</code>, <code>zu_fork_error</code>, …) rather than parsed message strings.</li>
+<li>On macOS the TLS engine is Network.framework, with trust still decided by <code>SecTrustEvaluateWithError</code>: TLS 1.3, and DNS and connection setup that <code>timeout</code> and Ctrl-C both interrupt. It replaced Secure Transport, which Apple deprecated, before this release.</li>
 <li>A <code><a href="../reference/zu_tls.html">zu_tls()</a></code> setting the linked backend cannot honour — pins, TLS 1.3, a custom CA, or revocation — raises <code>zu_tls_unsupported_error</code> before any connection, rather than connecting without it. <code>zu_info()$tls_capabilities</code> lists what the build supports.</li>
 <li>Credential redaction applied at every output path — printing, conditions, traces, verbose logging, recordings, and <code><a href="../reference/zu_resp.html">zu_resp_url()</a></code>.</li>
 <li>
@@ -85,7 +86,7 @@
 </ul></div>
 <div class="section level3">
 <h3 id="known-limitations-0-1-0">Known limitations<a class="anchor" aria-label="anchor" href="#known-limitations-0-1-0"></a></h3>
-<p>See the README. In brief: TLS 1.2 maximum on macOS and Windows; pinning on OpenSSL only; no custom CA on Windows; revocation off by default and refused on OpenSSL; a single total timeout, which DNS resolution ignores; HTTPS in a forked child raises on macOS; and no parallel or asynchronous requests.</p>
+<p>See the README. In brief: TLS 1.2 maximum on Windows; pinning on OpenSSL only; no custom CA on Windows; HTTPS through a proxy needs macOS 14 on macOS; revocation off by default and refused on OpenSSL; a single total timeout, which DNS resolution ignores outside HTTPS on macOS; HTTPS in a forked child raises on macOS; and no parallel or asynchronous requests.</p>
 </div>
 <div class="section level3">
 <h3 id="not-in-this-release-0-1-0">Not in this release<a class="anchor" aria-label="anchor" href="#not-in-this-release-0-1-0"></a></h3>
