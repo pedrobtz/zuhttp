@@ -3,18 +3,26 @@
  * Network-dependent by nature, so this lives in its own binary and its own CI
  * job — c-core must stay deterministic and offline. Run with `make engine`.
  */
+/* The CONNECT proxy and the cancellation cases need POSIX sockets, threads
+ * and getaddrinfo(), which -std=c99 hides on glibc without this. They are
+ * POSIX-only: the Windows leg runs the rest of the slice. */
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#  define _POSIX_C_SOURCE 200809L
+#endif
 #include "zuh_test.h"
 #include "zuh_engine.h"
 #include "zuh_alloc.h"
 #include <string.h>
 #include <stdio.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <netdb.h>
-#include <poll.h>
-#include <pthread.h>
+#ifndef _WIN32
+#  include <sys/socket.h>
+#  include <netinet/in.h>
+#  include <arpa/inet.h>
+#  include <unistd.h>
+#  include <netdb.h>
+#  include <poll.h>
+#  include <pthread.h>
+#endif
 
 int zuh_test_fails = 0;
 int zuh_test_checks = 0;
@@ -28,6 +36,7 @@ static int contains(const zuh_buffer *b, const char *needle) {
     return 0;
 }
 
+#ifndef _WIN32
 /* A real HTTP CONNECT proxy, one connection, on a thread: it records the
  * request head, opens the tunnel and relays bytes both ways until either side
  * closes. The fake proxy in tests/testthat answers but never tunnels; this
@@ -40,7 +49,7 @@ typedef struct {
 } connect_proxy;
 
 static int dial_target(const char *authority) {
-    char host[256], *colon;
+    char host[300], *colon;
     struct addrinfo hints, *res = NULL, *ai;
     int fd = -1;
     snprintf(host, sizeof host, "%s", authority);
@@ -158,6 +167,7 @@ static long cancel_latency(const char *url, const zuh_get_opts *base) {
     if (rc != ZUH_ERR_CANCELLED || !g_tick_fired) return -1;
     return (long)(zuh_now_ms() - g_tick_fired);
 }
+#endif /* !_WIN32 */
 
 /* badssl.com resets connections from CI runners now and then (ECONNRESET,
  * "read failed"). A transport failure is retried twice; a TLS verdict, or
@@ -371,6 +381,8 @@ int main(void) {
         if (rc == ZUH_OK) zuh_result_free(&r);
     }
 
+#ifndef _WIN32
+#if !(defined(ZUH_NW_ASSUME_NO_PROXY_API) && ZUH_NW_ASSUME_NO_PROXY_API)
     ZUH_CASE("HTTPS through a real CONNECT proxy, credentials to it alone (§20.3, §20.4)");
     {
         connect_proxy p;
@@ -381,7 +393,7 @@ int main(void) {
         memset(&p, 0, sizeof p);
         memset(&sa, 0, sizeof sa);
         sa.sin_family = AF_INET;
-        sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        sa.sin_addr.s_addr = htonl(0x7F000001u)   /* 127.0.0.1; INADDR_LOOPBACK is hidden by _POSIX_C_SOURCE on Darwin */;
         p.listen_fd = socket(AF_INET, SOCK_STREAM, 0);
         if (p.listen_fd >= 0 && bind(p.listen_fd, (struct sockaddr *)&sa, sizeof sa) == 0
             && listen(p.listen_fd, 4) == 0
@@ -415,6 +427,8 @@ int main(void) {
         if (p.listen_fd >= 0) close(p.listen_fd);
     }
 
+#endif /* the forced macOS < 14 build refuses proxied HTTPS by design */
+
     /* --- W13: cancellation is prompt in every phase the network owns --- */
 
     ZUH_CASE("a cancelled connect returns within 200 ms (§25.1)");
@@ -436,7 +450,7 @@ int main(void) {
         char url[64];
         memset(&sa, 0, sizeof sa);
         sa.sin_family = AF_INET;
-        sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        sa.sin_addr.s_addr = htonl(0x7F000001u)   /* 127.0.0.1; INADDR_LOOPBACK is hidden by _POSIX_C_SOURCE on Darwin */;
         ZUH_CHECK(fd >= 0);
         if (fd >= 0 && bind(fd, (struct sockaddr *)&sa, sizeof sa) == 0
             && listen(fd, 4) == 0
@@ -465,6 +479,8 @@ int main(void) {
         if (rc == ZUH_OK) zuh_result_free(&r);
     }
 #endif
+
+#endif /* !_WIN32 */
 
     ZUH_CASE("no leaks across the run");
     {
