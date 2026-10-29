@@ -242,11 +242,13 @@ D-65, §53, §34.1. **Estimate:** 1.5 days, high.
 
 **Exit criteria**
 
-- [ ] 58 exports: the 75 of 0.1.0 minus exactly the 17 removals in design §53.
-- [ ] Every condition inherits `zuhttp_error` directly above `error`, from the
+- [x] 61 exports: the 75 before W3 minus exactly the 14 removals in design §53
+      (D-65 as amended 2026-10-29: `zu_redact_headers()`, `zu_redact_params()`
+      and `zu_set_json_backend()` stay).
+- [x] Every condition inherits `zuhttp_error` directly above `error`, from the
       C chain (`zuh_code_class_chain()`), not from R.
-- [ ] Testing tools carry an "experimental" lifecycle note in their help.
-- [ ] README's "the API is expected to be stable" becomes true, and says
+- [x] Testing tools carry an "experimental" lifecycle note in their help.
+- [x] README's "the API is expected to be stable" becomes true, and says
       which functions are experimental.
 
 ### W4 — Test infrastructure: local httpbin, real timeouts, lifecycle
