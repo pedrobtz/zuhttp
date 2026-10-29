@@ -33,7 +33,10 @@ dependencies.
   connections inherited across `fork()`.
 - Redirects with method rewriting and cross-origin credential stripping
   (up to 10 by default; a longer chain raises `zu_too_many_redirects`);
-  transparent gzip and deflate under explicit size limits.
+  transparent gzip and deflate under explicit limits: 16 MiB of decoded
+  body, and at most 1000 bytes out per compressed byte, so a
+  decompression bomb fails after kilobytes rather than megabytes. Either
+  raises `zu_body_limit_error`.
 - A total timeout across a redirect chain, and Ctrl-C cancellation that
   unwinds without leaking sockets or TLS contexts. Neither bounds DNS
   resolution, which is synchronous.

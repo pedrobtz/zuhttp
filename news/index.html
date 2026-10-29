@@ -52,7 +52,7 @@
 <li>Reusable clients (<code><a href="../reference/zu_client.html">zu_client()</a></code>) carrying base URL, headers, query, and policy defaults, with per-request overrides.</li>
 <li>Response bodies to memory, to a file (<code>path =</code>), or to a callback (<code>callback =</code>), the last two without holding the body in memory.</li>
 <li>Connection pooling with keep-alive, and a PID guard that drops connections inherited across <code>fork()</code>.</li>
-<li>Redirects with method rewriting and cross-origin credential stripping (up to 10 by default; a longer chain raises <code>zu_too_many_redirects</code>); transparent gzip and deflate under explicit size limits.</li>
+<li>Redirects with method rewriting and cross-origin credential stripping (up to 10 by default; a longer chain raises <code>zu_too_many_redirects</code>); transparent gzip and deflate under explicit limits: 16 MiB of decoded body, and at most 1000 bytes out per compressed byte, so a decompression bomb fails after kilobytes rather than megabytes. Either raises <code>zu_body_limit_error</code>.</li>
 <li>A total timeout across a redirect chain, and Ctrl-C cancellation that unwinds without leaking sockets or TLS contexts. Neither bounds DNS resolution, which is synchronous.</li>
 <li>Retry policies, middleware, and observability hooks.</li>
 <li>Structured conditions (<code>zu_tls_certificate_error</code>, <code>zu_timeout_error</code>, <code>zu_fork_error</code>, …) rather than parsed message strings.</li>
