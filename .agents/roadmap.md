@@ -3,7 +3,7 @@
 **Edition:** 2 — from v0.1.0 to 1.0, written 2026-09-25
 **Companion:** [zuhttp-design.md](zuhttp-design.md), edition 2 — every work package cites the sections and decisions it implements
 **History:** [history/roadmap-v1.md](history/roadmap-v1.md) — edition 1 verbatim: stages S0–S21 and U1–U6, how each landed, the 2026-09-22 review and the amends merged with it
-**Status:** M0 in progress — #20 merged; `v0.1.0` not yet tagged
+**Status:** M0 in progress — 0.1.0 is the first CRAN submission (D-82, 2026-10-29); nothing is tagged until CRAN accepts
 
 ---
 
@@ -27,7 +27,7 @@ the evidence for several of the first half:
 | Revocation on OpenSSL | refused, with no way to supply a source | W10 |
 | Ctrl-C bound, leaks under interrupt | unmeasured | W11 |
 | Cancellable DNS | not bounded by `timeout` or Ctrl-C | W13 (macOS), W14 |
-| macOS engine | Secure Transport is deprecated, caps at TLS 1.2 and NOTEs under `--as-cran`; Network.framework is decided (D-63) and measured | W13 |
+| macOS engine | Secure Transport is deprecated, caps at TLS 1.2 and NOTEs under `--as-cran` — the one NOTE that blocks a CRAN submission; Network.framework is decided (D-63) and measured | W13 |
 | Windows TLS 1.3 | blocked on an unverified ABI | W15 |
 | Performance | unmeasured against every §51.3 runtime threshold | W18 |
 | Evidence in CI | pull requests from this repository ran **no CI** until W1; the Linux certificate matrix had never run until 2026-09-25 | W1 |
@@ -69,83 +69,112 @@ Edition 2 therefore starts with the machinery that makes "done" checkable.
 
 ```mermaid
 graph LR
-  M0["M0 · v0.1.0 tag"] --> M1["M1 · v0.2.0<br/>complete the core"]
-  M1 --> M2["M2 · v0.3.0<br/>CRAN"]
+  M0["M0 · v0.1.0<br/>first CRAN submission"] --> M1["M1 · v0.2.0<br/>complete the core"]
+  M1 --> M2["M2 · v0.3.0<br/>parity, measured"]
   M2 --> M3["M3 · v1.0<br/>reviewed, measured"]
 ```
 
 | Milestone | Version | Theme | Work packages | Gate |
 |---|---|---|---|---|
-| M0 | 0.1.0 | tag what shipped | — | the four M0 steps |
-| M1 | 0.2.0 | the design's promises, tested | W1–W4, W6–W13 | every `zu_tls()` setting works on every backend except TLS 1.3 on Windows; Network.framework on macOS; phase timeouts; the export surface frozen |
-| M2 | 0.3.0 | on CRAN | W14–W16, W18 | accepted on CRAN; §61.1 and §61.5 measured |
+| M0 | 0.1.0 | on CRAN | W1, W2, W3, W6, W13, W16 | accepted on CRAN; then, and only then, tagged |
+| M1 | 0.2.0 | the design's promises, tested | W4, W7–W12 | every `zu_tls()` setting works on every backend except TLS 1.3 on Windows; phase timeouts |
+| M2 | 0.3.0 | parity, measured | W14, W15, W18 | §61.4 and §61.5 measured; TLS 1.3 on Windows or scope cut 1 taken |
 | M3 | 1.0 | others may depend on it | W17, W19 | all 14 §61 criteria; external review; `SECURITY.md` |
 
-D-55 holds throughout: 0.x.y patch releases carry fixes only; features wait
-for the next minor.
+D-55 holds from the first CRAN acceptance on: 0.x.y patch releases carry
+fixes only; features wait for the next minor. Before it, 0.1.0 is unreleased
+and takes the M0 work packages (D-82).
 
-### M0 — v0.1.0
+**Versions are tagged only after CRAN accepts them** (D-82). A tag and a
+GitHub release are the post-acceptance close-out, never a step before the
+submission.
 
-**Status:** in progress.
+### M0 — v0.1.0: first CRAN submission
+
+**Status:** in progress. Tracker: #21; the submission itself is #40.
+
+0.1.0 is submitted with what shipped, plus the work that either blocks a
+submission or is far cheaper before one (D-82). Everything else follows on
+CRAN as 0.2.0 and later; the settings it lacks are refused with
+`zu_tls_unsupported_error`, never downgraded (D-56), so a gap is a missing
+feature and not a defect.
+
+**Done**
 
 - [x] Merge the review (#20), with its amends: D-54, D-55 and D-56 accepted;
       #12, #14 and #52 closed; #5 and #6 reduced to their implementation
       halves; the Linux certificate matrix running.
-- [x] Fix the seven tag blockers of the 2026-09-26 architecture review (#73):
+- [x] Fix the seven blockers of the 2026-09-26 architecture review (#73):
       C-1, R-1, R-2, R-3, R-4, CI-1, CI-2, each with a test that failed
       first (#74).
 - [x] Fix the 13 findings of the 2026-09-27 package review (#76), each with a
       test that failed first (#77): D-76 to D-81.
-- [ ] Tag `v0.1.0` on the merge commit and publish the GitHub release (#40).
-- [ ] Close #21 and #40; retitle #22 to track M3.
-- [ ] Create milestone issues for M1–M3 and one issue per work package, each
-      linking its anchor below; close the edition 1 stage issues #41–#51 as
-      superseded, each pointing at its work package (the map at the end).
-
-### M1 — v0.2.0: complete the core
-
-**Status:** not started.
+- [x] Close the edition 1 stage issues #41–#51 as superseded (2026-09-26).
+- [x] One issue per work package (#60–#71), and the trackers re-scoped to
+      D-82: #21 is M0, #72 is M1, #22 is the path to 1.0.
 
 **Order, and why.**
 
 1. **W1 first.** Until pull requests run CI, rule 1 cannot be satisfied by
-   anything else on this list.
-2. **W2 second.** The C prefix rename touches every C file; done after W7–W11
-   it would conflict with all of them.
-3. **W13 third.** It replaces the macOS backend and moves the §9 seam there
-   (D-71). W7, W9 and W11 each touch that backend, and building them on
-   Secure Transport first would mean building them twice.
-4. **W3 and W6** while nothing depends on the package (R-11): trimming exports
-   and fixing defaults is free now and a deprecation cycle later.
-5. **W4 before W7.** Phase timeouts are built against tests that already make
-   real requests time out, rather than against synthetic conditions.
-6. **W7–W11 in any order**, in parallel if there are two people: they touch
-   different files (`zu_engine.c`/`zu_net.c`; `zu_tls_schannel.c`;
-   `zu_spki.c` plus two backends; `zu_tls_openssl.c`; `init.c` and the test
-   harness).
-7. **W12** last, because three of its four documents describe W7–W10.
+   anything else on this list, and CRAN-like checks (R-devel on Windows, the
+   r-devel containers, sanitizers, rchk) are what stand in for win-builder.
+2. **W2 second.** The C prefix rename touches every C file; done after W13 it
+   would rename the new backend too.
+3. **W3 and W6** while nothing depends on the package (R-11): trimming exports
+   and fixing defaults is free now and a deprecation cycle once on CRAN.
+4. **W13.** The pragma that silences Secure Transport's deprecations is an
+   `--as-cran` NOTE, and CRAN's pretest does not read explanations. It also
+   moves the §9 seam (D-71), so W7, W9 and W11 are later built once, on the
+   engine that ships.
+5. **W16 last**: `cran-comments.md`, the missing-OpenSSL path, and a green
+   full run on the commit that is submitted.
 
 **Exit criteria**
 
-- [ ] W1–W4 and W6–W13 closed.
+- [ ] W1, W2, W3, W6, W13 and W16 closed.
+- [ ] `R CMD check --as-cran` on the submitted tarball: 0 errors, 0 warnings,
+      and the "New submission" NOTE only.
+- [ ] A green full-profile run of every workflow on the submitted commit.
+- [ ] NEWS lists every user-visible change since the 0.1.0 entry was first
+      written, including D-65's removals, D-68 and D-69.
+- [ ] Submitted (#40); accepted. Then the maintainer tags `v0.1.0` and
+      publishes the release.
+
+### M1 — v0.2.0: complete the core
+
+**Status:** not started. Blocked on M0. Tracker: #72.
+
+**Order, and why.**
+
+1. **W4 before W7.** Phase timeouts are built against tests that already make
+   real requests time out, rather than against synthetic conditions.
+2. **W7–W11 in any order**, in parallel if there are two people: they touch
+   different files (`zuh_engine.c`/`zuh_net.c`; `zuh_tls_schannel.c`;
+   `zuh_spki.c` plus two backends; `zuh_tls_openssl.c`; `init.c` and the
+   test harness).
+3. **W12** last, because three of its four documents describe W7–W10.
+
+**Exit criteria**
+
+- [ ] W4 and W7–W12 closed.
 - [ ] `zu_info()$tls_capabilities` is all five on macOS; `pins, ca_file,
       ca_extra, revocation` on Windows; all five on OpenSSL when `crl_file` is
       set.
 - [ ] Project-owned C ≤ 8,000 code lines (§51.3), measured by W1's job.
-- [ ] NEWS lists every user-visible change, including D-65's removals, D-68 and D-69.
+- [ ] NEWS lists every user-visible change.
 
-### M2 — v0.3.0: CRAN
+### M2 — v0.3.0: parity, measured
 
 **Status:** not started. Blocked on M1.
 
-**Order.** W18 first — measuring against `curl` is cheap and it is the last
-point at which an unfavourable number can change the plan before CRAN's
-obligations begin (R-7, R-11). W14 and W15 in parallel. W16 last.
+**Order.** W18 first — measuring against `curl` is cheap and an unfavourable
+number can still change the plan (R-7). It used to come before CRAN for that
+reason; D-82 moved the submission ahead of it, accepting that a premise that
+fails is then found on CRAN rather than before. W14 and W15 in parallel.
 
 **Exit criteria**
 
-- [ ] W14–W16 and W18 closed.
-- [ ] Accepted on CRAN; §61.1 green on win-builder, macOS builder and R-hub.
+- [ ] W14, W15 and W18 closed.
 - [ ] §61.5 and §61.4 measured and published in the README, even if unfavourable.
 
 ### M3 — 1.0
@@ -164,7 +193,7 @@ confidence, and exit criteria written so that each can fail.
 
 ### W1 — CI on every pull request, and to the family standard
 
-**Status:** not started. **Milestone:** M1. **Closes:** #18. **Implements:**
+**Status:** not started. **Milestone:** M0. **Closes:** #18. **Implements:**
 D-70, §44, §48, §61.13. **Estimate:** 2 days, high.
 
 Every job in every workflow carries `if: github.event_name != 'pull_request'
@@ -175,8 +204,8 @@ from this repository runs nothing. That comes first. The rest is #18.
 
 - [ ] A pull request from a branch of this repository runs every workflow;
       demonstrated on this package's own PR.
-- [ ] R CMD check through pinned `pedrobtz/r-actions` (the commit zucrypt pins),
-      including the CRAN-like containers; `coverage.yaml` pinned to a commit.
+- [ ] R CMD check through `pedrobtz/r-actions` at `@v1`, including the
+      CRAN-like containers and a Windows R-devel leg; `coverage.yaml` pinned to a commit.
       The `coverage.yaml` half is done (#74, zucrypt's `68c22c1`).
 - [ ] rchk and a sanitizer build over `src/init.c` in CI.
 - [ ] `tools/vendor/{manifest.tsv,checksums.sha256,verify}`, run in CI;
@@ -190,7 +219,7 @@ from this repository runs nothing. That comes first. The rest is #18.
 
 ### W2 — Internal C prefix `zuh_`, hidden symbols
 
-**Status:** not started. **Milestone:** M1. **Closes:** #15. **Implements:**
+**Status:** not started. **Milestone:** M0. **Closes:** #15. **Implements:**
 D-66, D-54. **Estimate:** 1 day, high. **Depends on:** W1.
 
 A mechanical rename of internal C identifiers from `zu_`/`ZU_` to
@@ -208,7 +237,7 @@ A mechanical rename of internal C identifiers from `zu_`/`ZU_` to
 
 ### W3 — Export surface and `zuhttp_error`
 
-**Status:** not started. **Milestone:** M1. **Closes:** #19. **Implements:**
+**Status:** not started. **Milestone:** M0. **Closes:** #19. **Implements:**
 D-65, §53, §34.1. **Estimate:** 1.5 days, high.
 
 **Exit criteria**
@@ -246,7 +275,7 @@ groups A–D). **Implements:** §50.4, §50.6. **Estimate:** 3 days, medium.
 
 ### W6 — Correct two shipped defaults
 
-**Status:** half done — `redirects = 10` shipped with #55; the ratio limit is open. **Milestone:** M1. **Implements:** D-68, D-69,
+**Status:** half done — `redirects = 10` shipped with #55; the ratio limit is open. **Milestone:** M0. **Implements:** D-68, D-69,
 §19.4, §21.4. **Estimate:** 0.5 day, high.
 
 **Exit criteria**
@@ -259,7 +288,7 @@ groups A–D). **Implements:** §50.4, §50.6. **Estimate:** 3 days, medium.
       ratio that fired.
 - [ ] Both in NEWS as behaviour changes.
 
-(W5 is retired: it was "tag v0.1.0", now M0.)
+(W5 is retired: it was "tag v0.1.0", which is now the close-out after CRAN accepts M0, D-82.)
 
 ### W7 — Phase timeouts
 
@@ -380,7 +409,7 @@ timeout documents.
 
 **Status:** not started; the go/no-go spike is done
 ([`spike/network-framework/FINDINGS.md`](../spike/network-framework/FINDINGS.md)).
-**Milestone:** M1, straight after W2. **Closes:** #16, #44.
+**Milestone:** M0, after W2, W3 and W6. **Closes:** #16, #44.
 **Implements:** D-63, D-71, §13.2, §9, §20.3. **Estimate:** 6 days, medium.
 
 This replaces `zu_tls_sectransport.c` with a Network.framework backend and
@@ -455,23 +484,27 @@ cancellably (F-16).
 
 ### W16 — CRAN packaging
 
-**Status:** not started. **Milestone:** M2. **Closes:** #47.
+**Status:** not started. **Milestone:** M0. **Closes:** #82, and what was left of #47.
 **Implements:** §47, §49. **Estimate:** 2 days plus review turnaround.
 **Depends on:** W13 (no macOS NOTE left to explain).
 
 **Exit criteria**
 
 - [ ] `R CMD check --as-cran`: 0 errors, 0 warnings, only the new-submission
-      NOTE, on win-builder, the macOS builder and R-hub.
+      NOTE, on every `pedrobtz/r-actions` leg of the full profile, which stand
+      in for win-builder, the macOS builder and R-hub (D-82).
 - [ ] The missing-OpenSSL `configure` path runs in CI and prints §47.3's
       message.
 - [ ] Cold compile time measured (§51.3).
-- [ ] `cran-comments.md` (added by #54) filled in with the platforms actually
-      checked and the final check results.
+- [ ] `cran-comments.md` (added by #54) filled in with the CI legs actually
+      run, by name, and the final check results; its macOS-NOTE comment gone.
+- [ ] No `\dontrun{}` example that could run: `zu_set_json_backend()`'s uses
+      a Suggested package under `requireNamespace()`.
 - [ ] README install section leads with `install.packages("zuhttp")`, with the
       GitHub install kept as the development version. On acceptance, not
       before — until then the line would be false.
-- [ ] Submitted; accepted.
+- [ ] Ready to submit: the M0 exit criteria hold. Submitting is #40 and the
+      maintainer's call.
 
 ### W17 — Fuzzing soak
 
@@ -725,3 +758,17 @@ changed the plan or the design.
   callbacks, the pool key and long credentials — and several comments
   asserted an invariant ("can never disagree", "replaced only at the rename")
   that no test tried to break. Rule 6, by combination.
+- **2026-10-29 — the plan put a tag before CRAN, and CRAN after M1.** M0's
+  "tag `v0.1.0`" step was wrong by the maintainer's rule: a version is tagged
+  only once CRAN accepts it. Re-reading what actually blocks a submission
+  narrowed it to one thing: a local `R CMD check --as-cran` of `main`
+  (`453f617`) gave 0 errors, 0 warnings and, besides "New submission", one
+  real NOTE — the Secure Transport pragma. So 0.1.0 becomes the first CRAN
+  submission (D-82): M0 now holds W13, which removes the NOTE; W1, because
+  CI stands in for win-builder and R-hub; W2, W3 and W6, which are cheap now
+  and a deprecation cycle later; and W16. M1 keeps the features, M2 the
+  measurements. The trade-off taken knowingly: W18 now runs after
+  acceptance, so an R-7 failure would be found on CRAN. On the same day
+  `main` went red on macOS only (`c-core` ASan's §25.1 tick-cadence test,
+  two `tls-spike` legs with `read failed (54)`) on a README-only commit;
+  owned by W1, which must leave `main` green.
