@@ -132,3 +132,21 @@ test_that("407 is a proxy-authentication failure, whatever the scheme (§20.4)",
   expect_s3_class(e, "zu_proxy_error")
   expect_match(conditionMessage(e), "Proxy Authentication Required", fixed = TRUE)
 })
+
+test_that("zuhttp_error sits directly above error in every chain (D-65)", {
+  # One handler catches anything zuhttp raises, and nothing else: the class
+  # comes from the C chain (zuh_code_class_chain), not from a table here.
+  codes <- zu_error_codes()
+  codes <- codes[names(codes) != "zu_ok"]
+  for (nm in names(codes)) {
+    cls <- class(zu_condition(nm, "boom"))
+    expect_identical(tail(cls, 4), c("zu_error", "zuhttp_error", "error", "condition"),
+                     info = nm)
+  }
+  expect_identical(
+    tryCatch(stop(zu_condition("zu_tls_pin_error", "x")),
+             zuhttp_error = function(e) "caught"),
+    "caught"
+  )
+  expect_false(inherits(simpleError("not ours"), "zuhttp_error"))
+})

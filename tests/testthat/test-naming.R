@@ -61,3 +61,19 @@ test_that("response accessors use the zu_resp_ prefix (D-1)", {
   skip_if(length(resp) == 0, "no response accessors yet")
   expect_true(all(grepl("^zu_resp_[a-z_]+$", resp)))
 })
+
+test_that("the export surface is D-65's: 61 functions, none of the 14 removed", {
+  # From 0.1.0 on, an export goes only through a deprecation release (§53), so
+  # an accidental @export is a commitment. This makes adding one a decision.
+  exports <- getNamespaceExports("zuhttp")
+  exports <- exports[!grepl(".", exports, fixed = TRUE)]
+  expect_length(exports, 61L)
+
+  removed <- c(paste0("zu_client_", c("get", "head", "post", "put", "patch", "delete")),
+               "zu_transport_perform", "zu_native_transport", "zu_error_codes",
+               "zu_code_retryable", "zu_is_secret_header", "zu_is_secret_param",
+               "zu_redact_form", "zu_redact_headers_for_display")
+  expect_identical(intersect(removed, exports), character(0))
+  # Kept by the maintainer's amendment: each is the only supported way to do it.
+  expect_true(all(c("zu_redact_headers", "zu_redact_params", "zu_set_json_backend") %in% exports))
+})

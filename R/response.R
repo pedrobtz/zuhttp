@@ -10,6 +10,11 @@
 #' Mostly for mock transports (§31.12) and for tests. Real responses come back
 #' from [zu_perform()].
 #'
+#' @section Lifecycle:
+#' Experimental (D-65). The testing tools are exported so that package tests can
+#' run without a network, and may still change before 1.0; the request
+#' functions, response accessors and conditions are the stable API.
+#'
 #' @param status Integer HTTP status.
 #' @param headers Named character vector. Repeated names are allowed and are
 #'   preserved (§18.3).

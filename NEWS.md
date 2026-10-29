@@ -38,6 +38,21 @@ bundles neither cryptography nor a CA bundle. No hard R dependencies.
 * Per-phase timings and an event trace (`zu_resp_trace()`, `zu_verbose()`),
   and `zu_info()` for a bug-report-ready configuration dump.
 
+## API surface
+
+61 exported functions. Every condition inherits `zuhttp_error`,
+directly above `error`, so `tryCatch(..., zuhttp_error = )` catches anything
+zuhttp raises and nothing else. The testing tools — `zu_mock_transport()`,
+`zu_stub()`, `zu_response()` and the cassette functions — are experimental
+and may still change before 1.0; the rest is the stable API.
+
+Trimmed before this release, from the development version some packages may
+have used: the client-first wrappers `zu_client_get()` and friends (use
+`zu_get(url, client = api)`), and `zu_transport_perform()`,
+`zu_native_transport()`, `zu_error_codes()`, `zu_code_retryable()`,
+`zu_is_secret_header()`, `zu_is_secret_param()`, `zu_redact_form()` and
+`zu_redact_headers_for_display()`, which are now internal.
+
 ## Fixed before release
 
 * **A redirect to another origin no longer carries credentials.**

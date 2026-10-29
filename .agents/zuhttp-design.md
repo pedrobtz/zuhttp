@@ -117,7 +117,7 @@ accepted when that work package's PR merges.
 | D-63 | macOS uses **Network.framework**, Apple's native, non-deprecated TLS, with trust still from our `SecTrustEvaluateWithError`. Direct HTTPS works on every macOS that R supports; HTTPS **through a proxy requires macOS 14**. Secure Transport is removed rather than kept as a fallback, because keeping it would keep the `--as-cran` NOTE. zuhttp vendors no TLS library; a bundled engine, if ever needed, comes from **`zucrypt`** | Accepted 2026-09-26 (maintainer; measured in `spike/network-framework/`) | 13.2, 5.1, 56 | W13 |
 | D-71 | On macOS an HTTPS stream is **dialled** by the TLS backend (`zu_tls_dial()`, `ZU_TLS_CAP_DIALS`), which does TCP, DNS and CONNECT itself; everywhere else, and for plain HTTP, the engine still opens the socket and the backend wraps it | Proposed | 9, 13.2, 20.3 | W13 |
 | D-64 | Windows TLS 1.3 ships only behind a CI job that proves the local `SCH_CREDENTIALS` / `TLS_PARAMETERS` layout equals MSVC's; otherwise Windows stays TLS 1.2 and scope cut 4 is recorded as taken | Proposed | 13.4, 47.4 | W15 |
-| D-65 | Export surface: exactly the **17** removals in §53, leaving **58** functions at 0.2.0 (75 today); every condition also inherits **`zuhttp_error`**, directly above `error` | Proposed | 34.1, 53 | W3 |
+| D-65 | Export surface: exactly the **14** removals in §53, leaving **61** functions (75 before W3); every condition also inherits **`zuhttp_error`**, directly above `error`. Amended 2026-10-29 by the maintainer: `zu_redact_headers()`, `zu_redact_params()` and `zu_set_json_backend()` stay exported, because each is the only supported way to do what it does | Accepted 2026-10-29 (W3) | 34.1, 53 | W3 |
 | D-66 | Internal C identifiers are `zuh_` / `ZUH_`; only `R_init_zuhttp` is exported from the shared object | Accepted (W2) | 1.1, 11 | W2 |
 | D-67 | No asynchronous or concurrent requests before 1.0 (answers §62 Q15 for 0.x). R connection sinks (§27.5) are **rejected** — `callback` covers them. Client certificates are post-1.0, on demand | Proposed | 27.5, 30, 38 | — |
 | D-68 | Default `redirects` is **10**, as §19.4 always said; the shipped default of 1 was a leftover of the §63.2 slice. An exhausted chain raises `zu_too_many_redirects`; `redirects = 0` returns the 3xx | Accepted 2026-09-26 (#55) | 19.4, 31.9 | — |
@@ -1270,7 +1270,7 @@ default by the §31.9 rule; it is never removed from the client.
 
 Constructors `zu_client`, `zu_request`; execution `zu_perform`; transformers
 `zu_query`, `zu_headers`, `zu_body_*`, `zu_req_*`; responses `zu_resp_*`.
-W3 trims the surface from 75 exports to 58 (D-65, §53).
+The surface is 61 exports (D-65, §53).
 
 #### 31.12 Transport as an explicit client dependency
 
@@ -1366,7 +1366,7 @@ The one definition is `src/zuh_error.c` (`k_class[]`, `class_parent()`); R
 reads it through `zu_condition()`. This tree is its documentation.
 
 ```text
-zuhttp_error  (D-65, W3; inherits error, condition)
+zuhttp_error  (D-65; inherits error, condition)
 └── zu_error
     ├── zu_memory_error, zu_overflow_error
     ├── zu_dns_error, zu_connect_error, zu_timeout_error ($phase, §24.1)
@@ -1758,16 +1758,19 @@ version R supports; HTTPS through a proxy needs macOS 14 (D-63).
 
 ### 53. API Stability
 
-**Status:** Partial — W3.
+**Status:** Built (W3).
 
-Only the R API is stable. Before 0.2.0 the export surface is trimmed from 75
-to 58 (D-65) by exactly these 17 removals: the six `zu_client_*` verb wrappers are removed; `zu_transport_perform`,
-`zu_native_transport`, `zu_error_codes`, `zu_code_retryable`,
-`zu_set_json_backend` and the six redaction helpers other than `zu_redact_url`
-become internal; the testing tools (`zu_mock_transport`, `zu_stub`,
-`zu_response`, cassettes) stay exported and are marked experimental. After
-0.2.0 an export is removed only after a deprecation release. C headers stay
-in `src/`.
+Only the R API is stable. 0.1.0 exports 61 functions (D-65), trimmed from 75
+by exactly these 14 removals: the six `zu_client_*` verb wrappers are removed;
+`zu_transport_perform`, `zu_native_transport`, `zu_error_codes`,
+`zu_code_retryable`, `zu_is_secret_header`, `zu_is_secret_param`,
+`zu_redact_form` and `zu_redact_headers_for_display` are internal.
+`zu_redact_url`, `zu_redact_headers`, `zu_redact_params` and
+`zu_set_json_backend` stay exported: the last three are the only supported
+way to extend redaction and to replace jsonlite. The testing tools
+(`zu_mock_transport`, `zu_stub`, `zu_response`, cassettes) are exported and
+marked experimental in their help. From 0.1.0 on, an export is removed only
+after a deprecation release. C headers stay in `src/`.
 
 ### 54. Potential Public C API
 

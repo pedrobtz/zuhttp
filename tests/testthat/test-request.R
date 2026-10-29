@@ -102,15 +102,16 @@ test_that("every method helper sends its own method", {
   }
 })
 
-test_that("the client-first wrappers are wrappers, not overloads (§31.3)", {
+test_that("a client is never argument one (§31.3)", {
+  # The zu_client_*() wrappers went with D-65; the rule they softened stays.
   api <- zu_client(base_url = "https://api.example.com",
                    transport = zu_mock_transport(function(req) {
                      zu_response(200L, body = req$url)
                    }))
-  expect_identical(zu_resp_text(zu_client_get(api, "/users")),
+  expect_identical(zu_resp_text(zu_get("/users", client = api)),
                    "https://api.example.com/users")
-  # And the plain form still refuses a client in argument one, with a message
-  # that says what to do rather than failing somewhere in the URL parser.
+  # The plain form refuses a client in argument one, with a message that says
+  # what to do rather than failing somewhere in the URL parser.
   expect_error(zu_get(api), "url")
 })
 

@@ -92,8 +92,11 @@ int zuh_code_class_chain(zuh_code code, const char **out, int max) {
         c = class_parent(c);
         if (c == ZUH_CODE_COUNT) break;
     }
-    /* Every §34.1 class inherits zu_error, including the direct children. */
+    /* Every §34.1 class inherits zu_error, including the direct children, and
+     * zu_error inherits zuhttp_error, directly above R's `error` (D-65): one
+     * handler for everything zuhttp raises. */
     if (n < max) out[n++] = "zu_error";
+    if (n < max) out[n++] = "zuhttp_error";
     return n;
 }
 

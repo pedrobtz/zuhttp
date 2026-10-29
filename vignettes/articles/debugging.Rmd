@@ -186,7 +186,6 @@ messages, hooks, verbose output, traces, cassettes and `zu_resp_url()`.
 
 ```{r redact}
 zu_redact_url("https://user:pw@api.example.com/v1?access_token=abc&page_token=2")
-zu_is_secret_param(c("token", "page_token"))
 ```
 
 Your API may use its own names. Add them for the session — they extend the

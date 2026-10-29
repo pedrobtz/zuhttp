@@ -48,9 +48,9 @@ returns the response whatever its status.}
 
 \item{decode}{Decompress the body transparently (§21.2).}
 
-\item{transport}{The object that actually performs requests. Defaults to
-\code{\link[=zu_native_transport]{zu_native_transport()}}; \code{\link[=zu_mock_transport]{zu_mock_transport()}} replaces the network in
-tests.}
+\item{transport}{The object that actually performs requests. The default
+is the network; \code{\link[=zu_mock_transport]{zu_mock_transport()}} and \code{\link[=zu_cassette_transport]{zu_cassette_transport()}} replace
+it in tests.}
 
 \item{pool}{Connection reuse settings from \code{\link[=zu_pool]{zu_pool()}}, or \code{NULL} to open a
 fresh connection for every request.}
@@ -93,7 +93,6 @@ An absolute request URL ignores \code{base_url} entirely.
 \code{zu_get(url, ..., client = api)}, never \code{zu_get(api, url)}. Overloading
 argument one by type breaks autocomplete, makes dispatch murky, and turns a
 misplaced argument into a confusing error instead of a clear one (§31.3).
-For client-first phrasing there are thin wrappers: \code{api |> zu_client_get("/users")}.
 }
 
 \examples{

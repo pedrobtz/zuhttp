@@ -90,6 +90,11 @@ replay_response <- function(rec) {
 #' whatever it has not seen before and replays everything else, which means a
 #' test suite is written once against the real service and then runs offline.
 #'
+#' @section Lifecycle:
+#' Experimental (D-65). The testing tools are exported so that package tests can
+#' run without a network, and may still change before 1.0; the request
+#' functions, response accessors and conditions are the stable API.
+#'
 #' @param dir Directory holding cassettes. Defaults to a subdirectory of
 #'   `tempdir()`, so nothing is written outside the session unless asked.
 #' @param name Cassette name; one file, `<name>.rds`, inside `dir`.
@@ -171,6 +176,11 @@ zu_transport_perform.zu_cassette_transport <- function(transport, req) {
 }
 
 #' Inspect or delete a cassette
+#'
+#' @section Lifecycle:
+#' Experimental (D-65). The testing tools are exported so that package tests can
+#' run without a network, and may still change before 1.0; the request
+#' functions, response accessors and conditions are the stable API.
 #'
 #' @param dir,name The cassette's directory and name, as given to
 #'   [zu_cassette_transport()].
