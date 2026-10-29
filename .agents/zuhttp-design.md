@@ -133,6 +133,7 @@ accepted when that work package's PR merges.
 | D-79 | **One list of secret headers.** A cross-origin redirect strips exactly the headers §42.1 redacts — the defaults and any configured with `zu_redact_headers()` — so a header hidden from every printout is never sent to an origin the caller did not name | Accepted 2026-09-28 (#77) | 19.2, 42.1 | — |
 | D-80 | A download's **temporary file is created exclusively** beside the destination, trying `<path>.zudl<pid>` then `.1`, `.2`…; nothing already at a candidate name is opened, so a planted symlink or a second download to the same path is never written through | Accepted 2026-09-28 (#77) | 27.1 | — |
 | D-81 | **No automatic retry after a callback has received bytes.** The callback API has no attempt boundary, and delivered bytes and their side effects cannot be taken back; an attempt that delivered nothing is retried as before | Accepted 2026-09-28 (#77) | 33.1 | — |
+| D-82 | **0.1.0 is the first CRAN submission, and a version is tagged only after CRAN accepts it.** 0.1.0 takes what shipped plus W1, W2, W3, W6, W13 and W16: the one `--as-cran` NOTE (Secure Transport's pragma) goes with W13, and exports and defaults change while nothing depends on them. CI through `pedrobtz/r-actions` stands in for win-builder, the macOS builder and R-hub. D-55 applies from acceptance on | Accepted 2026-10-29 | 47, 57 | W1, W16 |
 
 ---
 
@@ -1601,8 +1602,8 @@ README (R-6).
 
 ### 47. CRAN Build Strategy
 
-**Status:** Partial — builds on all three platforms; CRAN submission is
-milestone M2.
+**Status:** Partial — builds on all three platforms; the first CRAN
+submission is 0.1.0, milestone M0 (D-82).
 
 #### 47.1 Per-platform dependencies
 
