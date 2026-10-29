@@ -646,11 +646,12 @@ in 2025, so stapling would check less every year.
 
 Measured caveat, macOS: under `revocation = TRUE` a valid certificate from a
 CA that no longer answers revocation queries is rejected. And off is not off
-there: on macOS 15.7.9 (2026-10-29), `SecTrustEvaluateWithError` rejects
-revoked.badssl.com with no revocation policy set, under Secure Transport and
-Network.framework alike, so the system consults Apple's own revocation data
-by default. zuhttp adds nothing and cannot remove it; `test-certs.R` asserts
-it per backend so a change is noticed. Windows behaviour
+there, and not deterministically: on 2026-10-29 `SecTrustEvaluateWithError`
+rejected revoked.badssl.com with no revocation policy set on macOS 15.7.9 and
+on one CI run, under Secure Transport and Network.framework alike, and
+accepted it on the next. The system consults Apple's own revocation data when
+it has it. zuhttp adds nothing and cannot remove it; `test-certs.R` accepts
+either outcome on macOS and only a certificate error as the failure. Windows behaviour
 (`CERT_CHAIN_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT`) is unmeasured; W10 measures
 it with a locally generated revoked certificate and CRL.
 

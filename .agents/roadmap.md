@@ -780,9 +780,10 @@ changed the plan or the design.
 - **2026-10-29 — W13: what Network.framework changed besides the engine.**
   Four findings, each now in the design. (1) macOS checks revocation with
   no policy asking: SecTrust rejects revoked.badssl.com on macOS 15.7.9 with
-  revocation off, under the old Secure Transport build too, so §14.5's "no
-  platform checks by default" is false there; `test-certs.R` asserts it per
-  backend. A first guess, the server's stapled OCSP response, was wrong: a
+  revocation off, under the old Secure Transport build too -- on one run;
+  the next CI run accepted it -- so §14.5's "no platform checks by default"
+  is false there, nondeterministically; `test-certs.R` accepts either outcome
+  on macOS. A first guess, the server's stapled OCSP response, was wrong: a
   trust rebuilt from the bare chain gave the same answer. (2)
   Network.framework sends proxy credentials only after a 407 challenge, so
   the CONNECT test proxy issues one, as a real proxy would. (3) It does not

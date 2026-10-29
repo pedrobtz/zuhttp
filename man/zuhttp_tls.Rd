@@ -77,9 +77,10 @@ than verifying against the Windows store and ignoring the file.
 
 Off by default: \code{zuhttp} asks for no revocation check unless told to. What
 the platform then does differs. OpenSSL and Schannel check nothing. \strong{macOS
-checks anyway}: as of macOS 15 the system's trust evaluation consults
-Apple's own revocation data with no policy asking for it, so a certificate
-Apple knows to be revoked is rejected even with \code{revocation = FALSE}.
+may check anyway}: the system's trust evaluation consults Apple's own
+revocation data when it has it, with no policy asking for it, so a
+certificate Apple knows to be revoked can be rejected even with
+\code{revocation = FALSE} -- on one run and not the next.
 \code{zuhttp} cannot switch that off and does not try.
 
 \code{zu_tls(revocation = TRUE)} opts in, and what that buys you is
