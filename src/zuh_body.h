@@ -37,6 +37,13 @@ typedef struct {
     uint64_t   max_body;    /* §40; checked BEFORE the sink sees a byte */
 } zuh_body_pipe;
 
+/* §21.4, D-69: decoded output may be at most this many times the compressed
+ * input, once 32 input bytes have been seen. max_body bounds a bomb in
+ * megabytes; this makes it fail after kilobytes. 1000 sits just under
+ * deflate's ceiling of about 1030:1, so only a pathological body -- a run of
+ * one byte -- can reach it, and legitimate text compresses tens of times. */
+#define ZUH_MAX_DECOMPRESSION_RATIO 1000u
+
 /* Reads Content-Encoding from `h` and, when it decodes, REMOVES that header
  * and Content-Length: once the body leaves here it is not encoded any more,
  * so those headers would describe something the caller never received. */

@@ -21,6 +21,22 @@ static int contains(const zuh_buffer *b, const char *needle) {
     return 0;
 }
 
+/* badssl.com resets connections from CI runners now and then (ECONNRESET,
+ * "read failed"). A transport failure is retried twice; a TLS verdict, or
+ * any other answer, never is -- so a flaky network can neither fail these
+ * cases nor make one pass. */
+static zuh_code get_retrying(zuh_result *r, const char *url, const zuh_get_opts *o,
+                             zuh_error *e) {
+    zuh_code rc = ZUH_ERR_IO;
+    int attempt;
+    for (attempt = 0; attempt < 3; attempt++) {
+        rc = zuh_engine_get(r, url, o, e);
+        if (rc != ZUH_ERR_IO && rc != ZUH_ERR_CONNECT && rc != ZUH_ERR_TIMEOUT) break;
+        printf("  (transport failure, retrying: %s)\n", e->message);
+    }
+    return rc;
+}
+
 int main(void) {
     zuh_get_opts o;
     zuh_result r;
@@ -123,13 +139,13 @@ int main(void) {
     }
 
     ZUH_CASE("certificate verification is on by default");
-    rc = zuh_engine_get(&r, "https://expired.badssl.com/", &o, &e);
+    rc = get_retrying(&r, "https://expired.badssl.com/", &o, &e);
     ZUH_CHECK_EQ_INT(rc, ZUH_ERR_TLS_CERT);
     printf("  -> %s: %s\n", zuh_code_class(rc), e.message);
     if (rc == ZUH_OK) zuh_result_free(&r);
 
     ZUH_CASE("a hostname mismatch is distinct from a bad chain");
-    rc = zuh_engine_get(&r, "https://wrong.host.badssl.com/", &o, &e);
+    rc = get_retrying(&r, "https://wrong.host.badssl.com/", &o, &e);
     ZUH_CHECK_EQ_INT(rc, ZUH_ERR_TLS_HOSTNAME);
     if (rc == ZUH_OK) zuh_result_free(&r);
 

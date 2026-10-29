@@ -277,18 +277,19 @@ groups A–D). **Implements:** §50.4, §50.6. **Estimate:** 3 days, medium.
 
 ### W6 — Correct two shipped defaults
 
-**Status:** half done — `redirects = 10` shipped with #55; the ratio limit is open. **Milestone:** M0. **Implements:** D-68, D-69,
+**Status:** done. **Milestone:** M0. **Implements:** D-68, D-69,
 §19.4, §21.4. **Estimate:** 0.5 day, high.
 
 **Exit criteria**
 
 - [x] `redirects` defaults to 10; a 3-hop redirect chain succeeds with the
       default client. (#55; an exhausted chain now raises.)
-- [ ] `max_decompression_ratio` defaults to 1000 and is passed at
-      `zuh_body.c:35`; a 1 KB → 100 MB bomb fails after less than 1 MB of
-      output, with the absolute cap raised out of the way to prove it is the
-      ratio that fired.
-- [ ] Both in NEWS as behaviour changes.
+- [x] `max_decompression_ratio` defaults to 1000 and is passed at
+      `zuh_body.c:35`; a bomb fails after less than 1 MB of output, with the
+      absolute cap raised out of the way to prove it is the ratio that fired.
+      Measured with 100 MB of zeros as ~100 KB of gzip: deflate cannot reach
+      the 100,000:1 of "1 KB → 100 MB", its ceiling is about 1030:1.
+- [x] Both in NEWS: as what 0.1.0 does, since neither shipped a release.
 
 (W5 is retired: it was "tag v0.1.0", which is now the close-out after CRAN accepts M0, D-82.)
 

@@ -121,7 +121,7 @@ accepted when that work package's PR merges.
 | D-66 | Internal C identifiers are `zuh_` / `ZUH_`; only `R_init_zuhttp` is exported from the shared object | Accepted (W2) | 1.1, 11 | W2 |
 | D-67 | No asynchronous or concurrent requests before 1.0 (answers §62 Q15 for 0.x). R connection sinks (§27.5) are **rejected** — `callback` covers them. Client certificates are post-1.0, on demand | Proposed | 27.5, 30, 38 | — |
 | D-68 | Default `redirects` is **10**, as §19.4 always said; the shipped default of 1 was a leftover of the §63.2 slice. An exhausted chain raises `zu_too_many_redirects`; `redirects = 0` returns the 3xx | Accepted 2026-09-26 (#55) | 19.4, 31.9 | — |
-| D-69 | The decompression-ratio limit is enforced by default (`max_decompression_ratio = 1000`), as §21.4 requires; today it is implemented in `zuh_inflate.c` and switched off at `zuh_body.c:35` | Proposed | 21.4, 40 | W6 |
+| D-69 | The decompression-ratio limit is enforced by default (`max_decompression_ratio = 1000`, `ZUH_MAX_DECOMPRESSION_RATIO`), as §21.4 requires. A stop at either cap names the cap that was binding | Accepted 2026-10-29 (W6) | 21.4, 40 | W6 |
 | D-70 | Process: CI runs on every pull request; one PR per work package; a work package's test lands before or with it, `skip()`ped with the package named until then | Proposed | 50 | W1 |
 | D-72 | A **connection seam**, `zuh_get_opts.dial`: NULL opens real TCP (always, in the package); set, it supplies every connection while everything above it runs for real. It is how the offline suite and fuzz target 10 drive the whole engine | Accepted 2026-09-26 (#58) | 50.1 | — |
 | D-73 | Bytes received **past a response's framing** — after `Content-Length`, after a chunked body's trailers, or on a bodiless response — keep that connection out of the pool | Accepted 2026-09-26 (#58) | 26.3 | — |
@@ -874,11 +874,11 @@ zlib-wrapped first, raw DEFLATE on a header error.
 
 Enforced during inflation, not after: `max_body` caps decoded output
 (16 MiB by default), and `max_decompression_ratio` caps output ÷ input once
-32 input bytes have been seen. Either raises `zu_body_limit_error` and closes
-the connection. **The ratio check exists in `zuh_inflate.c` but is passed 0
-by `zuh_body.c:35` and so never runs; D-69 turns it on at 1000.** The absolute
-cap bounds a bomb today; the ratio makes it fail after kilobytes, not
-megabytes. `Transfer-Encoding: gzip` is rejected (§18.1).
+32 input bytes have been seen: 1000 (D-69, `ZUH_MAX_DECOMPRESSION_RATIO`),
+just under deflate's ceiling of about 1030:1. Either raises
+`zu_body_limit_error`, naming the cap that was binding, and closes the
+connection. The absolute cap bounds a bomb in megabytes; the ratio makes it
+fail after kilobytes. `Transfer-Encoding: gzip` is rejected (§18.1).
 
 #### 21.5 Completeness (D-76)
 
@@ -1489,7 +1489,7 @@ for pasting into bug reports.
 
 ### 40. Resource Limits and Security Defaults
 
-**Status:** Built, with the ratio default pending (D-69).
+**Status:** Built.
 
 | Limit | Default |
 |---|---|
@@ -1498,7 +1498,7 @@ for pasting into bug reports.
 | `max_header_name` / `max_header_value` | 256 B / 8 KiB |
 | `redirects` | 10 (D-68) |
 | `max_body` (decoded, every sink) | 16 MiB |
-| `max_decompression_ratio` | off → 1000 (D-69) |
+| `max_decompression_ratio` | 1000 (D-69) |
 | `max_redirect_body` | 64 KiB |
 | `max_retry_after` | 60 s |
 
