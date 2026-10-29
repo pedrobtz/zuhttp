@@ -500,11 +500,11 @@ cancellably (F-16).
       in for win-builder, the macOS builder and R-hub (D-82).
 - [ ] The missing-OpenSSL `configure` path runs in CI and prints §47.3's
       message.
-- [ ] Cold compile time measured (§51.3).
+- [x] Cold compile time measured (§51.3): 11 s on one core, against 90 s.
 - [ ] `cran-comments.md` (added by #54) filled in with the CI legs actually
       run, by name, and the final check results; its macOS-NOTE comment gone.
-- [ ] No `\dontrun{}` example that could run: `zu_set_json_backend()`'s uses
-      a Suggested package under `requireNamespace()`.
+- [x] No `\dontrun{}` example that could run: `zu_set_json_backend()`'s now
+      runs, with a toy backend, and restores the old one.
 - [ ] README install section leads with `install.packages("zuhttp")`, with the
       GitHub install kept as the development version. On acceptance, not
       before — until then the line would be false.

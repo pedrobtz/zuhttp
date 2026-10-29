@@ -8,21 +8,32 @@ This is a first submission.
 
 * This is a new release.
 
-<!-- Fill in at submission (roadmap W16): the platforms actually checked, e.g.
-     win-builder (release, devel), the macOS builder, R-hub (Linux, clang,
-     sanitizers), and GitHub Actions on all three operating systems.
-     Until W13 replaces Secure Transport, macOS also reports a
-     "pragmas in C/C++ headers and code" NOTE; do not submit with it. -->
+## Test environments
+
+`R CMD check --as-cran` on GitHub Actions, through the reusable workflows in
+<https://github.com/pedrobtz/r-actions>:
+
+* macOS (latest), R release — the Network.framework backend
+* Windows (latest), R release and R-devel — the Schannel backend
+* Ubuntu 24.04, R release and oldrel-1 — the OpenSSL backend
+* R-hub containers matching CRAN's r-devel Linux flavours: `clang23`
+  (`-std=gnu23 -pedantic`), `ubuntu-clang`, `ubuntu-gcc16`
+* `nosuggests` (no Suggests installed)
+
+and, on the compiled code: UBSan (clang and gcc) and ASan (R-hub
+`clang-asan`, `gcc-asan`), valgrind with `--leak-check=full`, rchk, LTO,
+`gctorture`, GCC `-fanalyzer`, and CRAN's `rcnst`, `rlibro` and `vnu`
+checks.
 
 ## Notes for the reviewer
 
 * **System requirements.** zuhttp links each platform's own TLS stack and
   trust store rather than bundling one: 'Schannel' on Windows (part of the
-  operating system), Apple's native TLS on macOS (part of the operating
-  system), and 'OpenSSL' >= 1.1.1 elsewhere, which `configure` locates with
-  `pkg-config` and a compile-and-link fallback, naming the package to install
-  when it is missing. zlib is linked on every platform. No certificate bundle
-  is shipped.
+  operating system), Apple's 'Network.framework' on macOS (part of the
+  operating system), and 'OpenSSL' >= 1.1.1 elsewhere, which `configure`
+  locates with `pkg-config` and a compile-and-link fallback, naming the
+  package to install when it is missing. zlib is linked on every platform.
+  No certificate bundle is shipped.
 
 * **Bundled code.** Two small libraries are compiled in: 'picohttpparser'
   (MIT) and a subset of 'uriparser' (BSD-3-Clause). Their copyright holders

@@ -1766,7 +1766,7 @@ platform.
 | project-owned C, code lines | ≤ 8,000 | > 12,000 | **6,379** (2026-09-25) |
 | total C incl. vendored | ≤ 25,000 | > 40,000 | ~11k code |
 | source tarball | ≤ 2 MB | > 5 MB | 261 KB |
-| cold compile, one core | ≤ 90 s | > 180 s | — |
+| cold compile, one core | ≤ 90 s | > 180 s | **11 s** (2026-10-29, macOS, Intel i5-8500B, `MAKEFLAGS=-j1`) |
 
 Project-owned C is at 80% of its target with W7, W8, W9, W10 and W14 still to
 add (estimated +900 lines). R-4 is now a live risk, not a hypothetical one.
