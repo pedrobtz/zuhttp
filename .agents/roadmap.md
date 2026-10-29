@@ -193,7 +193,7 @@ confidence, and exit criteria written so that each can fail.
 
 ### W1 — CI on every pull request, and to the family standard
 
-**Status:** not started. **Milestone:** M0. **Closes:** #18. **Implements:**
+**Status:** done (#84, merged 2026-10-29). **Milestone:** M0. **Closes:** #18. **Implements:**
 D-70, §44, §48, §61.13. **Estimate:** 2 days, high.
 
 Every job in every workflow carries `if: github.event_name != 'pull_request'
@@ -202,19 +202,19 @@ from this repository runs nothing. That comes first. The rest is #18.
 
 **Exit criteria**
 
-- [ ] A pull request from a branch of this repository runs every workflow;
-      demonstrated on this package's own PR.
-- [ ] R CMD check through `pedrobtz/r-actions` at `@v1`, including the
+- [x] A pull request from a branch of this repository runs every workflow;
+      demonstrated on this package's own PR (#84).
+- [x] R CMD check through `pedrobtz/r-actions` at `@v1`, including the
       CRAN-like containers and a Windows R-devel leg; `coverage.yaml` pinned to a commit.
       The `coverage.yaml` half is done (#74, zucrypt's `68c22c1`).
-- [ ] rchk and a sanitizer build over `src/init.c` in CI.
-- [ ] `tools/vendor/{manifest.tsv,checksums.sha256,verify}`, run in CI;
+- [x] rchk and a sanitizer build over `src/init.c` in CI.
+- [x] `tools/vendor/{manifest.tsv,checksums.sha256,verify}`, run in CI;
       editing one vendored byte fails it.
-- [ ] `tls-spike.yaml` renamed for what it does (`network.yaml`); README badges
+- [x] `tls-spike.yaml` renamed for what it does (`network.yaml`); README badges
       follow.
-- [ ] `dash -n` over `configure`, `configure.win` and `cleanup`.
-- [ ] `library(httr2); library(zuhttp)` emits no masking message, asserted (§61.13).
-- [ ] A job prints project-owned code lines on every PR and fails above 8,000
+- [x] `dash -n` over `configure`, `configure.win` and `cleanup`.
+- [x] `library(httr2); library(zuhttp)` emits no masking message, asserted (§61.13).
+- [x] A job prints project-owned code lines on every PR and fails above 8,000
       (R-4).
 
 ### W2 — Internal C prefix `zuh_`, hidden symbols
