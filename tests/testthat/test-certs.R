@@ -218,14 +218,18 @@ test_that("revocation off by default: what each platform then does (§14.5)", {
   # §14.5 documents. If a platform changes its default, this fails, which is
   # exactly when the section needs rewriting.
   #
-  # macOS did: measured 2026-10-29 on macOS 15.7.9 and on the macOS CI
-  # runner, SecTrust rejects revoked.badssl.com with no revocation policy
-  # set, under Secure Transport and Network.framework alike, so the system
-  # consults Apple's revocation data by default. zuhttp adds no check and
-  # cannot remove that one.
+  # macOS did, and not deterministically: on 2026-10-29 SecTrust rejected
+  # revoked.badssl.com with no revocation policy set on macOS 15.7.9 and on
+  # one CI run, under Secure Transport and Network.framework alike, and
+  # accepted it on the next CI run. The system consults Apple's revocation
+  # data when it has it. zuhttp adds no check and cannot remove that one, so
+  # on macOS either outcome is the platform's; what must not happen is a
+  # failure of any other kind.
   if (identical(Sys.info()[["sysname"]], "Darwin")) {
-    expect_error(zu_get("https://revoked.badssl.com", timeout = 20),
-                 class = "zu_tls_certificate_error")
+    r <- tryCatch(zu_get("https://revoked.badssl.com", timeout = 20),
+                  error = function(e) e)
+    if (inherits(r, "error")) expect_s3_class(r, "zu_tls_certificate_error")
+    else expect_identical(zu_resp_status(r), 200L)
   } else {
     r <- zu_get("https://revoked.badssl.com", timeout = 20)
     expect_identical(zu_resp_status(r), 200L)
