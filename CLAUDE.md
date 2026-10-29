@@ -76,12 +76,12 @@ check depend on example.com and badssl.com.
 ## Layout
 
     src/            the C core; only init.c includes R headers
-      zu_stream.h   the vtable that decouples the HTTP engine from the network
-      zu_engine.c   the composed request path: URI → TCP → TLS → framing → body
+      zuh_stream.h   the vtable that decouples the HTTP engine from the network
+      zuh_engine.c   the composed request path: URI → TCP → TLS → framing → body
       zu_tls_*.c    one file per backend, selected by ./configure
       vendor/       picohttpparser (D-10) and a subset of uriparser (D-11)
     R/              the public API; see .agents/zuhttp-design.md §31
-    ctest/          C tests. zu_ctest is offline; the engine/tls binaries are not.
+    ctest/          C tests. zuh_ctest is offline; the engine/tls binaries are not.
     fuzz/           libFuzzer harnesses + a portable replay driver, and the corpus
     tools/          update-uriparser, update-picohttpparser, check-feature-macros,
                     check-objects-sync, check-vendor-licenses, check-code-lines,
@@ -105,7 +105,7 @@ check depend on example.com and badssl.com.
   rather than like coverage.
 - **Verify non-vacuously.** Several bugs here survived because a test
   passed for the wrong reason: `suite_time` asserted the clock was
-  *monotonic*, which a constant satisfies, while `zu_now_ms()` returned
+  *monotonic*, which a constant satisfies, while `zuh_now_ms()` returned
   0 on Linux for six commits. When a test guards a mechanism, break the
   mechanism once and confirm the test fails.
 - **The C core builds without R headers.** That is what makes the
@@ -118,9 +118,10 @@ check depend on example.com and badssl.com.
 - **Refuse, never downgrade (D-56).** A
   [`zu_tls()`](https://pedrobtz.github.io/zuhttp/reference/zu_tls.md)
   setting the backend cannot honour raises `zu_tls_unsupported_error`
-  before any I/O. What a backend supports is its `zu_tls_backend_caps()`
-  mask in C; tests read it through `zu_info()$tls_capabilities` /
-  `skip_unless_tls_supports()`, never from a table of backend names.
+  before any I/O. What a backend supports is its
+  `zuh_tls_backend_caps()` mask in C; tests read it through
+  `zu_info()$tls_capabilities` / `skip_unless_tls_supports()`, never
+  from a table of backend names.
 - **Credentials never reach an egress.** Redaction happens in the
   formatting layer, so a redacted request stays executable (§42.3). The
   canary tests in `test-redact.R` are the guard.
@@ -134,10 +135,12 @@ them name `zuhttp` as a consumer. In 0.x it consumes none of them:
 compression is system zlib (D-7), pin digests come from each TLS
 backend, and `zuxml` could at most be a `Suggests`. Design §5.1 (D-54)
 records this and carries the family table shared by all five
-repositories. One practical consequence: the internal C prefix
-`zu_`/`ZU_` is `zukomp`’s public ABI namespace and already collides with
-`zukomp.h` (`ZU_OK`, `zu_buffer`), so do not add new `zu_` C names that
-a `zukomp` header could also declare (#15).
+repositories. One practical consequence: `zu_`/`ZU_` is `zukomp`’s
+public C ABI namespace, so zuhttp’s internal C prefix is `zuh_`/`ZUH_`
+(D-66, W2). Never write a `zu_` C identifier, even a static one;
+`tools/check-c-prefix` fails CI on it. `zu_` stays right in R names, R
+condition classes in C strings, comments citing R functions, and the
+`C_zu_*` routines `init.c` registers, which R calls by those names.
 
 ## Current state
 
