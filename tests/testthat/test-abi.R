@@ -9,7 +9,10 @@
 exported_symbols <- function(dll) {
   if (.Platform$OS.type == "windows") {
     # A DLL's exports are its export table, which objdump prints between the
-    # "[Ordinal/Name Pointer] Table" header and the next blank line.
+    # "[Ordinal/Name Pointer] Table" header and the next blank line, one entry
+    # per line that starts with an "[ordinal]". Newer binutils add a column
+    # header and a hint ("[   0] +base[   1]  0000 R_init_zuhttp"): the name is
+    # the last field either way.
     objdump <- Sys.which("objdump")
     skip_if(objdump == "", "objdump is not on the PATH")
     out <- system2(objdump, c("-p", shQuote(dll)), stdout = TRUE)
@@ -17,7 +20,8 @@ exported_symbols <- function(dll) {
     skip_if(length(start) == 0, "objdump printed no export table")
     rest <- out[seq(start[[1]] + 1, length(out))]
     rest <- rest[seq_len(match(TRUE, !nzchar(trimws(rest)), length(rest) + 1) - 1)]
-    return(sub("^.*\\]\\s+", "", trimws(rest)))
+    rest <- trimws(rest[grepl("^\\s*\\[", rest)])
+    return(sub("^.*\\s", "", rest))
   }
   nm <- Sys.which("nm")
   skip_if(nm == "", "nm is not on the PATH")

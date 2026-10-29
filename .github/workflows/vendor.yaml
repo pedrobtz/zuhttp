@@ -20,7 +20,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The defaults -- src/vendor, tools/vendor/verify, manifest.tsv plus
-  # checksums.sha256 -- are the family layout this package adopted.
+  # tools/vendor/verify, manifest.tsv and checksums.sha256 are the defaults and
+  # the family layout. `paths` narrows the pull-request half to the bytes that
+  # came from upstream: each src/vendor/<lib>/VENDOR, the LICENSE copies and
+  # uriparser's UriConfig.h are written here, so editing their prose is not a
+  # re-vendoring. The checksums still cover them; `verify` still fails until
+  # they are re-recorded. Found on W2, which renamed the files they cite.
   vendor:
     uses: pedrobtz/r-actions/.github/workflows/vendor.yml@v1
+    with:
+      paths: |
+        src/vendor/picohttpparser/picohttpparser.c
+        src/vendor/picohttpparser/picohttpparser.h
+        src/vendor/uriparser/Uri*.c
+        src/vendor/uriparser/UriCommon.h
+        src/vendor/uriparser/UriIp4Base.h
+        src/vendor/uriparser/UriMemory.h
+        src/vendor/uriparser/UriParseBase.h
+        src/vendor/uriparser/uriparser/
