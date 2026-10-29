@@ -136,12 +136,14 @@ a `zukomp` header could also declare (#15).
 
 ## Current state
 
-v0.1.0 is built and awaiting its tag (roadmap M0); the review and its
-amends merged on 2026-09-25 (#20). Next is **M1 → v0.2.0**, and its
-first work package is **W1: CI on pull requests** — until it lands, a
-pull request from a branch of this repository runs no CI, so dispatch
-the workflows by hand as shown under Commands. Then W2 (the `zuh_` C
-prefix rename) before any other C work, because it touches every file.
-The roadmap’s work-package exit criteria are authoritative — check them
-rather than inferring status from the code. Forked HTTPS on macOS raises
-`zu_fork_error` by design (D-32); it is not a bug to fix.
+v0.1.0 is built but unreleased: it is the **first CRAN submission**
+(roadmap M0, tracker \#21, D-82). Nothing is tagged until CRAN accepts a
+version — the tag is the maintainer’s post-acceptance step. M0 is W1,
+W2, W3, W6, W13 (Network.framework, which removes the one `--as-cran`
+NOTE) and W16. Its first work package is **W1: CI on pull requests** —
+until it lands, a pull request from a branch of this repository runs no
+CI, so dispatch the workflows by hand as shown under Commands. Then W2
+(the `zuh_` C prefix rename) before any other C work, because it touches
+every file. The roadmap’s work-package exit criteria are authoritative —
+check them rather than inferring status from the code. Forked HTTPS on
+macOS raises `zu_fork_error` by design (D-32); it is not a bug to fix.
