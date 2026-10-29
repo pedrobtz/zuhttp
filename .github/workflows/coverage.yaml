@@ -39,13 +39,16 @@ jobs:
   #   * The backend. This job runs on Linux and so compiles zu_tls_openssl.c;
   #     a macOS run compiles zu_tls_sectransport.c instead. Same suite,
   #     different denominator — 54.2% here against 46.3% measured on macOS.
-  #   * NOT_CRAN. covr never sets it (nothing in the covr namespace mentions
-  #     it), so skip_on_cran() fires and every loopback test — proxy,
-  #     download, and the origin-backed trace and redact arms — is skipped.
-  #     On macOS that cost 13.4 points, 46.3% against 59.7%, almost all of it
-  #     in src/. The reusable workflow takes no inputs and a reusable workflow
-  #     does not inherit caller env, so this repo cannot set it: closing that
-  #     gap means an input, or an env block, in pedrobtz/r-actions.
+  #   * NOT_CRAN. covr itself never sets it, but the r-actions job does
+  #     (`NOT_CRAN: true` in its log), so the loopback
+  #     tests -- proxy, download, the origin-backed trace and redact arms --
+  #     run here and count. A local `covr::package_coverage()` without it
+  #     skips them, and reads about 13 points lower on macOS.
+  #   * Child processes. A test whose webfakes app captures the zuhttp
+  #     namespace makes the server process load the instrumented package, and
+  #     stopping it can truncate its trace file: `readRDS(f)` then fails the
+  #     whole run (W1). Build such apps in an environment parented on
+  #     globalenv(), as test-retry.R does.
   coverage:
     # A commit, not the floating tag: this job holds `contents: write`, so a
     # moved tag in another repository could commit to this one. The same

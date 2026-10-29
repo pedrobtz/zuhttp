@@ -539,18 +539,27 @@ test_that("no automatic retry once a callback has been handed bytes (§27, §33.
   # so a retry after delivery handed it a second body behind the first: a 503
   # "ERROR" and then a 200 "OK" arrived as "ERROROK", reported as one 200.
   # The same 503 with nothing delivered is still retried.
-  app <- webfakes::new_app()
-  app$locals$n <- c(body = 0, empty = 0)
-  app$get("/body", function(req, res) {
-    req$app$locals$n[["body"]] <- req$app$locals$n[["body"]] + 1
-    if (req$app$locals$n[["body"]] == 1) res$set_status(503L)$send("ERROR")
-    else res$send("OK")
-  })
-  app$get("/empty", function(req, res) {
-    req$app$locals$n[["empty"]] <- req$app$locals$n[["empty"]] + 1
-    if (req$app$locals$n[["empty"]] == 1) res$set_status(503L)$send("")
-    else res$send("OK")
-  })
+  #
+  # The app is built outside the test environment on purpose. Its handlers are
+  # serialised into webfakes' server process, and a closure whose parent is
+  # the zuhttp namespace makes that process load zuhttp too. Under covr that
+  # copy is instrumented, and being stopped while it writes its trace file
+  # left a truncated one that failed every coverage run on CI (W1).
+  app <- local({
+    app <- webfakes::new_app()
+    app$locals$n <- c(body = 0, empty = 0)
+    app$get("/body", function(req, res) {
+      req$app$locals$n[["body"]] <- req$app$locals$n[["body"]] + 1
+      if (req$app$locals$n[["body"]] == 1) res$set_status(503L)$send("ERROR")
+      else res$send("OK")
+    })
+    app$get("/empty", function(req, res) {
+      req$app$locals$n[["empty"]] <- req$app$locals$n[["empty"]] + 1
+      if (req$app$locals$n[["empty"]] == 1) res$set_status(503L)$send("")
+      else res$send("OK")
+    })
+    app
+  }, envir = new.env(parent = globalenv()))
   web <- webfakes::local_app_process(app)
   cli <- zu_client(pool = NULL, proxy = FALSE, check = FALSE,
                    retry = zu_retry(2, base = 0, jitter = FALSE))
