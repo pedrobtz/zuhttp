@@ -55,7 +55,7 @@
 <td>The design, edition 2: a normative specification in 64 numbered sections, each with a status line; a Decision Register (D-1…D-70); a risk register.</td>
 <td>Before changing behaviour. Cite the section, e.g. §31.9.</td>
 </tr><tr><td><a href=".agents/roadmap.html"><code>.agents/roadmap.md</code></a></td>
-<td>The plan, edition 2: milestones M0–M3 (0.1.0 tag → 0.2.0 → CRAN 0.3.0 → 1.0), work packages W1–W19 with exit criteria, and an append-only findings log.</td>
+<td>The plan, edition 2: milestones M0–M3 (0.1.0 on CRAN → 0.2.0 → 0.3.0 → 1.0), work packages W1–W19 with exit criteria, and an append-only findings log.</td>
 <td>Before starting work, to see which work package owns it.</td>
 </tr><tr><td><a href=".agents/history/"><code>.agents/history/</code></a></td>
 <td>Edition 1 of both, verbatim: every spike measurement and how each stage landed.</td>
@@ -88,8 +88,10 @@
 <span id="cb1-21"><a href="#cb1-21" tabindex="-1"></a><span class="co"># What CI actually runs for the R suite — reproduce THIS before claiming green,</span></span>
 <span id="cb1-22"><a href="#cb1-22" tabindex="-1"></a><span class="co"># because it differs from R CMD check in ways that have bitten before.</span></span>
 <span id="cb1-23"><a href="#cb1-23" tabindex="-1"></a><span class="ex">Rscript</span> tools/ci-run-tests.R</span></code></pre></div>
-<p><strong>A pull request from a branch of this repository gets no CI.</strong> Every job skips on same-repository <code>pull_request</code> events and <code>push</code> fires only on <code>main</code>/<code>develop</code>. Before merging, dispatch the workflows on the branch:</p>
-<div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="cf">for</span> w <span class="kw">in</span> R-CMD-check c-core fuzz tls-spike<span class="kw">;</span> <span class="cf">do</span> <span class="ex">gh</span> workflow run <span class="va">$w</span>.yaml <span class="at">--ref</span> <span class="op">&lt;</span>branch<span class="op">&gt;</span><span class="kw">;</span> <span class="cf">done</span></span></code></pre></div>
+<p><strong>Every pull request runs CI</strong> (W1). R-CMD-check, native-checks and the r-actions jobs run a quick profile on a pull request and the full one on <code>main</code>; the <code>full-ci</code> label runs the full profile on a pull request before merging, which is what to use for anything platform-specific (a TLS backend, <code>configure.win</code>). A failure only the full set sees is otherwise found on <code>main</code> after the merge.</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="ex">tools/vendor/verify</span>            <span class="co"># src/vendor/ is byte-for-byte what was recorded</span></span>
+<span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a><span class="ex">tools/vendor/record</span>            <span class="co"># after tools/update-*, never after a hand edit</span></span>
+<span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a><span class="ex">tools/check-code-lines</span>         <span class="co"># project-owned C against the §51.3 budget</span></span></code></pre></div>
 <p>Network tests are gated on <code>ZU_TEST_NETWORK=1</code>, not on <code>NOT_CRAN</code> — <code>rcmdcheck</code> sets <code>NOT_CRAN</code>, so gating on it alone would make every check depend on example.com and badssl.com.</p>
 </div>
 <div class="section level2">
@@ -103,10 +105,11 @@ R/              the public API; see .agents/zuhttp-design.md §31
 ctest/          C tests. zu_ctest is offline; the engine/tls binaries are not.
 fuzz/           libFuzzer harnesses + a portable replay driver, and the corpus
 tools/          update-uriparser, update-picohttpparser, check-feature-macros,
-                check-objects-sync, check-vendor-licenses, ci-fork-guard.R,
-                ci-run-tests.R
-.github/        6 workflows: R-CMD-check, c-core, fuzz, tls-spike (the network
-                and per-backend jobs, despite the name), coverage, pkgdown</code></pre>
+                check-objects-sync, check-vendor-licenses, check-code-lines,
+                ci-fork-guard.R, ci-masking.R, ci-run-tests.R, vendor/
+.github/        R-CMD-check and native-checks (pedrobtz/r-actions), c-core, fuzz,
+                network (the network and per-backend jobs), vendor,
+                conventions, coverage, coverage-union, pkgdown</code></pre>
 <p><code>configure</code> / <code>configure.win</code> pick the TLS backend and substitute <code>@SSL_CFLAGS@</code> / <code>@SSL_LIBS@</code> / <code>@TLS_OBJ@</code> into <code>src/Makevars{,.win}</code>.</p>
 </div>
 <div class="section level2">
@@ -133,7 +136,7 @@ tools/          update-uriparser, update-picohttpparser, check-feature-macros,
 </div>
 <div class="section level2">
 <h2 id="current-state">Current state<a class="anchor" aria-label="anchor" href="#current-state"></a></h2>
-<p>v0.1.0 is built but unreleased: it is the <strong>first CRAN submission</strong> (roadmap M0, tracker #21, D-82). Nothing is tagged until CRAN accepts a version — the tag is the maintainer’s post-acceptance step. M0 is W1, W2, W3, W6, W13 (Network.framework, which removes the one <code>--as-cran</code> NOTE) and W16. Its first work package is <strong>W1: CI on pull requests</strong> — until it lands, a pull request from a branch of this repository runs no CI, so dispatch the workflows by hand as shown under Commands. Then W2 (the <code>zuh_</code> C prefix rename) before any other C work, because it touches every file. The roadmap’s work-package exit criteria are authoritative — check them rather than inferring status from the code. Forked HTTPS on macOS raises <code>zu_fork_error</code> by design (D-32); it is not a bug to fix.</p>
+<p>v0.1.0 is built but unreleased: it is the <strong>first CRAN submission</strong> (roadmap M0, tracker #21, D-82). Nothing is tagged until CRAN accepts a version — the tag is the maintainer’s post-acceptance step. M0 is W1, W2, W3, W6, W13 (Network.framework, which removes the one <code>--as-cran</code> NOTE) and W16. W1 (CI on every pull request) is done; next is W2 (the <code>zuh_</code> C prefix rename) before any other C work, because it touches every file. The roadmap’s work-package exit criteria are authoritative — check them rather than inferring status from the code. Forked HTTPS on macOS raises <code>zu_fork_error</code> by design (D-32); it is not a bug to fix.</p>
 </div>
 </div>
 

@@ -39,5 +39,5 @@ zu_perform(zu_request("DELETE", "https://example.com/x"),
 #> <zu_response [204 No Content]>
 #> DELETE https://example.com/x
 #> Body: 0 B in memory
-#> Total: 1 ms
+#> Total: 0 ms
 ```

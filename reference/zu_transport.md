@@ -41,7 +41,10 @@ fake <- zu_mock_transport(function(req) {
   zu_response(status = 200L, body = charToRaw('{"ok":true}'),
               headers = c("Content-Type" = "application/json"))
 })
-zu_resp_json(zu_get("https://example.com", client = zu_client(transport = fake)))
+r <- zu_get("https://example.com", client = zu_client(transport = fake))
+zu_resp_status(r)
+#> [1] 200
+if (requireNamespace("jsonlite", quietly = TRUE)) zu_resp_json(r)
 #> $ok
 #> [1] TRUE
 #> 
