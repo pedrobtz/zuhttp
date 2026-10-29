@@ -1,0 +1,82 @@
+# Checks on the compiled package that R CMD check does not perform, from
+# pedrobtz/r-actions (roadmap W1, #18).
+#
+# c-core.yaml and fuzz.yaml already put the C core under ASan, UBSan and
+# valgrind -- but as ctest and fuzz binaries, with no R in the process. What
+# they cannot reach is src/init.c, the R glue: the only file that touches the
+# PROTECT stack, R_CheckUserInterrupt() and external-pointer finalizers. The
+# S8 `R_FindNamespace` PROTECT bug in it was found by reading. These jobs run
+# the package as R loads it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+
+name: native-checks.yaml
+
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+# `profile` goes to the four workflows it changes: quick skips the asan
+# containers, valgrind and cran-special, and runs gctorture at step 500
+# instead of 20. lto, rchk and analyzers take minutes either way and run on
+# every push.
+jobs:
+  # UBSan under clang and gcc with CRAN's flags; ASan in the R-hub containers,
+  # whose R is itself instrumented. ASan is the one that matters most for the
+  # glue: an interrupt longjmps out of the engine, and what it skips past is
+  # sockets and TLS contexts that only a finalizer gets back (§25).
+  sanitizers:
+    uses: pedrobtz/r-actions/.github/workflows/sanitizers.yml@v1
+    with:
+      asan: true
+      profile: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-ci') && 'quick' || 'full' }}
+
+  valgrind:
+    uses: pedrobtz/r-actions/.github/workflows/valgrind.yml@v1
+    with:
+      profile: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-ci') && 'quick' || 'full' }}
+      valgrind-opts: >-
+        --leak-check=full
+        --show-leak-kinds=definite,indirect
+        --errors-for-leak-kinds=definite,indirect
+
+  # -flto cross-checks each declaration against its definition in another
+  # translation unit: the R glue, the engine and two vendored libraries are
+  # separate compilations.
+  lto:
+    uses: pedrobtz/r-actions/.github/workflows/lto.yml@v1
+
+  # rchk reasons statically about the PROTECT stack and reaches code no test
+  # executes; gctorture provokes real collections and catches what static
+  # reasoning misses. The image has no -dev packages, so configure needs
+  # OpenSSL and zlib named here or it fails before anything is analysed.
+  rchk:
+    uses: pedrobtz/r-actions/.github/workflows/rchk.yml@v1
+    with:
+      system-packages: libssl-dev zlib1g-dev
+      fail-on-findings: true
+
+  gctorture:
+    uses: pedrobtz/r-actions/.github/workflows/gctorture.yml@v1
+    with:
+      profile: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-ci') && 'quick' || 'full' }}
+
+  # GCC's -fanalyzer, for allocator lifecycle on error paths, which is most of
+  # the engine by volume. Vendored sources are excluded: upstream's findings
+  # are not ours to fix (§48).
+  analyzers:
+    uses: pedrobtz/r-actions/.github/workflows/analyzers.yml@v1
+    with:
+      exclude: src/vendor
+
+  # CRAN's rcnst, rlibro and vnu checks. Full runs only.
+  cran-special:
+    uses: pedrobtz/r-actions/.github/workflows/cran-special.yml@v1
+    with:
+      profile: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-ci') && 'quick' || 'full' }}

@@ -1,82 +1,64 @@
-# Workflow derived from https://github.com/r-lib/actions/tree/v2/examples
-# Need help debugging build failures? Start at https://github.com/r-lib/actions#where-to-find-help
+# R CMD check, on the GitHub runners and in the CRAN-like containers, from the
+# shared reusable workflow in pedrobtz/r-actions (roadmap W1, #18).
+#
+# r-actions calls track `@v1`, except coverage.yml: it is the one call that
+# holds a repository write token, and a tag is mutable, so it stays pinned to a
+# commit with the tag in a trailing comment and is bumped deliberately. The
+# read-only calls follow v1 so that its fixes reach every family repo without
+# a pull request in each.
+#
+# This replaced a hand-rolled r-lib/actions matrix. The containers are the
+# reason: clang 23 building C as -std=gnu23 with -pedantic, and GCC 16, are the
+# compilers of CRAN's r-devel Linux flavors, and no GitHub runner carries
+# either. The ubuntu/devel row that matrix had pinned R-devel to the runner's
+# own GCC, which matches no CRAN flavor.
+#
+# Every pull request runs this, including one from a branch of this
+# repository. Until W1 every job here skipped same-repository pull requests,
+# so merges went unchecked (roadmap, "Where 0.1.0 left things").
 on:
   push:
-    branches: [main, master, develop]
+    branches: [main]
+  # `labeled` so that adding `full-ci` to a pull request reruns it in full.
   pull_request:
-  # Every job skips on a same-repository pull_request (the push run covers
-  # it), and push runs only on main/develop, so a branch's PR otherwise gets
-  # no check at all before merge. Dispatch on the branch instead.
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
 
 name: R-CMD-check.yaml
 
 permissions: read-all
 
-# Superseded runs are cancelled: with several pushes in a row the only
-# answer that matters is the newest one.
+# A new push to a pull request cancels the run it supersedes. Pushes to main
+# get a group of their own, so every merge is checked and none is cancelled.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
-
-# A push to `develop` with PR #1 open fires both `push` and `pull_request`,
-# which ran every job twice and saturated the queue. Same-repo PRs are already
-# covered by the push run, so skip them; PRs from a fork still run, because
-# those have no push event here.
 
 jobs:
   R-CMD-check:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
-    runs-on: ${{ matrix.config.os }}
+    uses: pedrobtz/r-actions/.github/workflows/r-cmd-check.yml@v1
+    with:
+      # Quick on each push to a pull request, full after merge. The `full-ci`
+      # label runs the full set on a pull request before merging.
+      profile: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-ci') && 'quick' || 'full' }}
 
-    name: ${{ matrix.config.os }} (${{ matrix.config.r }})
+      # The default matrix plus Windows R-devel, which is CRAN's
+      # r-devel-windows-x86_64 flavor -- the one win-builder exists to reach
+      # (D-82: CI stands in for win-builder). It also links Schannel against
+      # the newest Rtools headers, which is where W15's ABI question lives. The
+      # user agent is "release" as in the r-lib template: under R-devel the
+      # default one can resolve to binaries built for the wrong R.
+      runners: >-
+        [{"os": "macos-latest", "r": "release"},
+         {"os": "windows-latest", "r": "release"},
+         {"os": "windows-latest", "r": "devel", "http-user-agent": "release"},
+         {"os": "ubuntu-latest", "r": "release"},
+         {"os": "ubuntu-latest", "r": "oldrel-1"}]
 
-    strategy:
-      fail-fast: false
-      matrix:
-        config:
-          - {os: macos-latest,   r: 'release'}
-          - {os: windows-latest, r: 'release'}
-          - {os: ubuntu-latest,   r: 'devel', http-user-agent: 'release'}
-          - {os: ubuntu-latest,   r: 'release'}
-          - {os: ubuntu-latest,   r: 'oldrel-1'}
-
-    env:
-      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
-      R_KEEP_PKG_SOURCE: yes
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: r-lib/actions/setup-pandoc@v2
-
-      - uses: r-lib/actions/setup-r@v2
-        with:
-          r-version: ${{ matrix.config.r }}
-          http-user-agent: ${{ matrix.config.http-user-agent }}
-
-      # git cannot represent the executable bit in a Windows working tree, so
-      # R CMD build reports "did not have execute permissions: corrected" for
-      # configure and cleanup on every Windows run. It is harmless — R fixes it
-      # itself, and the tarball CRAN builds on Linux has the right bits — but it
-      # is noise competing with real warnings. This may not silence it: R's
-      # check uses file.access(mode = 1), whose behaviour on Windows is
-      # documented as unreliable. If the warning persists, it is intrinsic to
-      # building a source package on Windows and should simply be ignored.
-      - name: Restore executable bits (Windows checkout)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: chmod +x configure configure.win cleanup
-
-      - uses: r-lib/actions/setup-r-dependencies@v2
-        with:
-          extra-packages: any::rcmdcheck
-          needs: check
-
-      - uses: r-lib/actions/check-r-package@v2
-        with:
-          upload-snapshots: true
-          build_args: 'c("--no-manual","--compact-vignettes=gs+qpdf")'
+      # CRAN's NOSUGGESTS flavor. Every Suggests here -- testthat, webfakes,
+      # jsonlite, parallel -- is used from tests and examples, and an unguarded
+      # one errors on this leg and nowhere else (tests/testthat.R's guard, #18).
+      nosuggests: true
 
   # A fresh CI checkout has no stray object files, so it cannot see the failure
   # mode this guards: `R CMD INSTALL .` compiles src/ in place, and
@@ -85,11 +67,11 @@ jobs:
   # files/libraries should not be included in a source package".
   #
   # This reproduces the maintainer's sequence deliberately: install first, then
-  # build, then assert the tarball is clean.
+  # build, then assert the tarball is clean. r-actions builds from a clean
+  # checkout and so cannot see it.
   source-package-hygiene:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
-    name: Source package hygiene (--as-cran)
+    name: Source package hygiene
     steps:
       - uses: actions/checkout@v6
 
@@ -120,22 +102,3 @@ jobs:
             tar tzf zuhttp_*.tar.gz | grep -E '\.(o|so|dll|a)$'
             exit 1
           fi
-
-      - name: R CMD check --as-cran
-        run: |
-          R CMD check --as-cran --no-manual zuhttp_*.tar.gz || true
-          # "New submission" and the dev version string are expected NOTEs;
-          # a WARNING or an ERROR is not. 00check.log puts a status at the END
-          # of its line, after --as-cran's timings ("... [6s/15s] WARNING"),
-          # and sums them up as "Status: 1 WARNING". The pattern this replaced
-          # looked for one at the start of a line, never matched, and so
-          # passed every check whatever it found.
-          log=zuhttp.Rcheck/00check.log
-          if ! grep -q '^Status:' "$log"; then
-            echo "::error::no Status line in $log — the check did not complete"
-            exit 1
-          fi
-          if grep -E '^Status: .*(WARNING|ERROR)|\.\.\. (\[[^]]*\] )?(WARNING|ERROR)$' "$log"; then
-            exit 1
-          fi
-          grep -c 'NOTE' "$log" || true
