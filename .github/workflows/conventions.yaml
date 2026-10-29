@@ -57,3 +57,14 @@ jobs:
           extra-packages: any::httr2, local::.
           needs: check
       - run: Rscript tools/ci-masking.R
+
+  # zu_/ZU_ is zukomp's public C ABI (D-54); zuhttp's internal C is zuh_/ZUH_
+  # (D-66). The first job keeps the prefix out of the code; the second proves
+  # the point of it, by compiling zuhttp's headers beside zukomp's.
+  c-prefix:
+    runs-on: ubuntu-latest
+    name: internal C prefix is zuh_
+    steps:
+      - uses: actions/checkout@v6
+      - run: tools/check-c-prefix
+      - run: tools/check-zukomp-headers

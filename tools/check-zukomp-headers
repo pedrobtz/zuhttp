@@ -1,0 +1,32 @@
+#!/bin/sh
+# zuhttp's internal C headers compile beside zukomp's public one (D-54, D-66).
+#
+# zukomp's public C ABI owns the zu_/ZU_ prefix, and its header is append-only
+# within ABI 1, so every zukomp release can add names. Before W2 this failed:
+# `ZU_OK` was redeclared and `zu_buffer` had conflicting types (#15). Compiling
+# one translation unit that includes both is the whole check.
+#
+# zukomp is pinned to a commit, so a new zukomp name cannot turn this red
+# without a reviewed bump here.
+set -eu
+ZUKOMP_COMMIT=${ZUKOMP_COMMIT:-497ac12522025a845ac227d55901b87f4cd7f6cb}
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+if [ -n "${ZUKOMP_HEADER:-}" ]; then
+    cp "$ZUKOMP_HEADER" "$TMP/zukomp.h"
+else
+    curl -fsSL "https://raw.githubusercontent.com/pedrobtz/zukomp/$ZUKOMP_COMMIT/inst/include/zukomp.h" \
+        -o "$TMP/zukomp.h"
+fi
+
+cat > "$TMP/both.c" <<'CEOF'
+#include "zukomp.h"
+#include "zuh_error.h"
+#include "zuh_buffer.h"
+int main(void) { return 0; }
+CEOF
+
+${CC:-cc} -std=c99 -Wall -Werror -I"$TMP" -I"$ROOT/src" -c "$TMP/both.c" -o "$TMP/both.o"
+echo "ok: zuh_error.h and zuh_buffer.h compile beside zukomp.h at ${ZUKOMP_COMMIT}"

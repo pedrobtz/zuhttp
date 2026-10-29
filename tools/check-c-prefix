@@ -1,0 +1,28 @@
+#!/bin/sh
+# No zu_/ZU_ identifier in project-owned C (D-66, W2).
+#
+# zu_/ZU_ is zukomp's public C ABI (D-54); zuhttp's internal names are
+# zuh_/ZUH_. Comments and string literals are stripped first: a comment may
+# cite an R function (`zu_get()`), and a string may be an R condition class
+# ("zu_tls_error") or an environment variable (ZU_TEST_NETWORK) -- all R-facing,
+# all correctly zu_. What is left is code, where zu_ is always a mistake.
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$ROOT"
+
+found=$(find src ctest fuzz \( -name '*.c' -o -name '*.h' \) ! -path 'src/vendor/*' | LC_ALL=C sort |
+    while read -r f; do
+        perl -0777 -ne '
+            s{/\*.*?\*/}{ }gs; s{//[^\n]*}{}g;
+            s{"(?:\\.|[^"\\\n])*"}{""}g; s{\x27(?:\\.|[^\x27\\\n])*\x27}{\x27\x27}g;
+            my %seen; $seen{$1}++ while /\b((?:zu|ZU)_\w*)/g;
+            print "$ARGV: $_\n" for sort keys %seen;
+        ' "$f"
+    done)
+
+if [ -n "$found" ]; then
+    echo "zu_/ZU_ identifiers in C code; the internal prefix is zuh_/ZUH_ (D-66):" >&2
+    echo "$found" >&2
+    exit 1
+fi
+echo "ok: no zu_/ZU_ identifier in project-owned C code"
