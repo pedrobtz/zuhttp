@@ -226,12 +226,12 @@ test_that("revocation off by default: what each platform then does (§14.5)", {
   # on macOS either outcome is the platform's; what must not happen is a
   # failure of any other kind.
   if (identical(Sys.info()[["sysname"]], "Darwin")) {
-    r <- tryCatch(zu_get("https://revoked.badssl.com", timeout = 20),
+    r <- tryCatch(zu_get_badssl("https://revoked.badssl.com", timeout = 20),
                   error = function(e) e)
     if (inherits(r, "error")) expect_s3_class(r, "zu_tls_certificate_error")
     else expect_identical(zu_resp_status(r), 200L)
   } else {
-    r <- zu_get("https://revoked.badssl.com", timeout = 20)
+    r <- zu_get_badssl("https://revoked.badssl.com", timeout = 20)
     expect_identical(zu_resp_status(r), 200L)
   }
 })
@@ -247,7 +247,7 @@ test_that("zu_tls(revocation = TRUE) changes the outcome for a revoked host", {
   # its CRL check fails before the chain is judged. What both must agree on is
   # that the request does not succeed.
   expect_error(
-    zu_get("https://revoked.badssl.com", timeout = 20,
+    zu_get_badssl("https://revoked.badssl.com", timeout = 20,
            tls = zu_tls(revocation = TRUE)),
     class = "zu_tls_error")
 })
@@ -269,7 +269,7 @@ test_that("a revocation failure is ABOUT revocation (S9 criterion 4)", {
   # all: a same-CA valid certificate must PASS before the revoked one failing
   # means anything.
   tls <- zu_tls(revocation = TRUE)
-  control <- tryCatch(zu_get("https://badssl.com", timeout = 20, tls = tls),
+  control <- tryCatch(zu_get_badssl("https://badssl.com", timeout = 20, tls = tls),
                       error = function(e) e)
   if (inherits(control, "condition"))
     skip(paste0("no usable control: a valid badssl.com certificate also fails ",
@@ -279,6 +279,6 @@ test_that("a revocation failure is ABOUT revocation (S9 criterion 4)", {
 
   expect_identical(zu_resp_status(control), 200L)
   expect_error(
-    zu_get("https://revoked.badssl.com", timeout = 20, tls = tls),
+    zu_get_badssl("https://revoked.badssl.com", timeout = 20, tls = tls),
     class = "zu_tls_certificate_error")
 })

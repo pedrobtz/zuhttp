@@ -65,3 +65,17 @@ skip_under_gctorture <- function() {
   if (identical(Sys.getenv("ZU_GCTORTURE"), "true"))
     testthat::skip("a wall-clock bound, under gctorture")
 }
+
+# zu_get() against badssl.com, which resets connections from CI runners now
+# and then ("Connection reset by peer" on macOS). A transport failure is
+# retried, twice; anything else -- a response, a TLS verdict -- is returned on
+# the first attempt, so a flaky network can neither fail a test nor make one
+# pass. The same rule as ctest's get_retrying() and dial().
+zu_get_badssl <- function(...) {
+  transient <- c("zu_connect_error", "zu_io_error", "zu_timeout_error")
+  for (attempt in 1:3) {
+    r <- tryCatch(zu_get(...), error = function(e) e)
+    if (!inherits(r, "error")) return(r)
+    if (!inherits(r, transient) || attempt == 3L) stop(r)
+  }
+}
