@@ -32,7 +32,7 @@ zuh_code zuh_body_pipe_init(zuh_body_pipe *p, zuh_sink *sink, zuh_headers *h,
                      zuh_headers_get(h, "Content-Encoding"));
         return ZUH_ERR_BODY_DECODE;
     }
-    if (zuh_inflate_init(&p->inflate, kind, max_body, 0) != ZUH_OK)
+    if (zuh_inflate_init(&p->inflate, kind, max_body, ZUH_MAX_DECOMPRESSION_RATIO) != ZUH_OK)
         return ZUH_ERR_NOMEM;
     if (!zuh_buf_init(&p->staging, ZUH_READ_CHUNK * 4, (size_t)-1)) {
         zuh_inflate_free(&p->inflate);

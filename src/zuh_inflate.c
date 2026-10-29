@@ -137,9 +137,18 @@ static zuh_code deliver(zuh_inflate *z, const unsigned char *chunk, size_t produ
         if (allow && !zuh_buf_append(out, chunk, (size_t)allow)) return ZUH_ERR_NOMEM;
         z->out_total += allow;
         (void)check_limits(z, err);
-        if (err && err->code != ZUH_ERR_BODY_LIMIT)
-            zuh_error_set(err, ZUH_ERR_BODY_LIMIT, ZUH_PHASE_DECODE,
-                         "decompressed body exceeds the configured limit");
+        /* Stopped exactly AT a cap, which check_limits() does not count as over
+         * it. Name the cap that was binding: a ratio stop blamed on max_body
+         * sends the caller to raise a limit that was never reached (D-69). */
+        if (err && err->code != ZUH_ERR_BODY_LIMIT) {
+            if (z->max_out && z->out_total >= z->max_out)
+                zuh_error_set(err, ZUH_ERR_BODY_LIMIT, ZUH_PHASE_DECODE,
+                             "decompressed body exceeds the configured limit");
+            else
+                zuh_error_set(err, ZUH_ERR_BODY_LIMIT, ZUH_PHASE_DECODE,
+                             "decompression ratio exceeds the limit of %u:1",
+                             z->max_ratio);
+        }
         return ZUH_ERR_BODY_LIMIT;
     }
     if (produced && !zuh_buf_append(out, chunk, produced)) return ZUH_ERR_NOMEM;

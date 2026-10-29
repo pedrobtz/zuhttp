@@ -24,6 +24,7 @@
 #include "zuh_fork.h"
 #include <string.h>
 #include <stdio.h>
+#include <zlib.h>
 
 #if defined(ZUH_POSIX)
 #  include <sys/resource.h>
@@ -55,6 +56,34 @@ static zuh_code run_body(const zuh_mock_step *steps, size_t nsteps,
     zuh_body_pipe_free(&p);
     zuh_stream_free(s);
     return rc;
+}
+
+/* gzip of `n` zero bytes, streamed through deflate so the input is never held:
+ * 100 MB of zeros is about 100 KB, a ratio near deflate's ceiling of ~1030:1. */
+static int gzip_zeros(zuh_buffer *out, uint64_t n) {
+    static unsigned char zeros[65536];
+    unsigned char chunk[65536];
+    z_stream s;
+    int flush, rc;
+    memset(&s, 0, sizeof s);
+    if (deflateInit2(&s, 9, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK) return 0;
+    do {
+        uInt take = n > sizeof zeros ? (uInt)sizeof zeros : (uInt)n;
+        n -= take;
+        flush = n ? Z_NO_FLUSH : Z_FINISH;
+        s.next_in = zeros; s.avail_in = take;
+        do {
+            s.next_out = chunk; s.avail_out = sizeof chunk;
+            rc = deflate(&s, flush);
+            if (rc == Z_STREAM_ERROR
+                || !zuh_buf_append(out, chunk, sizeof chunk - s.avail_out)) {
+                deflateEnd(&s);
+                return 0;
+            }
+        } while (s.avail_out == 0);
+    } while (flush != Z_FINISH);
+    deflateEnd(&s);
+    return rc == Z_STREAM_END;
 }
 
 void suite_body(void) {
@@ -269,6 +298,29 @@ void suite_body(void) {
         if (fp) { n = fread(buf, 1, sizeof buf, fp); fclose(fp);
                   ZUH_CHECK(n == 3 && memcmp(buf, "old", 3) == 0); }
         remove(path);
+    }
+
+    ZUH_CASE("D-69: a bomb fails on the ratio, with the absolute cap out of the way");
+    {
+        /* 100 MB of zeros as ~100 KB of gzip. max_body is raised to 1 GiB so the
+         * only limit that can fire is the ratio (§21.4): it must, and early --
+         * after kilobytes of output, not the 100 MB the absolute cap allows. */
+        zuh_buffer src, b; zuh_sink sink; zuh_mock_step step;
+        const uint64_t big = (uint64_t)1 << 30;
+        ZUH_CHECK(zuh_buf_init(&src, 1 << 16, (size_t)-1));
+        ZUH_CHECK(gzip_zeros(&src, (uint64_t)100 * 1024 * 1024));
+        ZUH_CHECK(zuh_buf_init(&b, 1 << 16, (size_t)-1));
+        zuh_sink_memory_init(&sink, &b);
+        zuh_headers_init(&h);
+        ZUH_CHECK(zuh_headers_add_str(&h, "Content-Encoding", "gzip") == ZUH_OK);
+        step.kind = ZUH_MOCK_DATA; step.data = src.data; step.len = src.len; step.code = ZUH_OK;
+        ZUH_CHECK_EQ_INT(run_body(&step, 1, ZUH_FRAME_LENGTH, src.len, &sink, &h, 0,
+                                 big, &e), ZUH_ERR_BODY_LIMIT);
+        ZUH_CHECK(strstr(e.message, "ratio") != NULL);
+        ZUH_CHECK(b.len < 1024 * 1024);
+        zuh_headers_free(&h);
+        zuh_buf_free(&b);
+        zuh_buf_free(&src);
     }
 
     /* --- framing through the pipe ------------------------------------- */
