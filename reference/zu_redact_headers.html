@@ -75,8 +75,11 @@ cannot remove a default.</p>
     <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
     <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="va">old</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/options.html" class="external-link">getOption</a></span><span class="op">(</span><span class="st">"zuhttp.redact_headers"</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="fu">zu_redact_headers</span><span class="op">(</span><span class="st">"X-Session"</span><span class="op">)</span></span></span>
-<span class="r-in"><span><span class="fu"><a href="zu_is_secret_header.html">zu_is_secret_header</a></span><span class="op">(</span><span class="st">"X-Session"</span><span class="op">)</span></span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] TRUE</span>
+<span class="r-in"><span><span class="co"># Printed requests, traces, cassettes and conditions now hide it:</span></span></span>
+<span class="r-in"><span><span class="fu"><a href="zu_headers.html">zu_headers</a></span><span class="op">(</span><span class="fu"><a href="zu_request.html">zu_request</a></span><span class="op">(</span><span class="st">"GET"</span>, <span class="st">"https://api.example.com"</span><span class="op">)</span>, `X-Session` <span class="op">=</span> <span class="st">"abc123"</span><span class="op">)</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> &lt;zu_request&gt;</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> GET https://api.example.com</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> X-Session: &lt;redacted&gt;</span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/options.html" class="external-link">options</a></span><span class="op">(</span>zuhttp.redact_headers <span class="op">=</span> <span class="va">old</span><span class="op">)</span>   <span class="co"># restore</span></span></span>
 </code></pre></div>
     </div>

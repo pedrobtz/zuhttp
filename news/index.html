@@ -63,6 +63,11 @@
 <li>Per-phase timings and an event trace (<code><a href="../reference/zu_resp_trace.html">zu_resp_trace()</a></code>, <code><a href="../reference/zu_verbose.html">zu_verbose()</a></code>), and <code><a href="../reference/zu_info.html">zu_info()</a></code> for a bug-report-ready configuration dump.</li>
 </ul></div>
 <div class="section level3">
+<h3 id="api-surface-0-1-0">API surface<a class="anchor" aria-label="anchor" href="#api-surface-0-1-0"></a></h3>
+<p>61 exported functions. Every condition inherits <code>zuhttp_error</code>, directly above <code>error</code>, so <code>tryCatch(..., zuhttp_error = )</code> catches anything zuhttp raises and nothing else. The testing tools — <code><a href="../reference/zu_transport.html">zu_mock_transport()</a></code>, <code><a href="../reference/zu_stub.html">zu_stub()</a></code>, <code><a href="../reference/zu_response.html">zu_response()</a></code> and the cassette functions — are experimental and may still change before 1.0; the rest is the stable API.</p>
+<p>Trimmed before this release, from the development version some packages may have used: the client-first wrappers <code>zu_client_get()</code> and friends (use <code>zu_get(url, client = api)</code>), and <code>zu_transport_perform()</code>, <code>zu_native_transport()</code>, <code>zu_error_codes()</code>, <code>zu_code_retryable()</code>, <code>zu_is_secret_header()</code>, <code>zu_is_secret_param()</code>, <code>zu_redact_form()</code> and <code>zu_redact_headers_for_display()</code>, which are now internal.</p>
+</div>
+<div class="section level3">
 <h3 id="fixed-before-release-0-1-0">Fixed before release<a class="anchor" aria-label="anchor" href="#fixed-before-release-0-1-0"></a></h3>
 <ul><li>
 <strong>A redirect to another origin no longer carries credentials.</strong> <code>Authorization</code>, <code>Cookie</code> and <code>Proxy-Authorization</code> set by the caller were re-sent on every hop, including to a different host, port or scheme. They are now dropped at the first cross-origin hop and stay dropped for the rest of the chain.</li>

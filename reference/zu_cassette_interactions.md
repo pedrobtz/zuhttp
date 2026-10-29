@@ -29,6 +29,12 @@ zu_cassette_clear(
 `request`, `response` and `recorded_at`, all already redacted;
 `zu_cassette_clear()` `TRUE` if a file was removed, invisibly.
 
+## Lifecycle
+
+Experimental (D-65). The testing tools are exported so that package
+tests can run without a network, and may still change before 1.0; the
+request functions, response accessors and conditions are the stable API.
+
 ## See also
 
 [`zu_cassette_transport()`](https://pedrobtz.github.io/zuhttp/reference/zu_cassette_transport.md)

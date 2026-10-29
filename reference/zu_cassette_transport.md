@@ -45,6 +45,12 @@ zu_cassette_transport(
 
 A transport object, for `zu_client(transport = )`.
 
+## Lifecycle
+
+Experimental (D-65). The testing tools are exported so that package
+tests can run without a network, and may still change before 1.0; the
+request functions, response accessors and conditions are the stable API.
+
 ## What is written
 
 Credentials are removed *before* anything reaches the disk: userinfo and

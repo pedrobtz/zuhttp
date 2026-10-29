@@ -61,6 +61,12 @@ zu_stub(
 A `zu_stub`, for
 [`zu_mock_transport()`](https://pedrobtz.github.io/zuhttp/reference/zu_transport.md).
 
+## Lifecycle
+
+Experimental (D-65). The testing tools are exported so that package
+tests can run without a network, and may still change before 1.0; the
+request functions, response accessors and conditions are the stable API.
+
 ## See also
 
 [`zu_mock_transport()`](https://pedrobtz.github.io/zuhttp/reference/zu_transport.md)

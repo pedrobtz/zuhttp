@@ -65,7 +65,8 @@ cnd <- zu_condition("zu_timeout_error", "the request took too long",
                     url = "https://user:pw@api.example.com/v1",
                     phase = "read")
 class(cnd)
-#> [1] "zu_timeout_error" "zu_error"         "error"            "condition"       
+#> [1] "zu_timeout_error" "zu_error"         "zuhttp_error"     "error"           
+#> [5] "condition"       
 cnd$url        # redacted: the userinfo is gone
 #> [1] "https://api.example.com/v1"
 

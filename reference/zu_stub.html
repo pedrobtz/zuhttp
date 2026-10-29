@@ -107,6 +107,14 @@ A stub with <code>times = 1</code> is how you assert a request is not retried.</
     <p>A <code>zu_stub</code>, for <code><a href="zu_transport.html">zu_mock_transport()</a></code>.</p>
     </div>
     <div class="section level2">
+    <h2 id="lifecycle">Lifecycle<a class="anchor" aria-label="anchor" href="#lifecycle"></a></h2>
+
+
+<p>Experimental (D-65). The testing tools are exported so that package tests can
+run without a network, and may still change before 1.0; the request
+functions, response accessors and conditions are the stable API.</p>
+    </div>
+    <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
     <div class="dont-index"><p><code><a href="zu_transport.html">zu_mock_transport()</a></code></p></div>
     </div>

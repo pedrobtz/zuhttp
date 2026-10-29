@@ -48,6 +48,12 @@ zu_response(
 
 A `zu_response`.
 
+## Lifecycle
+
+Experimental (D-65). The testing tools are exported so that package
+tests can run without a network, and may still change before 1.0; the
+request functions, response accessors and conditions are the stable API.
+
 ## Examples
 
 ``` r

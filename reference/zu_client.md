@@ -76,10 +76,12 @@ zu_client(
 
 - transport:
 
-  The object that actually performs requests. Defaults to
-  [`zu_native_transport()`](https://pedrobtz.github.io/zuhttp/reference/zu_transport.md);
+  The object that actually performs requests. The default is the
+  network;
   [`zu_mock_transport()`](https://pedrobtz.github.io/zuhttp/reference/zu_transport.md)
-  replaces the network in tests.
+  and
+  [`zu_cassette_transport()`](https://pedrobtz.github.io/zuhttp/reference/zu_cassette_transport.md)
+  replace it in tests.
 
 - pool:
 
@@ -136,8 +138,7 @@ that resolve here. An absolute request URL ignores `base_url` entirely.
 `zu_get(url, ..., client = api)`, never `zu_get(api, url)`. Overloading
 argument one by type breaks autocomplete, makes dispatch murky, and
 turns a misplaced argument into a confusing error instead of a clear one
-(§31.3). For client-first phrasing there are thin wrappers:
-`api |> zu_client_get("/users")`.
+(§31.3).
 
 ## See also
 

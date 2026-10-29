@@ -89,7 +89,7 @@ article builds with no internet access.</p>
 <span><span class="op">)</span></span>
 <span><span class="va">base</span> <span class="op">&lt;-</span> <span class="va">srv</span><span class="op">$</span><span class="fu">url</span><span class="op">(</span><span class="op">)</span></span>
 <span><span class="va">base</span></span>
-<span><span class="co">#&gt; [1] "http://127.0.0.1:39951/"</span></span></code></pre></div>
+<span><span class="co">#&gt; [1] "http://127.0.0.1:44867/"</span></span></code></pre></div>
 <p>httpbin’s endpoints echo the request back as JSON, which makes it
 easy to see exactly what was sent. A small helper keeps that
 readable:</p>
@@ -172,7 +172,7 @@ Pass it with <code>client =</code> — it is always a named argument.</p>
 <span><span class="op">)</span></span>
 <span><span class="va">api</span></span>
 <span><span class="co">#&gt; &lt;zu_client&gt;</span></span>
-<span><span class="co">#&gt;   base_url:  http://127.0.0.1:39951/</span></span>
+<span><span class="co">#&gt;   base_url:  http://127.0.0.1:44867/</span></span>
 <span><span class="co">#&gt;   Accept: application/json</span></span>
 <span><span class="co">#&gt;   X-Client: article</span></span>
 <span><span class="co">#&gt;   query:     lang=en</span></span>
@@ -189,7 +189,7 @@ resolution, so a base URL ending in <code>/v1</code> keeps its
 <div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">r</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="st">"anything/users"</span>, query <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>page <span class="op">=</span> <span class="fl">2</span><span class="op">)</span>, client <span class="op">=</span> <span class="va">api</span><span class="op">)</span></span>
 <span><span class="fu">sent</span><span class="op">(</span><span class="va">r</span><span class="op">)</span><span class="op">$</span><span class="va">url</span></span>
-<span><span class="co">#&gt; [1] "http://127.0.0.1:39951/anything/users"</span></span>
+<span><span class="co">#&gt; [1] "http://127.0.0.1:44867/anything/users"</span></span>
 <span><span class="fu">sent</span><span class="op">(</span><span class="va">r</span><span class="op">)</span><span class="op">$</span><span class="va">headers</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"Accept"</span>, <span class="st">"X-Client"</span><span class="op">)</span><span class="op">]</span></span>
 <span><span class="co">#&gt; $Accept</span></span>
 <span><span class="co">#&gt; [1] "application/json"</span></span>
@@ -232,11 +232,6 @@ API.</p>
 <span><span class="co">#&gt; [1] "Bearer admin-token"</span></span>
 <span><span class="st">"Authorization"</span> <span class="op"><a href="https://rdrr.io/r/base/match.html" class="external-link">%in%</a></span> <span class="fu"><a href="https://rdrr.io/r/base/names.html" class="external-link">names</a></span><span class="op">(</span><span class="fu">sent</span><span class="op">(</span><span class="fu"><a href="../reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="st">"headers"</span>, client <span class="op">=</span> <span class="va">api</span><span class="op">)</span><span class="op">)</span><span class="op">$</span><span class="va">headers</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] FALSE</span></span></code></pre></div>
-<p>If you prefer the client first, pipe-friendly wrappers read that
-way:</p>
-<div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">api</span> <span class="op">|&gt;</span> <span class="fu"><a href="../reference/zu_client_methods.html">zu_client_get</a></span><span class="op">(</span><span class="st">"get"</span><span class="op">)</span> <span class="op">|&gt;</span> <span class="fu"><a href="../reference/zu_resp.html">zu_resp_status</a></span><span class="op">(</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] 200</span></span></code></pre></div>
 </div>
 </div>
 <div class="section level2">
@@ -246,7 +241,7 @@ way:</p>
 object. No network I/O happens until <code><a href="../reference/zu_perform.html">zu_perform()</a></code>, so a
 package can build a request in one function, inspect or test it, and
 send it in another.</p>
-<div class="sourceCode" id="cb12"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">req</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/zu_request.html">zu_request</a></span><span class="op">(</span><span class="st">"POST"</span>, <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">base</span>, <span class="st">"anything/orders"</span><span class="op">)</span><span class="op">)</span> <span class="op">|&gt;</span></span>
 <span>  <span class="fu"><a href="../reference/zu_query.html">zu_query</a></span><span class="op">(</span>dry_run <span class="op">=</span> <span class="st">"true"</span><span class="op">)</span> <span class="op">|&gt;</span></span>
 <span>  <span class="fu"><a href="../reference/zu_headers.html">zu_headers</a></span><span class="op">(</span><span class="st">"Idempotency-Key"</span> <span class="op">=</span> <span class="st">"order-2026-001"</span><span class="op">)</span> <span class="op">|&gt;</span></span>
@@ -255,7 +250,7 @@ send it in another.</p>
 <span></span>
 <span><span class="va">req</span></span>
 <span><span class="co">#&gt; &lt;zu_request&gt;</span></span>
-<span><span class="co">#&gt; POST http://127.0.0.1:39951/anything/orders?dry_run=true</span></span>
+<span><span class="co">#&gt; POST http://127.0.0.1:44867/anything/orders?dry_run=true</span></span>
 <span><span class="co">#&gt; Idempotency-Key: order-2026-001</span></span>
 <span><span class="co">#&gt; Content-Type: application/json</span></span>
 <span><span class="co">#&gt; Body: JSON, 23 bytes</span></span>
@@ -263,7 +258,7 @@ send it in another.</p>
 <p>The printed request hides nothing it needs and shows nothing it
 should not: credentials would read <code>&lt;redacted&gt;</code> (see
 the <a href="debugging.html">debugging article</a>). Then:</p>
-<div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb12"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">r</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/zu_perform.html">zu_perform</a></span><span class="op">(</span><span class="va">req</span>, client <span class="op">=</span> <span class="va">api</span><span class="op">)</span></span>
 <span><span class="fu">sent</span><span class="op">(</span><span class="va">r</span><span class="op">)</span><span class="op">$</span><span class="va">args</span>      <span class="co"># the query: the request's dry_run, the client's lang</span></span>
 <span><span class="co">#&gt; $lang</span></span>
@@ -287,7 +282,7 @@ to the same request, so they behave identically.</p>
 <p>A client keeps a pool of open connections, so a second request to the
 same host skips the TCP (and TLS) setup. <code><a href="../reference/zu_pool_stats.html">zu_pool_stats()</a></code>
 shows it happening:</p>
-<div class="sourceCode" id="cb14"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">pooled</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/zu_client.html">zu_client</a></span><span class="op">(</span>base_url <span class="op">=</span> <span class="va">base</span><span class="op">)</span></span>
 <span><span class="kw">for</span> <span class="op">(</span><span class="va">i</span> <span class="kw">in</span> <span class="fl">1</span><span class="op">:</span><span class="fl">5</span><span class="op">)</span> <span class="fu"><a href="../reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="st">"get"</span>, client <span class="op">=</span> <span class="va">pooled</span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/zu_pool_stats.html">zu_pool_stats</a></span><span class="op">(</span><span class="va">pooled</span><span class="op">)</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"hits"</span>, <span class="st">"misses"</span>, <span class="st">"idle"</span><span class="op">)</span><span class="op">]</span></span>
@@ -311,7 +306,7 @@ crashing (<code><a href="../reference/zuhttp_fork.html">?zuhttp_fork</a></code>)
 <p>The one-shot calls use a package-level default client. Replace it to
 change defaults for a whole session; <code><a href="../reference/zu_info.html">zu_info()</a></code> reports what
 it is set to.</p>
-<div class="sourceCode" id="cb15"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb14"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">old</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/zu_set_default_client.html">zu_set_default_client</a></span><span class="op">(</span><span class="fu"><a href="../reference/zu_client.html">zu_client</a></span><span class="op">(</span>timeout <span class="op">=</span> <span class="fl">15</span>, headers <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"X-Team"</span> <span class="op">=</span> <span class="st">"data"</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="fu">sent</span><span class="op">(</span><span class="fu"><a href="../reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">base</span>, <span class="st">"headers"</span><span class="op">)</span><span class="op">)</span><span class="op">)</span><span class="op">$</span><span class="va">headers</span><span class="op">[[</span><span class="st">"X-Team"</span><span class="op">]</span><span class="op">]</span></span>
 <span><span class="co">#&gt; [1] "data"</span></span>

@@ -161,10 +161,15 @@ any connection is made, never downgrades.
 
 ## Status
 
-**v0.1.0 — a first release, not a 1.0.** The API is expected to be
-stable, but it has not been through the external security review that
-1.0 requires, and it is not on CRAN yet. Suitable for use; pin the
-version if you depend on it.
+**v0.1.0 — a first release, not a 1.0.** The request functions, response
+accessors and conditions are the stable API: from 0.1.0 on, an export is
+removed only after a deprecation release (§53). The testing tools
+([`zu_mock_transport()`](https://pedrobtz.github.io/zuhttp/reference/zu_transport.md),
+[`zu_stub()`](https://pedrobtz.github.io/zuhttp/reference/zu_stub.md),
+[`zu_response()`](https://pedrobtz.github.io/zuhttp/reference/zu_response.md),
+the cassettes) are experimental and may still change. It has not been
+through the external security review that 1.0 requires. Suitable for
+use.
 
 ## Security
 

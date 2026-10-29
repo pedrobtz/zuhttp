@@ -66,7 +66,7 @@ It is never the first argument of a request function — see below.</p>
 <span>  user_agent <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  check <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  decode <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  transport <span class="op">=</span> <span class="fu"><a href="zu_transport.html">zu_native_transport</a></span><span class="op">(</span><span class="op">)</span>,</span>
+<span>  transport <span class="op">=</span> <span class="fu">zu_native_transport</span><span class="op">(</span><span class="op">)</span>,</span>
 <span>  pool <span class="op">=</span> <span class="fu"><a href="zu_pool.html">zu_pool</a></span><span class="op">(</span><span class="op">)</span>,</span>
 <span>  retry <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  middleware <span class="op">=</span> <span class="cn">NULL</span>,</span>
@@ -124,9 +124,9 @@ returns the response whatever its status.</p></dd>
 
 
 <dt id="arg-transport">transport<a class="anchor" aria-label="anchor" href="#arg-transport"></a></dt>
-<dd><p>The object that actually performs requests. Defaults to
-<code><a href="zu_transport.html">zu_native_transport()</a></code>; <code><a href="zu_transport.html">zu_mock_transport()</a></code> replaces the network in
-tests.</p></dd>
+<dd><p>The object that actually performs requests. The default
+is the network; <code><a href="zu_transport.html">zu_mock_transport()</a></code> and <code><a href="zu_cassette_transport.html">zu_cassette_transport()</a></code> replace
+it in tests.</p></dd>
 
 
 <dt id="arg-pool">pool<a class="anchor" aria-label="anchor" href="#arg-pool"></a></dt>
@@ -180,8 +180,7 @@ An absolute request URL ignores <code>base_url</code> entirely.</p>
 
 <p><code>zu_get(url, ..., client = api)</code>, never <code>zu_get(api, url)</code>. Overloading
 argument one by type breaks autocomplete, makes dispatch murky, and turns a
-misplaced argument into a confusing error instead of a clear one (§31.3).
-For client-first phrasing there are thin wrappers: <code>api |&gt; zu_client_get("/users")</code>.</p>
+misplaced argument into a confusing error instead of a clear one (§31.3).</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

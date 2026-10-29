@@ -49,7 +49,7 @@ attempted, what came back, and what usually fixes it:
 
 zu_get(url("/status/404"))
 #> Error in `zu_perform()`:
-#> ! GET http://127.0.0.1:43275/status/404 failed: HTTP 404 Not Found
+#> ! GET http://127.0.0.1:36985/status/404 failed: HTTP 404 Not Found
 #>   The server has no such resource. If you are using a client base_url, check the join: base_url and path are concatenated, not resolved.
 ```
 
@@ -61,7 +61,7 @@ tree, so you catch as broadly or as narrowly as you need:
 e <- tryCatch(zu_get(url("/status/503")), error = function(e) e)
 class(e)
 #> [1] "zu_http_server_error" "zu_http_status_error" "zu_error"            
-#> [4] "error"                "condition"
+#> [4] "zuhttp_error"         "error"                "condition"
 
 tryCatch(zu_get(url("/status/404")),
          zu_http_client_error = function(e) "a 4xx: fix the request",
@@ -230,7 +230,7 @@ zuhttp follows redirects, up to 10 by default, and counts them:
 
 r <- zu_get(url("/redirect/3"))
 zu_resp_url(r)
-#> [1] "http://127.0.0.1:43275/get"
+#> [1] "http://127.0.0.1:36985/get"
 zu_resp_connection(r)$redirect_count
 #> [1] 3
 ```

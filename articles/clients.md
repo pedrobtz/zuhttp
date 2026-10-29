@@ -25,7 +25,7 @@ srv <- webfakes::new_app_process(
 )
 base <- srv$url()
 base
-#> [1] "http://127.0.0.1:39951/"
+#> [1] "http://127.0.0.1:44867/"
 ```
 
 httpbin’s endpoints echo the request back as JSON, which makes it easy
@@ -122,7 +122,7 @@ api <- zu_client(
 )
 api
 #> <zu_client>
-#>   base_url:  http://127.0.0.1:39951/
+#>   base_url:  http://127.0.0.1:44867/
 #>   Accept: application/json
 #>   X-Client: article
 #>   query:     lang=en
@@ -142,7 +142,7 @@ resolution, so a base URL ending in `/v1` keeps its `/v1`:
 
 r <- zu_get("anything/users", query = list(page = 2), client = api)
 sent(r)$url
-#> [1] "http://127.0.0.1:39951/anything/users"
+#> [1] "http://127.0.0.1:44867/anything/users"
 sent(r)$headers[c("Accept", "X-Client")]
 #> $Accept
 #> [1] "application/json"
@@ -195,14 +195,6 @@ sent(zu_get("headers", client = admin))$headers[["Authorization"]]
 #> [1] FALSE
 ```
 
-If you prefer the client first, pipe-friendly wrappers read that way:
-
-``` r
-
-api |> zu_client_get("get") |> zu_resp_status()
-#> [1] 200
-```
-
 ## Build a request now, send it later
 
 Everything the verbs do is available as a pipeline over a request
@@ -221,7 +213,7 @@ req <- zu_request("POST", paste0(base, "anything/orders")) |>
 
 req
 #> <zu_request>
-#> POST http://127.0.0.1:39951/anything/orders?dry_run=true
+#> POST http://127.0.0.1:44867/anything/orders?dry_run=true
 #> Idempotency-Key: order-2026-001
 #> Content-Type: application/json
 #> Body: JSON, 23 bytes

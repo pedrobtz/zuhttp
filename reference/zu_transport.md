@@ -1,16 +1,14 @@
 # Transports
 
-A transport is the object that actually performs a request.
-`zu_native_transport()` is the real one. `zu_mock_transport()` takes a
-function of one argument — the resolved request — and returns whatever
-that function returns, so package tests can exercise their own code
-without a network, a server, or an internet-dependent CRAN check.
+A transport is the object that actually performs a request. The default
+is the network. `zu_mock_transport()` takes a function of one argument —
+the resolved request — and returns whatever that function returns, so
+package tests can exercise their own code without a network, a server,
+or an internet-dependent CRAN check.
 
 ## Usage
 
 ``` r
-zu_native_transport()
-
 zu_mock_transport(handler = NULL, ...)
 ```
 
@@ -33,6 +31,12 @@ zu_mock_transport(handler = NULL, ...)
 ## Value
 
 A transport object, for `zu_client(transport = )`.
+
+## Lifecycle
+
+Experimental (D-65). The testing tools are exported so that package
+tests can run without a network, and may still change before 1.0; the
+request functions, response accessors and conditions are the stable API.
 
 ## Examples
 
