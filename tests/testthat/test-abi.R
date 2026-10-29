@@ -34,6 +34,9 @@ exported_symbols <- function(dll) {
 
 test_that("the shared object exports only R_init_zuhttp (D-66)", {
   skip_on_cran()
+  # covr compiles with --coverage, which exports gcov's own symbols: in a
+  # coverage build this would measure the instrumentation, not the package.
+  skip_if(identical(Sys.getenv("R_COVR"), "true"), "a coverage build")
   dll <- getLoadedDLLs()[["zuhttp"]][["path"]]
   syms <- exported_symbols(dll)
 
