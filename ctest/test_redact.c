@@ -254,37 +254,40 @@ void suite_redact(void) {
     {
         const char *chain[ZUH_CLASS_CHAIN_MAX];
         int n = zuh_code_class_chain(ZUH_ERR_TLS_CERT, chain, ZUH_CLASS_CHAIN_MAX);
-        ZUH_CHECK_EQ_INT(n, 3);
+        ZUH_CHECK_EQ_INT(n, 4);
         ZUH_CHECK(streq(chain[0], "zu_tls_certificate_error"));
         ZUH_CHECK(streq(chain[1], "zu_tls_error"));
         ZUH_CHECK(streq(chain[2], "zu_error"));
+        ZUH_CHECK(streq(chain[3], "zuhttp_error"));   /* D-65 */
 
         n = zuh_code_class_chain(ZUH_ERR_PROXY_AUTH, chain, ZUH_CLASS_CHAIN_MAX);
-        ZUH_CHECK_EQ_INT(n, 3);
+        ZUH_CHECK_EQ_INT(n, 4);
         ZUH_CHECK(streq(chain[1], "zu_proxy_error"));
 
         n = zuh_code_class_chain(ZUH_ERR_INTERRUPTED, chain, ZUH_CLASS_CHAIN_MAX);
-        ZUH_CHECK_EQ_INT(n, 3);
+        ZUH_CHECK_EQ_INT(n, 4);
         ZUH_CHECK(streq(chain[1], "zu_cancelled_error"));
 
         n = zuh_code_class_chain(ZUH_ERR_TOO_MANY_REDIRECTS, chain, ZUH_CLASS_CHAIN_MAX);
         ZUH_CHECK(streq(chain[1], "zu_redirect_error"));
 
-        /* A direct child of zu_error has a two-element chain. */
+        /* A direct child of zu_error has a three-element chain. */
         n = zuh_code_class_chain(ZUH_ERR_DNS, chain, ZUH_CLASS_CHAIN_MAX);
-        ZUH_CHECK_EQ_INT(n, 2);
+        ZUH_CHECK_EQ_INT(n, 3);
         ZUH_CHECK(streq(chain[0], "zu_dns_error"));
         ZUH_CHECK(streq(chain[1], "zu_error"));
+        ZUH_CHECK(streq(chain[2], "zuhttp_error"));
     }
 
-    ZUH_CASE("every error code produces a usable chain ending in zu_error");
+    ZUH_CASE("every chain ends zu_error, zuhttp_error (D-65)");
     {
         int code;
         for (code = 1; code < (int)ZUH_CODE_COUNT; code++) {
             const char *chain[ZUH_CLASS_CHAIN_MAX];
             int n = zuh_code_class_chain((zuh_code)code, chain, ZUH_CLASS_CHAIN_MAX);
-            ZUH_CHECK(n >= 2);
-            ZUH_CHECK(streq(chain[n - 1], "zu_error"));
+            ZUH_CHECK(n >= 3);
+            ZUH_CHECK(streq(chain[n - 2], "zu_error"));
+            ZUH_CHECK(streq(chain[n - 1], "zuhttp_error"));
             ZUH_CHECK(streq(chain[0], zuh_code_class((zuh_code)code)));
         }
     }

@@ -61,11 +61,11 @@ void suite_error(void) {
 
     ZUH_CASE("D-56: a backend refusal is its own class, a child of zu_tls_error");
     {
-        const char *chain[4];
-        int n = zuh_code_class_chain(ZUH_ERR_TLS_UNSUPPORTED, chain, 4);
-        ZUH_CHECK_EQ_INT(n, 3);
-        ZUH_CHECK(n == 3 && strcmp(chain[0], "zu_tls_unsupported_error") == 0);
-        ZUH_CHECK(n == 3 && strcmp(chain[1], "zu_tls_error") == 0);
+        const char *chain[ZUH_CLASS_CHAIN_MAX];
+        int n = zuh_code_class_chain(ZUH_ERR_TLS_UNSUPPORTED, chain, ZUH_CLASS_CHAIN_MAX);
+        ZUH_CHECK_EQ_INT(n, 4);
+        ZUH_CHECK(n == 4 && strcmp(chain[0], "zu_tls_unsupported_error") == 0);
+        ZUH_CHECK(n == 4 && strcmp(chain[1], "zu_tls_error") == 0);
         /* #12: never the mismatch class, and not retryable. */
         ZUH_CHECK(strcmp(zuh_code_class(ZUH_ERR_TLS_UNSUPPORTED),
                         zuh_code_class(ZUH_ERR_TLS_PIN)) != 0);

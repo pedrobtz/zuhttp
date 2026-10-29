@@ -93,7 +93,7 @@ const char *zuh_code_class(zuh_code code);
  *
  * Writes at most `max` pointers into `out` and returns how many; 0 for ZUH_OK
  * or an out-of-range code. */
-#define ZUH_CLASS_CHAIN_MAX 4
+#define ZUH_CLASS_CHAIN_MAX 5
 int zuh_code_class_chain(zuh_code code, const char **out, int max);
 const char *zuh_phase_name(zuh_phase phase);
 
