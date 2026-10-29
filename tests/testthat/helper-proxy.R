@@ -8,6 +8,7 @@
 
 skip_unless_forkable <- function() {
   testthat::skip_on_cran()
+  skip_under_gctorture()
   if (.Platform$OS.type != "unix") skip("the helper proxy uses POSIX shell")
   if (!nzchar(Sys.which("Rscript"))) skip("Rscript not on PATH")
 }

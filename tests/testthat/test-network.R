@@ -11,7 +11,7 @@
 # R-CMD-check run depend on example.com, github.com and badssl.com. That is
 # the same mistake as the DNS lookup inside the "offline" C suite: the
 # deterministic job must stay deterministic. The network-enabled job in
-# tls-spike.yaml sets ZU_TEST_NETWORK=1.
+# network.yaml sets ZU_TEST_NETWORK=1.
 test_that("a plain HTTPS GET returns a usable response", {
   skip_unless_online()
   r <- zu_get("https://example.com")

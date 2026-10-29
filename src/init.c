@@ -538,7 +538,10 @@ static int tls_from_r(SEXP tls, zu_tls_config *cfg) {
     SEXP names;
     R_xlen_t i, n;
     if (tls == R_NilValue || !Rf_isVectorList(tls)) return 0;
-    names = Rf_getAttrib(tls, R_NamesSymbol);
+    /* A list's names are reachable from `tls`, which .Call protects, so this
+     * is belt and braces -- but rchk cannot see that, and its gate is worth
+     * more than one PROTECT (W1). */
+    names = PROTECT(Rf_getAttrib(tls, R_NamesSymbol));
     n = Rf_xlength(tls);
     zu_tls_config_init(cfg);
     for (i = 0; i < n; i++) {
@@ -567,6 +570,7 @@ static int tls_from_r(SEXP tls, zu_tls_config *cfg) {
             if (mv == 12 || mv == 13) cfg->min_version = mv;
         }
     }
+    UNPROTECT(1);
     return 1;
 }
 

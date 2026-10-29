@@ -89,7 +89,7 @@ zu_ctest_asan: $(OWN) $(TESTS) $(VOBJ)
 
 # --- S7 TLS engine tests -------------------------------------------------
 # A SEPARATE binary: these need a real TLS peer and therefore the network,
-# while zu_ctest must stay deterministic and offline. Run by tls-spike.yaml.
+# while zu_ctest must stay deterministic and offline. Run by network.yaml.
 OPENSSL_CFLAGS := $(shell pkg-config --cflags openssl 2>/dev/null)
 OPENSSL_LIBS   := $(shell pkg-config --libs   openssl 2>/dev/null)
 ifeq ($(strip $(OPENSSL_LIBS)),)

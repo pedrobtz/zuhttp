@@ -7,6 +7,7 @@
 # redirect anywhere; Host dropped a non-default port; and an exhausted
 # redirect chain returned its last 3xx as a normal response.
 
+skip_under_gctorture()   # local servers: timing, not memory
 skip_if_not_installed("webfakes")
 
 a <- webfakes::local_app_process(webfakes::httpbin_app(),

@@ -1,0 +1,17 @@
+#!/bin/sh
+# Re-record tools/vendor/checksums.sha256 from the vendored tree. Run it after
+# tools/update-picohttpparser or tools/update-uriparser, never after a hand
+# edit: design §48 forbids local modifications, and recording one would make
+# tools/vendor/verify bless it.
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+cd "$ROOT"
+. tools/vendor/common.sh
+
+out=tools/vendor/checksums.sha256
+: > "$out.tmp"
+for f in $(vendored_files); do
+    printf '%s  %s\n' "$(sha256_of "$f")" "$f" >> "$out.tmp"
+done
+mv "$out.tmp" "$out"
+echo "recorded $(wc -l < "$out" | tr -d ' ') files in $out"

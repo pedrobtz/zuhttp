@@ -10,18 +10,21 @@
 # Windows is not measured yet: covr works there, but ctest's clang coverage
 # build does not under Rtools.
 #
-# Runs on every pull request, including from this repository's own branches,
-# unlike the jobs that still carry the same-repository skip (roadmap W1).
+# Runs on every pull request, as every workflow here does since W1.
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
 name: coverage-union.yaml
 
 permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   coverage:

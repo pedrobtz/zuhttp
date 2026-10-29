@@ -80,4 +80,5 @@ if grep -rnE "$EXCLUDED" src --include='zu_*.c' --include='zu_*.h' >&2; then
     exit 1
 fi
 
-echo "done. Subset is closed. Now run: (cd ctest && make strict && make asan)"
+tools/vendor/record
+echo "done. Subset is closed. Now run: (cd ctest && make strict && make asan), and update the ref in tools/vendor/manifest.tsv"

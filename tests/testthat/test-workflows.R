@@ -201,7 +201,7 @@ test_that("11. a client used inside mclapply (§26.4)", {
     list(text = zu_resp_text(zu_get("https://example.com", client = api)),
          default_pid = zuhttp:::the_default$pid,
          pid = Sys.getpid())
-  }, mc.cores = 2)
+  }, mc.cores = 2, mc.cleanup = FALSE)  # coverage.yaml: no SIGTERM mid-trace under covr
 
   expect_true(all(vapply(out, function(o) grepl("^pid=", o$text), logical(1))))
   for (o in out) {

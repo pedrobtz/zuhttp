@@ -134,6 +134,7 @@ test_that("with redirects = 0 the 3xx body goes to the caller's file", {
 
 # --- against a well-behaved server ----------------------------------------
 
+skip_under_gctorture()   # the rest of this file runs against a local server
 skip_if_not_installed("webfakes")
 web <- webfakes::local_app_process(
   webfakes::httpbin_app(),

@@ -1,0 +1,59 @@
+# Rules this package sets itself, which no R CMD check flavor enforces
+# (roadmap W1, #18). Each job is cheap and runs on every pull request.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+name: conventions.yaml
+
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  # configure and cleanup run under CRAN's /bin/sh, which on Debian is dash. A
+  # bashism there fails only on the machines that build the package for users.
+  # configure.win runs under Rtools' sh, but is held to the same rule so the
+  # two stay one dialect.
+  shell-syntax:
+    runs-on: ubuntu-latest
+    name: configure scripts parse under dash
+    steps:
+      - uses: actions/checkout@v6
+      - run: sudo apt-get install -y dash
+      # Not `dash -n "$f" && echo ok`: under `bash -e` a failure on the left
+      # of && does not stop the step, and the loop's status is its last file's.
+      - run: |
+          for f in configure configure.win cleanup; do
+            dash -n "$f"
+            echo "ok: $f"
+          done
+
+  # Design §51.3's budget for project-owned C, measured on every change so that
+  # R-4 is read before a work package lands rather than after.
+  code-lines:
+    runs-on: ubuntu-latest
+    name: project-owned C within budget
+    steps:
+      - uses: actions/checkout@v6
+      - run: sudo apt-get install -y cloc
+      - run: tools/check-code-lines | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # Success criterion §61.13: attaching zuhttp after httr2 masks nothing.
+  httr2-masking:
+    runs-on: ubuntu-latest
+    name: no masking message beside httr2
+    steps:
+      - uses: actions/checkout@v6
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::httr2, local::.
+          needs: check
+      - run: Rscript tools/ci-masking.R

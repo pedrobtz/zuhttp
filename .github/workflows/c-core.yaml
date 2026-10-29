@@ -10,7 +10,7 @@
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -18,20 +18,21 @@ name: c-core.yaml
 
 permissions: read-all
 
-# Superseded runs are cancelled: with several pushes in a row the only
-# answer that matters is the newest one.
+# A new push to a pull request cancels the run it supersedes. Pushes to main
+# get a group of their own, so every merge is checked and none is cancelled.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
-# A push to `develop` with PR #1 open fires both `push` and `pull_request`,
-# which ran every job twice and saturated the queue. Same-repo PRs are already
-# covered by the push run, so skip them; PRs from a fork still run, because
-# those have no push event here.
+# Every pull request runs this, including one from a branch of this
+# repository (W1). Until then every job here skipped same-repository pull
+# requests on the theory that a push run covered them -- but push fires only
+# on main, so merges went unchecked. `develop` is gone with it: nothing
+# pushes there, and a PR plus a push to the same branch was the double run
+# that rule was written against.
 
 jobs:
   ctest:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ${{ matrix.os }}
     name: C core (${{ matrix.os }})
     strategy:
@@ -127,7 +128,6 @@ jobs:
   # A leak or a wild write here is a release blocker (§45), so run the same
   # suite under valgrind where it is cheap to do so.
   valgrind:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     name: C core (valgrind)
     steps:

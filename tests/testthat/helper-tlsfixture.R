@@ -162,6 +162,7 @@ with_tls_server <- function(cert, code) {
 
 skip_unless_local_tls <- function() {
   testthat::skip_on_cran()
+  skip_under_gctorture()
   if (.Platform$OS.type != "unix") testthat::skip("the fixture uses a POSIX shell")
   if (is.null(openssl_bin())) testthat::skip("openssl CLI not available")
   # Every row of the matrix names its roots with ca_file.

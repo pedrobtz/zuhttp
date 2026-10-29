@@ -310,15 +310,36 @@ zu_resp_text <- function(resp, encoding = NULL, on_invalid = c("error", "substit
 # sub defaults to NA, iconv()'s own "report failure" mode. Passing sub = NULL
 # instead makes iconv() return NA for perfectly valid input, which reads as a
 # decoding failure for every response.
+#
+# iconv() must never be made to raise here, not even under tryCatch(): R's
+# do_iconv() allocates its conversion buffer before it can error, and an error
+# skips the free. valgrind found it (W1), 8 KiB per call. So the output is
+# taken as raw bytes, which cannot fail on an embedded NUL the way building a
+# string does, and a NUL is reported as undecodable here instead -- an R string
+# cannot hold one anyway.
 try_iconv <- function(bytes, from, sub = NA_character_) {
   out <- tryCatch(
-    suppressWarnings(iconv(list(bytes), from = from, to = "UTF-8", sub = sub)),
-    error = function(e) NA_character_
+    suppressWarnings(iconv(list(bytes), from = from, to = "UTF-8", sub = sub,
+                           toRaw = TRUE)),
+    error = function(e) NULL
   )
-  if (length(out) != 1L) NA_character_ else out
+  if (length(out) != 1L || is.null(out[[1L]])) return(NA_character_)
+  out <- out[[1L]]
+  if (any(out == as.raw(0L))) return(NA_character_)
+  out <- rawToChar(out)
+  # With toRaw = TRUE a UTF-8 to UTF-8 "conversion" copies invalid bytes
+  # through rather than failing, so the result is checked here.
+  if (!validUTF8(out)) NA_character_ else out
 }
 
-iconv_knows <- function(enc) !is.na(try_iconv(charToRaw("a"), enc))
+# The same leak, for an encoding iconv() does not know: it raises
+# "unsupported conversion" from inside the conversion loop. So a name is
+# probed only once iconvlist() has it.
+iconv_knows <- function(enc) {
+  known <- tryCatch(toupper(iconvlist()), error = function(e) character())
+  length(known) > 0L && toupper(enc) %in% known &&
+    !is.na(try_iconv(charToRaw("a"), enc))
+}
 
 bom_of <- function(b) {
   if (length(b) >= 3 && all(b[1:3] == as.raw(c(0xEF, 0xBB, 0xBF))))

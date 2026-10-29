@@ -2,7 +2,7 @@
  *
  * SEPARATE from the c-core suite on purpose: these require a real TLS peer and
  * therefore the network, and c-core must stay deterministic and offline.
- * Built as its own binary and run by the tls-spike workflow.
+ * Built as its own binary and run by the network workflow.
  *
  * The endpoints are the same ones the S0 spike used, so a regression here is
  * directly comparable to the spike's recorded results.
@@ -27,8 +27,8 @@ int zu_test_checks = 0;
 const char *zu_test_current = "(none)";
 
 /* Connect TCP + TLS to host:443. Returns the code from whichever stage failed. */
-static zu_code dial(const char *host, const zu_tls_config *cfg,
-                    zu_stream **out, zu_tls_info *info, zu_error *err) {
+static zu_code dial_once(const char *host, const zu_tls_config *cfg,
+                         zu_stream **out, zu_tls_info *info, zu_error *err) {
     zu_net_opts o;
     zu_stream *tcp = NULL, *tls = NULL;
     zu_deadline d = zu_deadline_in(15000);
@@ -50,6 +50,22 @@ static zu_code dial(const char *host, const zu_tls_config *cfg,
     if (info) zu_tls_get_info(tls, info);
     *out = tls;
     return ZU_OK;
+}
+
+/* badssl.com resets connections from CI runners now and then: "read failed
+ * (54)", ECONNRESET, mid-handshake, on macOS. A transport failure is retried,
+ * twice; a TLS verdict never is, so a flaky network can neither fail these
+ * tests nor make one pass. */
+static zu_code dial(const char *host, const zu_tls_config *cfg,
+                    zu_stream **out, zu_tls_info *info, zu_error *err) {
+    zu_code rc = ZU_ERR_IO;
+    int attempt;
+    for (attempt = 0; attempt < 3; attempt++) {
+        rc = dial_once(host, cfg, out, info, err);
+        if (rc != ZU_ERR_IO && rc != ZU_ERR_CONNECT && rc != ZU_ERR_TIMEOUT) break;
+        printf("       (transport failure, retrying: %s)\n", err->message);
+    }
+    return rc;
 }
 
 int main(void) {

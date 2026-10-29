@@ -27,4 +27,5 @@ cp "$DEST/LICENSE" inst/licenses/picohttpparser-LICENSE
 sed -i.bak "s|^Commit:.*|Commit:     $COMMIT|;s|^Retrieved:.*|Retrieved:  $(date -u +%Y-%m-%d)|" "$DEST/VENDOR"
 rm -f "$DEST/VENDOR.bak"
 
-echo "done. Now run: (cd ctest && make strict) && R CMD check"
+tools/vendor/record
+echo "done. Now run: (cd ctest && make strict) && R CMD check, and update the ref in tools/vendor/manifest.tsv"
