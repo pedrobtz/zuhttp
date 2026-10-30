@@ -60,6 +60,10 @@ jobs:
       # one errors on this leg and nowhere else (tests/testthat.R's guard, #18).
       nosuggests: true
 
+      # CRAN's NOLD flavor: R built --disable-long-double, which catches
+      # arithmetic that leans on 80-bit intermediates. Full profile only.
+      nold: true
+
   # A fresh CI checkout has no stray object files, so it cannot see the failure
   # mode this guards: `R CMD INSTALL .` compiles src/ in place, and
   # `R CMD build` drops src/*.o but NOT objects in subdirectories, so the
