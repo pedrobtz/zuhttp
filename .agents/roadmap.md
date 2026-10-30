@@ -109,10 +109,12 @@ feature and not a defect.
       first (#74).
 - [x] Fix the 13 findings of the 2026-09-27 package review (#76), each with a
       test that failed first (#77): D-76 to D-81.
-- [ ] Fix the 2026-10-30 critical review of `237bf96` (#91–#120): one
-      Blocking and seven Required findings are sub-issues of #21; D-83 to
-      D-87. Unticked until the pull request that closes them is green on the
-      full profile.
+- [x] Fix the 2026-10-30 critical review of `237bf96` (#91–#120), and the
+      Schannel defect it led to (#123): D-83 to D-87, in #121. The README's
+      eMudhra claims measured (#122); `zujson` replaces `jsonlite` and
+      `zu_resp_xml()`/`zu_resp_html()` join 0.1.0 (#124, D-88). Full profile
+      green on #124 (`f09eff4`), and every workflow green on `main` after
+      #121 and #122 (`fbb1775`).
 - [x] Close the edition 1 stage issues #41–#51 as superseded (2026-09-26).
 - [x] One issue per work package (#60–#71), and the trackers re-scoped to
       D-82: #21 is M0, #72 is M1, #22 is the path to 1.0.

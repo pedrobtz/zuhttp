@@ -144,12 +144,12 @@ condition classes in C strings, comments citing R functions, and the
 
 ## Current state
 
-v0.1.0 is **ready to submit** to CRAN, its first submission (roadmap
-M0, tracker #21, D-82). Nothing is tagged until CRAN accepts a version — the
-tag is the maintainer's post-acceptance step. M0 is W1, W2, W3, W6, W13
-(Network.framework, which removes the one `--as-cran` NOTE) and W16. W1 (CI on every
-pull request) is done; next is W2 (the `zuh_` C prefix rename) before any other C
-work, because it touches every file. The roadmap's work-package exit criteria
-are authoritative — check them rather than inferring status from the code.
-Forked HTTPS on macOS raises `zu_fork_error` by design (D-32); it is not a bug
-to fix.
+v0.1.0 is **ready to submit** to CRAN, its first submission (roadmap M0,
+tracker #21, D-82); the one open item is the submission itself, #40, which is
+the maintainer's. Nothing is tagged until CRAN accepts a version: the tag is
+the maintainer's post-acceptance step. M0's work packages (W1, W2, W3, W6,
+W13, W16) are merged, and so is the fix of the 2026-10-30 critical review
+(#91–#123). Next is M1 (#72, v0.2.0). The roadmap's work-package exit
+criteria are authoritative: check them rather than inferring status from the
+code. Forked HTTPS on macOS raises `zu_fork_error` by design (D-32); it is not
+a bug to fix.
