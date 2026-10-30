@@ -255,16 +255,19 @@ them on 17 October, Microsoft on 20 October and Apple on 22 October. Each test
 host serves a chain through them; a refusal is the safe answer. Measured on 30
 October 2026 with zuhttp 0.1.0 and the `curl` package:
 
-| Platform | TLS in zuhttp | zuhttp | `curl` package |
+| Machine | TLS in zuhttp | zuhttp | `curl` package |
 |---|---|---|---|
-| macOS 15.7 | Network.framework, `SecTrust` | refused all 4: "certificate is blocked" | connected to all 4 (LibreSSL, `/etc/ssl/cert.pem`) |
-| macOS 26.6 (GitHub runner) | Network.framework, `SecTrust` | refused all 4: "certificate is blocked" | connected to all 4 (LibreSSL) |
-| Ubuntu 24.04 (GitHub runner) | OpenSSL, distribution bundle | refused all 4: issuer not found | refused all 4: issuer not found |
-| Windows build 26100 (GitHub runner) | Schannel | no result: an unrelated read failure ([#123](https://github.com/pedrobtz/zuhttp/issues/123)) | connected to all 4: the runner had not received Microsoft's block |
+| macOS 15.7, with Apple's update | Network.framework, `SecTrust` | refused all 4: "certificate is blocked" | connected to all 4 (LibreSSL, `/etc/ssl/cert.pem`) |
+| macOS 26.6 runner, with the update | Network.framework, `SecTrust` | refused all 4: "certificate is blocked" | connected to all 4 |
+| macOS 26.6 runner, without it | Network.framework, `SecTrust` | connected to 2; refused the 2 never logged for CT: "certificate is not standards compliant" | connected to all 4 |
+| Ubuntu 24.04 runner | OpenSSL, distribution bundle | refused all 4: issuer not found | refused all 4: issuer not found |
+| Windows build 26100 runner, without Microsoft's block | Schannel | connected to all 4 | connected to all 4 |
 
 The four hosts cover the chain directly under the eMudhra root, the one
 cross-signed by Sectigo's AAA root, and a version of each whose certificate
-was never logged for Certificate Transparency. On macOS:
+was never logged for Certificate Transparency. The two macOS runners report
+the same OS version: Apple delivers a block like this one as an update to its
+trust data, and one runner had received it and the other had not. On macOS:
 
 ```r
 u <- "https://dv-g3b-emudhra.we-have-a-problem.com/"
@@ -274,13 +277,17 @@ tryCatch(zu_get(u), zu_tls_certificate_error = conditionMessage)
 
 That refusal needs no configuration: `zu_info()$revocation_default` is
 `FALSE`, and what refused the chain is the platform's block list, not a
-revocation check.
+revocation check. Nor does the Certificate Transparency refusal: Apple's
+evaluator requires a publicly trusted certificate to have been logged, and
+zuhttp asks that evaluator.
 
 What this does not show. On Linux, zuhttp trusts the distribution's bundle, a
 file that can drop a root but cannot block an intermediate; Ubuntu refused
-here only because the bundle lacks these hosts' issuer. zuhttp checks no
-Certificate Transparency of its own, so a client of the platform evaluator is
-as good as that evaluator and no better. The hosts are a record of one
+here only because the bundle lacks these hosts' issuer. On Windows the block
+reaches Schannel through the same kind of update, which the runner measured
+here had not received. zuhttp checks no Certificate Transparency of its own,
+so a client of the platform evaluator is as good as that evaluator, and as
+current as the machine's trust data, and no better. The hosts are a record of one
 incident and will not be up for ever; `tools/check-trust-blocks.R` in the
 source repository repeats the measurement while they are.
 

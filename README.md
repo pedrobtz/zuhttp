@@ -111,9 +111,9 @@ The [eMudhra incident](https://emudhra.we-have-a-problem.com/) of October
 keys anyone could recover, and they sit under roots that stay trusted. A CA
 bundle lists roots, so it has no way to exclude an intermediate beneath one;
 a platform's trust evaluator does. Apple blocked these intermediates on 22
-October. Eight days later, on macOS 15.7 and macOS 26, zuhttp refused every test
-host, and R's `curl` package, which on macOS trusts the PEM file at
-`/etc/ssl/cert.pem`, connected to every one:
+October. On a Mac that had received that update (macOS 15.7, 30 October),
+zuhttp refused every test host, and R's `curl` package, which on macOS trusts
+the PEM file at `/etc/ssl/cert.pem`, connected to every one:
 
 ```r
 u <- "https://dv-g3b-emudhra.we-have-a-problem.com/"
@@ -123,11 +123,15 @@ curl::curl_fetch_memory(u)$status_code
 #> [1] 200
 ```
 
+On a Mac that had not yet received it, zuhttp still refused the two hosts
+whose certificates were never logged for Certificate Transparency, which
+Apple's evaluator requires; `curl` connected to those as well.
+
 The difference is the platform's, and it is not the same everywhere. On Linux
 zuhttp reads the distribution's bundle, a file like any other. On Ubuntu 24.04
 both clients refused these hosts, but only because the bundle lacks their
-issuer, not because of a block. A GitHub Windows runner had not received
-Microsoft's block, so Windows is not yet measured. The
+issuer, not because of a block. On a GitHub Windows runner, which had not
+received Microsoft's block, both connected. The
 [TLS article](https://pedrobtz.github.io/zuhttp/articles/tls.html#when-the-platform-blocks-a-certificate)
 has the table for each platform, and `tools/check-trust-blocks.R` in the
 repository repeats the measurement.

@@ -844,16 +844,17 @@ changed the plan or the design.
   and its `close_notify` decrypted in one pass returned end of stream and
   discarded the response. That is #123, which the eMudhra measurement had
   first shown as intermittent.
-||||||| parent of 375141a (README and TLS article: the eMudhra block, measured)
 - **2026-10-30 — the eMudhra block, measured (#122).** The README argued
   that a client of the platform evaluator inherits an emergency distrust and
   a client of a CA bundle does not; `tools/check-trust-blocks.R` now shows
-  it. On macOS 15.7 and 26.6 zuhttp refused all four compromised-intermediate
-  test hosts ("certificate is blocked", with revocation off) while the `curl`
-  package, on LibreSSL and `/etc/ssl/cert.pem`, connected to all four. On
-  Ubuntu 24.04 both refused, for a missing issuer rather than a block. The
-  README's Windows claims did not survive measurement: the GitHub runner had
-  not received Microsoft's block, so `curl.exe` and the `curl` package both
-  connected, and zuhttp failed three hosts in one run and all four in the
-  next with `zu_http_parse_error`, `verify = FALSE` included: a Schannel read
-  defect unrelated to trust (#123).
+  when that holds. On a Mac with Apple's 22 October trust update (macOS 15.7
+  locally, and one macOS 26.6 runner) zuhttp refused all four
+  compromised-intermediate hosts ("certificate is blocked", revocation off)
+  while the `curl` package, on LibreSSL and `/etc/ssl/cert.pem`, connected to
+  all four. A second macOS 26.6 runner without the update let zuhttp reach
+  the two logged hosts, but `SecTrust` still refused the two never logged for
+  Certificate Transparency; `curl` connected to all four. The block is in the
+  machine's trust data, not its OS version. Ubuntu 24.04 refused with both
+  clients, for a missing issuer. The README's Windows claims did not survive
+  measurement: the runner had no Microsoft block, and zuhttp's failures there
+  were #123, fixed in #121, after which both clients connected.
