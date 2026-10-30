@@ -98,7 +98,7 @@ api <- zu_client(
 )
 
 zu_resp_json(zu_get("users", client = api))$id
-#> [1] 1 2
+#> NULL
 zu_resp_status(zu_post("users", json = list(name = "Ada"), client = api))
 #> [1] 201
 tryCatch(zu_get("users/99", client = api),
@@ -227,7 +227,7 @@ srv$stop()
 
 stored <- zu_cassette_interactions(dir, "secrets")[[1]]
 stored$request$url
-#> [1] "http://127.0.0.1:40439/json?api_key=<redacted>&page=2"
+#> [1] "http://127.0.0.1:40433/json?api_key=<redacted>&page=2"
 stored$request$headers[["Authorization"]]
 #> [1] "<redacted>"
 

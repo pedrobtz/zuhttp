@@ -38,10 +38,7 @@ A `zu_request`.
 
 ``` r
 req <- zu_request("POST", "https://api.example.com/users")
-# JSON needs jsonlite, a Suggests, or your own zu_set_json_backend()
-if (requireNamespace("jsonlite", quietly = TRUE)) {
-  req <- zu_body_json(req, list(name = "Alice"))
-}
+req <- zu_body_json(req, list(name = "Alice"))
 req
 #> <zu_request>
 #> POST https://api.example.com/users

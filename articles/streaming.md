@@ -36,7 +36,7 @@ url <- function(path) srv$url(path)
 dest <- tempfile(fileext = ".bin")
 r <- zu_get(url("/bytes/10000"), path = dest)
 zu_resp_path(r)
-#> [1] "/tmp/RtmpuHZRxN/file1f166b0cc679.bin"
+#> [1] "/tmp/RtmpQrBwLo/file1ee437062438.bin"
 file.size(dest)
 #> [1] 10000
 length(zu_resp_raw(r))   # nothing was kept in memory
@@ -62,7 +62,7 @@ class(e)[1]
 readLines(dest)            # the old file is still intact
 #> [1] "the previous version"
 list.files(dirname(dest), pattern = basename(dest))   # and no partial file
-#> [1] "file1f166b0cc679.bin"
+#> [1] "file1ee437062438.bin"
 ```
 
 One thing a file sink does not do is judge the status code. A 404 page
@@ -87,7 +87,7 @@ r <- zu_get(url("/drip?numbytes=5&duration=2"), callback = function(chunk) {
 length(seen)      # one call per chunk
 #> [1] 5
 seen
-#> [1] "09:39:18.2" "09:39:18.6" "09:39:19.0" "09:39:19.4" "09:39:19.8"
+#> [1] "11:03:57.2" "11:03:57.6" "11:03:58.0" "11:03:58.4" "11:03:58.8"
 ```
 
 That makes line-oriented streams easy to process incrementally — for
@@ -103,7 +103,7 @@ r <- zu_get(url("/stream/5"), callback = function(chunk) {
   pending <<- if (endsWith(rawToChar(chunk), "\n")) "" else lines[length(lines)]
   complete <- if (nzchar(pending)) lines[-length(lines)] else lines
   for (l in complete[nzchar(complete)]) {
-    records[[length(records) + 1]] <<- jsonlite::fromJSON(l)$id
+    records[[length(records) + 1]] <<- zujson::json_parse(l)$id
   }
   TRUE
 })

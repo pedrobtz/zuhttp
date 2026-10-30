@@ -81,7 +81,9 @@
 - [`zu_resp_connection()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_connection.md)
   : Connection metadata
 - [`zu_resp_json()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_json.md)
-  : The response body as parsed JSON
+  [`zu_resp_xml()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_json.md)
+  [`zu_resp_html()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_json.md)
+  : The response body as parsed JSON, XML or HTML
 - [`zu_resp_raw()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_raw.md)
   : The response body, decoded
 - [`zu_resp_text()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_text.md)

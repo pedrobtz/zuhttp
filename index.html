@@ -63,7 +63,7 @@
 </h1></div>
 <!-- badges: start -->
 
-<p>A minimal HTTP/1.1 client for R that uses <strong>each platform’s own TLS stack and trust store</strong> — Schannel on Windows, Network.framework with <code>SecTrust</code> on macOS, system OpenSSL elsewhere — rather than bundling cryptography or a CA bundle. Zero hard R dependencies.</p>
+<p>A minimal HTTP/1.1 client for R that uses <strong>each platform’s own TLS stack and trust store</strong> — Schannel on Windows, Network.framework with <code>SecTrust</code> on macOS, system OpenSSL elsewhere — rather than bundling cryptography or a CA bundle. One R dependency, its sibling <a href="https://github.com/pedrobtz/zujson" class="external-link">zujson</a>, for JSON.</p>
 <p>zuhttp is not on CRAN yet. Install it from GitHub:</p>
 <div class="sourceCode" id="cb1"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># install.packages("remotes")</span></span>
@@ -126,7 +126,7 @@
 <span>  zu_http_client_error <span class="op">=</span> <span class="kw">function</span><span class="op">(</span><span class="va">e</span><span class="op">)</span> <span class="fu"><a href="reference/zu_resp.html">zu_resp_status</a></span><span class="op">(</span><span class="va">e</span><span class="op">$</span><span class="va">response</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] 404</span></span></code></pre></div>
-<p><code><a href="reference/zu_resp_json.html">zu_resp_json()</a></code> uses <code>jsonlite</code> when it is installed, and says so plainly when it is not — everything else here, including sending a JSON body you have already encoded, works with no packages at all.</p>
+<p>JSON goes through <a href="https://github.com/pedrobtz/zujson" class="external-link">zujson</a>, written for zuhttp, and <code><a href="reference/zu_set_json_backend.html">zu_set_json_backend()</a></code> swaps in another implementation. <code><a href="reference/zu_resp_json.html">zu_resp_xml()</a></code> and <code><a href="reference/zu_resp_json.html">zu_resp_html()</a></code> parse with <a href="https://github.com/pedrobtz/zuxml" class="external-link">zuxml</a> and <a href="https://github.com/pedrobtz/zuhtml" class="external-link">zuhtml</a> when they are installed, honouring the response’s charset.</p>
 <div class="section level2">
 <h2 id="why-this-rather-than-curl">Why this rather than <code>curl</code>
 <a class="anchor" aria-label="anchor" href="#why-this-rather-than-curl"></a>

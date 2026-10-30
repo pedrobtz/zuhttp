@@ -1,11 +1,13 @@
 # Choose the JSON implementation
 
-`zuhttp` has no hard dependencies.
 [`zu_body_json()`](https://pedrobtz.github.io/zuhttp/reference/zu_body.md)
 and
 [`zu_resp_json()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_json.md)
-use `jsonlite` if it is installed, and this replaces it with anything
-else.
+use `zujson` by default
+([`zujson::json_write()`](https://pedrobtz.github.io/zujson/reference/json_write.html)
+and
+[`zujson::json_parse()`](https://pedrobtz.github.io/zujson/reference/json_parse.html));
+this replaces it with anything else, `jsonlite` included.
 
 ## Usage
 

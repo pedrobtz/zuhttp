@@ -44,7 +44,7 @@
 
 <div id="zuhttp" class="section level1">
 
-<p>A minimal HTTP/1.1 client for R that uses <strong>each platform’s own TLS stack and trust store</strong> — Schannel on Windows, Network.framework + SecTrust on macOS, system OpenSSL elsewhere — rather than bundling cryptography or a CA bundle. Zero hard R dependencies.</p>
+<p>A minimal HTTP/1.1 client for R that uses <strong>each platform’s own TLS stack and trust store</strong> — Schannel on Windows, Network.framework + SecTrust on macOS, system OpenSSL elsewhere — rather than bundling cryptography or a CA bundle. One hard R dependency, the sibling <code>zujson</code> (D-88); <code>zuxml</code> and <code>zuhtml</code> are Suggests.</p>
 <div class="section level2">
 <h2 id="the-two-documents-that-govern-this-repo">The two documents that govern this repo<a class="anchor" aria-label="anchor" href="#the-two-documents-that-govern-this-repo"></a></h2>
 <p>Both live in <a href=".agents/"><code>.agents/</code></a> and are excluded from the R package build:</p>
@@ -134,7 +134,7 @@ tools/          update-uriparser, update-picohttpparser, check-feature-macros,
 </ul></div>
 <div class="section level2">
 <h2 id="the-zu-family">The <code>zu*</code> family<a class="anchor" aria-label="anchor" href="#the-zu-family"></a></h2>
-<p><code>zukomp</code>, <code>zucrypt</code>, <code>zuxml</code> and <code>zuxlsx</code> are siblings, and three of them name <code>zuhttp</code> as a consumer. In 0.x it consumes none of them: compression is system zlib (D-7), pin digests come from each TLS backend, and <code>zuxml</code> could at most be a <code>Suggests</code>. Design §5.1 (D-54) records this and carries the family table shared by all five repositories. One practical consequence: <code>zu_</code>/<code>ZU_</code> is <code>zukomp</code>’s public C ABI namespace, so zuhttp’s internal C prefix is <code>zuh_</code>/<code>ZUH_</code> (D-66, W2). Never write a <code>zu_</code> C identifier, even a static one; <code>tools/check-c-prefix</code> fails CI on it. <code>zu_</code> stays right in R names, R condition classes in C strings, comments citing R functions, and the <code>C_zu_*</code> routines <code>init.c</code> registers, which R calls by those names.</p>
+<p><code>zukomp</code>, <code>zucrypt</code>, <code>zujson</code>, <code>zuxml</code>, <code>zuhtml</code> and <code>zuxlsx</code> are siblings. zuhttp imports <code>zujson</code> for JSON and suggests <code>zuxml</code> and <code>zuhtml</code> for <code><a href="reference/zu_resp_json.html">zu_resp_xml()</a></code> and <code><a href="reference/zu_resp_json.html">zu_resp_html()</a></code> (D-88); compression is still system zlib (D-7), and pin digests come from each TLS backend. Design §5.1 (D-54) records this and carries the family table shared by all five repositories. One practical consequence: <code>zu_</code>/<code>ZU_</code> is <code>zukomp</code>’s public C ABI namespace, so zuhttp’s internal C prefix is <code>zuh_</code>/<code>ZUH_</code> (D-66, W2). Never write a <code>zu_</code> C identifier, even a static one; <code>tools/check-c-prefix</code> fails CI on it. <code>zu_</code> stays right in R names, R condition classes in C strings, comments citing R functions, and the <code>C_zu_*</code> routines <code>init.c</code> registers, which R calls by those names.</p>
 </div>
 <div class="section level2">
 <h2 id="current-state">Current state<a class="anchor" aria-label="anchor" href="#current-state"></a></h2>

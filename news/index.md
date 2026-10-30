@@ -6,8 +6,8 @@ First release.
 
 A minimal HTTP/1.1 client that uses the platform’s own TLS stack and
 trust store — Schannel, Network.framework with `SecTrust`, or system
-OpenSSL — and bundles neither cryptography nor a CA bundle. No hard R
-dependencies.
+OpenSSL — and bundles neither cryptography nor a CA bundle. One R
+dependency, its sibling `zujson`, for JSON.
 
 ### What is in it
 
@@ -41,6 +41,15 @@ dependencies.
   unwinds without leaking sockets or TLS contexts. Neither bounds DNS
   resolution, which is synchronous.
 - Retry policies, middleware, and observability hooks.
+- JSON request and response bodies through `zujson` (`json =`,
+  [`zu_body_json()`](https://pedrobtz.github.io/zuhttp/reference/zu_body.md),
+  [`zu_resp_json()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_json.md)),
+  replaceable with
+  [`zu_set_json_backend()`](https://pedrobtz.github.io/zuhttp/reference/zu_set_json_backend.md);
+  XML and HTML responses through `zuxml` and `zuhtml` when installed
+  ([`zu_resp_xml()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_json.md),
+  [`zu_resp_html()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_json.md)),
+  with the response’s charset honoured.
 - Structured conditions (`zu_tls_certificate_error`, `zu_timeout_error`,
   `zu_fork_error`, …) rather than parsed message strings.
 - On macOS the TLS engine is Network.framework, with trust still decided
@@ -67,7 +76,7 @@ dependencies.
 
 ### API surface
 
-61 exported functions. Every condition inherits `zuhttp_error`, directly
+63 exported functions. Every condition inherits `zuhttp_error`, directly
 above `error`, so `tryCatch(..., zuhttp_error = )` catches anything
 zuhttp raises and nothing else. The testing tools —
 [`zu_mock_transport()`](https://pedrobtz.github.io/zuhttp/reference/zu_transport.md),

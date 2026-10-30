@@ -3,7 +3,8 @@
 A minimal HTTP/1.1 client for R that uses **each platform’s own TLS
 stack and trust store** — Schannel on Windows, Network.framework +
 SecTrust on macOS, system OpenSSL elsewhere — rather than bundling
-cryptography or a CA bundle. Zero hard R dependencies.
+cryptography or a CA bundle. One hard R dependency, the sibling `zujson`
+(D-88); `zuxml` and `zuhtml` are Suggests.
 
 ## The two documents that govern this repo
 
@@ -133,17 +134,21 @@ check depend on example.com and badssl.com.
 
 ## The `zu*` family
 
-`zukomp`, `zucrypt`, `zuxml` and `zuxlsx` are siblings, and three of
-them name `zuhttp` as a consumer. In 0.x it consumes none of them:
-compression is system zlib (D-7), pin digests come from each TLS
-backend, and `zuxml` could at most be a `Suggests`. Design §5.1 (D-54)
-records this and carries the family table shared by all five
-repositories. One practical consequence: `zu_`/`ZU_` is `zukomp`’s
-public C ABI namespace, so zuhttp’s internal C prefix is `zuh_`/`ZUH_`
-(D-66, W2). Never write a `zu_` C identifier, even a static one;
-`tools/check-c-prefix` fails CI on it. `zu_` stays right in R names, R
-condition classes in C strings, comments citing R functions, and the
-`C_zu_*` routines `init.c` registers, which R calls by those names.
+`zukomp`, `zucrypt`, `zujson`, `zuxml`, `zuhtml` and `zuxlsx` are
+siblings. zuhttp imports `zujson` for JSON and suggests `zuxml` and
+`zuhtml` for
+[`zu_resp_xml()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_json.md)
+and
+[`zu_resp_html()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_json.md)
+(D-88); compression is still system zlib (D-7), and pin digests come
+from each TLS backend. Design §5.1 (D-54) records this and carries the
+family table shared by all five repositories. One practical consequence:
+`zu_`/`ZU_` is `zukomp`’s public C ABI namespace, so zuhttp’s internal C
+prefix is `zuh_`/`ZUH_` (D-66, W2). Never write a `zu_` C identifier,
+even a static one; `tools/check-c-prefix` fails CI on it. `zu_` stays
+right in R names, R condition classes in C strings, comments citing R
+functions, and the `C_zu_*` routines `init.c` registers, which R calls
+by those names.
 
 ## Current state
 

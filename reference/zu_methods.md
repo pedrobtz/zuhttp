@@ -300,10 +300,8 @@ zu_resp_text(r)
 zu_resp_text(zu_delete("https://api.example.com/users/42", client = api))
 #> [1] "DELETE https://api.example.com/users/42"
 
-if (requireNamespace("jsonlite", quietly = TRUE)) {
-  zu_resp_text(zu_post("https://api.example.com/users",
-                       json = list(name = "Alice"), client = api))
-}
+zu_resp_text(zu_post("https://api.example.com/users",
+                     json = list(name = "Alice"), client = api))
 #> [1] "POST https://api.example.com/users"
 
 if (interactive()) {
