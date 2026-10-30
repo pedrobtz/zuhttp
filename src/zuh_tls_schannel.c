@@ -64,6 +64,10 @@ typedef struct {
     char        protocol[16];
     char        cipher[64];
     int         closed;
+    /* The peer's close_notify has been decrypted. Kept apart from reporting
+     * it, because the same DecryptMessage pass may have produced the
+     * response's last plaintext, which has to be handed over first. */
+    int         peer_closed;
 } sch_impl;
 
 /* --- diagnostics ---------------------------------------------------------- */
@@ -370,10 +374,16 @@ static zuh_ssize sch_read(zuh_stream *s, void *buf, size_t n, zuh_deadline d, zu
             zuh_buf_consume(&t->dec, take);
             return (zuh_ssize)take;
         }
+        if (t->peer_closed) return 0;
         {
             zuh_code rc = decrypt_available(t, err);
             if (rc == ZUH_OK) continue;
-            if (rc == ZUH_ERR_CLOSED) return 0;
+            /* A response and its close_notify often arrive in one read: the
+             * pass that decrypted the body then met the close. Returning 0
+             * here discarded that body, as "connection closed before the
+             * response headers ended", which every server that closes after
+             * responding could trigger (#123). The loop hands it over first. */
+            if (rc == ZUH_ERR_CLOSED) { t->peer_closed = 1; continue; }
             if (rc != ZUH_ERR_WOULDBLOCK) return -1;
         }
         {
@@ -468,7 +478,7 @@ static int sch_readable(zuh_stream *s, int timeout_ms) {
     sch_impl *t;
     if (!s || !s->impl) return -1;
     t = (sch_impl *)s->impl;
-    if (t->dec.len > 0 || t->enc.len > 0) return 1;
+    if (t->dec.len > 0 || t->enc.len > 0 || t->peer_closed) return 1;
     return zuh_stream_readable(t->inner, timeout_ms);
 }
 

@@ -8,6 +8,9 @@
 #             connection held open, so the client's single read takes both
 #             into its rbio and the socket never becomes readable. The pool's
 #             liveness probe could not see it and reused the dead connection.
+#   keepalive answers every request on a connection until the client closes,
+#             one thread per connection: the third mode's pooled connection
+#             stays open while another connection's handshake fails.
 #
 # SSLObject over memory BIOs, so the bytes on the wire are exactly these.
 import socket, ssl, sys, time
@@ -28,6 +31,31 @@ def pump(raw, inc):
         raise EOFError
     inc.write(d)
 
+
+def keepalive(raw):
+    s = ctx.wrap_socket(raw, server_side=True)
+    try:
+        while True:
+            req = b""
+            while b"\r\n\r\n" not in req:
+                d = s.recv(4096)
+                if not d:
+                    return
+                req += d
+            s.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+    except (ssl.SSLError, OSError):
+        return          # the failing handshake is this mode's whole point
+    finally:
+        raw.close()
+
+
+if mode == "keepalive":
+    import threading
+    for _ in range(3):
+        raw, _ = ls.accept()
+        threading.Thread(target=keepalive, args=(raw,), daemon=True).start()
+    time.sleep(5)
+    sys.exit(0)
 
 for _ in range(2):
     raw, _ = ls.accept()

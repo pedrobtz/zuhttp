@@ -205,8 +205,15 @@ static zuh_code configure_trust(tls_impl *t, const zuh_tls_config *cfg, zuh_erro
 static zuh_ssize tls_read(zuh_stream *s, void *buf, size_t n, zuh_deadline d, zuh_error *err) {
     tls_impl *t = (tls_impl *)s->impl;
     for (;;) {
-        int r = SSL_read(t->ssl, buf, (int)(n > INT_MAX ? INT_MAX : n));
-        int e;
+        int r, e;
+        /* SSL_get_error() reads this thread's error queue, which must be
+         * empty before the call. The handshake clears it; a pooled
+         * connection skips the handshake, so a failed one elsewhere (an
+         * expired certificate on another host) left "certificate verify
+         * failed" behind, and the next read here was misreported as
+         * SSL_ERROR_SSL. Found by the shuffled CI run (#121). */
+        ERR_clear_error();
+        r = SSL_read(t->ssl, buf, (int)(n > INT_MAX ? INT_MAX : n));
         if (r > 0) return (zuh_ssize)r;
         e = SSL_get_error(t->ssl, r);
         if (e == SSL_ERROR_ZERO_RETURN) return 0;          /* clean close_notify */
@@ -243,8 +250,9 @@ static zuh_ssize tls_read(zuh_stream *s, void *buf, size_t n, zuh_deadline d, zu
 static zuh_ssize tls_write(zuh_stream *s, const void *buf, size_t n, zuh_deadline d, zuh_error *err) {
     tls_impl *t = (tls_impl *)s->impl;
     for (;;) {
-        int w = SSL_write(t->ssl, buf, (int)(n > INT_MAX ? INT_MAX : n));
-        int e;
+        int w, e;
+        ERR_clear_error();   /* as in tls_read() */
+        w = SSL_write(t->ssl, buf, (int)(n > INT_MAX ? INT_MAX : n));
         if (w > 0) {
             if (flush_out(t, d, err) != ZUH_OK) return -1;
             return (zuh_ssize)w;
@@ -273,6 +281,7 @@ static void tls_close(zuh_stream *s) {
     if (!t) return;
     if (t->ssl) {
         SSL_shutdown(t->ssl);          /* best effort; peer may already be gone */
+        ERR_clear_error();             /* and leave nothing for the next caller */
         SSL_free(t->ssl);              /* frees rbio/wbio too */
         t->ssl = NULL; t->rbio = t->wbio = NULL;
     }
@@ -474,6 +483,9 @@ fail_detach:
      * it here or it would be closed twice. */
     t->inner = NULL;
 fail:
+    /* The error has been read into `err`; what is left in the queue would
+     * otherwise be the next caller's (see tls_read()). */
+    ERR_clear_error();
     if (t->ssl) SSL_free(t->ssl);              /* frees the BIOs */
     else { if (t->rbio) BIO_free(t->rbio); if (t->wbio) BIO_free(t->wbio); }
     if (t->ctx) SSL_CTX_free(t->ctx);

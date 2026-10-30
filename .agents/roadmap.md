@@ -833,3 +833,14 @@ changed the plan or the design.
   silently omitted on allocation failure, and allocation failures reported as
   `zu_url_error` and `zu_proxy_error`. Rule 6 again: each of these passed a
   test that never asked the question.
+- **2026-10-30 — two latent TLS read defects, surfaced by #121's CI.**
+  Shuffling the R suite put a failed handshake (`expired.badssl.com`) before
+  a request on a pooled connection, and on OpenSSL that request failed with
+  the other host's "certificate verify failed": `SSL_get_error()` reads the
+  thread's error queue, the handshake cleared it, and a reused connection
+  has no handshake. Every TLS call now clears it first; `make -C ctest
+  tls-eof`'s `stale` mode fails without that. And sending `Connection:
+  close` without a pool (#104) made a Schannel bug reproducible: a response
+  and its `close_notify` decrypted in one pass returned end of stream and
+  discarded the response. That is #123, which the eMudhra measurement had
+  first shown as intermittent.

@@ -119,6 +119,13 @@ have used: the client-first wrappers `zu_client_get()` and friends (use
   as `zu_closed`, a class that was not part of the condition tree; a closed
   connection is now always `zu_io_error`. A pooled connection whose server
   had already closed it is no longer reused.
+* On Windows, a response whose server closes the connection straight after
+  it (`Connection: close`, or a server that always does) is delivered; its
+  last bytes were discarded when they arrived with the TLS `close_notify`,
+  as `zu_http_parse_error` "connection closed before the response headers
+  ended".
+* On OpenSSL, a failed HTTPS request (an expired certificate, say) no longer
+  makes the next request on a pooled connection fail with that same error.
 * Retry jitter and `zu_req_retry(idempotency_key = TRUE)` no longer advance
   the session's random number stream, and parsing a `Retry-After` date no
   longer switches `LC_TIME` for the whole session.
