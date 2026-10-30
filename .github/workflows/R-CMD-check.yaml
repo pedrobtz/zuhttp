@@ -56,7 +56,7 @@ jobs:
          {"os": "ubuntu-latest", "r": "oldrel-1"}]
 
       # CRAN's NOSUGGESTS flavor. Every Suggests here -- testthat, webfakes,
-      # jsonlite, parallel -- is used from tests and examples, and an unguarded
+      # zuxml, zuhtml, parallel -- is used from tests and examples, and an unguarded
       # one errors on this leg and nowhere else (tests/testthat.R's guard, #18).
       nosuggests: true
 

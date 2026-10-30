@@ -25,3 +25,25 @@ drop_header <- function(h, name) {
   hit <- which(tolower(names(h)) == tolower(name))
   if (length(hit)) h[-hit] else h
 }
+
+# Split out so a test can pretend a package is missing.
+has_package <- function(pkg) requireNamespace(pkg, quietly = TRUE)
+
+# A package zuhttp suggests rather than imports, for the one function that
+# needs it: name the function, the package and the fix.
+need_suggested <- function(pkg, what) {
+  if (has_package(pkg)) {
+    return(invisible(TRUE))
+  }
+  stop(
+    "`",
+    what,
+    "` needs the ",
+    pkg,
+    " package, which zuhttp suggests but does not require.\n",
+    "  install.packages(\"",
+    pkg,
+    "\")",
+    call. = FALSE
+  )
+}

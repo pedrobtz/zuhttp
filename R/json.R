@@ -1,16 +1,15 @@
-# §31.7's JSON decision: jsonlite in Suggests, not Imports.
-#
-# The hard-dependency count stays at zero (§1). Everything except the two JSON
-# helpers works without jsonlite, including sending a JSON body the caller has
-# already serialised — and a package author who prefers another implementation
-# can swap it in rather than taking jsonlite transitively.
+# §31.7's JSON decision (D-88): zujson, the zu* sibling written for exactly
+# these two jobs, in Imports. It has no R dependencies of its own and vendors
+# its parser, so JSON works with nothing else installed. zu_set_json_backend()
+# still swaps in any other implementation.
 
 the_json <- new.env(parent = emptyenv())
 
 #' Choose the JSON implementation
 #'
-#' `zuhttp` has no hard dependencies. [zu_body_json()] and [zu_resp_json()]
-#' use `jsonlite` if it is installed, and this replaces it with anything else.
+#' [zu_body_json()] and [zu_resp_json()] use `zujson` by default
+#' ([zujson::json_write()] and [zujson::json_parse()]); this replaces it with
+#' anything else, `jsonlite` included.
 #'
 #' @param encode A function `(x, ...)` returning a single JSON string. Must
 #'   accept `...`, since request-level options are forwarded to it.
@@ -41,35 +40,11 @@ zu_set_json_backend <- function(encode = NULL, decode = NULL) {
   invisible(old)
 }
 
-# Split out so tests can replace it, and so the error message below has one
-# place to come from.
-has_jsonlite <- function() requireNamespace("jsonlite", quietly = TRUE)
-
-need_jsonlite <- function(what) {
-  if (has_jsonlite()) {
-    return(invisible(TRUE))
-  }
-  stop(
-    "`",
-    what,
-    "` needs a JSON implementation, and jsonlite is not installed.\n",
-    "  zuhttp has no hard dependencies, so JSON support is optional.\n",
-    "  * install.packages(\"jsonlite\")\n",
-    "  * or supply your own: zu_set_json_backend(encode = , decode = )\n",
-    "  Everything else in zuhttp works without it, including sending a\n",
-    "  JSON string you have already serialised, with zu_body_raw().",
-    call. = FALSE
-  )
-}
-
 json_encode <- function(x, ...) {
-  if (!is.null(the_json$encode)) {
-    out <- the_json$encode(x, ...)
+  out <- if (!is.null(the_json$encode)) {
+    the_json$encode(x, ...)
   } else {
-    need_jsonlite("zu_body_json()")
-    # digits = NA keeps full double precision; null = "null" stops NULL from
-    # silently becoming {} inside a list.
-    out <- as.character(jsonlite::toJSON(x, null = "null", digits = NA, ...))
+    zujson::json_write(x, ...)
   }
   if (!is.character(out) || length(out) != 1L || is.na(out)) {
     stop(
@@ -84,6 +59,5 @@ json_decode <- function(txt, ...) {
   if (!is.null(the_json$decode)) {
     return(the_json$decode(txt, ...))
   }
-  need_jsonlite("zu_resp_json()")
-  jsonlite::fromJSON(txt, ...)
+  zujson::json_parse(txt, ...)
 }

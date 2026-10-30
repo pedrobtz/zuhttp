@@ -31,7 +31,7 @@
 #' })
 #' r <- zu_get("https://example.com", client = zu_client(transport = fake))
 #' zu_resp_status(r)
-#' if (requireNamespace("jsonlite", quietly = TRUE)) zu_resp_json(r)
+#' zu_resp_json(r)
 NULL
 
 # The default transport: the network, through C_zu_perform.

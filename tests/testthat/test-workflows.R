@@ -19,7 +19,6 @@ test_that("1. one-line GET", {
 })
 
 test_that("2. JSON POST", {
-  skip_if_not_installed("jsonlite")
   rec <- recorder(function(req) zu_response(201L, body = "{}"))
   r <- zu_post(
     "https://api.example.com/users",
@@ -152,7 +151,6 @@ test_that("7. mocked package test", {
   })
   api <- zu_client(base_url = "https://api.example.com", transport = fake)
 
-  skip_if_not_installed("jsonlite")
   expect_identical(user_name(7, api), "Alice")
   expect_error(user_name(8, api), class = "zu_http_client_error")
 })

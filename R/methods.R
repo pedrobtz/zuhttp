@@ -143,10 +143,8 @@ one_shot <- function(
 #'
 #' zu_resp_text(zu_delete("https://api.example.com/users/42", client = api))
 #'
-#' if (requireNamespace("jsonlite", quietly = TRUE)) {
-#'   zu_resp_text(zu_post("https://api.example.com/users",
-#'                        json = list(name = "Alice"), client = api))
-#' }
+#' zu_resp_text(zu_post("https://api.example.com/users",
+#'                      json = list(name = "Alice"), client = api))
 #'
 #' if (interactive()) {
 #'   # Download straight to disk: the body never passes through memory, and
