@@ -134,6 +134,11 @@ accepted when that work package's PR merges.
 | D-80 | A download's **temporary file is created exclusively** beside the destination, trying `<path>.zudl<pid>` then `.1`, `.2`…; nothing already at a candidate name is opened, so a planted symlink or a second download to the same path is never written through | Accepted 2026-09-28 (#77) | 27.1 | — |
 | D-81 | **No automatic retry after a callback has received bytes.** The callback API has no attempt boundary, and delivered bytes and their side effects cannot be taken back; an attempt that delivered nothing is retried as before | Accepted 2026-09-28 (#77) | 33.1 | — |
 | D-82 | **0.1.0 is the first CRAN submission, and a version is tagged only after CRAN accepts it.** 0.1.0 takes what shipped plus W1, W2, W3, W6, W13 and W16: the one `--as-cran` NOTE (Secure Transport's pragma) goes with W13, and exports and defaults change while nothing depends on them. CI through `pedrobtz/r-actions` stands in for win-builder, the macOS builder and R-hub. D-55 applies from acceptance on | Accepted 2026-10-29 | 47, 57 | W1, W16 |
+| D-83 | **Pipeline argument names.** A pipeline setter names its value for the quantity it sets — `zu_req_timeout(req, total)` (§24.1), `zu_req_redirects(req, max)` — and matches the one-shot argument when it is the same object: `zu_req_callback(req, callback)` and `zu_body_file(req, file)`, the latter because `path =` is always a response destination (D-45) | Accepted 2026-10-30 (#111) | 31.4, 31.6 | — |
+| D-84 | **A response header value is UTF-8 only if it is valid UTF-8**; any other bytes (obs-text) reach R as Latin-1, RFC 7230's nominal charset and the one in which every byte is a character. Marking them UTF-8 made `nchar()`, `grepl()` and `print()` fail | Accepted 2026-10-30 (#92) | 18.3 | — |
+| D-85 | **Request headers are bounded by the 64 KiB header block alone.** §40's per-field limits defend against an untrusted response and do not apply to what the caller sends; a rejected request header is named (never its value) and refused as `zu_http_parse_error` before connecting | Accepted 2026-10-30 (#95) | 17.1, 40 | — |
+| D-86 | **Only §34.1 classes reach R.** The stream signals `ZUH_ERR_CLOSED` and `ZUH_ERR_WOULDBLOCK` have no class and arrive as `zu_io_error`. On OpenSSL a TCP close without `close_notify` is end of stream while reading, as on Schannel and Network.framework (a truncated length-framed or chunked body is still caught by the framing), and a handshake failure during the handshake | Accepted 2026-10-30 (#99) | 18.1, 34.1 | — |
+| D-87 | `zu_redact_headers()` and `zu_redact_params()` **keep their names**: they register names to redact, as their titles say, and an alias with a configuring verb would grow the §53 export surface for no new behaviour | Accepted 2026-10-30 (#112) | 42.1, 53 | — |
 
 ---
 
@@ -561,7 +566,9 @@ for hostnames (never hand-rolled), SNI, TLS 1.2+. LibreSSL is best effort.
 
 `verify_peer` and `verify_hostname` are on and `trust = "system"`. zuhttp MUST
 NOT default to disabling verification. `verify = FALSE` is a merged policy
-argument (§31.9, D-49), not a `zu_tls()` field. `zu_tls()` carries `ca_file`,
+argument (§31.9, D-49), not a `zu_tls()` field, and it must be `TRUE` or
+`FALSE`: `NA` or `"yes"` is refused, never read as "off" (as are `check` and
+`decode`). `zu_tls()` carries `ca_file`,
 `ca_extra`, `pins`, `revocation` and `min_version`, and after W10 `crl_file`.
 
 #### 14.2 Custom CA semantics
@@ -716,7 +723,9 @@ beside the headers, and in a second write under the same deadline otherwise.
 #### 17.1 Header injection
 
 Header names MUST be RFC 7230 tokens; values MUST NOT contain CR, LF or NUL.
-Violations raise; nothing is silently stripped. The same rules apply to values
+Violations raise `zu_http_parse_error` naming the header, never its value;
+nothing is silently stripped. A request header has no length limit of its own
+beyond the 64 KiB block (D-85). The same rules apply to values
 zuhttp derives from user input — the request target, `Host`, proxy
 credentials.
 
@@ -724,7 +733,10 @@ credentials.
 
 `Host` (from the URI, never user-settable to a conflicting value),
 `User-Agent: zuhttp/<version>`, `Accept: */*`, `Accept-Encoding: gzip` (§21.2),
-`Connection: keep-alive` (`close` without a pool). Each is overridable.
+`Connection: keep-alive` (`close` without a pool). Each is overridable. The
+version comes from `DESCRIPTION`: the native transport passes
+`zuhttp/<version>`, and the C core, which holds no version, sends a bare
+`zuhttp` when called without one.
 
 #### 17.3 `Expect: 100-continue`
 
@@ -758,7 +770,7 @@ Strict, not permissive (D-15):
 | both `Transfer-Encoding` and `Content-Length` | reject |
 | more than one `Content-Length`, equal or not | reject |
 | `Content-Length` not plain decimal or overflowing `uint64` | reject |
-| chunk size invalid hex, overflowing, or above `max_chunk_size` | reject |
+| chunk size invalid hex, overflowing, or above `max_chunk_size` (when set; checked as the chunk arrives, so exact to one read; the engine sets none, and `max_body` bounds the total) | reject |
 | neither header, body possible | read to close; not poolable |
 | `obs-fold` | reject |
 | malformed status line, status not three digits | reject |
@@ -775,7 +787,8 @@ the response headers.
 
 Order and repetition are preserved. `zu_resp_header(res, name)` is
 case-insensitive and returns a character vector — length 0 absent, more than
-1 repeated — and never comma-joins (D-16).
+1 repeated — and never comma-joins (D-16). A value is marked UTF-8 when it is
+valid UTF-8 and Latin-1 otherwise (D-84).
 
 #### 18.4 Header limits
 
@@ -810,7 +823,9 @@ HTTPS → HTTP is refused with `zu_redirect_error` by default.
 
 `redirects` (**default 10**, D-68) raises `zu_too_many_redirects` when a
 chain would exceed it (`redirects = 0` returns the 3xx itself); the `total` deadline and `max_body` span the whole
-chain; a repeated (method, URL) pair is a loop and raises.
+chain; a repeated (method, URL) pair is a loop and raises `zu_redirect_error`
+at once, before the repeat is requested (`zuh_redirect_trail`, owned per
+request by `zuh_engine_perform()`).
 
 #### 19.5 Interaction with sinks
 
@@ -1305,8 +1320,8 @@ W3 the transport-extension contract (`zu_transport_perform`,
 
 Policy objects are declarative arguments; middleware is a list of
 `function(req, next)`. Retry runs inside middleware, so middleware sees one
-logical request. Hooks (`before_request`, `after_response`, `before_retry`)
-observe and cannot mutate.
+logical request. Hooks (`before_request`, `after_response`, `before_retry`,
+`after_retry`) observe and cannot mutate; every payload is redacted (§42.2).
 
 #### 31.14 Error-status philosophy (D-33)
 
@@ -1373,7 +1388,7 @@ sleeps are interruptible.
 #### 33.4 Observability
 
 Every retry fires `before_retry` with the attempt, the condition and the
-delay.
+delay, and `after_retry` with the attempt it begins.
 
 #### 33.5 Implementation record
 
@@ -1414,7 +1429,10 @@ zuhttp_error  (D-65; inherits error, condition)
 ```
 
 `zuhttp_error` goes *above* `zu_error` so that every existing handler keeps
-working and the family convention (`<pkg>_error`) holds.
+working and the family convention (`<pkg>_error`) holds. The C enum's two
+stream signals, `ZUH_ERR_CLOSED` and `ZUH_ERR_WOULDBLOCK`, are below
+`ZUH_CODE_PUBLIC_COUNT`'s line, have no class, and reach R as `zu_io_error`
+(D-86); `zu_error_codes()` lists the public codes only.
 
 #### 34.2 Payload
 
@@ -1518,9 +1536,9 @@ for pasting into bug reports.
 |---|---|
 | `max_header_bytes` | 64 KiB |
 | `max_header_count` | 100 |
-| `max_header_name` / `max_header_value` | 256 B / 8 KiB |
+| `max_header_name` / `max_header_value` | 256 B / 8 KiB (responses; D-85) |
 | `redirects` | 10 (D-68) |
-| `max_body` (decoded, every sink) | 16 MiB |
+| `max_body` (decoded, every sink) | 16 MiB; `Inf` for none |
 | `max_decompression_ratio` | 1000 (D-69) |
 | `max_redirect_body` | 64 KiB |
 | `max_retry_after` | 60 s |

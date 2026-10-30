@@ -161,7 +161,17 @@ zuh_engtest_sch: $(SCHSRC) test_engine.c
 engine-sch: zuh_engtest_sch
 	./zuh_engtest_sch
 
-clean:
-	rm -rf zuh_ctest zuh_ctest_asan zuh_tlstest zuh_engtest zuh_engtest_nw zuh_engtest_sch *.dSYM build build-asan *.o
+# D-86: the engine over OpenSSL against a loopback TLS server that closes
+# without close_notify, and one that sends close_notify behind the body. Needs
+# python3 and the openssl CLI; no network.
+zuh_tlseof: $(ENGSRC) tls_eof/drive.c
+	$(CC) $(BASE) $(URIFLAGS) $(OPENSSL_CFLAGS) -o $@ $(ENGSRC) tls_eof/drive.c \
+	      $(OPENSSL_LIBS) -lz $(NETLIBS)
 
-.PHONY: all run strict asan clean tls engine engine-nw engine-sch
+tls-eof: zuh_tlseof
+	tls_eof/run.sh
+
+clean:
+	rm -rf zuh_ctest zuh_ctest_asan zuh_tlstest zuh_engtest zuh_engtest_nw zuh_engtest_sch zuh_tlseof *.dSYM build build-asan *.o
+
+.PHONY: all run strict asan clean tls tls-eof engine engine-nw engine-sch

@@ -13,47 +13,75 @@
 # returned, or NULL if it recorded nothing.
 with_raw_server <- function(response, code) {
   skip_unless_forkable()
-  d <- tempfile("zu-raw-"); dir.create(d)
+  d <- tempfile("zu-raw-")
+  dir.create(d)
   on.exit(unlink(d, recursive = TRUE), add = TRUE)
   script <- file.path(d, "server.R")
-  respf  <- file.path(d, "response.bin")
-  logf   <- file.path(d, "seen.bin")
+  respf <- file.path(d, "response.bin")
+  logf <- file.path(d, "seen.bin")
   readyf <- file.path(d, "ready")
-  if (is.character(response)) response <- charToRaw(enc2utf8(response))
+  if (is.character(response)) {
+    response <- charToRaw(enc2utf8(response))
+  }
   writeBin(response, respf)
 
-  writeLines(c(
-    "args <- commandArgs(TRUE)",
-    "port <- as.integer(args[1]); respf <- args[2]; logf <- args[3]; readyf <- args[4]",
-    "srv <- serverSocket(port)",
-    "cat('ready\\n', file = readyf)",
-    "con <- socketAccept(srv, open = 'r+b', timeout = 20)",
-    "buf <- raw()",
-    "repeat {",
-    "  b <- readBin(con, 'raw', 1L)",
-    "  if (length(b) == 0L) break",
-    "  buf <- c(buf, b); n <- length(buf)",
-    "  if (n >= 4L && identical(buf[(n-3L):n], charToRaw('\\r\\n\\r\\n'))) break",
-    "}",
-    "f <- file(logf, 'wb'); writeBin(buf, f); close(f)",
-    "writeBin(readBin(respf, 'raw', file.size(respf)), con); flush(con)",
-    "close(con); close(srv)"
-  ), script)
+  writeLines(
+    c(
+      "args <- commandArgs(TRUE)",
+      "port <- as.integer(args[1]); respf <- args[2]; logf <- args[3]; readyf <- args[4]",
+      "srv <- serverSocket(port)",
+      "cat('ready\\n', file = readyf)",
+      "con <- socketAccept(srv, blocking = TRUE, open = 'r+b', timeout = 20)",
+      "buf <- raw()",
+      "repeat {",
+      "  b <- readBin(con, 'raw', 1L)",
+      "  if (length(b) == 0L) break",
+      "  buf <- c(buf, b); n <- length(buf)",
+      "  if (n >= 4L && identical(buf[(n-3L):n], charToRaw('\\r\\n\\r\\n'))) break",
+      "}",
+      "f <- file(logf, 'wb'); writeBin(buf, f); close(f)",
+      "writeBin(readBin(respf, 'raw', file.size(respf)), con); flush(con)",
+      "close(con); close(srv)"
+    ),
+    script
+  )
 
   port <- sample(20000:59000, 1L)
-  system2("sh", c("-c", shQuote(sprintf("exec Rscript %s %d %s %s %s",
-                                        script, port, respf, logf, readyf))),
-          wait = FALSE, stdout = NULL, stderr = NULL)
+  system2(
+    "sh",
+    c(
+      "-c",
+      shQuote(sprintf(
+        "exec Rscript %s %d %s %s %s",
+        script,
+        port,
+        respf,
+        logf,
+        readyf
+      ))
+    ),
+    wait = FALSE,
+    stdout = NULL,
+    stderr = NULL
+  )
   deadline <- Sys.time() + 20
-  while (!file.exists(readyf) && Sys.time() < deadline) Sys.sleep(0.05)
-  if (!file.exists(readyf)) skip("the raw test server did not start")
+  while (!file.exists(readyf) && Sys.time() < deadline) {
+    Sys.sleep(0.05)
+  }
+  if (!file.exists(readyf)) {
+    skip("the raw test server did not start")
+  }
   Sys.sleep(0.2)
 
   code(sprintf("http://127.0.0.1:%d", port))
 
   deadline <- Sys.time() + 10
-  while (!file.exists(logf) && Sys.time() < deadline) Sys.sleep(0.05)
-  if (!file.exists(logf)) return(NULL)
+  while (!file.exists(logf) && Sys.time() < deadline) {
+    Sys.sleep(0.05)
+  }
+  if (!file.exists(logf)) {
+    return(NULL)
+  }
   rawToChar(readBin(logf, "raw", file.size(logf)))
 }
 

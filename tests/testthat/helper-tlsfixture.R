@@ -21,19 +21,42 @@ openssl_bin <- function() {
 # as an option, the generation fails, and the tests skip() themselves — which
 # looks like an absent toolchain rather than a broken fixture.
 ssl <- function(...) {
-  suppressWarnings(system2(openssl_bin(), c(...), stdout = FALSE, stderr = FALSE))
+  suppressWarnings(system2(
+    openssl_bin(),
+    c(...),
+    stdout = FALSE,
+    stderr = FALSE
+  ))
 }
 
 tls_fixture <- function() {
-  if (!is.null(.zu_tls_fixture$dir)) return(.zu_tls_fixture$paths)
-  if (is.null(openssl_bin())) testthat::skip("openssl CLI not available")
+  if (!is.null(.zu_tls_fixture$dir)) {
+    return(.zu_tls_fixture$paths)
+  }
+  if (is.null(openssl_bin())) {
+    testthat::skip("openssl CLI not available")
+  }
 
-  d <- tempfile("zu-certs-"); dir.create(d)
+  d <- tempfile("zu-certs-")
+  dir.create(d)
   f <- function(...) file.path(d, paste0(...))
 
   ca <- function(name, cn) {
-    ssl("req", "-x509", "-newkey", "rsa:2048", "-keyout", f(name, ".key"),
-        "-out", f(name, ".pem"), "-days", "30", "-nodes", "-subj", paste0("/CN=", cn))
+    ssl(
+      "req",
+      "-x509",
+      "-newkey",
+      "rsa:2048",
+      "-keyout",
+      f(name, ".key"),
+      "-out",
+      f(name, ".pem"),
+      "-days",
+      "30",
+      "-nodes",
+      "-subj",
+      paste0("/CN=", cn)
+    )
   }
   # Two CAs. The second signs a certificate the client is never told about,
   # which is the "unknown or untrusted issuer" row of §14.6 — distinct from a
@@ -45,15 +68,43 @@ tls_fixture <- function() {
     # serverAuth is not optional: SecTrust's SSL policy rejects a leaf without
     # it as "not permitted for this usage", which reads like a trust failure
     # and is really a missing extension in the fixture.
-    writeLines(c(paste0("subjectAltName=DNS:", san),
-                 "basicConstraints=CA:FALSE",
-                 "keyUsage=digitalSignature,keyEncipherment",
-                 "extendedKeyUsage=serverAuth"), f(name, ".ext"))
-    ssl("req", "-newkey", "rsa:2048", "-keyout", f(name, ".key"),
-        "-out", f(name, ".csr"), "-nodes", "-subj", paste0("/CN=", san))
-    ssl("x509", "-req", "-in", f(name, ".csr"), "-CA", f(signer, ".pem"),
-        "-CAkey", f(signer, ".key"), "-CAcreateserial", "-out", f(name, ".pem"),
-        "-extfile", f(name, ".ext"), ...)
+    writeLines(
+      c(
+        paste0("subjectAltName=DNS:", san),
+        "basicConstraints=CA:FALSE",
+        "keyUsage=digitalSignature,keyEncipherment",
+        "extendedKeyUsage=serverAuth"
+      ),
+      f(name, ".ext")
+    )
+    ssl(
+      "req",
+      "-newkey",
+      "rsa:2048",
+      "-keyout",
+      f(name, ".key"),
+      "-out",
+      f(name, ".csr"),
+      "-nodes",
+      "-subj",
+      paste0("/CN=", san)
+    )
+    ssl(
+      "x509",
+      "-req",
+      "-in",
+      f(name, ".csr"),
+      "-CA",
+      f(signer, ".pem"),
+      "-CAkey",
+      f(signer, ".key"),
+      "-CAcreateserial",
+      "-out",
+      f(name, ".pem"),
+      "-extfile",
+      f(name, ".ext"),
+      ...
+    )
   }
 
   # A leaf with explicit validity dates, so the intent is readable and the
@@ -63,46 +114,83 @@ tls_fixture <- function() {
   # rows had never run in CI. `openssl ca -startdate` is the portable route.
   dated <- function(name, from, to) {
     leaf(name, "localhost", "ca", "-not_before", from, "-not_after", to)
-    if (file.exists(f(name, ".pem"))) return(invisible())
-    cadir <- f("ca-db-", name); dir.create(cadir)
+    if (file.exists(f(name, ".pem"))) {
+      return(invisible())
+    }
+    cadir <- f("ca-db-", name)
+    dir.create(cadir)
     file.create(file.path(cadir, "index.txt"))
     writeLines("01", file.path(cadir, "serial"))
-    writeLines(c("[ca]", "default_ca=zu", "[zu]",
-                 paste0("database=", file.path(cadir, "index.txt")),
-                 paste0("new_certs_dir=", cadir),
-                 paste0("serial=", file.path(cadir, "serial")),
-                 "default_md=sha256", "policy=pol", "unique_subject=no",
-                 "[pol]", "commonName=supplied"),
-               file.path(cadir, "ca.cnf"))
-    ssl("ca", "-batch", "-notext", "-config", file.path(cadir, "ca.cnf"),
-        "-cert", f("ca.pem"), "-keyfile", f("ca.key"),
-        "-in", f(name, ".csr"), "-out", f(name, ".pem"),
-        "-extfile", f(name, ".ext"), "-startdate", from, "-enddate", to)
+    writeLines(
+      c(
+        "[ca]",
+        "default_ca=zu",
+        "[zu]",
+        paste0("database=", file.path(cadir, "index.txt")),
+        paste0("new_certs_dir=", cadir),
+        paste0("serial=", file.path(cadir, "serial")),
+        "default_md=sha256",
+        "policy=pol",
+        "unique_subject=no",
+        "[pol]",
+        "commonName=supplied"
+      ),
+      file.path(cadir, "ca.cnf")
+    )
+    ssl(
+      "ca",
+      "-batch",
+      "-notext",
+      "-config",
+      file.path(cadir, "ca.cnf"),
+      "-cert",
+      f("ca.pem"),
+      "-keyfile",
+      f("ca.key"),
+      "-in",
+      f(name, ".csr"),
+      "-out",
+      f(name, ".pem"),
+      "-extfile",
+      f(name, ".ext"),
+      "-startdate",
+      from,
+      "-enddate",
+      to
+    )
   }
 
-  leaf("good",      "localhost",  "ca", "-days", "30")
+  leaf("good", "localhost", "ca", "-days", "30")
   leaf("wronghost", "other.test", "ca", "-days", "30")
-  leaf("untrusted", "localhost",  "rogueca", "-days", "30")
+  leaf("untrusted", "localhost", "rogueca", "-days", "30")
   dated("expired", "20240101000000Z", "20240201000000Z")
-  dated("notyet",  "20400101000000Z", "20400201000000Z")
+  dated("notyet", "20400101000000Z", "20400201000000Z")
 
-  paths <- list(dir = d, ca = f("ca.pem"), rogue_ca = f("rogueca.pem"),
-                cert = function(n) f(n, ".pem"), key = function(n) f(n, ".key"))
+  paths <- list(
+    dir = d,
+    ca = f("ca.pem"),
+    rogue_ca = f("rogueca.pem"),
+    cert = function(n) f(n, ".pem"),
+    key = function(n) f(n, ".key")
+  )
   # The three certificates every other row needs. The dated two are checked
   # by the rows that use them (skip_unless_cert), so a toolchain that cannot
   # date a certificate costs two rows, not the matrix.
-  for (n in c("good", "wronghost", "untrusted"))
-    if (!file.exists(paths$cert(n)))
+  for (n in c("good", "wronghost", "untrusted")) {
+    if (!file.exists(paths$cert(n))) {
       testthat::skip(paste("could not generate the", n, "certificate"))
+    }
+  }
 
-  .zu_tls_fixture$dir   <- d
+  .zu_tls_fixture$dir <- d
   .zu_tls_fixture$paths <- paths
   paths
 }
 
 skip_unless_cert <- function(name) {
-  if (!file.exists(tls_fixture()$cert(name)))
+  if (!file.exists(tls_fixture()$cert(name))) {
     testthat::skip(paste("could not generate the", name, "certificate"))
+  }
 }
 
 # The §14.4 pin of a fixture certificate, computed by the openssl CLI rather
@@ -111,13 +199,26 @@ skip_unless_cert <- function(name) {
 spki_pin <- function(cert) {
   fx <- tls_fixture()
   o <- shQuote(openssl_bin())
-  cmd <- sprintf(paste("%s x509 -in %s -pubkey -noout | %s pkey -pubin -outform der",
-                       "| %s dgst -sha256 -binary | %s base64 -A"),
-                 o, shQuote(fx$cert(cert)), o, o, o)
-  b64 <- suppressWarnings(system2("sh", c("-c", shQuote(cmd)), stdout = TRUE,
-                                  stderr = FALSE))
-  if (length(b64) != 1L || !grepl("^[A-Za-z0-9+/]{43}=$", b64))
+  cmd <- sprintf(
+    paste(
+      "%s x509 -in %s -pubkey -noout | %s pkey -pubin -outform der",
+      "| %s dgst -sha256 -binary | %s base64 -A"
+    ),
+    o,
+    shQuote(fx$cert(cert)),
+    o,
+    o,
+    o
+  )
+  b64 <- suppressWarnings(system2(
+    "sh",
+    c("-c", shQuote(cmd)),
+    stdout = TRUE,
+    stderr = FALSE
+  ))
+  if (length(b64) != 1L || !grepl("^[A-Za-z0-9+/]{43}=$", b64)) {
     testthat::skip(paste("could not compute the pin of", cert))
+  }
   paste0("sha256//", b64)
 }
 
@@ -130,32 +231,87 @@ with_tls_server <- function(cert, code) {
   for (attempt in 1:8) {
     p <- sample(20000:59000, 1L)
     pidf <- tempfile("zu-s_server-")
-    system2("sh", c("-c", shQuote(sprintf(
-      "echo $$ > %s; exec %s s_server -cert %s -key %s -accept %d -www -quiet",
-      pidf, openssl_bin(), fx$cert(cert), fx$key(cert), p))),
-      wait = FALSE, stdout = NULL, stderr = NULL)
+    system2(
+      "sh",
+      c(
+        "-c",
+        shQuote(sprintf(
+          "echo $$ > %s; exec %s s_server -cert %s -key %s -accept %d -www -quiet",
+          pidf,
+          openssl_bin(),
+          fx$cert(cert),
+          fx$key(cert),
+          p
+        ))
+      ),
+      wait = FALSE,
+      stdout = NULL,
+      stderr = NULL
+    )
 
     deadline <- Sys.time() + 10
     up <- FALSE
     while (Sys.time() < deadline) {
-      con <- try(suppressWarnings(socketConnection("127.0.0.1", p, open = "r+b",
-                                                   timeout = 1, blocking = TRUE)),
-                 silent = TRUE)
-      if (!inherits(con, "try-error")) { close(con); up <- TRUE; break }
+      con <- try(
+        suppressWarnings(socketConnection(
+          "127.0.0.1",
+          p,
+          open = "r+b",
+          timeout = 1,
+          blocking = TRUE
+        )),
+        silent = TRUE
+      )
+      if (!inherits(con, "try-error")) {
+        close(con)
+        up <- TRUE
+        break
+      }
       Sys.sleep(0.1)
     }
-    if (up) { port <- p; break }
-    if (file.exists(pidf))
-      try(tools::pskill(as.integer(readLines(pidf, warn = FALSE)[[1]]),
-                        tools::SIGKILL), silent = TRUE)
+    # A port that answered is only ours if s_server is still running: one that
+    # failed to bind (the port was taken) exits, and the probe then succeeded
+    # against someone else's listener, so the handshake below was aborted by
+    # a server that never spoke TLS. Seen once under shuffle (OSStatus -9816
+    # and -9836); not reproduced in isolation, so this closes the one hole
+    # that explains it rather than a confirmed cause.
+    Sys.sleep(0.1)
+    if (up && file.exists(pidf)) {
+      pid <- as.integer(readLines(pidf, warn = FALSE)[[1]])
+      up <- isTRUE(tools::pskill(pid, 0L))
+    }
+    if (up) {
+      port <- p
+      break
+    }
+    if (file.exists(pidf)) {
+      try(
+        tools::pskill(
+          as.integer(readLines(pidf, warn = FALSE)[[1]]),
+          tools::SIGKILL
+        ),
+        silent = TRUE
+      )
+    }
   }
-  if (is.null(port)) testthat::skip("could not start a local TLS server")
-  on.exit({
-    if (file.exists(pidf))
-      try(tools::pskill(as.integer(readLines(pidf, warn = FALSE)[[1]]),
-                        tools::SIGKILL), silent = TRUE)
-    unlink(pidf)
-  }, add = TRUE)
+  if (is.null(port)) {
+    testthat::skip("could not start a local TLS server")
+  }
+  on.exit(
+    {
+      if (file.exists(pidf)) {
+        try(
+          tools::pskill(
+            as.integer(readLines(pidf, warn = FALSE)[[1]]),
+            tools::SIGKILL
+          ),
+          silent = TRUE
+        )
+      }
+      unlink(pidf)
+    },
+    add = TRUE
+  )
 
   code(sprintf("https://localhost:%d/", port))
 }
@@ -163,8 +319,43 @@ with_tls_server <- function(cert, code) {
 skip_unless_local_tls <- function() {
   testthat::skip_on_cran()
   skip_under_gctorture()
-  if (.Platform$OS.type != "unix") testthat::skip("the fixture uses a POSIX shell")
-  if (is.null(openssl_bin())) testthat::skip("openssl CLI not available")
+  if (.Platform$OS.type != "unix") {
+    testthat::skip("the fixture uses a POSIX shell")
+  }
+  if (is.null(openssl_bin())) {
+    testthat::skip("openssl CLI not available")
+  }
   # Every row of the matrix names its roots with ca_file.
   skip_unless_tls_supports("ca_file")
+}
+
+# A CA that is real, correctly formed, and trusts nothing on the internet.
+# That is what distinguishes "adds to" from "replaces": with it added, a
+# public host still validates; with it substituted, the same host must not.
+# Shared with the §50.5 matrix in test-certs.R via helper-tlsfixture.R rather
+# than generated twice — two fixtures for one concept drift.
+local_ca <- function() {
+  fx <- tls_fixture()
+  list(dir = fx$dir, pem = fx$ca)
+}
+
+# For test-tls.R's D-56 cases: one config per setting some backend cannot
+# honour.
+unsupported_cases <- function() {
+  # PEM-shaped, so check_tls()'s PEM check passes and the capability check is
+  # what decides; the certificate itself is never parsed on this path.
+  pem <- tempfile(fileext = ".pem")
+  writeLines(
+    c("-----BEGIN CERTIFICATE-----", "MIIB", "-----END CERTIFICATE-----"),
+    pem
+  )
+  list(
+    pins = zu_tls(
+      pins = "sha256//YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg="
+    ),
+    tls13 = zu_tls(min_version = 13),
+    ca_file = zu_tls(ca_file = pem),
+    ca_extra = zu_tls(ca_extra = pem),
+    revocation = zu_tls(revocation = TRUE)
+  )
 }

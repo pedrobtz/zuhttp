@@ -1,10 +1,10 @@
 # §31.7 — response accessors, the charset chain, and the status-error policy.
 
-resp <- function(...) zu_response(...)
-
 test_that("header lookup is case-insensitive and keeps repeats (§18.3)", {
-  r <- resp(200L, c("Set-Cookie" = "a=1", "Set-Cookie" = "b=2",
-                    "Content-Type" = "text/plain"))
+  r <- resp(
+    200L,
+    c("Set-Cookie" = "a=1", "Set-Cookie" = "b=2", "Content-Type" = "text/plain")
+  )
   expect_identical(zu_resp_header(r, "set-cookie"), c("a=1", "b=2"))
   expect_identical(zu_resp_header(r, "SET-COOKIE"), c("a=1", "b=2"))
   # Absent is length 0, not NULL and not NA: it composes with length() and
@@ -21,14 +21,18 @@ test_that("zu_resp_ok() draws the line at 400", {
 })
 
 test_that("the charset chain follows §31.7 in order", {
-  bytes <- as.raw(c(0x63, 0x61, 0x66, 0xE9))          # café, ISO-8859-1
+  bytes <- as.raw(c(0x63, 0x61, 0x66, 0xE9)) # café, ISO-8859-1
 
   # 1. an explicit encoding wins over everything
   r <- resp(200L, c("Content-Type" = "text/plain; charset=utf-8"), bytes)
   expect_identical(zu_resp_text(r, encoding = "ISO-8859-1"), "café")
 
   # 2. the charset parameter, including the quoted form servers really send
-  r <- resp(200L, c("Content-Type" = "text/plain; charset=\"ISO-8859-1\""), bytes)
+  r <- resp(
+    200L,
+    c("Content-Type" = "text/plain; charset=\"ISO-8859-1\""),
+    bytes
+  )
   expect_identical(zu_resp_text(r), "café")
 
   # 3. a BOM, which is then stripped
@@ -45,14 +49,20 @@ test_that("the charset chain follows §31.7 in order", {
   expect_identical(zu_resp_text(r), "café")
 
   # 5. application/json is UTF-8 by RFC 8259 whatever the charset says
-  r <- resp(200L, c("Content-Type" = "application/json; charset=ISO-8859-1"),
-            charToRaw(enc2utf8('{"a":"é"}')))
+  r <- resp(
+    200L,
+    c("Content-Type" = "application/json; charset=ISO-8859-1"),
+    charToRaw(enc2utf8('{"a":"é"}'))
+  )
   expect_identical(zu_resp_text(r), '{"a":"é"}')
 })
 
 test_that("an unrecognised charset falls through instead of failing", {
-  r <- resp(200L, c("Content-Type" = "text/plain; charset=x-not-a-charset"),
-            charToRaw(enc2utf8("café")))
+  r <- resp(
+    200L,
+    c("Content-Type" = "text/plain; charset=x-not-a-charset"),
+    charToRaw(enc2utf8("café"))
+  )
   expect_identical(zu_resp_text(r), "café")
 })
 
@@ -63,8 +73,11 @@ test_that("undecodable bytes raise rather than corrupt", {
 })
 
 test_that("the result is marked UTF-8", {
-  r <- resp(200L, c("Content-Type" = "text/plain; charset=ISO-8859-1"),
-            as.raw(c(0x63, 0x61, 0x66, 0xE9)))
+  r <- resp(
+    200L,
+    c("Content-Type" = "text/plain; charset=ISO-8859-1"),
+    as.raw(c(0x63, 0x61, 0x66, 0xE9))
+  )
   expect_identical(Encoding(zu_resp_text(r)), "UTF-8")
 })
 
@@ -73,8 +86,10 @@ test_that("an empty body is an empty string, not an error", {
 })
 
 test_that("zu_resp_check() maps status ranges to the §34.1 classes", {
-  e <- tryCatch(zu_resp_check(resp(404L, url = "https://x/y")),
-                zu_error = function(e) e)
+  e <- tryCatch(
+    zu_resp_check(resp(404L, url = "https://x/y")),
+    zu_error = function(e) e
+  )
   expect_s3_class(e, "zu_http_client_error")
   expect_s3_class(e, "zu_http_status_error")
   expect_s3_class(e, "zu_error")
@@ -92,8 +107,10 @@ test_that("zu_resp_check() maps status ranges to the §34.1 classes", {
 })
 
 test_that("a status error message says what to do about it (§34.4)", {
-  e <- tryCatch(zu_resp_check(resp(401L, url = "https://api.example.com/x")),
-                zu_error = function(e) e)
+  e <- tryCatch(
+    zu_resp_check(resp(401L, url = "https://api.example.com/x")),
+    zu_error = function(e) e
+  )
   msg <- conditionMessage(e)
   expect_match(msg, "401")
   expect_match(msg, "Unauthorized")
@@ -101,10 +118,14 @@ test_that("a status error message says what to do about it (§34.4)", {
 })
 
 test_that("credentials do not reach a condition's payload (§42.4)", {
-  api <- zu_client(headers = c(Authorization = "Bearer SUPERSECRET"),
-                   transport = zu_mock_transport(function(req) zu_response(403L)))
-  e <- tryCatch(zu_get("https://api.example.com/x?api_key=SUPERSECRET", client = api),
-                zu_error = function(e) e)
+  api <- zu_client(
+    headers = c(Authorization = "Bearer SUPERSECRET"),
+    transport = zu_mock_transport(function(req) zu_response(403L))
+  )
+  e <- tryCatch(
+    zu_get("https://api.example.com/x?api_key=SUPERSECRET", client = api),
+    zu_error = function(e) e
+  )
 
   flat <- paste(capture.output(str(e)), collapse = " ")
   expect_false(grepl("SUPERSECRET", flat, fixed = TRUE))
@@ -115,16 +136,21 @@ test_that("credentials do not reach a condition's payload (§42.4)", {
 })
 
 test_that("printing a response redacts credential headers (§42.2)", {
-  r <- resp(200L, c(Authorization = "Bearer SECRET", Accept = "*/*"),
-            url = "https://h/")
+  r <- resp(
+    200L,
+    c(Authorization = "Bearer SECRET", Accept = "*/*"),
+    url = "https://h/"
+  )
   out <- paste(capture.output(print(r)), collapse = "\n")
   expect_false(grepl("SECRET", out, fixed = TRUE))
   expect_match(out, "<redacted>", fixed = TRUE)
 })
 
 test_that("printing a request redacts too", {
-  req <- zu_headers(zu_request("GET", "https://x/?api_key=SECRET"),
-                    Authorization = "Bearer SECRET")
+  req <- zu_headers(
+    zu_request("GET", "https://x/?api_key=SECRET"),
+    Authorization = "Bearer SECRET"
+  )
   out <- paste(capture.output(print(req)), collapse = "\n")
   expect_false(grepl("SECRET", out, fixed = TRUE))
 })
@@ -143,9 +169,14 @@ test_that("zu_resp_json() says what went wrong, not what the parser thinks", {
   expect_match(conditionMessage(e), "empty")
   expect_match(conditionMessage(e), "204")
 
-  e <- tryCatch(zu_resp_json(zu_response(200L, c("Content-Type" = "application/json"),
-                                         "<html>oops</html>")),
-                zu_error = function(e) e)
+  e <- tryCatch(
+    zu_resp_json(zu_response(
+      200L,
+      c("Content-Type" = "application/json"),
+      "<html>oops</html>"
+    )),
+    zu_error = function(e) e
+  )
   expect_s3_class(e, "zu_body_decode_error")
   expect_match(conditionMessage(e), "not valid JSON")
   # The backend's own message is present, but last.
@@ -155,7 +186,15 @@ test_that("zu_resp_json() says what went wrong, not what the parser thinks", {
 test_that("max_body = 0 is refused rather than silently meaning 16 MB", {
   # The C side reads 0 as "use the default", so honouring the value would do
   # the opposite of what the caller wrote.
-  api <- zu_client(transport = zu_mock_transport(function(req) zu_response(200L)))
-  expect_error(zu_get("https://x/", max_body = 0, client = api), "at least 1 byte")
-  expect_error(zu_get("https://x/", max_body = -1, client = api), "at least 1 byte")
+  api <- zu_client(
+    transport = zu_mock_transport(function(req) zu_response(200L))
+  )
+  expect_error(
+    zu_get("https://x/", max_body = 0, client = api),
+    "at least 1 byte"
+  )
+  expect_error(
+    zu_get("https://x/", max_body = -1, client = api),
+    "at least 1 byte"
+  )
 })

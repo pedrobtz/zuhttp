@@ -65,7 +65,9 @@ typedef struct {
 
 void    zuh_redirect_trail_init(zuh_redirect_trail *t);
 void    zuh_redirect_trail_free(zuh_redirect_trail *t);
-/* Returns 1 if newly recorded, 0 if already present (a loop) or on failure. */
-int     zuh_redirect_trail_add(zuh_redirect_trail *t, const char *method, const zuh_uri *u);
+/* ZUH_OK if newly recorded, ZUH_ERR_REDIRECT if already present (a loop),
+ * ZUH_ERR_NOMEM on allocation failure. Distinct codes, because a loop is the
+ * server's doing and running out of memory is not. */
+zuh_code zuh_redirect_trail_add(zuh_redirect_trail *t, const char *method, const zuh_uri *u);
 
 #endif /* ZUHTTP_REDIRECT_H */

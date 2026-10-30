@@ -30,6 +30,9 @@ typedef struct {
     zuh_headers      headers;
     zuh_body_framing body;
     uint64_t        content_length;
+    /* §17.2: `Connection: close` instead of keep-alive, for a request whose
+     * connection will be closed after the response anyway (no pool). */
+    int             close_connection;
 } zuh_request;
 
 void    zuh_request_init(zuh_request *r);
@@ -41,7 +44,10 @@ int zuh_method_valid(const char *method);
 /* A target may not contain CTLs, space, CR or LF. */
 int zuh_target_valid(const char *target);
 
-/* Apply the §17.2 defaults, each only if absent so a caller override wins. */
+/* Apply the §17.2 defaults, each only if absent so a caller override wins.
+ * `user_agent` NULL sends a bare "zuhttp": the version lives in DESCRIPTION,
+ * and R passes "zuhttp/<version>" built from it, so C holds no copy to go
+ * stale (it said 0.0.0.9000 on the wire of the 0.1.0 release candidate). */
 zuh_code zuh_request_add_defaults(zuh_request *r, const char *user_agent);
 
 /* Serialise request line + headers + CRLF. The body is written separately by

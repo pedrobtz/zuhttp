@@ -109,6 +109,10 @@ feature and not a defect.
       first (#74).
 - [x] Fix the 13 findings of the 2026-09-27 package review (#76), each with a
       test that failed first (#77): D-76 to D-81.
+- [ ] Fix the 2026-10-30 critical review of `237bf96` (#91–#120): one
+      Blocking and seven Required findings are sub-issues of #21; D-83 to
+      D-87. Unticked until the pull request that closes them is green on the
+      full profile.
 - [x] Close the edition 1 stage issues #41–#51 as superseded (2026-09-26).
 - [x] One issue per work package (#60–#71), and the trackers re-scoped to
       D-82: #21 is M0, #72 is M1, #22 is the path to 1.0.
@@ -812,6 +816,35 @@ changed the plan or the design.
   truncated by killed children, gcov symbols in the ABI test, macOS's
   nondeterministic revocation check, a test runner outside the namespace,
   and three portability bugs in new test code. Submitting is #40.
+- **2026-10-30 — a whole-package critical review (#91–#120) of the
+  ready-to-submit `237bf96`.** All 13 #76 findings held, and every suite was
+  green; what it found was what the suites did not look at. One test reached
+  `expired.badssl.com` with no network gate, 15 of the suite's 16 offline
+  seconds under CRAN conditions. The wire said `User-Agent: zuhttp/0.0.0.9000`;
+  a Latin-1 header byte reached R marked UTF-8 and broke `nchar()`; a 9 KB
+  bearer token was refused as a body limit; a pooled response reported a
+  direct connection through a proxy; hook payloads carried form bodies in the
+  clear; and on OpenSSL a TCP close without `close_notify` failed as
+  `zu_closed`, a class outside §34.1. Deleting every TLS field from the
+  engine's pool key left `ctest` green: the §26.1 guard existed only online.
+  Ten test files kept state at file level, so a shuffled run failed. A new
+  allocation-failure sweep through the engine then found, on its first run, a
+  leaked buffer on every error exit of the proxy branch, a proxy credential
+  silently omitted on allocation failure, and allocation failures reported as
+  `zu_url_error` and `zu_proxy_error`. Rule 6 again: each of these passed a
+  test that never asked the question.
+- **2026-10-30 — two latent TLS read defects, surfaced by #121's CI.**
+  Shuffling the R suite put a failed handshake (`expired.badssl.com`) before
+  a request on a pooled connection, and on OpenSSL that request failed with
+  the other host's "certificate verify failed": `SSL_get_error()` reads the
+  thread's error queue, the handshake cleared it, and a reused connection
+  has no handshake. Every TLS call now clears it first; `make -C ctest
+  tls-eof`'s `stale` mode fails without that. And sending `Connection:
+  close` without a pool (#104) made a Schannel bug reproducible: a response
+  and its `close_notify` decrypted in one pass returned end of stream and
+  discarded the response. That is #123, which the eMudhra measurement had
+  first shown as intermittent.
+||||||| parent of 375141a (README and TLS article: the eMudhra block, measured)
 - **2026-10-30 — the eMudhra block, measured (#122).** The README argued
   that a client of the platform evaluator inherits an emergency distrust and
   a client of a CA bundle does not; `tools/check-trust-blocks.R` now shows

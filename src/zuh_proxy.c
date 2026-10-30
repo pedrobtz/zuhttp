@@ -156,6 +156,10 @@ zuh_code zuh_proxy_parse(zuh_proxy *p, const char *url, zuh_error *err) {
 
     rc = zuh_uri_parse(&u, text, text + strlen(text));
     zuh_free(withscheme);
+    if (rc == ZUH_ERR_NOMEM) {
+        zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_NONE, "out of memory");
+        return ZUH_ERR_NOMEM;
+    }
     if (rc != ZUH_OK) {
         zuh_error_set(err, ZUH_ERR_PROXY, ZUH_PHASE_CONNECT,
                      "proxy URL is not usable");

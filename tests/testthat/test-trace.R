@@ -5,20 +5,17 @@
 # The phases anyone actually wants to see — DNS, connect, TLS handshake —
 # were exactly the invisible ones.
 
-# A client of its own per test. The DEFAULT client pools, so a test that ran
-# earlier in the file leaves a warm connection and the next request correctly
-# skips dns/connect/tls — which then looks like missing instrumentation. The
-# pooling is right; sharing a client between tests that measure connection
-# setup is not.
-fresh <- function(...) zu_client(...)
-
 # --- offline -------------------------------------------------------------
 
 test_that("tracing is off by default", {
   # It costs a fixed buffer and a branch per event. Cheap is not free, and a
   # diagnostic nobody asked for should not be collected.
-  r <- zu_get("https://h/x", client = zu_client(
-    transport = zu_mock_transport(function(q) zu_response(200L))))
+  r <- zu_get(
+    "https://h/x",
+    client = zu_client(
+      transport = zu_mock_transport(function(q) zu_response(200L))
+    )
+  )
   expect_null(zu_resp_trace(r))
 
   expect_true(zu_req_trace(zu_request("GET", "https://h/x"))$trace)
@@ -36,9 +33,20 @@ test_that("a hand-built response still answers zu_resp_timings()", {
 test_that("§35.1 reports all nine measurements", {
   skip_unless_online()
   t <- zu_resp_timings(zu_get("https://example.com", client = fresh()))
-  expect_named(t, c("dns", "connect", "tls", "request_write", "ttfb",
-                    "response_read", "total", "body_bytes_wire",
-                    "body_bytes_decoded"))
+  expect_named(
+    t,
+    c(
+      "dns",
+      "connect",
+      "tls",
+      "request_write",
+      "ttfb",
+      "response_read",
+      "total",
+      "body_bytes_wire",
+      "body_bytes_decoded"
+    )
+  )
   # Seconds, like `timeout`, so the two can be compared without converting.
   expect_gt(t[["total"]], 0)
   expect_lt(t[["total"]], 60)
@@ -85,7 +93,11 @@ test_that("wire and decoded byte counts differ for a compressed body", {
 
 test_that("§35.3 narrates the whole chain, in order", {
   skip_unless_online()
-  tr <- zu_resp_trace(zu_get("https://example.com", trace = TRUE, client = fresh()))
+  tr <- zu_resp_trace(zu_get(
+    "https://example.com",
+    trace = TRUE,
+    client = fresh()
+  ))
   expect_s3_class(tr, "data.frame")
   expect_named(tr, c("event", "at_ms", "n", "detail"))
 
@@ -93,9 +105,18 @@ test_that("§35.3 narrates the whole chain, in order", {
   expect_identical(ev[[1]], "request.start")
   expect_identical(ev[[length(ev)]], "request.done")
   # The phases a timing summary can only total up.
-  for (e in c("dns.start", "dns.done", "connect.start", "connect.done",
-              "tls.start", "tls.done", "request.sent", "headers.received"))
+  for (e in c(
+    "dns.start",
+    "dns.done",
+    "connect.start",
+    "connect.done",
+    "tls.start",
+    "tls.done",
+    "request.sent",
+    "headers.received"
+  )) {
     expect_true(e %in% ev, info = e)
+  }
 
   # Monotonic, because at_ms is measured from one clock started once.
   expect_false(is.unsorted(tr$at_ms))
@@ -110,7 +131,11 @@ test_that("a reused connection says so, and skips the phases it skipped", {
   skip_unless_online()
   api <- zu_client()
   invisible(zu_get("https://example.com", client = api))
-  ev <- zu_resp_trace(zu_get("https://example.com", trace = TRUE, client = api))$event
+  ev <- zu_resp_trace(zu_get(
+    "https://example.com",
+    trace = TRUE,
+    client = api
+  ))$event
 
   expect_true("connection.reused" %in% ev)
   # Not merely "faster": the phases are absent, which is the explanation for
@@ -122,7 +147,11 @@ test_that("a reused connection says so, and skips the phases it skipped", {
 
 test_that("plain HTTP produces no TLS events", {
   skip_unless_online()
-  ev <- zu_resp_trace(zu_get("http://example.com", trace = TRUE, client = fresh()))$event
+  ev <- zu_resp_trace(zu_get(
+    "http://example.com",
+    trace = TRUE,
+    client = fresh()
+  ))$event
   expect_true("connect.done" %in% ev)
   expect_false("tls.start" %in% ev)
   expect_false("tls.done" %in% ev)
@@ -130,8 +159,14 @@ test_that("plain HTTP produces no TLS events", {
 
 test_that("a followed redirect is an event, with its target (§35.3)", {
   with_redirect_origin(function(start, target) {
-    r  <- zu_get(start, trace = TRUE, redirects = 1, check = FALSE,
-                 timeout = 20, client = fresh(pool = NULL))
+    r <- zu_get(
+      start,
+      trace = TRUE,
+      redirects = 1,
+      check = FALSE,
+      timeout = 20,
+      client = fresh(pool = NULL)
+    )
     tr <- zu_resp_trace(r)
     got <- tr$detail[tr$event == "redirect.followed"]
 
@@ -169,8 +204,10 @@ test_that("zu_verbose() narrates the phases when the request is traced", {
 test_that("zu_verbose() without a trace shows the HTTP layer only", {
   out <- textConnection("lines2", "w", local = TRUE)
   on.exit(try(close(out), silent = TRUE), add = TRUE)
-  cli <- zu_client(hooks = zu_verbose(to = out),
-                   transport = zu_mock_transport(function(q) zu_response(200L)))
+  cli <- zu_client(
+    hooks = zu_verbose(to = out),
+    transport = zu_mock_transport(function(q) zu_response(200L))
+  )
   invisible(zu_get("https://h/x", client = cli))
   close(out)
 
@@ -182,9 +219,17 @@ test_that("the total is never shorter than a phase inside it", {
   # Offline: a response carrying the engine's millisecond timings and an
   # R-measured total that proc.time()'s 1 ms resolution rounded down.
   r <- zu_response(200L)
-  r$timings_ms <- c(dns = 0, connect = 0, tls = NA, request_write = 0,
-                    ttfb = 2, response_read = 2, total = 2,
-                    body_bytes_wire = 10, body_bytes_decoded = 10)
+  r$timings_ms <- c(
+    dns = 0,
+    connect = 0,
+    tls = NA,
+    request_write = 0,
+    ttfb = 2,
+    response_read = 2,
+    total = 2,
+    body_bytes_wire = 10,
+    body_bytes_decoded = 10
+  )
   r$timings <- c(total = 0.001)
   t <- zu_resp_timings(r)
   expect_gte(t[["total"]], t[["ttfb"]])

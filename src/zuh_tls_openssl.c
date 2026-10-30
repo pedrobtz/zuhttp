@@ -11,6 +11,7 @@
  * SSL_CTX_set_verify below.
  */
 #include "zuh_tls.h"
+#include "zuh_net.h"
 #include "zuh_alloc.h"
 #include "zuh_buffer.h"
 #include <string.h>
@@ -75,7 +76,12 @@ static zuh_code fill_in(tls_impl *t, zuh_deadline d, zuh_error *err) {
     char buf[16384];
     zuh_ssize n = zuh_stream_read(t->inner, buf, sizeof buf, d, err);
     if (n > 0) {
-        BIO_write(t->rbio, buf, (int)n);
+        /* A memory BIO grows; it fails only when allocation does, and a
+         * dropped write would lose ciphertext without a sign. */
+        if (BIO_write(t->rbio, buf, (int)n) != (int)n) {
+            zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_TLS, "out of memory buffering TLS input");
+            return ZUH_ERR_NOMEM;
+        }
         return ZUH_OK;
     }
     if (n == 0) {
@@ -199,14 +205,31 @@ static zuh_code configure_trust(tls_impl *t, const zuh_tls_config *cfg, zuh_erro
 static zuh_ssize tls_read(zuh_stream *s, void *buf, size_t n, zuh_deadline d, zuh_error *err) {
     tls_impl *t = (tls_impl *)s->impl;
     for (;;) {
-        int r = SSL_read(t->ssl, buf, (int)(n > INT_MAX ? INT_MAX : n));
-        int e;
+        int r, e;
+        /* SSL_get_error() reads this thread's error queue, which must be
+         * empty before the call. The handshake clears it; a pooled
+         * connection skips the handshake, so a failed one elsewhere (an
+         * expired certificate on another host) left "certificate verify
+         * failed" behind, and the next read here was misreported as
+         * SSL_ERROR_SSL. Found by the shuffled CI run (#121). */
+        ERR_clear_error();
+        r = SSL_read(t->ssl, buf, (int)(n > INT_MAX ? INT_MAX : n));
         if (r > 0) return (zuh_ssize)r;
         e = SSL_get_error(t->ssl, r);
         if (e == SSL_ERROR_ZERO_RETURN) return 0;          /* clean close_notify */
         if (e == SSL_ERROR_WANT_READ) {
+            zuh_code fc;
             if (flush_out(t, d, err) != ZUH_OK) return -1;
-            if (fill_in(t, d, err) != ZUH_OK) return -1;
+            fc = fill_in(t, d, err);
+            /* A TCP close with no close_notify, and SSL has nothing left to
+             * give: end of stream, as Schannel and Network.framework report
+             * it. Many servers close a close-delimited body this way, and
+             * failing them is what curl's SSL_OP_IGNORE_UNEXPECTED_EOF
+             * exists to avoid. Truncation of a body with a length or chunked
+             * framing is still caught, by the framing (§18.1); this used to
+             * escape as ZUH_ERR_CLOSED, i.e. R class `zu_closed`. */
+            if (fc == ZUH_ERR_CLOSED) { zuh_error_clear(err); return 0; }
+            if (fc != ZUH_OK) return -1;
             continue;
         }
         if (e == SSL_ERROR_WANT_WRITE) {
@@ -227,8 +250,9 @@ static zuh_ssize tls_read(zuh_stream *s, void *buf, size_t n, zuh_deadline d, zu
 static zuh_ssize tls_write(zuh_stream *s, const void *buf, size_t n, zuh_deadline d, zuh_error *err) {
     tls_impl *t = (tls_impl *)s->impl;
     for (;;) {
-        int w = SSL_write(t->ssl, buf, (int)(n > INT_MAX ? INT_MAX : n));
-        int e;
+        int w, e;
+        ERR_clear_error();   /* as in tls_read() */
+        w = SSL_write(t->ssl, buf, (int)(n > INT_MAX ? INT_MAX : n));
         if (w > 0) {
             if (flush_out(t, d, err) != ZUH_OK) return -1;
             return (zuh_ssize)w;
@@ -257,6 +281,7 @@ static void tls_close(zuh_stream *s) {
     if (!t) return;
     if (t->ssl) {
         SSL_shutdown(t->ssl);          /* best effort; peer may already be gone */
+        ERR_clear_error();             /* and leave nothing for the next caller */
         SSL_free(t->ssl);              /* frees rbio/wbio too */
         t->ssl = NULL; t->rbio = t->wbio = NULL;
     }
@@ -274,6 +299,12 @@ static int tls_readable(zuh_stream *s, int timeout_ms) {
     if (!s || !s->impl) return -1;
     t = (tls_impl *)s->impl;
     if (t->ssl && SSL_pending(t->ssl) > 0) return 1;
+    /* Ciphertext fill_in() read but SSL has not processed: a close_notify
+     * that arrived in the same segment as the last body record sits here,
+     * invisible to both SSL_pending() and the socket, and the pool kept the
+     * dead connection. Readable means "do not reuse" (§26.2), as Schannel
+     * already says for its undecrypted bytes. */
+    if (t->rbio && BIO_ctrl_pending(t->rbio) > 0) return 1;
     return zuh_stream_readable(t->inner, timeout_ms);
 }
 
@@ -387,7 +418,15 @@ zuh_code zuh_tls_connect(zuh_stream **out, zuh_stream *inner, const char *hostna
         e = SSL_get_error(t->ssl, r);
         if (e == SSL_ERROR_WANT_READ) {
             if (flush_out(t, deadline, err) != ZUH_OK) { rc = err->code; goto fail_detach; }
-            if (fill_in(t, deadline, err) != ZUH_OK)   { rc = err->code; goto fail_detach; }
+            rc = fill_in(t, deadline, err);
+            if (rc == ZUH_ERR_CLOSED) {
+                /* A server that drops the connection mid-handshake failed
+                 * the handshake; "peer closed" is not a §34.1 class. */
+                zuh_error_set(err, ZUH_ERR_TLS_HANDSHAKE, ZUH_PHASE_TLS,
+                             "the server closed the connection during the TLS handshake");
+                rc = ZUH_ERR_TLS_HANDSHAKE; goto fail_detach;
+            }
+            if (rc != ZUH_OK) { rc = err->code; goto fail_detach; }
             continue;
         }
         if (e == SSL_ERROR_WANT_WRITE) {
@@ -444,6 +483,9 @@ fail_detach:
      * it here or it would be closed twice. */
     t->inner = NULL;
 fail:
+    /* The error has been read into `err`; what is left in the queue would
+     * otherwise be the next caller's (see tls_read()). */
+    ERR_clear_error();
     if (t->ssl) SSL_free(t->ssl);              /* frees the BIOs */
     else { if (t->rbio) BIO_free(t->rbio); if (t->wbio) BIO_free(t->wbio); }
     if (t->ctx) SSL_CTX_free(t->ctx);
@@ -475,7 +517,10 @@ zuh_code zuh_tls_dial(zuh_stream **out, const char *host, uint16_t port,
     return ZUH_ERR_TLS;
 }
 
+/* §35.2: this backend wraps a TCP stream, so the peer is the inner
+ * stream's. Asked of a pooled connection, which has no other record of whom
+ * it was opened to; through a proxy that is the proxy, as on a fresh dial. */
 int zuh_tls_peer_ip(const zuh_stream *s, char *buf, size_t n) {
-    (void)s; (void)buf; (void)n;
-    return 0;
+    if (!s || s->vt != &k_tls_vt || !s->impl) return 0;
+    return zuh_net_peer_ip(((tls_impl *)s->impl)->inner, buf, n);
 }

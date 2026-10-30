@@ -153,7 +153,7 @@ static char *redacted_url_of(const zuh_uri *u, const zuh_redact_policy *p) {
  * the hop. That is four strdups per pooled request instead of two, and it buys
  * the loop's dozen early-return paths having no key to free — the kind of
  * lifetime bookkeeping that leaks the first time someone adds a thirteenth. */
-static int pool_key_for(zuh_pool_key *k, const zuh_uri *u, const zuh_get_opts *o,
+int zuh_engine_pool_key(zuh_pool_key *k, const zuh_uri *u, const zuh_get_opts *o,
                         const zuh_proxy *px) {
     zuh_pool_key_init(k);
     k->scheme = dup_str(u->is_https ? "https" : "http");
@@ -255,7 +255,7 @@ static void done_with_stream(const zuh_get_opts *o, const zuh_uri *u,
                              const zuh_proxy *px, zuh_stream *s, zuh_reuse r) {
     zuh_pool_key key;
     if (!s) return;
-    if (o->pool && pool_key_for(&key, u, o, px)) {
+    if (o->pool && zuh_engine_pool_key(&key, u, o, px)) {
         zuh_pool_release(o->pool, &key, s, r);
         zuh_pool_key_free(&key);
         return;
@@ -402,12 +402,22 @@ static zuh_code open_stream(zuh_stream **out, const zuh_uri *u,
     if (o->pool) {
         zuh_pool_key key;
         zuh_stream *reused = NULL;
-        if (!pool_key_for(&key, u, o, px)) return ZUH_ERR_NOMEM;
+        if (!zuh_engine_pool_key(&key, u, o, px)) return ZUH_ERR_NOMEM;
         reused = zuh_pool_acquire(o->pool, &key);
         zuh_pool_key_free(&key);
         if (reused) {
+            char ip[64];
             if (u->is_https) record_tls_info(reused, res);
             res->reused_connection = 1;   /* §35.2 */
+            /* §35.2 describes the connection this response arrived on, which
+             * a reuse is as much as a fresh dial: the pool key includes the
+             * proxy (§26.1), so how it was opened is still how it runs. */
+            res->proxy_used = via_proxy;
+            if (zuh_tls_peer_ip(reused, ip, sizeof ip) ||
+                zuh_net_peer_ip(reused, ip, sizeof ip)) {
+                zuh_free(res->remote_ip);
+                res->remote_ip = dup_str(ip);
+            }
             /* §35.1 leaves dns/connect/tls at -1 here, which is the honest
              * answer for a pooled connection: those phases did not happen on
              * this request. Reporting 0 would claim they were instantaneous. */
@@ -578,9 +588,46 @@ static zuh_code check_caller_framing(const zuh_req_spec *req, size_t body_len,
     return ZUH_OK;
 }
 
-zuh_code zuh_engine_perform(zuh_result *out, const char *url,
-                          const zuh_req_spec *req, const zuh_get_opts *o,
-                          zuh_error *err) {
+/* §17.1 and D-85: every caller header is checked once, before connecting,
+ * so a malformed one costs no connection. The message names the header and
+ * the rule, never the value, which may be a credential (§42); a name is
+ * echoed only if it is a short token, so the message cannot carry the CR/LF
+ * it refuses. */
+static zuh_code check_caller_headers(const zuh_req_spec *req, zuh_error *err) {
+    size_t i, n = req ? req->n_headers : 0;
+    for (i = 0; i < n; i++) {
+        const char *nm = req->header_names[i];
+        const char *v  = req->header_values[i];
+        size_t nlen = nm ? strlen(nm) : 0;
+        if (!zuh_header_name_valid(nm, nlen)) {
+            zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_NONE,
+                         "request header %lu has an invalid name: "
+                         "a name must be an RFC 7230 token (§17.1)",
+                         (unsigned long)i + 1);
+            return ZUH_ERR_PARSE;
+        }
+        if (!zuh_header_value_valid(v, v ? strlen(v) : 0)) {
+            if (nlen <= 64)
+                zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_NONE,
+                             "request header `%s` has an invalid value: a value "
+                             "must not contain CR, LF, NUL or other control "
+                             "characters (§17.1)", nm);
+            else
+                zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_NONE,
+                             "request header %lu has an invalid value: a value "
+                             "must not contain CR, LF, NUL or other control "
+                             "characters (§17.1)", (unsigned long)i + 1);
+            return ZUH_ERR_PARSE;
+        }
+    }
+    return ZUH_OK;
+}
+
+/* The hop loop. `trail` is §19.4's record of every (method, URL) requested
+ * so far; zuh_engine_perform() owns it, so the many exits below need not. */
+static zuh_code perform_hops(zuh_result *out, const char *url,
+                             const zuh_req_spec *req, const zuh_get_opts *o,
+                             zuh_redirect_trail *trail, zuh_error *err) {
     zuh_get_opts defaults;
     zuh_uri cur;
     zuh_deadline total;
@@ -615,6 +662,10 @@ zuh_code zuh_engine_perform(zuh_result *out, const char *url,
     total = zuh_deadline_in(o->timeout_ms > 0 ? o->timeout_ms : ZUH_DEFAULT_TIMEOUT_MS);
 
     rc = zuh_uri_parse(&cur, url, url + strlen(url));
+    if (rc == ZUH_ERR_NOMEM) {
+        zuh_error_set(err, rc, ZUH_PHASE_NONE, "out of memory");
+        return rc;
+    }
     if (rc != ZUH_OK) {
         /* §42.2: the message is an egress like the URL field, and the URL
          * that failed to parse is the one most likely to be pasted with its
@@ -632,6 +683,9 @@ zuh_code zuh_engine_perform(zuh_result *out, const char *url,
     }
 
     rc = check_caller_framing(req, body_len, err);
+    if (rc == ZUH_OK) rc = check_caller_headers(req, err);
+    if (rc != ZUH_OK) { zuh_uri_free(&cur); zuh_result_free(out); return rc; }
+    rc = zuh_redirect_trail_add(trail, method, &cur);
     if (rc != ZUH_OK) { zuh_uri_free(&cur); zuh_result_free(out); return rc; }
 
     /* §27: where the final body goes. `o->sink` is the caller's; without one
@@ -682,6 +736,10 @@ zuh_code zuh_engine_perform(zuh_result *out, const char *url,
         zuh_request_init(&rq);
         rq.method = method;
         rq.target = cur.path_query;
+        /* §17.2: without a pool this connection is closed after the
+         * response (done_with_stream), so promising keep-alive would only
+         * leave the server holding it until its own idle timeout. */
+        rq.close_connection = o->pool == NULL;
         if (!host_header(&cur, hosthdr, sizeof hosthdr)) {
             zuh_error_set(err, ZUH_ERR_URL, ZUH_PHASE_NONE, "host name too long");
             zuh_request_free(&rq); zuh_stream_free(s);
@@ -716,11 +774,16 @@ zuh_code zuh_engine_perform(zuh_result *out, const char *url,
              * the origin — and because the proxy is re-resolved per hop, a
              * redirect onto a NO_PROXY host simply never reaches this branch
              * and so cannot carry the credential onward (§19.2). */
-            if (zuh_buf_init(&auth, 64, 4096)) {
+            if (px.username) {
                 const char *v = NULL;
-                if (zuh_proxy_auth_value(&px, &auth) && zuh_buf_cstr(&auth, &v))
-                    rc = zuh_headers_add_str(&rq.headers, "Proxy-Authorization", v);
-                zuh_buf_free(&auth);
+                /* Failing to build the credential fails the request: sending
+                 * it without one would only earn a 407 and hide the cause. */
+                rc = ZUH_ERR_NOMEM;
+                if (zuh_buf_init(&auth, 64, 4096)) {
+                    if (zuh_proxy_auth_value(&px, &auth) && zuh_buf_cstr(&auth, &v))
+                        rc = zuh_headers_add_str(&rq.headers, "Proxy-Authorization", v);
+                    zuh_buf_free(&auth);
+                }
                 if (rc != ZUH_OK) {
                     if (have_absform) zuh_buf_free(&absform);
                     zuh_request_free(&rq); zuh_stream_free(s);
@@ -743,6 +806,7 @@ zuh_code zuh_engine_perform(zuh_result *out, const char *url,
         if (o->no_decode) {
             rc = zuh_headers_add_str(&rq.headers, "Accept-Encoding", "identity");
             if (rc != ZUH_OK) {
+                if (have_absform) zuh_buf_free(&absform);
                 zuh_request_free(&rq); zuh_stream_free(s);
                 zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
                 return rc;
@@ -768,14 +832,19 @@ zuh_code zuh_engine_perform(zuh_result *out, const char *url,
             rc = zuh_headers_add_str(&rq.headers, req->header_names[hi],
                                     req->header_values[hi]);
             if (rc != ZUH_OK) {
+                /* check_caller_headers() refused anything malformed before
+                 * connecting, so what is left is running out of memory. */
                 zuh_error_set(err, rc, ZUH_PHASE_NONE,
-                             "header %lu is not valid", (unsigned long)hi + 1);
+                             "request header %lu could not be added",
+                             (unsigned long)hi + 1);
+                if (have_absform) zuh_buf_free(&absform);
                 zuh_request_free(&rq); zuh_stream_free(s);
                 zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
                 return rc;
             }
         }
         if (!zuh_buf_init(&wire, 512, 64 * 1024)) {
+            if (have_absform) zuh_buf_free(&absform);
             zuh_request_free(&rq); zuh_stream_free(s);
             zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
             return ZUH_ERR_NOMEM;
@@ -969,10 +1038,13 @@ zuh_code zuh_engine_perform(zuh_result *out, const char *url,
             if (!loc) { zuh_proxy_free(&px); break; }   /* a redirect with no Location */
             rc = zuh_uri_resolve(&next, &cur, loc, loc + strlen(loc));
             if (rc != ZUH_OK) {
-                zuh_error_set(err, ZUH_ERR_URL, ZUH_PHASE_NONE,
-                             "redirect Location is not a usable URL");
+                if (rc == ZUH_ERR_NOMEM)
+                    zuh_error_set(err, rc, ZUH_PHASE_NONE, "out of memory");
+                else
+                    zuh_error_set(err, ZUH_ERR_URL, ZUH_PHASE_NONE,
+                                 "redirect Location is not a usable URL");
                 zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
-                return ZUH_ERR_URL;
+                return rc == ZUH_ERR_NOMEM ? rc : ZUH_ERR_URL;
             }
             zuh_redirect_policy_init(&pol);
             pol.max_redirects = (size_t)o->max_redirects;
@@ -993,6 +1065,22 @@ zuh_code zuh_engine_perform(zuh_result *out, const char *url,
                 cur = next;
                 hops++;
                 out->redirects = (int)hops;
+                /* §19.4: a (method, URL) already requested in this chain is
+                 * a loop, and following it again can only repeat what the
+                 * server already said. The hop count alone made a self-
+                 * redirect cost max_redirects round trips to report. */
+                rc = zuh_redirect_trail_add(trail, method, &cur);
+                if (rc != ZUH_OK) {
+                    if (rc == ZUH_ERR_REDIRECT)
+                        zuh_error_set(err, rc, ZUH_PHASE_NONE,
+                                     "redirect loop: hop %lu returns to a URL "
+                                     "this request already visited",
+                                     (unsigned long)hops);
+                    else
+                        zuh_error_set(err, rc, ZUH_PHASE_NONE, "out of memory");
+                    zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
+                    return rc;
+                }
                 zuh_buf_reset(&out->body);
                 zuh_headers_free(&out->headers);
                 zuh_headers_init(&out->headers);
@@ -1017,7 +1105,10 @@ zuh_code zuh_engine_perform(zuh_result *out, const char *url,
             zuh_uri_free(&next);
         }
         /* The decision was "do not follow", so this 3xx IS the caller's
-         * response and the bytes held for it are theirs. Without this a
+         * response and the bytes held for it are theirs. Unreachable today —
+         * zuh_redirect_decide() follows or fails once may_follow holds — and
+         * kept so that a decision that one day declines (§19.3) cannot lose
+         * the body. Without this a
          * download whose final hop is an unfollowed redirect would leave an
          * empty file and put the body somewhere the caller never looks. */
         if (body_sink != &mem_sink && out->body.len) {
@@ -1042,4 +1133,22 @@ zuh_code zuh_engine_perform(zuh_result *out, const char *url,
     zuh_uri_free(&cur);
     if (!out->final_url) { zuh_result_free(out); return ZUH_ERR_NOMEM; }
     return ZUH_OK;
+}
+
+zuh_code zuh_engine_perform(zuh_result *out, const char *url,
+                          const zuh_req_spec *req, const zuh_get_opts *o,
+                          zuh_error *err) {
+    zuh_redirect_trail trail;
+    zuh_code rc;
+    if (err) zuh_error_clear(err);   /* a stale code would hide a bare failure */
+    zuh_redirect_trail_init(&trail);
+    rc = perform_hops(out, url, req, o, &trail, err);
+    zuh_redirect_trail_free(&trail);
+    /* Every failure carries a filled error object (§34.4). Dozens of exits
+     * return ZUH_ERR_NOMEM bare; one place says so for all of them, rather
+     * than leaving init.c's "request failed" fallback to guess. */
+    if (rc != ZUH_OK && err && err->code == ZUH_OK)
+        zuh_error_set(err, rc, ZUH_PHASE_NONE,
+                      rc == ZUH_ERR_NOMEM ? "out of memory" : "request failed");
+    return rc;
 }

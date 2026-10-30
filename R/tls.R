@@ -44,30 +44,45 @@
 #' @examples
 #' zu_tls(ca_extra = "corporate-root.pem")
 #' zu_tls(pins = "sha256//YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg=")
-zu_tls <- function(ca_file = NULL, ca_extra = NULL, pins = NULL,
-                   revocation = FALSE, min_version = NULL) {
+zu_tls <- function(
+  ca_file = NULL,
+  ca_extra = NULL,
+  pins = NULL,
+  revocation = FALSE,
+  min_version = NULL
+) {
   path1 <- function(x, nm) {
-    if (is.null(x)) return(NULL)
-    if (!is.character(x) || length(x) != 1L || is.na(x) || !nzchar(x))
+    if (is.null(x)) {
+      return(NULL)
+    }
+    if (!is.character(x) || length(x) != 1L || is.na(x) || !nzchar(x)) {
       stop("`", nm, "` must be a single file path", call. = FALSE)
+    }
     path.expand(x)
   }
   if (!is.null(pins)) {
     pins <- as.character(pins)
     bad <- !grepl("^sha256//[A-Za-z0-9+/]+=*$", pins)
-    if (any(bad))
-      stop("pins must look like \"sha256//<base64>\"; got ",
-           paste(pins[bad], collapse = ", "), call. = FALSE)
+    if (any(bad)) {
+      stop(
+        "pins must look like \"sha256//<base64>\"; got ",
+        paste(pins[bad], collapse = ", "),
+        call. = FALSE
+      )
+    }
   }
-  if (!is.null(min_version) && !isTRUE(min_version %in% c(12, 13)))
+  if (!is.null(min_version) && !isTRUE(min_version %in% c(12, 13))) {
     stop("`min_version` must be 12 (TLS 1.2) or 13 (TLS 1.3)", call. = FALSE)
+  }
 
   structure(
-    list(ca_file = path1(ca_file, "ca_file"),
-         ca_extra = path1(ca_extra, "ca_extra"),
-         pins = pins,
-         revocation = isTRUE(revocation),
-         min_version = if (is.null(min_version)) 0L else as.integer(min_version)),
+    list(
+      ca_file = path1(ca_file, "ca_file"),
+      ca_extra = path1(ca_extra, "ca_extra"),
+      pins = pins,
+      revocation = isTRUE(revocation),
+      min_version = if (is.null(min_version)) 0L else as.integer(min_version)
+    ),
     class = "zu_tls_config"
   )
 }
@@ -77,11 +92,15 @@ zu_tls <- function(ca_file = NULL, ca_extra = NULL, pins = NULL,
 #' @export
 format.zu_tls_config <- function(x, ...) {
   parts <- c(
-    if (!is.null(x$ca_file))  paste0("ca_file ", x$ca_file, " (replaces system trust)"),
-    if (!is.null(x$ca_extra)) paste0("ca_extra ", x$ca_extra, " (adds to system trust)"),
-    if (length(x$pins))       paste0(length(x$pins), " pin(s)"),
-    if (x$revocation)         "revocation on",
-    if (x$min_version)        paste0("min TLS 1.", x$min_version - 10L)
+    if (!is.null(x$ca_file)) {
+      paste0("ca_file ", x$ca_file, " (replaces system trust)")
+    },
+    if (!is.null(x$ca_extra)) {
+      paste0("ca_extra ", x$ca_extra, " (adds to system trust)")
+    },
+    if (length(x$pins)) paste0(length(x$pins), " pin(s)"),
+    if (x$revocation) "revocation on",
+    if (x$min_version) paste0("min TLS 1.", x$min_version - 10L)
   )
   if (length(parts)) paste(parts, collapse = "; ") else "system trust"
 }
@@ -89,11 +108,19 @@ format.zu_tls_config <- function(x, ...) {
 #' @export
 print.zu_tls_config <- function(x, ...) {
   cat("<zu_tls_config>\n")
-  if (!is.null(x$ca_file))  cat("  ca_file:  ", x$ca_file, " (REPLACES system trust)\n", sep = "")
-  if (!is.null(x$ca_extra)) cat("  ca_extra: ", x$ca_extra, " (adds to system trust)\n", sep = "")
-  if (length(x$pins))       cat("  pins:     ", length(x$pins), "\n", sep = "")
+  if (!is.null(x$ca_file)) {
+    cat("  ca_file:  ", x$ca_file, " (REPLACES system trust)\n", sep = "")
+  }
+  if (!is.null(x$ca_extra)) {
+    cat("  ca_extra: ", x$ca_extra, " (adds to system trust)\n", sep = "")
+  }
+  if (length(x$pins)) {
+    cat("  pins:     ", length(x$pins), "\n", sep = "")
+  }
   cat("  revocation: ", if (x$revocation) "on" else "off", "\n", sep = "")
-  if (x$min_version) cat("  min TLS:  1.", x$min_version - 10L, "\n", sep = "")
+  if (x$min_version) {
+    cat("  min TLS:  1.", x$min_version - 10L, "\n", sep = "")
+  }
   invisible(x)
 }
 
@@ -112,28 +139,54 @@ print.zu_tls_config <- function(x, ...) {
 # the file is checked here, where the message can say how to convert it.
 check_pem <- function(path, arg) {
   bytes <- readBin(path, "raw", n = min(file.size(path), 1e6))
-  if (length(grepRaw("-----BEGIN CERTIFICATE-----", bytes, fixed = TRUE)))
+  if (length(grepRaw("-----BEGIN CERTIFICATE-----", bytes, fixed = TRUE))) {
     return(invisible())
+  }
   der <- length(bytes) > 1L && bytes[1L] == as.raw(0x30)
-  stop("`", arg, "` has no PEM certificate in it: ", path, "\n",
-       if (der) paste0(
-         "  It looks like a DER (binary) certificate. zuhttp reads PEM, the text\n",
-         "  form starting '-----BEGIN CERTIFICATE-----'. Convert it with:\n",
-         "    openssl x509 -inform der -in ", path, " -out cert.pem")
-       else "  Expected a PEM file containing '-----BEGIN CERTIFICATE-----'.",
-       call. = FALSE)
+  stop(
+    "`",
+    arg,
+    "` has no PEM certificate in it: ",
+    path,
+    "\n",
+    if (der) {
+      paste0(
+        "  It looks like a DER (binary) certificate. zuhttp reads PEM, the text\n",
+        "  form starting '-----BEGIN CERTIFICATE-----'. Convert it with:\n",
+        "    openssl x509 -inform der -in ",
+        path,
+        " -out cert.pem"
+      )
+    } else {
+      "  Expected a PEM file containing '-----BEGIN CERTIFICATE-----'."
+    },
+    call. = FALSE
+  )
 }
 
 check_tls <- function(tls) {
-  if (is.null(tls)) return(NULL)
-  if (!inherits(tls, "zu_tls_config"))
+  if (is.null(tls)) {
+    return(NULL)
+  }
+  if (!inherits(tls, "zu_tls_config")) {
     stop("`tls` must come from zu_tls(); got ", class(tls)[[1]], call. = FALSE)
+  }
   for (f in c("ca_file", "ca_extra")) {
     p <- tls[[f]]
-    if (!is.null(p) && !file.exists(p))
+    if (!is.null(p) && !file.exists(p)) {
       stop("`", f, "` does not exist: ", p, call. = FALSE)
+    }
     if (!is.null(p)) check_pem(p, f)
   }
   .Call(C_zu_tls_check, unclass(tls))
   tls
 }
+
+#' The TLS backend this build was linked against
+#'
+#' @return A short backend identifier, e.g. `"openssl"`, `"schannel"`,
+#'   `"network-framework"`.
+#' @export
+#' @examples
+#' zu_tls_backend()
+zu_tls_backend <- function() .Call(C_zu_tls_backend)

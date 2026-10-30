@@ -2,9 +2,9 @@
 #
 # The fork guard's error message ends "See ?zuhttp_fork", configure prints
 # "see ?zuhttp_tls", and the TLS backends cite the same topic when they refuse
-# a setting — and neither existed. §26.4 calls turning the
-# forked-HTTPS segfault into a diagnosable error "the whole mitigation", which
-# is half-defeated when the pointer it hands the user goes nowhere.
+# a setting, so both must exist. §26.4 calls turning the forked-HTTPS
+# segfault into a diagnosable error "the whole mitigation", which is
+# half-defeated if the pointer it hands the user goes nowhere.
 #
 # Written as topics rather than folded into ?zu_client because that is what
 # those messages promise, and a cross-reference has to resolve to the name it
@@ -33,9 +33,8 @@
 #'
 #' `zuhttp` therefore records the process ID that first opened an HTTPS
 #' connection and refuses to open one in a different process, raising
-#' `zu_fork_error`. That
-#' does not make forked HTTPS work. It makes it diagnosable: an error naming
-#' the cause instead of a worker vanishing.
+#' `zu_fork_error`. That does not make forked HTTPS work. It makes it
+#' diagnosable: an error naming the cause instead of a worker vanishing.
 #'
 #' **Inherited connections.** A forked child also inherits the parent's open
 #' sockets, pooled TLS sessions included. If both processes write into one TLS
@@ -112,17 +111,16 @@ NULL
 #' where `zu_tls(min_version = 13)` is refused rather than silently
 #' downgraded: the Schannel build available through Rtools lacks
 #' `SCH_CREDENTIALS`. Asking for 1.3 there raises rather than quietly giving
-#' you 1.2 — silently weakening a
-#' security setting is worse than failing. Connections still negotiate the
-#' highest version both ends support; it is the *floor* that cannot be raised.
+#' you 1.2 — silently weakening a security setting is worse than failing.
+#' Connections still negotiate the highest version both ends support; it is
+#' the *floor* that cannot be raised.
 #'
 #' @section Certificate pinning:
 #' [zu_tls()]'s `pins` works on **OpenSSL only**. On macOS and Windows the
 #' platform will not hand over the SubjectPublicKeyInfo without hand-parsing
-#' DER, and that parser is not written yet. Both
-#' refuse, because a pin that silently compares the wrong bytes is worse than
-#' no pin. A pinned request either enforces the pin or raises; it never quietly
-#' succeeds unpinned.
+#' DER, and that parser is not written yet. Both refuse, because a pin that
+#' silently compares the wrong bytes is worse than no pin. A pinned request
+#' either enforces the pin or raises; it never quietly succeeds unpinned.
 #'
 #' @section Custom certificate authorities:
 #' `ca_file` **replaces** the system trust store; `ca_extra` **adds** to it.

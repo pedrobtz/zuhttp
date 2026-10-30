@@ -15,17 +15,31 @@ library(testthat)
 library(zuhttp)
 
 cat("TLS backend: ", zu_tls_backend(), "\n", sep = "")
-if (!identical(zu_tls_backend(), "network-framework"))
+if (!identical(zu_tls_backend(), "network-framework")) {
   stop("this job must build against Network.framework, got ", zu_tls_backend())
+}
 
-res <- as.data.frame(test_file("tests/testthat/test-fork.R", reporter = "summary"))
+res <- as.data.frame(test_file(
+  "tests/testthat/test-fork.R",
+  reporter = "summary"
+))
 
 skipped <- sum(res$skipped)
-failed  <- sum(res$failed) + sum(res$error)
+failed <- sum(res$failed) + sum(res$error)
 
-if (skipped > 0)
-  stop("R-12 gate: ", skipped, " test(s) SKIPPED — the guard was never exercised")
-if (failed > 0)
-  stop("R-12 gate: ", failed, " failure(s) — a forked child crashed or did not raise zu_fork_error")
+if (skipped > 0) {
+  stop(
+    "R-12 gate: ",
+    skipped,
+    " test(s) SKIPPED — the guard was never exercised"
+  )
+}
+if (failed > 0) {
+  stop(
+    "R-12 gate: ",
+    failed,
+    " failure(s) — a forked child crashed or did not raise zu_fork_error"
+  )
+}
 
 cat("R-12 mitigated: every forked child raised zu_fork_error and survived\n")

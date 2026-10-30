@@ -9,6 +9,7 @@
  */
 #include "zuh_test.h"
 #include "zuh_pool.h"
+#include "zuh_engine.h"
 #include "zuh_mock_stream.h"
 #include "zuh_alloc.h"
 #include <string.h>
@@ -93,6 +94,71 @@ void suite_pool(void) {
     ZUH_CASE("a different ALPN does not share");
     DIFFERS(b.alpn = (char *)zuh_alloc(9); strcpy(b.alpn, "http/1.1"));
 #undef DIFFERS
+
+    /* The comparator is only half of §26.1. zuh_engine_pool_key() decides
+     * which settings reach the key at all, and deleting every TLS field from
+     * it left this suite green: only network tests would have noticed a
+     * pinned request reusing an unpinned connection. Each setting below is
+     * changed alone, from a baseline, and must change the key. */
+    ZUH_CASE("§26.1: every per-request trust and proxy setting reaches the engine's key");
+    {
+        zuh_uri u;
+        zuh_get_opts o0, o1;
+        zuh_tls_config t0, t1;
+        zuh_proxy px, px2;
+        zuh_error pe;
+        zuh_pool_key k0, k1;
+        static const char *const pins_ab[] = { "sha256//A", "sha256//B" };
+        static const char *const pins_ba[] = { "sha256//B", "sha256//A" };
+        int ok;
+        static const char url[] = "https://example.com/x";
+        ZUH_CHECK_EQ_INT(zuh_uri_parse(&u, url, url + sizeof url - 1), ZUH_OK);
+        zuh_get_opts_init(&o0); zuh_tls_config_init(&t0); o0.tls = &t0;
+        zuh_proxy_init(&px); zuh_proxy_init(&px2);
+        ZUH_CHECK_EQ_INT(zuh_engine_pool_key(&k0, &u, &o0, NULL), 1);
+#define KEY_DIFFERS(setup, proxy) do {                                     \
+        o1 = o0; t1 = t0; o1.tls = &t1;                                    \
+        { setup; }                                                         \
+        ok = zuh_engine_pool_key(&k1, &u, &o1, proxy);                     \
+        ZUH_CHECK_EQ_INT(ok, 1);                                           \
+        if (ok) { ZUH_CHECK_EQ_INT(zuh_pool_key_eq(&k0, &k1), 0); zuh_pool_key_free(&k1); } \
+    } while (0)
+        /* The baseline is reproducible, or every DIFFERS below is vacuous. */
+        o1 = o0; t1 = t0; o1.tls = &t1;
+        ZUH_CHECK_EQ_INT(zuh_engine_pool_key(&k1, &u, &o1, NULL), 1);
+        ZUH_CHECK_EQ_INT(zuh_pool_key_eq(&k0, &k1), 1);
+        zuh_pool_key_free(&k1);
+
+        KEY_DIFFERS(o1.verify = 0, NULL);
+        KEY_DIFFERS(o1.ca_file = "/tmp/ca.pem", NULL);
+        KEY_DIFFERS(t1.ca_extra_file = "/tmp/extra.pem", NULL);
+        KEY_DIFFERS(t1.min_version = 13, NULL);
+        KEY_DIFFERS(t1.revocation = 1, NULL);
+        KEY_DIFFERS(t1.alpn = "h2", NULL);          /* the default is http/1.1 */
+        KEY_DIFFERS((t1.pins = pins_ab, t1.n_pins = 2), NULL);
+        ZUH_CHECK_EQ_INT(zuh_proxy_parse(&px, "http://u:p@proxy.test:3128", &pe), ZUH_OK);
+        ZUH_CHECK_EQ_INT(zuh_proxy_parse(&px2, "http://u:q@proxy.test:3128", &pe), ZUH_OK);
+        KEY_DIFFERS((void)0, &px);
+        {   /* pins in a different order, and proxies differing only in the
+             * password, are different keys too */
+            zuh_pool_key ka, kb;
+            o1 = o0; t1 = t0; o1.tls = &t1; t1.pins = pins_ab; t1.n_pins = 2;
+            ZUH_CHECK_EQ_INT(zuh_engine_pool_key(&ka, &u, &o1, NULL), 1);
+            t1.pins = pins_ba;
+            ZUH_CHECK_EQ_INT(zuh_engine_pool_key(&kb, &u, &o1, NULL), 1);
+            ZUH_CHECK_EQ_INT(zuh_pool_key_eq(&ka, &kb), 0);
+            zuh_pool_key_free(&ka); zuh_pool_key_free(&kb);
+            o1 = o0;
+            ZUH_CHECK_EQ_INT(zuh_engine_pool_key(&ka, &u, &o1, &px), 1);
+            ZUH_CHECK_EQ_INT(zuh_engine_pool_key(&kb, &u, &o1, &px2), 1);
+            ZUH_CHECK_EQ_INT(zuh_pool_key_eq(&ka, &kb), 0);
+            zuh_pool_key_free(&ka); zuh_pool_key_free(&kb);
+        }
+#undef KEY_DIFFERS
+        zuh_pool_key_free(&k0);
+        zuh_proxy_free(&px); zuh_proxy_free(&px2);
+        zuh_uri_free(&u);
+    }
 
     ZUH_CASE("scheme and host compare case-insensitively");
     ZUH_CHECK_EQ_INT(zuh_pool_key_copy(&b, &a), 1);

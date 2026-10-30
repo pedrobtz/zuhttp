@@ -3,6 +3,10 @@
 
 void suite_time(void);
 
+/* Read by main(): with a stuck clock no deadline expires, so suite_net would
+ * wait forever instead of reporting. */
+int zuh_test_clock_stuck = 0;
+
 void suite_time(void) {
     /* A clock stuck at a constant satisfies "monotonic" — non-decreasing is
      * true of a constant — so the monotonicity checks below cannot catch the
@@ -20,6 +24,7 @@ void suite_time(void) {
         ZUH_CHECK(first != 0);
         while (now == first && spins < 200000000L) { now = zuh_now_ms(); spins++; }
         ZUH_CHECK(now != first);
+        if (first == 0 || now == first) zuh_test_clock_stuck = 1;
     }
 
     ZUH_CASE("a short deadline actually expires");
@@ -29,6 +34,7 @@ void suite_time(void) {
         while (!zuh_deadline_expired(d) && spins < 200000000L) spins++;
         /* If this fails, every timeout in the library is inoperative. */
         ZUH_CHECK(zuh_deadline_expired(d));
+        if (!zuh_deadline_expired(d)) zuh_test_clock_stuck = 1;
     }
 
     ZUH_CASE("the clock advances monotonically");

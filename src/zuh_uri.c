@@ -287,8 +287,14 @@ zuh_code zuh_uri_parse(zuh_uri *out, const char *first, const char *last)
     zup_mm(&mm);
     /* An explicit end pointer is required: the Mm entry point rejects a NULL
      * afterLast with URI_ERROR_NULL despite what Uri.h documents. */
-    if (uriParseSingleUriExMmA(&u, first, last, NULL, &mm) != URI_SUCCESS)
-        return ZUH_ERR_URL;
+    {
+        /* uriparser's own allocation failure is ours to report as such:
+         * calling it an unusable URL blamed the caller for running out of
+         * memory (found by the engine's allocation sweep). */
+        int ur = uriParseSingleUriExMmA(&u, first, last, NULL, &mm);
+        if (ur == URI_ERROR_MALLOC) return ZUH_ERR_NOMEM;
+        if (ur != URI_SUCCESS)      return ZUH_ERR_URL;
+    }
 
     rc = from_uriparser(out, &u);
     uriFreeUriMembersMmA(&u, &mm);
@@ -303,7 +309,7 @@ zuh_code zuh_uri_resolve(zuh_uri *out, const zuh_uri *base,
     zuh_buffer b;
     const char *base_str = NULL;
     zuh_code rc = ZUH_ERR_URL;
-    int have_base = 0, have_ref = 0, have_abs = 0;
+    int have_base = 0, have_ref = 0, have_abs = 0, ur;
     char portbuf[8];
 
     if (!out) return ZUH_ERR_URL;
@@ -318,6 +324,9 @@ zuh_code zuh_uri_resolve(zuh_uri *out, const zuh_uri *base,
      * not be able to carry credentials into the result (§19.2 handles who may
      * keep them, and it works on the struct). */
     if (!zuh_buf_init(&b, 128, 64 * 1024)) return ZUH_ERR_NOMEM;
+    /* Until the reference is parsed, a failure here is the buffer's: the
+     * base was a parsed URI, so rebuilding its text cannot be "unusable". */
+    rc = ZUH_ERR_NOMEM;
     if (!zuh_buf_append_str(&b, base->scheme) || !zuh_buf_append_str(&b, "://")) goto done;
     if (strchr(base->host, ':')) {                    /* IPv6 literal needs brackets back */
         if (!zuh_buf_append_byte(&b, '[') || !zuh_buf_append_str(&b, base->host)
@@ -331,16 +340,17 @@ zuh_code zuh_uri_resolve(zuh_uri *out, const zuh_uri *base,
     if (!zuh_buf_append_str(&b, base->path_query)) goto done;
     if (!zuh_buf_cstr(&b, &base_str)) goto done;
 
-    if (uriParseSingleUriExMmA(&ubase, base_str, base_str + strlen(base_str),
-                               NULL, &mm) != URI_SUCCESS) goto done;
+    ur = uriParseSingleUriExMmA(&ubase, base_str, base_str + strlen(base_str), NULL, &mm);
+    if (ur != URI_SUCCESS) { if (ur != URI_ERROR_MALLOC) rc = ZUH_ERR_URL; goto done; }
     have_base = 1;
-    if (uriParseSingleUriExMmA(&uref, ref, ref_last, NULL, &mm) != URI_SUCCESS) goto done;
+    ur = uriParseSingleUriExMmA(&uref, ref, ref_last, NULL, &mm);
+    if (ur != URI_SUCCESS) { rc = ur == URI_ERROR_MALLOC ? ZUH_ERR_NOMEM : ZUH_ERR_URL; goto done; }
     have_ref = 1;
 
     /* STRICTLY: a same-scheme absolute reference is NOT folded into the base
      * (RFC 3986 §5.2.2 strict mode). */
-    if (uriAddBaseUriExMmA(&uabs, &uref, &ubase, URI_RESOLVE_STRICTLY, &mm) != URI_SUCCESS)
-        goto done;
+    ur = uriAddBaseUriExMmA(&uabs, &uref, &ubase, URI_RESOLVE_STRICTLY, &mm);
+    if (ur != URI_SUCCESS) { rc = ur == URI_ERROR_MALLOC ? ZUH_ERR_NOMEM : ZUH_ERR_URL; goto done; }
     have_abs = 1;
 
     rc = from_uriparser(out, &uabs);

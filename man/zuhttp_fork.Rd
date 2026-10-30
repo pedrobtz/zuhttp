@@ -25,9 +25,8 @@ appears only once a script grows a warm-up request.
 
 \code{zuhttp} therefore records the process ID that first opened an HTTPS
 connection and refuses to open one in a different process, raising
-\code{zu_fork_error}. That
-does not make forked HTTPS work. It makes it diagnosable: an error naming
-the cause instead of a worker vanishing.
+\code{zu_fork_error}. That does not make forked HTTPS work. It makes it
+diagnosable: an error naming the cause instead of a worker vanishing.
 
 \strong{Inherited connections.} A forked child also inherits the parent's open
 sockets, pooled TLS sessions included. If both processes write into one TLS

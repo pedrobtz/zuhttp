@@ -49,6 +49,11 @@ void zuh_headers_free(zuh_headers *h);
 int zuh_header_name_valid(const char *name, size_t len);
 int zuh_header_value_valid(const char *value, size_t len);
 
+/* Whether `len` bytes are well-formed UTF-8 (RFC 3629: no overlong forms, no
+ * surrogates, nothing above U+10FFFF). A value may carry obs-text, which is
+ * not necessarily UTF-8, and the R boundary has to know which it got (§18.3). */
+int zuh_utf8_valid(const char *s, size_t len);
+
 /* Append. Returns ZUH_OK, ZUH_ERR_PARSE (invalid), ZUH_ERR_BODY_LIMIT (a §40
  * limit), or ZUH_ERR_NOMEM. Appending preserves duplicates. */
 zuh_code zuh_headers_add(zuh_headers *h, const char *name, size_t nlen,

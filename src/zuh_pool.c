@@ -413,8 +413,8 @@ zuh_reuse zuh_reuse_decide(zuh_code rc, const zuh_framing *fr,
         return ZUH_NOREUSE_CLOSE_FRAMED;
 
     /* Either side may end the connection; the server's word is in the
-     * response. Our own request always says keep-alive (zuh_request.c), so
-     * only the response has to be checked. */
+     * response. Our own request says close only when there is no pool
+     * (§17.2), and then nothing is pooled, so only the response is checked. */
     if (connection_has(resp_headers, "close"))
         return ZUH_NOREUSE_CONNECTION_CLOSE;
 
