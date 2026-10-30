@@ -19,6 +19,7 @@ This is a first submission.
 * R-hub containers matching CRAN's r-devel Linux flavours: `clang23`
   (`-std=gnu23 -pedantic`), `ubuntu-clang`, `ubuntu-gcc16`
 * `nosuggests` (no Suggests installed)
+* `nold` (R built `--disable-long-double`)
 
 and, on the compiled code: UBSan (clang and gcc) and ASan (R-hub
 `clang-asan`, `gcc-asan`), valgrind with `--leak-check=full`, rchk, LTO,

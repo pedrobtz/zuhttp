@@ -14,11 +14,17 @@ system OpenSSL elsewhere — rather than bundling cryptography or a CA bundle.
 One R dependency, its sibling [zujson](https://github.com/pedrobtz/zujson), for
 JSON.
 
-zuhttp is not on CRAN yet. Install it from GitHub:
+Install the released version from CRAN:
 
 ```r
-# install.packages("remotes")
-remotes::install_github("pedrobtz/zuhttp")
+install.packages("zuhttp")
+```
+
+Or the development version from GitHub:
+
+```r
+# install.packages("pak")
+pak::pak("pedrobtz/zuhttp")
 ```
 
 Every example below is a real request against a public API, and the `#>` lines
