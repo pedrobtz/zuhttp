@@ -8,7 +8,7 @@
   [`zu_body_file()`](https://pedrobtz.github.io/zuhttp/reference/zu_body.md)
   : Set the request body
 - [`zu_body_rewindable()`](https://pedrobtz.github.io/zuhttp/reference/zu_body_rewindable.md)
-  : Can this request's body be replayed?
+  : Whether a request's body can be replayed
 - [`zu_cassette_interactions()`](https://pedrobtz.github.io/zuhttp/reference/zu_cassette_interactions.md)
   [`zu_cassette_clear()`](https://pedrobtz.github.io/zuhttp/reference/zu_cassette_interactions.md)
   : Inspect or delete a cassette
@@ -60,7 +60,7 @@
   [`zu_req_check()`](https://pedrobtz.github.io/zuhttp/reference/zu_req_policy.md)
   : Set request policy
 - [`zu_req_replay_safe()`](https://pedrobtz.github.io/zuhttp/reference/zu_req_replay_safe.md)
-  : Is this request safe to replay?
+  : Whether a request is safe to replay
 - [`zu_req_retry()`](https://pedrobtz.github.io/zuhttp/reference/zu_req_retry.md)
   : Per-request retry settings
 - [`zu_req_trace()`](https://pedrobtz.github.io/zuhttp/reference/zu_req_trace.md)
@@ -101,7 +101,7 @@
 - [`zu_tls()`](https://pedrobtz.github.io/zuhttp/reference/zu_tls.md) :
   TLS and certificate trust settings
 - [`zu_tls_backend()`](https://pedrobtz.github.io/zuhttp/reference/zu_tls_backend.md)
-  : Which TLS backend was this build linked against?
+  : The TLS backend this build was linked against
 - [`zu_mock_transport()`](https://pedrobtz.github.io/zuhttp/reference/zu_transport.md)
   : Transports
 - [`zu_verbose()`](https://pedrobtz.github.io/zuhttp/reference/zu_verbose.md)

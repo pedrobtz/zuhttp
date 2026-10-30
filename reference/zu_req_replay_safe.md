@@ -1,4 +1,4 @@
-# Is this request safe to replay?
+# Whether a request is safe to replay
 
 `TRUE` when §33.1's second condition holds: the method is idempotent, or
 the caller declared it replay-safe, or the request carries an

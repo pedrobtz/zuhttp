@@ -16,7 +16,8 @@ zu_req_trace(req, trace = TRUE)
 
 - trace:
 
-  `TRUE` to collect the trace; `FALSE` (the default) to not.
+  `TRUE` (the default) to collect the trace; `FALSE` to turn off one
+  that an earlier step requested.
 
 ## Value
 

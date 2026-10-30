@@ -34,7 +34,8 @@ zu_resp_timings(resp)
 
 ## Value
 
-`zu_resp_status()` an integer; `zu_resp_ok()` a logical;
+`zu_resp_status()` an integer; `zu_resp_ok()` a logical, `TRUE` for a
+2xx or 3xx status (a 3xx reaches you with `redirects = 0`);
 `zu_resp_headers()` a named character vector; `zu_resp_header()` a
 character vector, length 0 when the header is absent and longer than 1
 when it repeats; `zu_resp_url()` the final URL after redirects, with

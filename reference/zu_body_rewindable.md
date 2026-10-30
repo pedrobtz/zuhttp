@@ -1,4 +1,4 @@
-# Can this request's body be replayed?
+# Whether a request's body can be replayed
 
 §28.2 makes rewindability a property of the body rather than a
 convention, so the retry layer (§33) and the redirect layer (§19.1) can

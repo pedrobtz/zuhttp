@@ -20,7 +20,7 @@ zu_hooks(
 
 - before_request:
 
-  Called with `list(request)` before each attempt.
+  Called with `list(request, attempt)` before each attempt.
 
 - after_response:
 

@@ -90,39 +90,110 @@ may have used: the client-first wrappers `zu_client_get()` and friends
   were re-sent on every hop, including to a different host, port or
   scheme. They are now dropped at the first cross-origin hop and stay
   dropped for the rest of the chain.
+
 - The `Host` header includes the port when it is not the scheme’s
   default.
+
 - A redirect chain longer than `redirects` raises
   `zu_too_many_redirects` instead of returning its last 3xx as if it
   were the final response. `redirects = 0` still returns the 3xx itself.
+
 - An HTTP status missing from zuhttp’s table of status texts (412, 451,
   a proxy’s 407, …) crashed
   [`zu_resp_check()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_check.md)
   with “subscript out of bounds” instead of raising
   `zu_http_client_error` or `zu_http_server_error`.
+
 - A 407 from a proxy on a plain `http://` request is
   `zu_proxy_auth_error`, the class the same failure already had over
   `https://`.
+
 - `ca_file` and `ca_extra` explain a certificate file that is not PEM,
   and show the `openssl` command that converts a DER (binary) `.crt` or
   `.cer`; the backends’ own message was “cannot read CA file”.
+
 - A printed client shows its retry policy and TLS configuration as
   readable lines rather than their fields pasted together.
+
 - [`zu_resp_timings()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp.md)
   no longer reports a `total` shorter than one of its own phases on very
   fast requests.
+
 - A connection on which the server sent bytes beyond a response’s
   declared length (or after a chunked body, or on a response that has no
   body) is no longer returned to the pool. Those bytes were already
   discarded, but the connection was out of step with its responses, so
   the next request on it could have read an answer to a question it
   never asked.
+
 - A time limit reached during a request
   ([`setTimeLimit()`](https://rdrr.io/r/base/setTimeLimit.html),
   `R.utils::withTimeout()`) surfaces as its own error. It used to be
   printed to the console, discarded, and reported as
   `zu_interrupted_error` (“interrupted by the user”), so `withTimeout()`
   never saw it. A real Ctrl-C is still `zu_interrupted_error`.
+
+- The default `User-Agent` is `zuhttp/<version>`; it said
+  `zuhttp/0.0.0.9000`.
+
+- A response header value that is not valid UTF-8 (a Latin-1 filename,
+  say) arrives marked Latin-1. It was marked UTF-8, so
+  [`nchar()`](https://rdrr.io/r/base/nchar.html),
+  [`grepl()`](https://rdrr.io/r/base/grep.html) and
+  [`print()`](https://rdrr.io/r/base/print.html) failed on it.
+
+- A request header longer than 8 KB (a large bearer token) is sent; it
+  was refused as `zu_body_limit_error`. A header with CR, LF or another
+  control character is refused as `zu_http_parse_error` before
+  connecting, naming the header and never its value.
+
+- [`zu_resp_connection()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_connection.md)
+  reports `proxy_used` and `remote_ip` for a reused connection too; both
+  were reset on every pool hit.
+
+- A redirect back to a URL already requested raises `zu_redirect_error`
+  at once, rather than after `redirects` round trips.
+
+- A client with `pool = NULL` sends `Connection: close`.
+
+- `verify`, `check` and `decode` must be `TRUE` or `FALSE`.
+  `verify = NA` used to turn verification off with only a warning, and
+  `check = NA` and `decode = NA` turned theirs off silently.
+
+- `max_body = Inf` means no limit, and `zu_pool(idle_timeout = Inf)`
+  keeps connections as long as the server does; the second used to mean
+  30 seconds.
+
+- A `before_request`, `before_retry` or `after_response` hook no longer
+  sees a form body’s secret fields.
+
+- On OpenSSL, a server that closes the connection without a TLS
+  `close_notify` ends the body as on the other backends, rather than
+  failing as `zu_closed`, a class that was not part of the condition
+  tree; a closed connection is now always `zu_io_error`. A pooled
+  connection whose server had already closed it is no longer reused.
+
+- On Windows, a response whose server closes the connection straight
+  after it (`Connection: close`, or a server that always does) is
+  delivered; its last bytes were discarded when they arrived with the
+  TLS `close_notify`, as `zu_http_parse_error` “connection closed before
+  the response headers ended”.
+
+- On OpenSSL, a failed HTTPS request (an expired certificate, say) no
+  longer makes the next request on a pooled connection fail with that
+  same error.
+
+- Retry jitter and `zu_req_retry(idempotency_key = TRUE)` no longer
+  advance the session’s random number stream, and parsing a
+  `Retry-After` date no longer switches `LC_TIME` for the whole session.
+
+- [`zu_body_file()`](https://pedrobtz.github.io/zuhttp/reference/zu_body.md)
+  takes `file =` rather than `path =`, as
+  [`zu_post()`](https://pedrobtz.github.io/zuhttp/reference/zu_methods.md)
+  does, and
+  [`zu_req_callback()`](https://pedrobtz.github.io/zuhttp/reference/zu_req_callback.md)
+  takes `callback =` rather than `f =`: in zuhttp `path` is always where
+  a response goes.
 
 ### Known limitations
 

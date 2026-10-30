@@ -65,29 +65,31 @@
 </div>
 <div class="section level2">
 <h2 id="commands">Commands<a class="anchor" aria-label="anchor" href="#commands"></a></h2>
-<div class="sourceCode" id="cb1"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="co"># C core — no R, no network, no TLS. 1630 checks against mock streams,</span></span>
+<div class="sourceCode" id="cb1"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="co"># C core — no R, no network, no TLS. 1903 checks against mock streams,</span></span>
 <span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a><span class="co"># including the whole engine through the dial seam (test_engine_mock.c).</span></span>
 <span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest strict          <span class="co"># warnings-as-errors; the one to run by default</span></span>
 <span id="cb1-4"><a href="#cb1-4" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest asan            <span class="co"># ASan + UBSan</span></span>
 <span id="cb1-5"><a href="#cb1-5" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest engine-nw       <span class="co"># live engine over macOS Network.framework (network)</span></span>
 <span id="cb1-6"><a href="#cb1-6" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest engine          <span class="co"># same, over OpenSSL</span></span>
 <span id="cb1-7"><a href="#cb1-7" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest tls             <span class="co"># OpenSSL backend only (network)</span></span>
-<span id="cb1-8"><a href="#cb1-8" tabindex="-1"></a></span>
-<span id="cb1-9"><a href="#cb1-9" tabindex="-1"></a><span class="co"># Fuzzing — 10 targets (engine is the whole request path), each built two ways</span></span>
-<span id="cb1-10"><a href="#cb1-10" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> fuzz replay-run       <span class="co"># corpus replay, needs no clang; a regression suite</span></span>
-<span id="cb1-11"><a href="#cb1-11" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> fuzz replay-asan      <span class="co"># the same corpus under ASan + UBSan</span></span>
-<span id="cb1-12"><a href="#cb1-12" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> fuzz fuzz-run         <span class="co"># libFuzzer, needs clang</span></span>
-<span id="cb1-13"><a href="#cb1-13" tabindex="-1"></a></span>
-<span id="cb1-14"><a href="#cb1-14" tabindex="-1"></a><span class="co"># R</span></span>
-<span id="cb1-15"><a href="#cb1-15" tabindex="-1"></a><span class="ex">R</span> CMD INSTALL .</span>
-<span id="cb1-16"><a href="#cb1-16" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'testthat::test_local()'</span>                     <span class="co"># offline</span></span>
-<span id="cb1-17"><a href="#cb1-17" tabindex="-1"></a><span class="va">ZU_TEST_NETWORK</span><span class="op">=</span>1 <span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'testthat::test_local()'</span>   <span class="co"># + the network suite</span></span>
-<span id="cb1-18"><a href="#cb1-18" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'roxygen2::roxygenise()'</span>                     <span class="co"># after touching roxygen blocks</span></span>
-<span id="cb1-19"><a href="#cb1-19" tabindex="-1"></a><span class="ex">./tools/check-vendor-licenses</span>                           <span class="co"># after a re-vendor</span></span>
-<span id="cb1-20"><a href="#cb1-20" tabindex="-1"></a></span>
-<span id="cb1-21"><a href="#cb1-21" tabindex="-1"></a><span class="co"># What CI actually runs for the R suite — reproduce THIS before claiming green,</span></span>
-<span id="cb1-22"><a href="#cb1-22" tabindex="-1"></a><span class="co"># because it differs from R CMD check in ways that have bitten before.</span></span>
-<span id="cb1-23"><a href="#cb1-23" tabindex="-1"></a><span class="ex">Rscript</span> tools/ci-run-tests.R</span></code></pre></div>
+<span id="cb1-8"><a href="#cb1-8" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest tls-eof         <span class="co"># OpenSSL vs a loopback TLS server that closes badly</span></span>
+<span id="cb1-9"><a href="#cb1-9" tabindex="-1"></a>                              <span class="co">#   (needs python3 and the openssl CLI; D-86)</span></span>
+<span id="cb1-10"><a href="#cb1-10" tabindex="-1"></a></span>
+<span id="cb1-11"><a href="#cb1-11" tabindex="-1"></a><span class="co"># Fuzzing — 10 targets (engine is the whole request path), each built two ways</span></span>
+<span id="cb1-12"><a href="#cb1-12" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> fuzz replay-run       <span class="co"># corpus replay, needs no clang; a regression suite</span></span>
+<span id="cb1-13"><a href="#cb1-13" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> fuzz replay-asan      <span class="co"># the same corpus under ASan + UBSan</span></span>
+<span id="cb1-14"><a href="#cb1-14" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> fuzz fuzz-run         <span class="co"># libFuzzer, needs clang</span></span>
+<span id="cb1-15"><a href="#cb1-15" tabindex="-1"></a></span>
+<span id="cb1-16"><a href="#cb1-16" tabindex="-1"></a><span class="co"># R</span></span>
+<span id="cb1-17"><a href="#cb1-17" tabindex="-1"></a><span class="ex">R</span> CMD INSTALL .</span>
+<span id="cb1-18"><a href="#cb1-18" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'testthat::test_local()'</span>                     <span class="co"># offline</span></span>
+<span id="cb1-19"><a href="#cb1-19" tabindex="-1"></a><span class="va">ZU_TEST_NETWORK</span><span class="op">=</span>1 <span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'testthat::test_local()'</span>   <span class="co"># + the network suite</span></span>
+<span id="cb1-20"><a href="#cb1-20" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'roxygen2::roxygenise()'</span>                     <span class="co"># after touching roxygen blocks</span></span>
+<span id="cb1-21"><a href="#cb1-21" tabindex="-1"></a><span class="ex">./tools/check-vendor-licenses</span>                           <span class="co"># after a re-vendor</span></span>
+<span id="cb1-22"><a href="#cb1-22" tabindex="-1"></a></span>
+<span id="cb1-23"><a href="#cb1-23" tabindex="-1"></a><span class="co"># What CI actually runs for the R suite — reproduce THIS before claiming green,</span></span>
+<span id="cb1-24"><a href="#cb1-24" tabindex="-1"></a><span class="co"># because it differs from R CMD check in ways that have bitten before.</span></span>
+<span id="cb1-25"><a href="#cb1-25" tabindex="-1"></a><span class="ex">Rscript</span> tools/ci-run-tests.R</span></code></pre></div>
 <p><strong>Every pull request runs CI</strong> (W1). R-CMD-check, native-checks and the r-actions jobs run a quick profile on a pull request and the full one on <code>main</code>. Work-package pull requests merge on the quick profile; the <code>full-ci</code> label, which runs the full profile on a pull request, goes only on the pull request that closes a milestone (the maintainer’s rule, 2026-10-29). Every merge still runs the full profile on <code>main</code>: read it before opening the next pull request, and fix what it finds there.</p>
 <div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="ex">tools/vendor/verify</span>            <span class="co"># src/vendor/ is byte-for-byte what was recorded</span></span>
 <span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a><span class="ex">tools/vendor/record</span>            <span class="co"># after tools/update-*, never after a hand edit</span></span>

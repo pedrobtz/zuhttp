@@ -179,7 +179,7 @@ fails. The printed configuration spells out which one you have:</p>
 <div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/zu_tls.html">zu_tls</a></span><span class="op">(</span>ca_extra <span class="op">=</span> <span class="va">ca</span><span class="op">)</span></span>
 <span><span class="co">#&gt; &lt;zu_tls_config&gt;</span></span>
-<span><span class="co">#&gt;   ca_extra: /tmp/Rtmpr0MtSo/zuhttp-tls-1f5f37eca892/ca.pem (adds to system trust)</span></span>
+<span><span class="co">#&gt;   ca_extra: /tmp/Rtmp7hUbaD/zuhttp-tls-1fa96f6bdc30/ca.pem (adds to system trust)</span></span>
 <span><span class="co">#&gt;   revocation: off</span></span></code></pre></div>
 <p>Put the setting on a client to apply it to every request:</p>
 <div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
@@ -214,10 +214,10 @@ so, with the command that converts it:</p>
 <span><span class="fu">ssl</span><span class="op">(</span><span class="st">"x509"</span>, <span class="st">"-in"</span>, <span class="va">ca</span>, <span class="st">"-outform"</span>, <span class="st">"der"</span>, <span class="st">"-out"</span>, <span class="va">der</span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="va">site</span>, tls <span class="op">=</span> <span class="fu"><a href="../reference/zu_tls.html">zu_tls</a></span><span class="op">(</span>ca_extra <span class="op">=</span> <span class="va">der</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #BBBB00; font-weight: bold;">Error</span><span style="font-weight: bold;">:</span></span></span>
-<span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> `ca_extra` has no PEM certificate in it: /tmp/Rtmpr0MtSo/zuhttp-tls-1f5f37eca892/corporate-root-der.crt</span></span>
+<span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> `ca_extra` has no PEM certificate in it: /tmp/Rtmp7hUbaD/zuhttp-tls-1fa96f6bdc30/corporate-root-der.crt</span></span>
 <span><span class="co">#&gt;   It looks like a DER (binary) certificate. zuhttp reads PEM, the text</span></span>
 <span><span class="co">#&gt;   form starting '-----BEGIN CERTIFICATE-----'. Convert it with:</span></span>
-<span><span class="co">#&gt;     openssl x509 -inform der -in /tmp/Rtmpr0MtSo/zuhttp-tls-1f5f37eca892/corporate-root-der.crt -out cert.pem</span></span></code></pre></div>
+<span><span class="co">#&gt;     openssl x509 -inform der -in /tmp/Rtmp7hUbaD/zuhttp-tls-1fa96f6bdc30/corporate-root-der.crt -out cert.pem</span></span></code></pre></div>
 </div>
 </div>
 <div class="section level2">
@@ -311,6 +311,99 @@ and change the traffic.</p>
 <span><span class="co">#&gt; [1] 200</span></span></code></pre></div>
 <p>Prefer <code>ca_extra</code> with the development server’s
 certificate: it is one more line and keeps verification on.</p>
+</div>
+<div class="section level2">
+<h2 id="when-the-platform-blocks-a-certificate">When the platform blocks a certificate<a class="anchor" aria-label="anchor" href="#when-the-platform-blocks-a-certificate"></a>
+</h2>
+<p>Sometimes a certificate authority has to stop being trusted faster
+than a release cycle allows, and sometimes only part of one: an
+intermediate whose key leaked, under a root the rest of the web still
+relies on. A list of trusted roots, which is what a CA bundle file is,
+has no way to say “trust this root but not that intermediate”. A
+platform’s trust evaluator can, and on macOS zuhttp asks it.</p>
+<p>In October 2026 eight eMudhra intermediate CA certificates turned out
+to have private keys anyone could recover (<a href="https://emudhra.we-have-a-problem.com/" class="external-link">the disclosure, with test
+hosts</a>). Firefox and Chrome blocked them on 17 October, Microsoft on
+20 October and Apple on 22 October. Each test host serves a chain
+through them; a refusal is the safe answer. Measured on 30 October 2026
+with zuhttp 0.1.0 and the <code>curl</code> package:</p>
+<table class="table">
+<colgroup>
+<col width="25%">
+<col width="25%">
+<col width="25%">
+<col width="25%">
+</colgroup>
+<thead><tr class="header">
+<th>Machine</th>
+<th>TLS in zuhttp</th>
+<th>zuhttp</th>
+<th>
+<code>curl</code> package</th>
+</tr></thead>
+<tbody>
+<tr class="odd">
+<td>macOS 15.7, with Apple’s update</td>
+<td>Network.framework, <code>SecTrust</code>
+</td>
+<td>refused all 4: “certificate is blocked”</td>
+<td>connected to all 4 (LibreSSL, <code>/etc/ssl/cert.pem</code>)</td>
+</tr>
+<tr class="even">
+<td>macOS 26.6 runner, with the update</td>
+<td>Network.framework, <code>SecTrust</code>
+</td>
+<td>refused all 4: “certificate is blocked”</td>
+<td>connected to all 4</td>
+</tr>
+<tr class="odd">
+<td>macOS 26.6 runner, without it</td>
+<td>Network.framework, <code>SecTrust</code>
+</td>
+<td>connected to 2; refused the 2 never logged for CT: “certificate is
+not standards compliant”</td>
+<td>connected to all 4</td>
+</tr>
+<tr class="even">
+<td>Ubuntu 24.04 runner</td>
+<td>OpenSSL, distribution bundle</td>
+<td>refused all 4: issuer not found</td>
+<td>refused all 4: issuer not found</td>
+</tr>
+<tr class="odd">
+<td>Windows build 26100 runner, without Microsoft’s block</td>
+<td>Schannel</td>
+<td>connected to all 4</td>
+<td>connected to all 4</td>
+</tr>
+</tbody>
+</table>
+<p>The four hosts cover the chain directly under the eMudhra root, the
+one cross-signed by Sectigo’s AAA root, and a version of each whose
+certificate was never logged for Certificate Transparency. The two macOS
+runners report the same OS version: Apple delivers a block like this one
+as an update to its trust data, and one runner had received it and the
+other had not. On macOS:</p>
+<div class="sourceCode" id="cb16"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">u</span> <span class="op">&lt;-</span> <span class="st">"https://dv-g3b-emudhra.we-have-a-problem.com/"</span></span>
+<span><span class="kw"><a href="https://rdrr.io/r/base/conditions.html" class="external-link">tryCatch</a></span><span class="op">(</span><span class="fu"><a href="../reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="va">u</span><span class="op">)</span>, zu_tls_certificate_error <span class="op">=</span> <span class="va">conditionMessage</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] "certificate verification failed for 'dv-g3b-emudhra.we-have-a-problem.com': “dv-g3b-emudhra.we-have-a-problem.com” certificate is blocked"</span></span></code></pre></div>
+<p>That refusal needs no configuration:
+<code>zu_info()$revocation_default</code> is <code>FALSE</code>, and
+what refused the chain is the platform’s block list, not a revocation
+check. Nor does the Certificate Transparency refusal: Apple’s evaluator
+requires a publicly trusted certificate to have been logged, and zuhttp
+asks that evaluator.</p>
+<p>What this does not show. On Linux, zuhttp trusts the distribution’s
+bundle, a file that can drop a root but cannot block an intermediate;
+Ubuntu refused here only because the bundle lacks these hosts’ issuer.
+On Windows the block reaches Schannel through the same kind of update,
+which the runner measured here had not received. zuhttp checks no
+Certificate Transparency of its own, so a client of the platform
+evaluator is as good as that evaluator, and as current as the machine’s
+trust data, and no better. The hosts are a record of one incident and
+will not be up for ever; <code>tools/check-trust-blocks.R</code> in the
+source repository repeats the measurement while they are.</p>
 </div>
 <div class="section level2">
 <h2 id="revocation">Revocation<a class="anchor" aria-label="anchor" href="#revocation"></a>

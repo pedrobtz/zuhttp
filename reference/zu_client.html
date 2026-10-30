@@ -94,12 +94,15 @@ works. Joining is textual, not RFC 3986 resolution: see Details.</p></dd>
 
 
 <dt id="arg-timeout">timeout<a class="anchor" aria-label="anchor" href="#arg-timeout"></a></dt>
-<dd><p>Total seconds for a request, redirects included. DNS resolution is not
-bounded by it (nor by Ctrl-C); see <a href="zuhttp_tls.html">zuhttp_tls</a>.</p></dd>
+<dd><p>Total seconds for a request, redirects included. DNS
+resolution is not bounded by it (nor by Ctrl-C); see <a href="zuhttp_tls.html">zuhttp_tls</a>.</p></dd>
 
 
 <dt id="arg-redirects">redirects<a class="anchor" aria-label="anchor" href="#arg-redirects"></a></dt>
-<dd><p>Maximum redirects to follow. <code>0</code> returns the 3xx itself.</p></dd>
+<dd><p>Maximum redirects to follow. <code>0</code> returns the 3xx itself.
+A <code>Location</code> that is not a valid URL reference — a raw space or non-ASCII
+bytes — raises <code>zu_url_error</code> rather than being repaired (§8.2), and a
+redirect back to a URL already requested raises <code>zu_redirect_error</code>.</p></dd>
 
 
 <dt id="arg-verify">verify<a class="anchor" aria-label="anchor" href="#arg-verify"></a></dt>
@@ -107,11 +110,12 @@ bounded by it (nor by Ctrl-C); see <a href="zuhttp_tls.html">zuhttp_tls</a>.</p>
 
 
 <dt id="arg-max-body">max_body<a class="anchor" aria-label="anchor" href="#arg-max-body"></a></dt>
-<dd><p>Maximum decoded body size in bytes.</p></dd>
+<dd><p>Maximum decoded body size in bytes; <code>Inf</code> for no limit.</p></dd>
 
 
 <dt id="arg-user-agent">user_agent<a class="anchor" aria-label="anchor" href="#arg-user-agent"></a></dt>
-<dd><p>Default <code>User-Agent</code>.</p></dd>
+<dd><p>Default <code>User-Agent</code>. Unset, requests send
+<code>zuhttp/&lt;version&gt;</code>.</p></dd>
 
 
 <dt id="arg-check">check<a class="anchor" aria-label="anchor" href="#arg-check"></a></dt>

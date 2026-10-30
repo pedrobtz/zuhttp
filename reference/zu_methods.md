@@ -176,7 +176,7 @@ zu_delete(
 
 - max_body:
 
-  Maximum decoded body size in bytes.
+  Maximum decoded body size in bytes; `Inf` for no limit.
 
 - user_agent:
 
@@ -196,8 +196,9 @@ zu_delete(
 
   A
   [`zu_retry()`](https://pedrobtz.github.io/zuhttp/reference/zu_retry.md)
-  policy for this request. Overrides the client's; `NULL` inherits it
-  (§31.9).
+  policy for this request. Overrides the client's; `NULL` resets it to
+  the package default, which retries nothing (§31.9). Omit it to inherit
+  the client's.
 
 - path:
 

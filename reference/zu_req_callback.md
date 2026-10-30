@@ -8,7 +8,7 @@ then not reused, because its framing position is no longer known
 ## Usage
 
 ``` r
-zu_req_callback(req, f)
+zu_req_callback(req, callback)
 ```
 
 ## Arguments
@@ -17,7 +17,7 @@ zu_req_callback(req, f)
 
   A `zu_request`.
 
-- f:
+- callback:
 
   A function of one argument (a raw vector). Return `FALSE` to stop.
 

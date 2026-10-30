@@ -55,7 +55,7 @@ then not reused, because its framing position is no longer known (§26.3).</p>
 
     <div class="section level2">
     <h2 id="ref-usage">Usage<a class="anchor" aria-label="anchor" href="#ref-usage"></a></h2>
-    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">zu_req_callback</span><span class="op">(</span><span class="va">req</span>, <span class="va">f</span><span class="op">)</span></span></code></pre></div>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">zu_req_callback</span><span class="op">(</span><span class="va">req</span>, <span class="va">callback</span><span class="op">)</span></span></code></pre></div>
     </div>
 
     <div class="section level2">
@@ -66,8 +66,9 @@ then not reused, because its framing position is no longer known (§26.3).</p>
 <dd><p>A <code>zu_request</code>.</p></dd>
 
 
-<dt id="arg-f">f<a class="anchor" aria-label="anchor" href="#arg-f"></a></dt>
-<dd><p>A function of one argument (a raw vector). Return <code>FALSE</code> to stop.</p></dd>
+<dt id="arg-callback">callback<a class="anchor" aria-label="anchor" href="#arg-callback"></a></dt>
+<dd><p>A function of one argument (a raw vector). Return <code>FALSE</code>
+to stop.</p></dd>
 
 </dl></div>
     <div class="section level2">

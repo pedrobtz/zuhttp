@@ -1,6 +1,6 @@
-# Which TLS backend was this build linked against?
+# The TLS backend this build was linked against
 
-Which TLS backend was this build linked against?
+The TLS backend this build was linked against
 
 ## Usage
 

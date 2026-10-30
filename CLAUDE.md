@@ -31,13 +31,15 @@ the present tense, and put dated findings in the roadmap’s findings log.
 ## Commands
 
 ``` sh
-# C core — no R, no network, no TLS. 1630 checks against mock streams,
+# C core — no R, no network, no TLS. 1903 checks against mock streams,
 # including the whole engine through the dial seam (test_engine_mock.c).
 make -C ctest strict          # warnings-as-errors; the one to run by default
 make -C ctest asan            # ASan + UBSan
 make -C ctest engine-nw       # live engine over macOS Network.framework (network)
 make -C ctest engine          # same, over OpenSSL
 make -C ctest tls             # OpenSSL backend only (network)
+make -C ctest tls-eof         # OpenSSL vs a loopback TLS server that closes badly
+                              #   (needs python3 and the openssl CLI; D-86)
 
 # Fuzzing — 10 targets (engine is the whole request path), each built two ways
 make -C fuzz replay-run       # corpus replay, needs no clang; a regression suite

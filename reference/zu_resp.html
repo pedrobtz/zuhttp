@@ -80,7 +80,8 @@
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p><code>zu_resp_status()</code> an integer; <code>zu_resp_ok()</code> a logical;
+    <p><code>zu_resp_status()</code> an integer; <code>zu_resp_ok()</code> a logical, <code>TRUE</code>
+for a 2xx or 3xx status (a 3xx reaches you with <code>redirects = 0</code>);
 <code>zu_resp_headers()</code> a named character vector; <code>zu_resp_header()</code> a
 character vector, length 0 when the header is absent and longer than 1
 when it repeats; <code>zu_resp_url()</code> the final URL after redirects, with

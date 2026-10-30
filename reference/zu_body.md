@@ -15,7 +15,7 @@ zu_body_form(req, x)
 
 zu_body_raw(req, x, type = NULL)
 
-zu_body_file(req, path, type = "application/octet-stream")
+zu_body_file(req, file, type = "application/octet-stream")
 ```
 
 ## Arguments
@@ -39,10 +39,12 @@ zu_body_file(req, path, type = "application/octet-stream")
 
   Content type to declare.
 
-- path:
+- file:
 
-  A file path. The file is read into memory; streaming request bodies
-  are §27's, not this stage's.
+  A file path. The file is read into memory (§28 covers streaming
+  request bodies). Named `file` as in
+  [`zu_post()`](https://pedrobtz.github.io/zuhttp/reference/zu_methods.md):
+  `path` is always where a *response* goes (D-45).
 
 ## Value
 

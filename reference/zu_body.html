@@ -67,7 +67,7 @@ zu_body_file() sends a file's contents."></head><body>
 <span></span>
 <span><span class="fu">zu_body_raw</span><span class="op">(</span><span class="va">req</span>, <span class="va">x</span>, type <span class="op">=</span> <span class="cn">NULL</span><span class="op">)</span></span>
 <span></span>
-<span><span class="fu">zu_body_file</span><span class="op">(</span><span class="va">req</span>, <span class="va">path</span>, type <span class="op">=</span> <span class="st">"application/octet-stream"</span><span class="op">)</span></span></code></pre></div>
+<span><span class="fu">zu_body_file</span><span class="op">(</span><span class="va">req</span>, <span class="va">file</span>, type <span class="op">=</span> <span class="st">"application/octet-stream"</span><span class="op">)</span></span></code></pre></div>
     </div>
 
     <div class="section level2">
@@ -94,9 +94,10 @@ mean.</p></dd>
 <dd><p>Content type to declare.</p></dd>
 
 
-<dt id="arg-path">path<a class="anchor" aria-label="anchor" href="#arg-path"></a></dt>
-<dd><p>A file path. The file is read into memory; streaming request
-bodies are §27's, not this stage's.</p></dd>
+<dt id="arg-file">file<a class="anchor" aria-label="anchor" href="#arg-file"></a></dt>
+<dd><p>A file path. The file is read into memory (§28 covers streaming
+request bodies). Named <code>file</code> as in <code><a href="zu_methods.html">zu_post()</a></code>: <code>path</code> is always where a
+<em>response</em> goes (D-45).</p></dd>
 
 </dl></div>
     <div class="section level2">

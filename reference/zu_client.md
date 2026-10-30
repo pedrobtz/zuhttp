@@ -51,7 +51,10 @@ zu_client(
 
 - redirects:
 
-  Maximum redirects to follow. `0` returns the 3xx itself.
+  Maximum redirects to follow. `0` returns the 3xx itself. A `Location`
+  that is not a valid URL reference — a raw space or non-ASCII bytes —
+  raises `zu_url_error` rather than being repaired (§8.2), and a
+  redirect back to a URL already requested raises `zu_redirect_error`.
 
 - verify:
 
@@ -59,11 +62,11 @@ zu_client(
 
 - max_body:
 
-  Maximum decoded body size in bytes.
+  Maximum decoded body size in bytes; `Inf` for no limit.
 
 - user_agent:
 
-  Default `User-Agent`.
+  Default `User-Agent`. Unset, requests send `zuhttp/<version>`.
 
 - check:
 

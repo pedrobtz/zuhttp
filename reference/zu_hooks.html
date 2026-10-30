@@ -68,7 +68,8 @@ middleware wearing a disguise, and §31.13 keeps the two apart deliberately.</p>
 
 
 <dl><dt id="arg-before-request">before_request<a class="anchor" aria-label="anchor" href="#arg-before-request"></a></dt>
-<dd><p>Called with <code>list(request)</code> before each attempt.</p></dd>
+<dd><p>Called with <code>list(request, attempt)</code> before each
+attempt.</p></dd>
 
 
 <dt id="arg-after-response">after_response<a class="anchor" aria-label="anchor" href="#arg-after-response"></a></dt>
