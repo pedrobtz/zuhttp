@@ -227,7 +227,7 @@ srv$stop()
 
 stored <- zu_cassette_interactions(dir, "secrets")[[1]]
 stored$request$url
-#> [1] "http://127.0.0.1:33103/json?api_key=<redacted>&page=2"
+#> [1] "http://127.0.0.1:45947/json?api_key=<redacted>&page=2"
 stored$request$headers[["Authorization"]]
 #> [1] "<redacted>"
 

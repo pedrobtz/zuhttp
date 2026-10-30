@@ -58,10 +58,11 @@ Rscript tools/ci-run-tests.R
 
 **Every pull request runs CI** (W1). R-CMD-check, native-checks and the
 r-actions jobs run a quick profile on a pull request and the full one on
-`main`; the `full-ci` label runs the full profile on a pull request
-before merging, which is what to use for anything platform-specific (a
-TLS backend, `configure.win`). A failure only the full set sees is
-otherwise found on `main` after the merge.
+`main`. Work-package pull requests merge on the quick profile; the
+`full-ci` label, which runs the full profile on a pull request, goes
+only on the pull request that closes a milestone (the maintainer’s rule,
+2026-10-29). Every merge still runs the full profile on `main`: read it
+before opening the next pull request, and fix what it finds there.
 
 ``` sh
 tools/vendor/verify            # src/vendor/ is byte-for-byte what was recorded

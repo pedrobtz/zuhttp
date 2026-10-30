@@ -32,7 +32,7 @@ req <- zu_request("GET", url("/get")) |>
   zu_headers(Authorization = "Bearer s3cret", Accept = "application/json")
 req
 #> <zu_request>
-#> GET http://127.0.0.1:39397/get?api_key=<redacted>&page=2
+#> GET http://127.0.0.1:39633/get?api_key=<redacted>&page=2
 #> Authorization: <redacted>
 #> Accept: application/json
 ```
@@ -54,22 +54,22 @@ timestamps:
 
 chatty <- zu_client(hooks = zu_verbose(to = stdout()))
 r <- zu_get(url("/gzip"), trace = TRUE, client = chatty)
-#> > GET http://127.0.0.1:39397/gzip
-#> * 0ms     +0     request.start     http://127.0.0.1:39397/gzip
+#> > GET http://127.0.0.1:39633/gzip
+#> * 0ms     +0     request.start     http://127.0.0.1:39633/gzip
 #> * 0ms     +0     dns.start         127.0.0.1
 #> * 0ms     +0     dns.done          127.0.0.1
 #> * 0ms     +0     connect.start     127.0.0.1
-#> * 1ms     +1     connect.done      127.0.0.1
-#> * 1ms     +0     request.sent      GET  (136)
-#> * 18ms    +17    headers.received  200  (5)
-#> * 18ms    +0     body.chunk        body  (368)
-#> * 18ms    +0     request.done        (200)
+#> * 0ms     +0     connect.done      127.0.0.1
+#> * 0ms     +0     request.sent      GET  (136)
+#> * 14ms    +14    headers.received  200  (5)
+#> * 14ms    +0     body.chunk        body  (368)
+#> * 14ms    +0     request.done        (200)
 #> < HTTP 200
-#> <   Date: Thu, 29 Oct 2026 23:46:52 GMT
+#> <   Date: Fri, 30 Oct 2026 00:41:12 GMT
 #> <   Content-Type: application/json
-#> <   ETag: "605602c0"
+#> <   ETag: "5b726335"
 #> < 368 bytes
-#> < 0.019s
+#> < 0.015s
 ```
 
 (`to = stdout()` is only so the output appears in this article.)
@@ -84,19 +84,19 @@ frame you can inspect or save:
 r <- zu_get(url("/redirect/1"), trace = TRUE)
 zu_resp_trace(r)
 #>                event at_ms   n                            detail
-#> 1      request.start     0   0 http://127.0.0.1:39397/redirect/1
+#> 1      request.start     0   0 http://127.0.0.1:39633/redirect/1
 #> 2          dns.start     0   0                         127.0.0.1
 #> 3           dns.done     0   0                         127.0.0.1
 #> 4      connect.start     0   0                         127.0.0.1
 #> 5       connect.done     0   0                         127.0.0.1
 #> 6       request.sent     0 142                               GET
-#> 7   headers.received     8   5                               302
-#> 8  redirect.followed     8   1        http://127.0.0.1:39397/get
-#> 9  connection.reused     8   0                         127.0.0.1
-#> 10      request.sent     8 135                               GET
-#> 11  headers.received    50   4                               200
-#> 12        body.chunk    50 271                              body
-#> 13      request.done    50 200
+#> 7   headers.received     5   5                               302
+#> 8  redirect.followed     5   1        http://127.0.0.1:39633/get
+#> 9  connection.reused     5   0                         127.0.0.1
+#> 10      request.sent     5 135                               GET
+#> 11  headers.received    47   4                               200
+#> 12        body.chunk    47 271                              body
+#> 13      request.done    47 200
 ```
 
 A followed redirect appears as an event carrying the resolved target,
@@ -116,8 +116,8 @@ second <- zu_get("get", client = api)
 rbind(first = zu_resp_timings(first), second = zu_resp_timings(second))[
   , c("dns", "connect", "ttfb", "total")]
 #>        dns connect  ttfb total
-#> first    0       0 0.002 0.002
-#> second  NA      NA 0.042 0.042
+#> first    0       0 0.001 0.002
+#> second  NA      NA 0.041 0.041
 ```
 
 [`zu_resp_connection()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_connection.md)
@@ -207,9 +207,9 @@ invisible(zu_post("post", json = list(a = 1), client = logging))
 invisible(zu_get("status/404", check = FALSE, client = logging))
 log
 #>   method                               url status ms
-#> 1    GET        http://127.0.0.1:39397/get    200  2
-#> 2   POST       http://127.0.0.1:39397/post    200 44
-#> 3    GET http://127.0.0.1:39397/status/404    404 44
+#> 1    GET        http://127.0.0.1:39633/get    200  1
+#> 2   POST       http://127.0.0.1:39633/post    200 44
+#> 3    GET http://127.0.0.1:39633/status/404    404 44
 ```
 
 ## Middleware: change requests and responses
