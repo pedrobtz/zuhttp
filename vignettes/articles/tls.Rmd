@@ -239,6 +239,51 @@ zu_resp_status(zu_get(site, verify = FALSE))
 Prefer `ca_extra` with the development server's certificate: it is one more
 line and keeps verification on.
 
+## When the platform blocks a certificate
+
+Sometimes a certificate authority has to stop being trusted faster than a
+release cycle allows, and sometimes only part of one: an intermediate whose
+key leaked, under a root the rest of the web still relies on. A list of
+trusted roots, which is what a CA bundle file is, has no way to say "trust
+this root but not that intermediate". A platform's trust evaluator can, and
+on macOS zuhttp asks it.
+
+In October 2026 eight eMudhra intermediate CA certificates turned out to have
+private keys anyone could recover ([the disclosure, with test
+hosts](https://emudhra.we-have-a-problem.com/)). Firefox and Chrome blocked
+them on 17 October, Microsoft on 20 October and Apple on 22 October. Each test
+host serves a chain through them; a refusal is the safe answer. Measured on 30
+October 2026 with zuhttp 0.1.0 and the `curl` package:
+
+| Platform | TLS in zuhttp | zuhttp | `curl` package |
+|---|---|---|---|
+| macOS 15.7 | Network.framework, `SecTrust` | refused all 4: "certificate is blocked" | connected to all 4 (LibreSSL, `/etc/ssl/cert.pem`) |
+| macOS 26.6 (GitHub runner) | Network.framework, `SecTrust` | refused all 4: "certificate is blocked" | connected to all 4 (LibreSSL) |
+| Ubuntu 24.04 (GitHub runner) | OpenSSL, distribution bundle | refused all 4: issuer not found | refused all 4: issuer not found |
+| Windows build 26100 (GitHub runner) | Schannel | no result: an unrelated read failure ([#123](https://github.com/pedrobtz/zuhttp/issues/123)) | connected to all 4: the runner had not received Microsoft's block |
+
+The four hosts cover the chain directly under the eMudhra root, the one
+cross-signed by Sectigo's AAA root, and a version of each whose certificate
+was never logged for Certificate Transparency. On macOS:
+
+```r
+u <- "https://dv-g3b-emudhra.we-have-a-problem.com/"
+tryCatch(zu_get(u), zu_tls_certificate_error = conditionMessage)
+#> [1] "certificate verification failed for 'dv-g3b-emudhra.we-have-a-problem.com': “dv-g3b-emudhra.we-have-a-problem.com” certificate is blocked"
+```
+
+That refusal needs no configuration: `zu_info()$revocation_default` is
+`FALSE`, and what refused the chain is the platform's block list, not a
+revocation check.
+
+What this does not show. On Linux, zuhttp trusts the distribution's bundle, a
+file that can drop a root but cannot block an intermediate; Ubuntu refused
+here only because the bundle lacks these hosts' issuer. zuhttp checks no
+Certificate Transparency of its own, so a client of the platform evaluator is
+as good as that evaluator and no better. The hosts are a record of one
+incident and will not be up for ever; `tools/check-trust-blocks.R` in the
+source repository repeats the measurement while they are.
+
 ## Revocation
 
 Certificate revocation is **not** checked by default, on any platform —

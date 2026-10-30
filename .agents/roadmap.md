@@ -812,3 +812,15 @@ changed the plan or the design.
   truncated by killed children, gcov symbols in the ABI test, macOS's
   nondeterministic revocation check, a test runner outside the namespace,
   and three portability bugs in new test code. Submitting is #40.
+- **2026-10-30 — the eMudhra block, measured (#122).** The README argued
+  that a client of the platform evaluator inherits an emergency distrust and
+  a client of a CA bundle does not; `tools/check-trust-blocks.R` now shows
+  it. On macOS 15.7 and 26.6 zuhttp refused all four compromised-intermediate
+  test hosts ("certificate is blocked", with revocation off) while the `curl`
+  package, on LibreSSL and `/etc/ssl/cert.pem`, connected to all four. On
+  Ubuntu 24.04 both refused, for a missing issuer rather than a block. The
+  README's Windows claims did not survive measurement: the GitHub runner had
+  not received Microsoft's block, so `curl.exe` and the `curl` package both
+  connected, and zuhttp failed three hosts in one run and all four in the
+  next with `zu_http_parse_error`, `verify = FALSE` included: a Schannel read
+  defect unrelated to trust (#123).
