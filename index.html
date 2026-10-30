@@ -64,12 +64,15 @@
 <!-- badges: start -->
 
 <p>A minimal HTTP/1.1 client for R that uses <strong>each platform’s own TLS stack and trust store</strong> — Schannel on Windows, Network.framework with <code>SecTrust</code> on macOS, system OpenSSL elsewhere — rather than bundling cryptography or a CA bundle. One R dependency, its sibling <a href="https://github.com/pedrobtz/zujson" class="external-link">zujson</a>, for JSON.</p>
-<p>zuhttp is not on CRAN yet. Install it from GitHub:</p>
+<p>Install the released version from CRAN:</p>
 <div class="sourceCode" id="cb1"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="co"># install.packages("remotes")</span></span>
-<span><span class="fu">remotes</span><span class="fu">::</span><span class="fu">install_github</span><span class="op">(</span><span class="st">"pedrobtz/zuhttp"</span><span class="op">)</span></span></code></pre></div>
-<p>Every example below is a real request against a public API, and the <code>#&gt;</code> lines are what it actually returns.</p>
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/install.packages.html" class="external-link">install.packages</a></span><span class="op">(</span><span class="st">"zuhttp"</span><span class="op">)</span></span></code></pre></div>
+<p>Or the development version from GitHub:</p>
 <div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># install.packages("pak")</span></span>
+<span><span class="fu">pak</span><span class="fu">::</span><span class="fu"><a href="https://pak.r-lib.org/reference/pak.html" class="external-link">pak</a></span><span class="op">(</span><span class="st">"pedrobtz/zuhttp"</span><span class="op">)</span></span></code></pre></div>
+<p>Every example below is a real request against a public API, and the <code>#&gt;</code> lines are what it actually returns.</p>
+<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/pedrobtz/zuhttp" class="external-link">zuhttp</a></span><span class="op">)</span></span>
 <span></span>
 <span><span class="va">r</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="st">"https://ipwho.is/8.8.8.8"</span><span class="op">)</span></span>
@@ -95,7 +98,7 @@
 <span><span class="co">#&gt;  $ name  : chr "Alice"</span></span>
 <span><span class="co">#&gt;  $ active: logi TRUE</span></span></code></pre></div>
 <p>Straight to disk: the body never passes through memory, and the file appears at its destination only once it has arrived whole.</p>
-<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">r</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="st">"https://raw.githubusercontent.com/pedrobtz/zuhttp/main/README.md"</span>,</span>
 <span>            path <span class="op">=</span> <span class="st">"README-copy.md"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="reference/zu_resp.html">zu_resp_path</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span></span>
@@ -103,7 +106,7 @@
 <span><span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="fu"><a href="reference/zu_resp_raw.html">zu_resp_raw</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] 0   # it went to the file, not through memory</span></span></code></pre></div>
 <p>A client carries defaults; a request overrides them. Connections are reused across requests to the same origin.</p>
-<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">gh</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/zu_client.html">zu_client</a></span><span class="op">(</span></span>
 <span>  base_url <span class="op">=</span> <span class="st">"https://api.github.com"</span>,</span>
 <span>  headers  <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span></span>
@@ -120,7 +123,7 @@
 <span><span class="fu"><a href="reference/zu_pool_stats.html">zu_pool_stats</a></span><span class="op">(</span><span class="va">gh</span><span class="op">)</span><span class="op">[[</span><span class="st">"hits"</span><span class="op">]</span><span class="op">]</span></span>
 <span><span class="co">#&gt; [1] 1</span></span></code></pre></div>
 <p>A failed request raises, and what it raises is a condition you match by class rather than by parsing a message.</p>
-<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/conditions.html" class="external-link">tryCatch</a></span><span class="op">(</span></span>
 <span>  <span class="fu"><a href="reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="st">"/repos/pedrobtz/no-such-repo"</span>, client <span class="op">=</span> <span class="va">gh</span><span class="op">)</span>,</span>
 <span>  zu_http_client_error <span class="op">=</span> <span class="kw">function</span><span class="op">(</span><span class="va">e</span><span class="op">)</span> <span class="fu"><a href="reference/zu_resp.html">zu_resp_status</a></span><span class="op">(</span><span class="va">e</span><span class="op">$</span><span class="va">response</span><span class="op">)</span></span>
@@ -128,12 +131,12 @@
 <span><span class="co">#&gt; [1] 404</span></span></code></pre></div>
 <p>JSON goes through <a href="https://github.com/pedrobtz/zujson" class="external-link">zujson</a>, written for zuhttp, and <code><a href="reference/zu_set_json_backend.html">zu_set_json_backend()</a></code> swaps in another implementation. <code><a href="reference/zu_resp_json.html">zu_resp_xml()</a></code> and <code><a href="reference/zu_resp_json.html">zu_resp_html()</a></code> parse with <a href="https://github.com/pedrobtz/zuxml" class="external-link">zuxml</a> and <a href="https://github.com/pedrobtz/zuhtml" class="external-link">zuhtml</a> when they are installed, honouring the response’s charset.</p>
 <div class="section level2">
-<h2 id="why-this-rather-than-curl">Why this rather than <code>curl</code>
-<a class="anchor" aria-label="anchor" href="#why-this-rather-than-curl"></a>
+<h2 id="native-trust-versus-a-static-ca-bundle">Native trust versus a static CA bundle<a class="anchor" aria-label="anchor" href="#native-trust-versus-a-static-ca-bundle"></a>
 </h2>
-<p>Because the trust decision is the platform’s. There is no bundled CA bundle to go stale, and no vendored TLS library to track for CVEs — an enterprise MDM root or a corporate proxy CA already installed on the machine simply works. The package is small enough to audit, and its behaviour under malformed input is fuzzed rather than assumed.</p>
-<p>The <a href="https://emudhra.we-have-a-problem.com/" class="external-link">eMudhra incident</a> of October 2026 is the measured example. Eight intermediate CA certificates had private keys anyone could recover, and they sit under roots that stay trusted. A CA bundle lists roots, so it has no way to exclude an intermediate beneath one; a platform’s trust evaluator does. Apple blocked these intermediates on 22 October. On a Mac that had received that update (macOS 15.7, 30 October), zuhttp refused every test host, and R’s <code>curl</code> package, which on macOS trusts the PEM file at <code>/etc/ssl/cert.pem</code>, connected to every one:</p>
-<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
+<p>When a certificate authority is compromised, what protects you depends on where your HTTP client gets its trust from. A <strong>native</strong> trust store is the operating system’s own: its trust evaluator receives emergency blocks through ordinary OS updates, and can distrust a single intermediate certificate while the root above it stays trusted. A <strong>static</strong> trust store is a file of root certificates, a CA bundle such as <code>/etc/ssl/cert.pem</code> or <code>cacert.pem</code>. It changes only when someone ships a new file, and it can only add or remove whole roots.</p>
+<p>zuhttp asks the native evaluator wherever the platform has one: <code>SecTrust</code> on macOS and the Windows certificate store through Schannel. A certificate the operating system has blocked is refused with no configuration, and an enterprise MDM root or a corporate proxy CA already installed on the machine simply works. There is no CA bundle to go stale and no vendored TLS library to track for CVEs. The package is small enough to audit, and its behaviour under malformed input is fuzzed rather than assumed.</p>
+<p>The <a href="https://emudhra.we-have-a-problem.com/" class="external-link">eMudhra incident</a> of October 2026 shows the difference. Eight intermediate CA certificates had private keys anyone could recover, and they sit under roots that stay trusted, so a CA bundle has no way to exclude them; only a trust evaluator can. Apple blocked them on 22 October. On a Mac that had received that update (macOS 15.7, 30 October), zuhttp refused every test host. A client that reads a static bundle did not: R’s <code>curl</code> package, which on macOS uses LibreSSL and the bundle at <code>/etc/ssl/cert.pem</code>, connected to every one. That is a property of the bundle, not a flaw in <code>curl</code>; any client built on the same file behaves the same way.</p>
+<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">u</span> <span class="op">&lt;-</span> <span class="st">"https://dv-g3b-emudhra.we-have-a-problem.com/"</span></span>
 <span><span class="kw"><a href="https://rdrr.io/r/base/conditions.html" class="external-link">tryCatch</a></span><span class="op">(</span><span class="fu"><a href="reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="va">u</span><span class="op">)</span>, zu_tls_certificate_error <span class="op">=</span> <span class="va">conditionMessage</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] "certificate verification failed for 'dv-g3b-emudhra.we-have-a-problem.com': “dv-g3b-emudhra.we-have-a-problem.com” certificate is blocked"</span></span>
@@ -141,7 +144,11 @@
 <span><span class="co">#&gt; [1] 200</span></span></code></pre></div>
 <p>On a Mac that had not yet received it, zuhttp still refused the two hosts whose certificates were never logged for Certificate Transparency, which Apple’s evaluator requires; <code>curl</code> connected to those as well.</p>
 <p>The difference is the platform’s, and it is not the same everywhere. On Linux zuhttp reads the distribution’s bundle, a file like any other. On Ubuntu 24.04 both clients refused these hosts, but only because the bundle lacks their issuer, not because of a block. On a GitHub Windows runner, which had not received Microsoft’s block, both connected. The <a href="https://pedrobtz.github.io/zuhttp/articles/tls.html#when-the-platform-blocks-a-certificate">TLS article</a> has the table for each platform, and <code>tools/check-trust-blocks.R</code> in the repository repeats the measurement.</p>
-<p><strong>When <code>curl</code> is the better choice</strong>, stated plainly rather than left to inference:</p>
+</div>
+<div class="section level2">
+<h2 id="when-curl-is-the-better-choice">When <code>curl</code> is the better choice<a class="anchor" aria-label="anchor" href="#when-curl-is-the-better-choice"></a>
+</h2>
+<p>zuhttp does one thing; <code>curl</code> does a great deal more, and is the right choice for:</p>
 <ul>
 <li>Anything needing HTTP/2, HTTP/3, or a non-HTTP protocol.</li>
 <li>Anything needing NTLM, Kerberos, or cloud-provider request signing.</li>

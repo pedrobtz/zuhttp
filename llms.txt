@@ -6,12 +6,19 @@ stack and trust store** — Schannel on Windows, Network.framework with
 cryptography or a CA bundle. One R dependency, its sibling
 [zujson](https://github.com/pedrobtz/zujson), for JSON.
 
-zuhttp is not on CRAN yet. Install it from GitHub:
+Install the released version from CRAN:
 
 ``` r
 
-# install.packages("remotes")
-remotes::install_github("pedrobtz/zuhttp")
+install.packages("zuhttp")
+```
+
+Or the development version from GitHub:
+
+``` r
+
+# install.packages("pak")
+pak::pak("pedrobtz/zuhttp")
 ```
 
 Every example below is a real request against a public API, and the `#>`
@@ -103,23 +110,36 @@ parse with [zuxml](https://github.com/pedrobtz/zuxml) and
 [zuhtml](https://github.com/pedrobtz/zuhtml) when they are installed,
 honouring the response’s charset.
 
-## Why this rather than `curl`
+## Native trust versus a static CA bundle
 
-Because the trust decision is the platform’s. There is no bundled CA
-bundle to go stale, and no vendored TLS library to track for CVEs — an
-enterprise MDM root or a corporate proxy CA already installed on the
-machine simply works. The package is small enough to audit, and its
-behaviour under malformed input is fuzzed rather than assumed.
+When a certificate authority is compromised, what protects you depends
+on where your HTTP client gets its trust from. A **native** trust store
+is the operating system’s own: its trust evaluator receives emergency
+blocks through ordinary OS updates, and can distrust a single
+intermediate certificate while the root above it stays trusted. A
+**static** trust store is a file of root certificates, a CA bundle such
+as `/etc/ssl/cert.pem` or `cacert.pem`. It changes only when someone
+ships a new file, and it can only add or remove whole roots.
+
+zuhttp asks the native evaluator wherever the platform has one:
+`SecTrust` on macOS and the Windows certificate store through Schannel.
+A certificate the operating system has blocked is refused with no
+configuration, and an enterprise MDM root or a corporate proxy CA
+already installed on the machine simply works. There is no CA bundle to
+go stale and no vendored TLS library to track for CVEs. The package is
+small enough to audit, and its behaviour under malformed input is fuzzed
+rather than assumed.
 
 The [eMudhra incident](https://emudhra.we-have-a-problem.com/) of
-October 2026 is the measured example. Eight intermediate CA certificates
+October 2026 shows the difference. Eight intermediate CA certificates
 had private keys anyone could recover, and they sit under roots that
-stay trusted. A CA bundle lists roots, so it has no way to exclude an
-intermediate beneath one; a platform’s trust evaluator does. Apple
-blocked these intermediates on 22 October. On a Mac that had received
-that update (macOS 15.7, 30 October), zuhttp refused every test host,
-and R’s `curl` package, which on macOS trusts the PEM file at
-`/etc/ssl/cert.pem`, connected to every one:
+stay trusted, so a CA bundle has no way to exclude them; only a trust
+evaluator can. Apple blocked them on 22 October. On a Mac that had
+received that update (macOS 15.7, 30 October), zuhttp refused every test
+host. A client that reads a static bundle did not: R’s `curl` package,
+which on macOS uses LibreSSL and the bundle at `/etc/ssl/cert.pem`,
+connected to every one. That is a property of the bundle, not a flaw in
+`curl`; any client built on the same file behaves the same way.
 
 ``` r
 
@@ -144,8 +164,10 @@ article](https://pedrobtz.github.io/zuhttp/articles/tls.html#when-the-platform-b
 has the table for each platform, and `tools/check-trust-blocks.R` in the
 repository repeats the measurement.
 
-**When `curl` is the better choice**, stated plainly rather than left to
-inference:
+## When `curl` is the better choice
+
+zuhttp does one thing; `curl` does a great deal more, and is the right
+choice for:
 
 - Anything needing HTTP/2, HTTP/3, or a non-HTTP protocol.
 - Anything needing NTLM, Kerberos, or cloud-provider request signing.
