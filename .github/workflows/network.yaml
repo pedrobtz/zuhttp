@@ -442,9 +442,14 @@ jobs:
                BASE="-std=gnu2x -O2 -Wall -mfpmath=sse -msse2 -mstackrealign -I../src -I../src/vendor/picohttpparser -I../src/vendor/uriparser -I."
           echo "exit=$?"
 
+      # D-88: zujson is zuhttp's one Import. This job installs nothing else on
+      # purpose, so the dependency comes from CRAN here rather than through
+      # setup-r-dependencies.
       - name: Install
         timeout-minutes: 10
-        run: R CMD INSTALL .
+        run: |
+          Rscript -e 'install.packages("zujson", repos = "https://cloud.r-project.org")'
+          R CMD INSTALL .
 
       # Split into one step per operation. The previous attempt segfaulted with
       # ZERO output — even a stderr write before library() never appeared — so
