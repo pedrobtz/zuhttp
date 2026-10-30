@@ -3,7 +3,7 @@
 **Edition:** 2 — from v0.1.0 to 1.0, written 2026-09-25
 **Companion:** [zuhttp-design.md](zuhttp-design.md), edition 2 — every work package cites the sections and decisions it implements
 **History:** [history/roadmap-v1.md](history/roadmap-v1.md) — edition 1 verbatim: stages S0–S21 and U1–U6, how each landed, the 2026-09-22 review and the amends merged with it
-**Status:** M0 in progress — 0.1.0 is the first CRAN submission (D-82, 2026-10-29); nothing is tagged until CRAN accepts
+**Status:** M0 ready to submit (2026-10-30) — 0.1.0 is the first CRAN submission (D-82); nothing is tagged until CRAN accepts
 
 ---
 
@@ -91,7 +91,7 @@ submission.
 
 ### M0 — v0.1.0: first CRAN submission
 
-**Status:** in progress. Tracker: #21; the submission itself is #40.
+**Status:** ready to submit, on `main` at `0706937`. Tracker: #21; the submission itself is #40.
 
 0.1.0 is submitted with what shipped, plus the work that either blocks a
 submission or is far cheaper before one (D-82). Everything else follows on
@@ -131,11 +131,13 @@ feature and not a defect.
 
 **Exit criteria**
 
-- [ ] W1, W2, W3, W6, W13 and W16 closed.
-- [ ] `R CMD check --as-cran` on the submitted tarball: 0 errors, 0 warnings,
-      and the "New submission" NOTE only.
-- [ ] A green full-profile run of every workflow on the submitted commit.
-- [ ] NEWS lists every user-visible change since the 0.1.0 entry was first
+- [x] W1, W2, W3, W6, W13 and W16 closed (#84–#89).
+- [x] `R CMD check --as-cran` on the submitted tarball: 0 errors, 0 warnings,
+      and the "New submission" NOTE only (`0706937`, locally; the one other
+      NOTE is the local machine's HTML Tidy).
+- [x] A green full-profile run of every workflow on the submitted commit
+      (`0706937`, all ten workflows; #89's full run: 0 notes on every leg).
+- [x] NEWS lists every user-visible change since the 0.1.0 entry was first
       written, including D-65's removals, D-68 and D-69.
 - [ ] Submitted (#40); accepted. Then the maintainer tags `v0.1.0` and
       publishes the release.
@@ -237,7 +239,7 @@ A mechanical rename of internal C identifiers from `zu_`/`ZU_` to
 
 ### W3 — Export surface and `zuhttp_error`
 
-**Status:** done (#86). **Milestone:** M0. **Closes:** #19. **Implements:**
+**Status:** done (#86, merged 2026-10-29). **Milestone:** M0. **Closes:** #19. **Implements:**
 D-65, §53, §34.1. **Estimate:** 1.5 days, high.
 
 **Exit criteria**
@@ -489,26 +491,26 @@ cancellably (F-16).
 
 ### W16 — CRAN packaging
 
-**Status:** not started. **Milestone:** M0. **Closes:** #82, and what was left of #47.
+**Status:** done (#89). **Milestone:** M0. **Closes:** #82, and what was left of #47.
 **Implements:** §47, §49. **Estimate:** 2 days plus review turnaround.
 **Depends on:** W13 (no macOS NOTE left to explain).
 
 **Exit criteria**
 
-- [ ] `R CMD check --as-cran`: 0 errors, 0 warnings, only the new-submission
+- [x] `R CMD check --as-cran`: 0 errors, 0 warnings, only the new-submission
       NOTE, on every `pedrobtz/r-actions` leg of the full profile, which stand
       in for win-builder, the macOS builder and R-hub (D-82).
-- [ ] The missing-OpenSSL `configure` path runs in CI and prints §47.3's
+- [x] The missing-OpenSSL `configure` path runs in CI and prints §47.3's
       message.
 - [x] Cold compile time measured (§51.3): 11 s on one core, against 90 s.
-- [ ] `cran-comments.md` (added by #54) filled in with the CI legs actually
+- [x] `cran-comments.md` (added by #54) filled in with the CI legs actually
       run, by name, and the final check results; its macOS-NOTE comment gone.
 - [x] No `\dontrun{}` example that could run: `zu_set_json_backend()`'s now
       runs, with a toy backend, and restores the old one.
 - [ ] README install section leads with `install.packages("zuhttp")`, with the
       GitHub install kept as the development version. On acceptance, not
       before — until then the line would be false.
-- [ ] Ready to submit: the M0 exit criteria hold. Submitting is #40 and the
+- [x] Ready to submit: the M0 exit criteria hold. Submitting is #40 and the
       maintainer's call.
 
 ### W17 — Fuzzing soak
@@ -800,3 +802,13 @@ changed the plan or the design.
   maintainer's rule since: work-package PRs merge on the quick profile, and
   `full-ci` goes only on the PR that closes a milestone (W16 for M0). Each
   merge's full run on `main` is read before the next PR.
+- **2026-10-30 — M0 ready to submit.** W1–W3, W6, W13 and W16 merged
+  (#84–#89). #89's full run: 0 errors, 0 warnings, 0 notes on macOS, Windows
+  release and R-devel, Ubuntu release and oldrel-1, the clang23, ubuntu-clang
+  and ubuntu-gcc16 containers and nosuggests; `main` at `0706937` green on all
+  ten workflows; a local `--as-cran` of that commit gives "New submission"
+  only. What CI found on the way that no local run had: an rchk PROTECT, an
+  unguarded Suggests in two examples, a leak in R's own iconv(), a covr trace
+  truncated by killed children, gcov symbols in the ABI test, macOS's
+  nondeterministic revocation check, a test runner outside the namespace,
+  and three portability bugs in new test code. Submitting is #40.
