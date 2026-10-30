@@ -14,7 +14,10 @@
 #include "zuh_alloc.h"
 #include <string.h>
 #include <stdio.h>
-#ifndef _WIN32
+#ifdef _WIN32
+#  include <windows.h>   /* Sleep */
+#else
+#  include <time.h>      /* nanosleep */
 #  include <sys/socket.h>
 #  include <netinet/in.h>
 #  include <arpa/inet.h>
@@ -172,15 +175,30 @@ static long cancel_latency(const char *url, const zuh_get_opts *base) {
 /* badssl.com resets connections from CI runners now and then (ECONNRESET,
  * "read failed"). A transport failure is retried twice; a TLS verdict, or
  * any other answer, never is -- so a flaky network can neither fail these
- * cases nor make one pass. */
+ * cases nor make one pass. The retries wait 1 s and then 3 s: back to back,
+ * all three landed in the same millisecond and were reset alike (#121). */
+static void pause_ms(unsigned ms) {
+#ifdef _WIN32
+    Sleep(ms);
+#else
+    struct timespec ts;
+    ts.tv_sec  = (time_t)(ms / 1000u);
+    ts.tv_nsec = (long)(ms % 1000u) * 1000000L;
+    nanosleep(&ts, NULL);
+#endif
+}
+
 static zuh_code get_retrying(zuh_result *r, const char *url, const zuh_get_opts *o,
                              zuh_error *e) {
+    static const unsigned waits_ms[2] = { 1000u, 3000u };
     zuh_code rc = ZUH_ERR_IO;
     int attempt;
     for (attempt = 0; attempt < 3; attempt++) {
         rc = zuh_engine_get(r, url, o, e);
         if (rc != ZUH_ERR_IO && rc != ZUH_ERR_CONNECT && rc != ZUH_ERR_TIMEOUT) break;
-        printf("  (transport failure, retrying: %s)\n", e->message);
+        if (attempt == 2) break;
+        printf("  (transport failure, retrying in %u ms: %s)\n", waits_ms[attempt], e->message);
+        pause_ms(waits_ms[attempt]);
     }
     return rc;
 }

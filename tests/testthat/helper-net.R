@@ -99,7 +99,11 @@ zu_get_badssl <- function(...) {
     if (!inherits(r, "error")) {
       return(r)
     }
-    if (!inherits(r, transient) || attempt == 3L) stop(r)
+    if (!inherits(r, transient) || attempt == 3L) {
+      stop(r)
+    }
+    # Back to back, the retries met the same reset in the same millisecond.
+    Sys.sleep(c(1, 3)[attempt])
   }
 }
 
