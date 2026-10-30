@@ -141,7 +141,7 @@ condition classes in C strings, comments citing R functions, and the
 
 ## Current state
 
-v0.1.0 is built but unreleased: it is the **first CRAN submission** (roadmap
+v0.1.0 is **ready to submit** to CRAN, its first submission (roadmap
 M0, tracker #21, D-82). Nothing is tagged until CRAN accepts a version — the
 tag is the maintainer's post-acceptance step. M0 is W1, W2, W3, W6, W13
 (Network.framework, which removes the one `--as-cran` NOTE) and W16. W1 (CI on every
