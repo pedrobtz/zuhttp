@@ -180,6 +180,23 @@ void suite_response(void) {
         zuh_chunked_free(&c);
     }
 
+    ZUH_CASE("§18.1: a chunk larger than max_chunk is refused while it arrives");
+    {
+        /* The engine passes 0 (no per-chunk cap) today, so only a direct test
+         * reaches this branch. The cap is checked against what is left of the
+         * current chunk when a feed ends inside it — which a chunk larger
+         * than the cap by more than one read always does. */
+        zuh_chunked c; zuh_error e; size_t len; char buf[64];
+        const char *body = "a\r\n01";      /* a 10-byte chunk, 2 bytes in */
+        zuh_error_clear(&e);
+        zuh_chunked_init(&c, 4, 0);          /* max_chunk = 4, no total cap */
+        len = strlen(body);
+        memcpy(buf, body, len);
+        ZUH_CHECK_EQ_INT(zuh_chunked_decode(&c, buf, &len, &e), ZUH_ERR_BODY_LIMIT);
+        ZUH_CHECK(strstr(e.message, "chunk size exceeds") != NULL);
+        zuh_chunked_free(&c);
+    }
+
     ZUH_CASE("no leaks across the suite");
     {
         zuh_alloc_stats st;

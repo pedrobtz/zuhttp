@@ -2,7 +2,7 @@
 % Please edit documentation in R/retry.R
 \name{zu_req_replay_safe}
 \alias{zu_req_replay_safe}
-\title{Is this request safe to replay?}
+\title{Whether a request is safe to replay}
 \usage{
 zu_req_replay_safe(req)
 }

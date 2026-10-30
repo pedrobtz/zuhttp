@@ -5,19 +5,12 @@
 # Everything runs against a mock transport (§31.12), so the file is
 # deterministic and CRAN-safe: it exercises the API, not the network.
 
-# A transport that records what it was asked to do and answers from a script.
-recorder <- function(respond = function(req) zu_response(200L, body = "ok")) {
-  calls <- list()
-  t <- zu_mock_transport(function(req) {
-    calls[[length(calls) + 1L]] <<- req
-    respond(req)
-  })
-  list(transport = t, calls = function() calls, n = function() length(calls))
-}
-
 test_that("1. one-line GET", {
   rec <- recorder(function(req) zu_response(200L, body = "hello"))
-  r <- zu_get("https://example.com", client = zu_client(transport = rec$transport))
+  r <- zu_get(
+    "https://example.com",
+    client = zu_client(transport = rec$transport)
+  )
 
   expect_s3_class(r, "zu_response")
   expect_identical(zu_resp_status(r), 200L)
@@ -28,8 +21,11 @@ test_that("1. one-line GET", {
 test_that("2. JSON POST", {
   skip_if_not_installed("jsonlite")
   rec <- recorder(function(req) zu_response(201L, body = "{}"))
-  r <- zu_post("https://api.example.com/users", json = list(name = "Alice"),
-               client = zu_client(transport = rec$transport))
+  r <- zu_post(
+    "https://api.example.com/users",
+    json = list(name = "Alice"),
+    client = zu_client(transport = rec$transport)
+  )
 
   sent <- rec$calls()[[1]]
   expect_identical(sent$method, "POST")
@@ -43,16 +39,21 @@ test_that("3. API client with bearer token and base URL", {
   rec <- recorder()
   api <- zu_client(
     base_url = "https://api.example.com",
-    headers  = c(Accept = "application/json", Authorization = "Bearer tok"),
+    headers = c(Accept = "application/json", Authorization = "Bearer tok"),
     transport = rec$transport
   )
   zu_get("/users", client = api)
   zu_get("/teams", client = api)
 
   urls <- vapply(rec$calls(), function(r) r$url, character(1))
-  expect_identical(urls, c("https://api.example.com/users",
-                           "https://api.example.com/teams"))
-  expect_identical(unname(rec$calls()[[1]]$headers[["Authorization"]]), "Bearer tok")
+  expect_identical(
+    urls,
+    c("https://api.example.com/users", "https://api.example.com/teams")
+  )
+  expect_identical(
+    unname(rec$calls()[[1]]$headers[["Authorization"]]),
+    "Bearer tok"
+  )
 })
 
 test_that("4. a package builds a request without performing it", {
@@ -65,12 +66,14 @@ test_that("4. a package builds a request without performing it", {
   req <- zu_req_timeout(req, total = 10)
 
   expect_s3_class(req, "zu_request")
-  expect_identical(rec$n(), 0L)         # nothing has happened yet
+  expect_identical(rec$n(), 0L) # nothing has happened yet
 
   zu_perform(req, client = zu_client(transport = rec$transport))
   expect_identical(rec$n(), 1L)
-  expect_identical(rec$calls()[[1]]$url,
-                   "https://api.example.com/users?verbose=true")
+  expect_identical(
+    rec$calls()[[1]]$url,
+    "https://api.example.com/users?verbose=true"
+  )
   expect_identical(rec$calls()[[1]]$resolved$timeout, 10)
 })
 
@@ -81,12 +84,21 @@ test_that("5. retried idempotent request", {
   n <- 0L
   flaky <- zu_mock_transport(function(req) {
     n <<- n + 1L
-    if (n < 3L) zu_response(503L) else zu_response(200L, body = '{"ok":true}',
-                                                  headers = c("Content-Type" = "application/json"))
+    if (n < 3L) {
+      zu_response(503L)
+    } else {
+      zu_response(
+        200L,
+        body = '{"ok":true}',
+        headers = c("Content-Type" = "application/json")
+      )
+    }
   })
-  r <- zu_get("https://api.example.com/things",
-              retry = zu_retry(attempts = 3, base = 0.01),
-              client = zu_client(transport = flaky))
+  r <- zu_get(
+    "https://api.example.com/things",
+    retry = zu_retry(attempts = 3, base = 0.01),
+    client = zu_client(transport = flaky)
+  )
 
   expect_identical(zu_resp_status(r), 200L)
   expect_true(zu_resp_json(r)$ok)
@@ -100,19 +112,23 @@ test_that("6. streaming download", {
   # disk WITHOUT passing through memory — not merely that a file appeared.
   skip_unless_online()
 
-  d <- tempfile(); dir.create(d); on.exit(unlink(d, recursive = TRUE), add = TRUE)
+  d <- tempfile()
+  dir.create(d)
+  on.exit(unlink(d, recursive = TRUE), add = TRUE)
   f <- file.path(d, "download.bin")
 
   r <- zu_get("https://example.com", path = f)
   expect_identical(zu_resp_status(r), 200L)
   expect_gt(file.size(f), 0)
   expect_identical(length(zu_resp_raw(r)), 0L)
-  expect_length(list.files(d), 1L)     # the committed file, and nothing else
+  expect_length(list.files(d), 1L) # the committed file, and nothing else
 
   # And the callback form of the same workflow, for a caller who wants to
   # process as it arrives rather than land it on disk.
   n <- 0L
-  r2 <- zu_get("https://example.com", callback = function(chunk) n <<- n + length(chunk))
+  r2 <- zu_get("https://example.com", callback = function(chunk) {
+    n <<- n + length(chunk)
+  })
   expect_identical(zu_resp_status(r2), 200L)
   expect_identical(n, as.integer(file.size(f)))
 })
@@ -124,11 +140,15 @@ test_that("7. mocked package test", {
     zu_resp_json(zu_get(paste0("/users/", id), client = client))$name
   }
   fake <- zu_mock_transport(function(req) {
-    if (grepl("/users/7$", req$url))
-      zu_response(200L, c("Content-Type" = "application/json"),
-                  '{"name":"Alice"}')
-    else
+    if (grepl("/users/7$", req$url)) {
+      zu_response(
+        200L,
+        c("Content-Type" = "application/json"),
+        '{"name":"Alice"}'
+      )
+    } else {
       zu_response(404L, c("Content-Type" = "application/json"), '{}')
+    }
   })
   api <- zu_client(base_url = "https://api.example.com", transport = fake)
 
@@ -157,10 +177,16 @@ test_that("8. a request timeout overrides the client's", {
 })
 
 test_that("9. redirect and error inspection", {
-  api <- zu_client(transport = zu_mock_transport(function(req) {
-    zu_response(503L, c("Content-Type" = "text/plain"),
-                "upstream unavailable", redirects = 2L)
-  }))
+  api <- zu_client(
+    transport = zu_mock_transport(function(req) {
+      zu_response(
+        503L,
+        c("Content-Type" = "text/plain"),
+        "upstream unavailable",
+        redirects = 2L
+      )
+    })
+  )
   r <- zu_get("https://example.com", check = FALSE, client = api)
 
   expect_identical(zu_resp_status(r), 503L)
@@ -177,7 +203,9 @@ test_that("9. redirect and error inspection", {
 test_that("10. many requests share one client", {
   rec <- recorder()
   api <- zu_client(transport = rec$transport)
-  for (i in 1:5) zu_get(paste0("https://example.com/", i), client = api)
+  for (i in 1:5) {
+    zu_get(paste0("https://example.com/", i), client = api)
+  }
   expect_identical(rec$n(), 5L)
   # That these five share a connection pool is S16's claim to prove; the pool
   # is C-side and not yet wired to the R client. This asserts only what is
@@ -185,23 +213,32 @@ test_that("10. many requests share one client", {
 })
 
 test_that("11. a client used inside mclapply (§26.4)", {
-  skip_on_os("windows")                      # no fork()
+  skip_on_os("windows") # no fork()
   skip_if_not_installed("parallel")
-  api <- zu_client(transport = zu_mock_transport(function(req) {
-    zu_response(200L, body = paste0("pid=", Sys.getpid()))
-  }))
+  api <- zu_client(
+    transport = zu_mock_transport(function(req) {
+      zu_response(200L, body = paste0("pid=", Sys.getpid()))
+    })
+  )
   # Populate the parent's default client FIRST. Without this the test passes
   # for the wrong reason: an unset default is trivially "not inherited".
   zu_default_client()
   parent_pid <- zuhttp:::the_default$pid
   expect_identical(parent_pid, Sys.getpid())
 
-  out <- parallel::mclapply(1:2, function(i) {
-    zu_default_client()                       # the PID guard runs here
-    list(text = zu_resp_text(zu_get("https://example.com", client = api)),
-         default_pid = zuhttp:::the_default$pid,
-         pid = Sys.getpid())
-  }, mc.cores = 2, mc.cleanup = FALSE)  # coverage.yaml: no SIGTERM mid-trace under covr
+  out <- parallel::mclapply(
+    1:2,
+    function(i) {
+      zu_default_client() # the PID guard runs here
+      list(
+        text = zu_resp_text(zu_get("https://example.com", client = api)),
+        default_pid = zuhttp:::the_default$pid,
+        pid = Sys.getpid()
+      )
+    },
+    mc.cores = 2,
+    mc.cleanup = FALSE
+  ) # coverage.yaml: no SIGTERM mid-trace under covr
 
   expect_true(all(vapply(out, function(o) grepl("^pid=", o$text), logical(1))))
   for (o in out) {
@@ -215,12 +252,14 @@ test_that("11. a client used inside mclapply (§26.4)", {
 test_that("12. a client survives saveRDS() and a new session (§26.5)", {
   path <- tempfile(fileext = ".rds")
   on.exit(unlink(path), add = TRUE)
-  api <- zu_client(base_url = "https://api.example.com",
-                   headers = c(Accept = "application/json"),
-                   timeout = 7,
-                   transport = zu_mock_transport(function(req) {
-                     zu_response(200L, body = req$url)
-                   }))
+  api <- zu_client(
+    base_url = "https://api.example.com",
+    headers = c(Accept = "application/json"),
+    timeout = 7,
+    transport = zu_mock_transport(function(req) {
+      zu_response(200L, body = req$url)
+    })
+  )
   saveRDS(api, path)
 
   # A genuinely new session, because the point is that nothing in the object
@@ -231,26 +270,37 @@ test_that("12. a client survives saveRDS() and a new session (§26.5)", {
   # tempfile path would not survive being pasted into a string literal either.
   script <- tempfile(fileext = ".R")
   on.exit(unlink(script), add = TRUE)
-  writeLines(c(
-    'suppressMessages(library(zuhttp))',
-    sprintf('api <- readRDS("%s")', normalizePath(path, winslash = "/")),
-    'r <- zu_get("/users", client = api)',
-    'cat(zu_resp_text(r), zu_get("/x", client = api)$request$resolved$timeout)'
-  ), script)
-  out <- system2(file.path(R.home("bin"), "Rscript"), c("--vanilla", shQuote(script)),
-                 stdout = TRUE, stderr = TRUE)
-  expect_identical(paste(out, collapse = " "),
-                   "https://api.example.com/users 7")
+  writeLines(
+    c(
+      'suppressMessages(library(zuhttp))',
+      sprintf('api <- readRDS("%s")', normalizePath(path, winslash = "/")),
+      'r <- zu_get("/users", client = api)',
+      'cat(zu_resp_text(r), zu_get("/x", client = api)$request$resolved$timeout)'
+    ),
+    script
+  )
+  out <- system2(
+    file.path(R.home("bin"), "Rscript"),
+    c("--vanilla", shQuote(script)),
+    stdout = TRUE,
+    stderr = TRUE
+  )
+  expect_identical(
+    paste(out, collapse = " "),
+    "https://api.example.com/users 7"
+  )
 })
 
 test_that("13. text from a server that sends no charset (§31.7)", {
   # Latin-1 bytes, no charset parameter: step 4 of the chain applies and the
   # default is UTF-8, so these bytes are NOT valid and must be reported rather
   # than silently mangled.
-  latin1 <- as.raw(c(0x63, 0x61, 0x66, 0xE9))     # "café" in ISO-8859-1
-  api <- zu_client(transport = zu_mock_transport(function(req) {
-    zu_response(200L, c("Content-Type" = "text/plain"), latin1)
-  }))
+  latin1 <- as.raw(c(0x63, 0x61, 0x66, 0xE9)) # "café" in ISO-8859-1
+  api <- zu_client(
+    transport = zu_mock_transport(function(req) {
+      zu_response(200L, c("Content-Type" = "text/plain"), latin1)
+    })
+  )
   r <- zu_get("https://example.com", client = api)
 
   expect_error(zu_resp_text(r), class = "zu_body_decode_error")
@@ -258,10 +308,17 @@ test_that("13. text from a server that sends no charset (§31.7)", {
   expect_match(zu_resp_text(r, on_invalid = "substitute"), "^caf")
 
   # And the ordinary case: UTF-8 bytes with no charset decode cleanly.
-  api2 <- zu_client(transport = zu_mock_transport(function(req) {
-    zu_response(200L, c("Content-Type" = "text/plain"),
-                charToRaw(enc2utf8("café")))
-  }))
-  expect_identical(zu_resp_text(zu_get("https://example.com", client = api2)),
-                   "café")
+  api2 <- zu_client(
+    transport = zu_mock_transport(function(req) {
+      zu_response(
+        200L,
+        c("Content-Type" = "text/plain"),
+        charToRaw(enc2utf8("café"))
+      )
+    })
+  )
+  expect_identical(
+    zu_resp_text(zu_get("https://example.com", client = api2)),
+    "café"
+  )
 })

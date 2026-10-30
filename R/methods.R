@@ -6,28 +6,67 @@
 # a named argument at the end. Never zu_get(client, url) — §31.3 rejects
 # positional polymorphism outright.
 
-one_shot <- function(method, url, query, headers, policy, client,
-                     body = NULL, json = NULL, form = NULL, file = NULL,
-                     path = NULL, callback = NULL, trace = FALSE) {
-  given <- c(body = !is.null(body), json = !is.null(json),
-             form = !is.null(form), file = !is.null(file))
-  if (sum(given) > 1L)
-    stop("`", paste(names(given)[given], collapse = "`, `"),
-         "` are mutually exclusive: a request has one body", call. = FALSE)
+one_shot <- function(
+  method,
+  url,
+  query,
+  headers,
+  policy,
+  client,
+  body = NULL,
+  json = NULL,
+  form = NULL,
+  file = NULL,
+  path = NULL,
+  callback = NULL,
+  trace = FALSE
+) {
+  given <- c(
+    body = !is.null(body),
+    json = !is.null(json),
+    form = !is.null(form),
+    file = !is.null(file)
+  )
+  if (sum(given) > 1L) {
+    stop(
+      "`",
+      paste(names(given)[given], collapse = "`, `"),
+      "` are mutually exclusive: a request has one body",
+      call. = FALSE
+    )
+  }
 
   req <- zu_request(method, url)
-  if (!is.null(query))   req$query   <- as_query_list(query)
-  if (!is.null(headers)) req$headers <- as_header_vec(headers)
-  if (!is.null(json))    req <- zu_body_json(req, json)
-  if (!is.null(form))    req <- zu_body_form(req, form)
-  if (!is.null(body))    req <- zu_body_raw(req, body)
-  if (!is.null(file))    req <- zu_body_file(req, file)
+  if (!is.null(query)) {
+    req$query <- as_query_list(query)
+  }
+  if (!is.null(headers)) {
+    req$headers <- as_header_vec(headers)
+  }
+  if (!is.null(json)) {
+    req <- zu_body_json(req, json)
+  }
+  if (!is.null(form)) {
+    req <- zu_body_form(req, form)
+  }
+  if (!is.null(body)) {
+    req <- zu_body_raw(req, body)
+  }
+  if (!is.null(file)) {
+    req <- zu_body_file(req, file)
+  }
   req$policy <- policy
   # §27: not a policy. Where a response goes is a property of this call, not
   # something a client inherits or the §31.9 three-state merge applies to.
-  if (!is.null(path)) req <- zu_req_path(req, path)
-  if (!is.null(callback)) req <- zu_req_callback(req, callback)
-  if (isTRUE(trace)) req <- zu_req_trace(req)
+  if (!is.null(path)) {
+    req <- zu_req_path(req, path)
+  }
+  if (!is.null(callback)) {
+    req <- zu_req_callback(req, callback)
+  }
+  if (isTRUE(trace)) {
+    req <- zu_req_trace(req)
+  }
   zu_perform(req, client = client)
 }
 
@@ -54,10 +93,11 @@ one_shot <- function(method, url, query, headers, policy, client,
 #'   bounded by it (nor by Ctrl-C); see [zuhttp_tls].
 #' @param redirects Maximum redirects to follow.
 #' @param verify Verify the certificate and hostname. Leave this `TRUE`.
-#' @param max_body Maximum decoded body size in bytes.
+#' @param max_body Maximum decoded body size in bytes; `Inf` for no limit.
 #' @param user_agent `User-Agent` to send.
 #' @param retry A [zu_retry()] policy for this request. Overrides the
-#'   client's; `NULL` inherits it (§31.9).
+#'   client's; `NULL` resets it to the package default, which retries nothing
+#'   (§31.9). Omit it to inherit the client's.
 #' @param trace Collect a §35.3 event trace, readable with
 #'   [zu_resp_trace()]. Off by default.
 #' @param tls Certificate trust settings from [zu_tls()] for this request.
@@ -75,10 +115,9 @@ one_shot <- function(method, url, query, headers, policy, client,
 #'   completes with a non-2xx status is a successful transfer of an error
 #'   page, so a 404 body is written and does replace it — `check` raises
 #'   afterwards, too late to prevent that. Mutually exclusive with
-#'   `callback`: a response body has one destination. Note the asymmetry with `file`, which
-#'   is a request *body* source (§31.6): `path` is where the response goes,
-#'   `file` is where a
-#'   request body comes from.
+#'   `callback`: a response body has one destination. Note the asymmetry
+#'   with `file`, which is a request *body* source (§31.6): `path` is where
+#'   the response goes, `file` is where a request body comes from.
 #' @param check Raise a condition for 4xx and 5xx (§31.14). `FALSE` returns the
 #'   response whatever its status.
 #' @param decode Decompress transparently. `FALSE` returns the wire bytes and
@@ -128,82 +167,236 @@ NULL
 
 #' @rdname zu_methods
 #' @export
-zu_get <- function(url, query = NULL, headers = NULL, timeout = NULL,
-                   redirects = NULL, verify = NULL, max_body = NULL,
-                   user_agent = NULL, check = NULL, decode = NULL,
-                   retry = NULL, path = NULL, callback = NULL,
-                   proxy = NULL, tls = NULL, trace = FALSE,
-                   client = zu_default_client()) {
-  one_shot("GET", url, query, headers, collect_policy(environment()), client,
-           path = path, callback = callback, trace = trace)
+zu_get <- function(
+  url,
+  query = NULL,
+  headers = NULL,
+  timeout = NULL,
+  redirects = NULL,
+  verify = NULL,
+  max_body = NULL,
+  user_agent = NULL,
+  check = NULL,
+  decode = NULL,
+  retry = NULL,
+  path = NULL,
+  callback = NULL,
+  proxy = NULL,
+  tls = NULL,
+  trace = FALSE,
+  client = zu_default_client()
+) {
+  one_shot(
+    "GET",
+    url,
+    query,
+    headers,
+    collect_policy(environment()),
+    client,
+    path = path,
+    callback = callback,
+    trace = trace
+  )
 }
 
 #' @rdname zu_methods
 #' @export
-zu_head <- function(url, query = NULL, headers = NULL, timeout = NULL,
-                    redirects = NULL, verify = NULL, max_body = NULL,
-                    user_agent = NULL, check = NULL, decode = NULL,
-                    retry = NULL, path = NULL, callback = NULL,
-                   proxy = NULL, tls = NULL, trace = FALSE,
-                   client = zu_default_client()) {
-  one_shot("HEAD", url, query, headers, collect_policy(environment()), client,
-           path = path, callback = callback, trace = trace)
+zu_head <- function(
+  url,
+  query = NULL,
+  headers = NULL,
+  timeout = NULL,
+  redirects = NULL,
+  verify = NULL,
+  max_body = NULL,
+  user_agent = NULL,
+  check = NULL,
+  decode = NULL,
+  retry = NULL,
+  path = NULL,
+  callback = NULL,
+  proxy = NULL,
+  tls = NULL,
+  trace = FALSE,
+  client = zu_default_client()
+) {
+  one_shot(
+    "HEAD",
+    url,
+    query,
+    headers,
+    collect_policy(environment()),
+    client,
+    path = path,
+    callback = callback,
+    trace = trace
+  )
 }
 
 #' @rdname zu_methods
 #' @export
-zu_post <- function(url, query = NULL, headers = NULL, body = NULL, json = NULL,
-                    form = NULL, file = NULL, timeout = NULL, redirects = NULL,
-                    verify = NULL, max_body = NULL, user_agent = NULL,
-                    check = NULL, decode = NULL, retry = NULL, path = NULL, callback = NULL,
-                   proxy = NULL, tls = NULL, trace = FALSE,
-                   client = zu_default_client()) {
-  one_shot("POST", url, query, headers, collect_policy(environment()), client,
-           body = body, json = json, form = form, file = file, path = path, callback = callback, trace = trace)
+zu_post <- function(
+  url,
+  query = NULL,
+  headers = NULL,
+  body = NULL,
+  json = NULL,
+  form = NULL,
+  file = NULL,
+  timeout = NULL,
+  redirects = NULL,
+  verify = NULL,
+  max_body = NULL,
+  user_agent = NULL,
+  check = NULL,
+  decode = NULL,
+  retry = NULL,
+  path = NULL,
+  callback = NULL,
+  proxy = NULL,
+  tls = NULL,
+  trace = FALSE,
+  client = zu_default_client()
+) {
+  one_shot(
+    "POST",
+    url,
+    query,
+    headers,
+    collect_policy(environment()),
+    client,
+    body = body,
+    json = json,
+    form = form,
+    file = file,
+    path = path,
+    callback = callback,
+    trace = trace
+  )
 }
 
 #' @rdname zu_methods
 #' @export
-zu_put <- function(url, query = NULL, headers = NULL, body = NULL, json = NULL,
-                   form = NULL, file = NULL, timeout = NULL, redirects = NULL,
-                   verify = NULL, max_body = NULL, user_agent = NULL,
-                   check = NULL, decode = NULL, retry = NULL, path = NULL, callback = NULL,
-                   proxy = NULL, tls = NULL, trace = FALSE,
-                   client = zu_default_client()) {
-  one_shot("PUT", url, query, headers, collect_policy(environment()), client,
-           body = body, json = json, form = form, file = file, path = path, callback = callback, trace = trace)
+zu_put <- function(
+  url,
+  query = NULL,
+  headers = NULL,
+  body = NULL,
+  json = NULL,
+  form = NULL,
+  file = NULL,
+  timeout = NULL,
+  redirects = NULL,
+  verify = NULL,
+  max_body = NULL,
+  user_agent = NULL,
+  check = NULL,
+  decode = NULL,
+  retry = NULL,
+  path = NULL,
+  callback = NULL,
+  proxy = NULL,
+  tls = NULL,
+  trace = FALSE,
+  client = zu_default_client()
+) {
+  one_shot(
+    "PUT",
+    url,
+    query,
+    headers,
+    collect_policy(environment()),
+    client,
+    body = body,
+    json = json,
+    form = form,
+    file = file,
+    path = path,
+    callback = callback,
+    trace = trace
+  )
 }
 
 #' @rdname zu_methods
 #' @export
-zu_patch <- function(url, query = NULL, headers = NULL, body = NULL, json = NULL,
-                     form = NULL, file = NULL, timeout = NULL, redirects = NULL,
-                     verify = NULL, max_body = NULL, user_agent = NULL,
-                     check = NULL, decode = NULL, retry = NULL, path = NULL, callback = NULL,
-                   proxy = NULL, tls = NULL, trace = FALSE,
-                   client = zu_default_client()) {
-  one_shot("PATCH", url, query, headers, collect_policy(environment()), client,
-           body = body, json = json, form = form, file = file, path = path, callback = callback, trace = trace)
+zu_patch <- function(
+  url,
+  query = NULL,
+  headers = NULL,
+  body = NULL,
+  json = NULL,
+  form = NULL,
+  file = NULL,
+  timeout = NULL,
+  redirects = NULL,
+  verify = NULL,
+  max_body = NULL,
+  user_agent = NULL,
+  check = NULL,
+  decode = NULL,
+  retry = NULL,
+  path = NULL,
+  callback = NULL,
+  proxy = NULL,
+  tls = NULL,
+  trace = FALSE,
+  client = zu_default_client()
+) {
+  one_shot(
+    "PATCH",
+    url,
+    query,
+    headers,
+    collect_policy(environment()),
+    client,
+    body = body,
+    json = json,
+    form = form,
+    file = file,
+    path = path,
+    callback = callback,
+    trace = trace
+  )
 }
 
 #' @rdname zu_methods
 #' @export
-zu_delete <- function(url, query = NULL, headers = NULL, body = NULL,
-                      json = NULL, form = NULL, file = NULL, timeout = NULL,
-                      redirects = NULL, verify = NULL, max_body = NULL,
-                      user_agent = NULL, check = NULL, decode = NULL,
-                      retry = NULL, path = NULL, callback = NULL,
-                   proxy = NULL, tls = NULL, trace = FALSE,
-                   client = zu_default_client()) {
-  one_shot("DELETE", url, query, headers, collect_policy(environment()), client,
-           body = body, json = json, form = form, file = file, path = path, callback = callback, trace = trace)
+zu_delete <- function(
+  url,
+  query = NULL,
+  headers = NULL,
+  body = NULL,
+  json = NULL,
+  form = NULL,
+  file = NULL,
+  timeout = NULL,
+  redirects = NULL,
+  verify = NULL,
+  max_body = NULL,
+  user_agent = NULL,
+  check = NULL,
+  decode = NULL,
+  retry = NULL,
+  path = NULL,
+  callback = NULL,
+  proxy = NULL,
+  tls = NULL,
+  trace = FALSE,
+  client = zu_default_client()
+) {
+  one_shot(
+    "DELETE",
+    url,
+    query,
+    headers,
+    collect_policy(environment()),
+    client,
+    body = body,
+    json = json,
+    form = form,
+    file = file,
+    path = path,
+    callback = callback,
+    trace = trace
+  )
 }
-
-#' Which TLS backend was this build linked against?
-#'
-#' @return A short backend identifier, e.g. `"openssl"`, `"schannel"`,
-#'   `"network-framework"`.
-#' @export
-#' @examples
-#' zu_tls_backend()
-zu_tls_backend <- function() .Call(C_zu_tls_backend)

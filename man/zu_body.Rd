@@ -14,7 +14,7 @@ zu_body_form(req, x)
 
 zu_body_raw(req, x, type = NULL)
 
-zu_body_file(req, path, type = "application/octet-stream")
+zu_body_file(req, file, type = "application/octet-stream")
 }
 \arguments{
 \item{req}{A \code{zu_request}.}
@@ -29,8 +29,9 @@ mean.}
 
 \item{type}{Content type to declare.}
 
-\item{path}{A file path. The file is read into memory; streaming request
-bodies are §27's, not this stage's.}
+\item{file}{A file path. The file is read into memory (§28 covers streaming
+request bodies). Named \code{file} as in \code{\link[=zu_post]{zu_post()}}: \code{path} is always where a
+\emph{response} goes (D-45).}
 }
 \value{
 A \code{zu_request}.

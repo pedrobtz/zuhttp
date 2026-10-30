@@ -57,6 +57,32 @@ int zuh_header_value_valid(const char *value, size_t len) {
     return 1;
 }
 
+int zuh_utf8_valid(const char *s, size_t len) {
+    const unsigned char *p = (const unsigned char *)s;
+    size_t i = 0;
+    if (!s) return len == 0;
+    while (i < len) {
+        unsigned char c = p[i];
+        size_t k, need;
+        unsigned char lo = 0x80, hi = 0xBF;   /* bounds of the 2nd byte */
+        if (c < 0x80) { i++; continue; }
+        if (c >= 0xC2 && c <= 0xDF)      need = 1;
+        else if (c == 0xE0)            { need = 2; lo = 0xA0; }   /* overlong */
+        else if (c == 0xED)            { need = 2; hi = 0x9F; }   /* surrogates */
+        else if (c >= 0xE1 && c <= 0xEF) need = 2;
+        else if (c == 0xF0)            { need = 3; lo = 0x90; }   /* overlong */
+        else if (c == 0xF4)            { need = 3; hi = 0x8F; }   /* > U+10FFFF */
+        else if (c >= 0xF1 && c <= 0xF3) need = 3;
+        else return 0;                 /* 0x80-0xC1, 0xF5-0xFF */
+        if (len - i - 1 < need) return 0;
+        if (p[i + 1] < lo || p[i + 1] > hi) return 0;
+        for (k = 2; k <= need; k++)
+            if (p[i + k] < 0x80 || p[i + k] > 0xBF) return 0;
+        i += need + 1;
+    }
+    return 1;
+}
+
 void zuh_headers_init_limited(zuh_headers *h, size_t max_count, size_t max_name,
                              size_t max_value, size_t max_bytes) {
     memset(h, 0, sizeof *h);

@@ -4,7 +4,11 @@
 
 void zuh_request_init(zuh_request *r) {
     memset(r, 0, sizeof *r);
-    zuh_headers_init(&r->headers);
+    /* No per-field limits on what WE send: §40's count, name and value caps
+     * defend against an untrusted response, and applying them here refused a
+     * 9 KB bearer token as a "body limit". The 64 KiB header block (§17) is
+     * the bound, enforced by the buffer the request is written into. */
+    zuh_headers_init_limited(&r->headers, 0, 0, 0, 0);
     r->form = ZUH_TARGET_ORIGIN;
     r->body = ZUH_BODY_NONE;
 }
@@ -41,7 +45,7 @@ zuh_code zuh_request_add_defaults(zuh_request *r, const char *user_agent) {
     }
     if (!zuh_headers_has(&r->headers, "User-Agent")) {
         rc = zuh_headers_add_str(&r->headers, "User-Agent",
-                                user_agent ? user_agent : "zuhttp/0.0.0.9000");
+                                user_agent ? user_agent : "zuhttp");
         if (rc != ZUH_OK) return rc;
     }
     if (!zuh_headers_has(&r->headers, "Accept")) {
@@ -54,7 +58,8 @@ zuh_code zuh_request_add_defaults(zuh_request *r, const char *user_agent) {
         if (rc != ZUH_OK) return rc;
     }
     if (!zuh_headers_has(&r->headers, "Connection")) {
-        rc = zuh_headers_add_str(&r->headers, "Connection", "keep-alive");
+        rc = zuh_headers_add_str(&r->headers, "Connection",
+                                r->close_connection ? "close" : "keep-alive");
         if (rc != ZUH_OK) return rc;
     }
     return ZUH_OK;

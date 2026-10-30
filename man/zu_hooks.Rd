@@ -12,7 +12,8 @@ zu_hooks(
 )
 }
 \arguments{
-\item{before_request}{Called with \code{list(request)} before each attempt.}
+\item{before_request}{Called with \code{list(request, attempt)} before each
+attempt.}
 
 \item{after_response}{Called with \code{list(request, response, attempt)}.}
 

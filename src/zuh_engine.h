@@ -32,6 +32,7 @@
 #include "zuh_tls.h"
 #include "zuh_trace.h"
 #include "zuh_redact.h"
+#include "zuh_uri.h"
 
 /* A request the engine can perform. Headers are parallel arrays rather than a
  * zuh_headers, so the R layer can pass them without building one — the engine
@@ -166,6 +167,14 @@ void zuh_result_free(zuh_result *r);
 zuh_code zuh_engine_perform(zuh_result *out, const char *url,
                           const zuh_req_spec *req, const zuh_get_opts *o,
                           zuh_error *err);
+
+/* §26.1: the pool key for a hop to `u` under `o`, through `px` when it is in
+ * use. 1 on success; 0 on allocation failure, with `k` left freed. Exposed so
+ * ctest/test_pool.c can check that every setting two clients may differ on
+ * reaches the key: zuh_pool_key_eq() comparing a field is no help if this
+ * never fills it in, and only network tests saw that before. */
+int zuh_engine_pool_key(zuh_pool_key *k, const zuh_uri *u,
+                        const zuh_get_opts *o, const zuh_proxy *px);
 
 /* Convenience wrapper: a GET with no extra headers and no body. */
 zuh_code zuh_engine_get(zuh_result *out, const char *url,

@@ -45,23 +45,38 @@
 #' api  <- zu_client(transport = zu_mock_transport(stub))
 #' zu_resp_status(zu_perform(zu_request("POST", "https://x.test/users"),
 #'                           client = api))
-zu_stub <- function(response, method = NULL, url = NULL, regex = NULL,
-                    headers = NULL, body = NULL, times = Inf) {
-  if (!is.function(response) && !inherits(response, "zu_response"))
-    stop("`response` must be a zu_response() or a function returning one",
-         call. = FALSE)
-  if (!is.null(url) && !is.null(regex))
+zu_stub <- function(
+  response,
+  method = NULL,
+  url = NULL,
+  regex = NULL,
+  headers = NULL,
+  body = NULL,
+  times = Inf
+) {
+  if (!is.function(response) && !inherits(response, "zu_response")) {
+    stop(
+      "`response` must be a zu_response() or a function returning one",
+      call. = FALSE
+    )
+  }
+  if (!is.null(url) && !is.null(regex)) {
     stop("give `url` or `regex`, not both", call. = FALSE)
-  if (is.character(body)) body <- charToRaw(enc2utf8(paste0(body, collapse = "")))
+  }
+  if (is.character(body)) {
+    body <- charToRaw(enc2utf8(paste0(body, collapse = "")))
+  }
   structure(
-    list(response = response,
-         method   = if (!is.null(method)) toupper(method),
-         url      = url,
-         regex    = regex,
-         headers  = as_header_vec(headers),
-         body     = body,
-         times    = times,
-         matched  = 0L),
+    list(
+      response = response,
+      method = if (!is.null(method)) toupper(method),
+      url = url,
+      regex = regex,
+      headers = as_header_vec(headers),
+      body = body,
+      times = times,
+      matched = 0L
+    ),
     class = "zu_stub"
   )
 }
@@ -69,15 +84,19 @@ zu_stub <- function(response, method = NULL, url = NULL, regex = NULL,
 #' @export
 print.zu_stub <- function(x, ...) {
   crit <- c(
-    if (!is.null(x$method))  paste("method", x$method),
-    if (!is.null(x$url))     paste("url", x$url),
-    if (!is.null(x$regex))   paste("regex", x$regex),
-    if (length(x$headers))   paste(length(x$headers), "header(s)"),
-    if (!is.null(x$body))    "body",
-    if (is.finite(x$times))  paste("times", x$times)
+    if (!is.null(x$method)) paste("method", x$method),
+    if (!is.null(x$url)) paste("url", x$url),
+    if (!is.null(x$regex)) paste("regex", x$regex),
+    if (length(x$headers)) paste(length(x$headers), "header(s)"),
+    if (!is.null(x$body)) "body",
+    if (is.finite(x$times)) paste("times", x$times)
   )
-  cat("<zu_stub", if (length(crit)) paste0(": ", paste(crit, collapse = ", ")),
-      ">\n", sep = "")
+  cat(
+    "<zu_stub",
+    if (length(crit)) paste0(": ", paste(crit, collapse = ", ")),
+    ">\n",
+    sep = ""
+  )
   invisible(x)
 }
 
@@ -85,21 +104,32 @@ print.zu_stub <- function(x, ...) {
 # not a criterion — it must not narrow the match, or a stub with no matchers
 # would match nothing instead of everything.
 stub_matches <- function(stub, req) {
-  if (stub$matched >= stub$times) return(FALSE)
-  if (!is.null(stub$method) && !identical(toupper(req$method), stub$method))
+  if (stub$matched >= stub$times) {
     return(FALSE)
-  if (!is.null(stub$url) && !identical(req$url, stub$url)) return(FALSE)
-  if (!is.null(stub$regex) && !grepl(stub$regex, req$url)) return(FALSE)
+  }
+  if (!is.null(stub$method) && !identical(toupper(req$method), stub$method)) {
+    return(FALSE)
+  }
+  if (!is.null(stub$url) && !identical(req$url, stub$url)) {
+    return(FALSE)
+  }
+  if (!is.null(stub$regex) && !grepl(stub$regex, req$url)) {
+    return(FALSE)
+  }
   if (length(stub$headers)) {
     have <- req$headers
-    hn   <- tolower(names(have) %||% character())
+    hn <- tolower(names(have) %||% character())
     for (i in seq_along(stub$headers)) {
       j <- match(tolower(names(stub$headers)[i]), hn)
-      if (is.na(j) || !identical(unname(have[j]), unname(stub$headers[i])))
+      if (is.na(j) || !identical(unname(have[j]), unname(stub$headers[i]))) {
         return(FALSE)
+      }
     }
   }
-  if (!is.null(stub$body) && !identical(as.raw(req$body %||% raw()), stub$body))
+  if (
+    !is.null(stub$body) && !identical(as.raw(req$body %||% raw()), stub$body)
+  ) {
     return(FALSE)
+  }
   TRUE
 }

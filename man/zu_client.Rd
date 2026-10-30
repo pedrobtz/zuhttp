@@ -32,16 +32,20 @@ works. Joining is textual, not RFC 3986 resolution: see Details.}
 
 \item{query}{Named list of default query parameters.}
 
-\item{timeout}{Total seconds for a request, redirects included. DNS resolution is not
-bounded by it (nor by Ctrl-C); see \link{zuhttp_tls}.}
+\item{timeout}{Total seconds for a request, redirects included. DNS
+resolution is not bounded by it (nor by Ctrl-C); see \link{zuhttp_tls}.}
 
-\item{redirects}{Maximum redirects to follow. \code{0} returns the 3xx itself.}
+\item{redirects}{Maximum redirects to follow. \code{0} returns the 3xx itself.
+A \code{Location} that is not a valid URL reference — a raw space or non-ASCII
+bytes — raises \code{zu_url_error} rather than being repaired (§8.2), and a
+redirect back to a URL already requested raises \code{zu_redirect_error}.}
 
 \item{verify}{Verify the certificate and hostname. Leave this \code{TRUE}.}
 
-\item{max_body}{Maximum decoded body size in bytes.}
+\item{max_body}{Maximum decoded body size in bytes; \code{Inf} for no limit.}
 
-\item{user_agent}{Default \code{User-Agent}.}
+\item{user_agent}{Default \code{User-Agent}. Unset, requests send
+\verb{zuhttp/<version>}.}
 
 \item{check}{Raise a condition for 4xx and 5xx responses (§31.14). \code{FALSE}
 returns the response whatever its status.}

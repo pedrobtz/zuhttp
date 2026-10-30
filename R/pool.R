@@ -1,7 +1,7 @@
 # §26 — the connection pool, from R.
 #
-# The pool itself is C (src/zuh_pool.c) and has been since S16's first half.
-# This file is only the part §26.5 puts in R: deciding WHEN a client needs a
+# The pool itself is C (src/zuh_pool.c). This file is only the part §26.5
+# puts in R: deciding WHEN a client needs a
 # native pool, and re-creating one that did not survive a saveRDS().
 #
 # The shape follows from two facts that pull in opposite directions:
@@ -42,16 +42,43 @@
 #' api <- zu_client(pool = zu_pool(max_idle = 4, idle_timeout = 10))
 #' zu_pool_stats(api)
 zu_pool <- function(max_idle = 16L, max_per_host = 4L, idle_timeout = 30) {
+  # Finite: as.integer(Inf) is NA, which C read as "the default" — so
+  # idle_timeout = Inf, a natural way to say "keep forever", silently meant 30.
   check_count <- function(x, nm) {
-    if (!is.numeric(x) || length(x) != 1L || is.na(x) || x < 1)
-      stop("`", nm, "` must be a single number of at least 1", call. = FALSE)
+    if (
+      !is.numeric(x) ||
+        length(x) != 1L ||
+        !is.finite(x) ||
+        x < 1 ||
+        x > .Machine$integer.max
+    ) {
+      stop(
+        "`",
+        nm,
+        "` must be a single whole number of at least 1",
+        call. = FALSE
+      )
+    }
     as.integer(x)
+  }
+  if (
+    !is.numeric(idle_timeout) ||
+      length(idle_timeout) != 1L ||
+      is.na(idle_timeout) ||
+      idle_timeout < 0.001
+  ) {
+    stop(
+      "`idle_timeout` must be a number of seconds, at least 0.001",
+      call. = FALSE
+    )
   }
   structure(
     list(
-      max_idle        = check_count(max_idle, "max_idle"),
-      max_per_host    = check_count(max_per_host, "max_per_host"),
-      idle_timeout_ms = check_count(idle_timeout * 1000, "idle_timeout")
+      max_idle = check_count(max_idle, "max_idle"),
+      max_per_host = check_count(max_per_host, "max_per_host"),
+      # Inf, or anything past what an int of milliseconds holds, is the most
+      # the C side can express, as for `timeout` (timeout_ms()).
+      idle_timeout_ms = timeout_ms(idle_timeout)
     ),
     class = "zu_pool_config"
   )
@@ -83,22 +110,38 @@ print.zu_pool_config <- function(x, ...) {
 # survives a client being saved in one session and used in another.
 client_pool <- function(client) {
   cfg <- client$pool
-  if (is.null(cfg)) return(NULL)
-  if (!inherits(cfg, "zu_pool_config"))
-    stop("`pool` must be zu_pool() or NULL; got ", class(cfg)[[1]],
-         call. = FALSE)
+  if (is.null(cfg)) {
+    return(NULL)
+  }
+  if (!inherits(cfg, "zu_pool_config")) {
+    stop(
+      "`pool` must be zu_pool() or NULL; got ",
+      class(cfg)[[1]],
+      call. = FALSE
+    )
+  }
 
   st <- attr(client, "pool_state")
   # A client built before this attribute existed, or one whose attribute was
   # stripped: give it somewhere to put the pool rather than refusing to run.
-  if (!is.environment(st)) st <- new.env(parent = emptyenv())
+  if (!is.environment(st)) {
+    st <- new.env(parent = emptyenv())
+  }
 
-  if (!is.null(st$ptr) && isTRUE(.Call(C_zu_pool_valid, st$ptr)) &&
-      identical(st$cfg, cfg))
+  if (
+    !is.null(st$ptr) &&
+      isTRUE(.Call(C_zu_pool_valid, st$ptr)) &&
+      identical(st$cfg, cfg)
+  ) {
     return(st$ptr)
+  }
 
-  st$ptr <- .Call(C_zu_pool_new, cfg$max_idle, cfg$max_per_host,
-                  cfg$idle_timeout_ms)
+  st$ptr <- .Call(
+    C_zu_pool_new,
+    cfg$max_idle,
+    cfg$max_per_host,
+    cfg$idle_timeout_ms
+  )
   st$cfg <- cfg
   st$ptr
 }
@@ -119,9 +162,11 @@ client_pool <- function(client) {
 #' @examples
 #' zu_pool_stats(zu_client())
 zu_pool_stats <- function(client) {
-  stopifnot(inherits(client, "zu_client"))
+  check_client(client)
   st <- attr(client, "pool_state")
-  if (!is.environment(st) || is.null(st$ptr)) return(NULL)
+  if (!is.environment(st) || is.null(st$ptr)) {
+    return(NULL)
+  }
   .Call(C_zu_pool_stats, st$ptr)
 }
 
@@ -138,8 +183,10 @@ zu_pool_stats <- function(client) {
 #' api <- zu_client()
 #' zu_pool_reset(api)
 zu_pool_reset <- function(client) {
-  stopifnot(inherits(client, "zu_client"))
+  check_client(client)
   st <- attr(client, "pool_state")
-  if (is.environment(st) && !is.null(st$ptr)) .Call(C_zu_pool_clear, st$ptr)
+  if (is.environment(st) && !is.null(st$ptr)) {
+    .Call(C_zu_pool_clear, st$ptr)
+  }
   invisible(client)
 }

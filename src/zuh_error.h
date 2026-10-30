@@ -49,10 +49,16 @@ typedef enum {
     ZUH_ERR_INTERRUPTED,
     ZUH_ERR_FORK,          /* §26.4 hazard 2, macOS */
     ZUH_ERR_IO,
+    /* Internal signals, below this line: a stream says "closed" or "not yet"
+     * to its caller, and neither is a §34.1 class. Whatever reaches R as one
+     * is ZUH_ERR_IO (zuh_code_public); they once escaped as `zu_closed`. */
     ZUH_ERR_CLOSED,        /* orderly peer close */
     ZUH_ERR_WOULDBLOCK,    /* not an error: retry when the stream is ready */
     ZUH_CODE_COUNT
 } zuh_code;
+
+/* Codes below this have a §34.1 class; the rest are internal (above). */
+#define ZUH_CODE_PUBLIC_COUNT ZUH_ERR_CLOSED
 
 typedef enum {
     ZUH_PHASE_NONE = 0,
@@ -99,5 +105,10 @@ const char *zuh_phase_name(zuh_phase phase);
 
 /* Retryability hint (§33.2, §34.2). */
 int zuh_code_retryable(zuh_code code);
+
+/* The code an R condition carries: itself for a public code, ZUH_ERR_IO for
+ * an internal signal that escaped (a peer close mid-write is an I/O failure,
+ * and §33.2 retries it as one). */
+zuh_code zuh_code_public(zuh_code code);
 
 #endif /* ZUHTTP_ERROR_H */

@@ -5,7 +5,7 @@
 # already serialised — and a package author who prefers another implementation
 # can swap it in rather than taking jsonlite transitively.
 
-json_state <- new.env(parent = emptyenv())
+the_json <- new.env(parent = emptyenv())
 
 #' Choose the JSON implementation
 #'
@@ -29,11 +29,15 @@ json_state <- new.env(parent = emptyenv())
 #'
 #' zu_set_json_backend(old$encode, old$decode)   # restore
 zu_set_json_backend <- function(encode = NULL, decode = NULL) {
-  old <- list(encode = json_state$encode, decode = json_state$decode)
-  if (!is.null(encode)) stopifnot(is.function(encode))
-  if (!is.null(decode)) stopifnot(is.function(decode))
-  json_state$encode <- encode
-  json_state$decode <- decode
+  old <- list(encode = the_json$encode, decode = the_json$decode)
+  if (!is.null(encode)) {
+    stopifnot(is.function(encode))
+  }
+  if (!is.null(decode)) {
+    stopifnot(is.function(decode))
+  }
+  the_json$encode <- encode
+  the_json$decode <- decode
   invisible(old)
 }
 
@@ -42,32 +46,44 @@ zu_set_json_backend <- function(encode = NULL, decode = NULL) {
 has_jsonlite <- function() requireNamespace("jsonlite", quietly = TRUE)
 
 need_jsonlite <- function(what) {
-  if (has_jsonlite()) return(invisible(TRUE))
-  stop("`", what, "` needs a JSON implementation, and jsonlite is not installed.\n",
-       "  zuhttp has no hard dependencies, so JSON support is optional.\n",
-       "  * install.packages(\"jsonlite\")\n",
-       "  * or supply your own: zu_set_json_backend(encode = , decode = )\n",
-       "  Everything else in zuhttp works without it, including sending a\n",
-       "  JSON string you have already serialised, with zu_body_raw().",
-       call. = FALSE)
+  if (has_jsonlite()) {
+    return(invisible(TRUE))
+  }
+  stop(
+    "`",
+    what,
+    "` needs a JSON implementation, and jsonlite is not installed.\n",
+    "  zuhttp has no hard dependencies, so JSON support is optional.\n",
+    "  * install.packages(\"jsonlite\")\n",
+    "  * or supply your own: zu_set_json_backend(encode = , decode = )\n",
+    "  Everything else in zuhttp works without it, including sending a\n",
+    "  JSON string you have already serialised, with zu_body_raw().",
+    call. = FALSE
+  )
 }
 
 json_encode <- function(x, ...) {
-  if (!is.null(json_state$encode)) {
-    out <- json_state$encode(x, ...)
+  if (!is.null(the_json$encode)) {
+    out <- the_json$encode(x, ...)
   } else {
     need_jsonlite("zu_body_json()")
     # digits = NA keeps full double precision; null = "null" stops NULL from
     # silently becoming {} inside a list.
     out <- as.character(jsonlite::toJSON(x, null = "null", digits = NA, ...))
   }
-  if (!is.character(out) || length(out) != 1L || is.na(out))
-    stop("the JSON backend's encode() must return a single string", call. = FALSE)
+  if (!is.character(out) || length(out) != 1L || is.na(out)) {
+    stop(
+      "the JSON backend's encode() must return a single string",
+      call. = FALSE
+    )
+  }
   out
 }
 
 json_decode <- function(txt, ...) {
-  if (!is.null(json_state$decode)) return(json_state$decode(txt, ...))
+  if (!is.null(the_json$decode)) {
+    return(the_json$decode(txt, ...))
+  }
   need_jsonlite("zu_resp_json()")
   jsonlite::fromJSON(txt, ...)
 }

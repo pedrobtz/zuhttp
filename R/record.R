@@ -25,13 +25,17 @@ cassette_file <- function(dir, name) file.path(dir, paste0(name, ".rds"))
 
 cassette_read <- function(dir, name) {
   f <- cassette_file(dir, name)
-  if (!file.exists(f)) return(list())
+  if (!file.exists(f)) {
+    return(list())
+  }
   out <- readRDS(f)
   if (!is.list(out)) list() else out
 }
 
 cassette_write <- function(dir, name, interactions) {
-  if (!dir.exists(dir)) dir.create(dir, recursive = TRUE)
+  if (!dir.exists(dir)) {
+    dir.create(dir, recursive = TRUE)
+  }
   saveRDS(interactions, cassette_file(dir, name), compress = FALSE)
   invisible(interactions)
 }
@@ -39,18 +43,13 @@ cassette_write <- function(dir, name, interactions) {
 # The redacted, storable form of a request, and the key at the same time —
 # they are deliberately the same thing, so a key can never carry a secret the
 # stored form redacted. See note 2 above.
-redacted_request <- function(req) {
-  body <- req$body
-  ct   <- tolower(paste(req$headers[tolower(names(req$headers) %||% "") ==
-                                    "content-type"], collapse = ""))
-  if (length(body) && grepl("application/x-www-form-urlencoded", ct, fixed = TRUE)) {
-    body <- charToRaw(zu_redact_form(rawToChar(as.raw(body))))
-  }
+cassette_request <- function(req) {
+  r <- redact_request_fields(req)
   list(
-    method  = toupper(req$method %||% "GET"),
-    url     = zu_redact_url(req$url %||% ""),
-    headers = zu_redact_headers_for_display(req$headers),
-    body    = if (length(body)) as.raw(body) else raw()
+    method = toupper(r$method %||% "GET"),
+    url = r$url %||% "",
+    headers = r$headers,
+    body = if (length(r$body)) as.raw(r$body) else raw()
   )
 }
 
@@ -59,26 +58,34 @@ redacted_request <- function(req) {
 # nothing to do with which response a server would send, and including them
 # makes cassettes miss for reasons a test author cannot see.
 interaction_key <- function(rr) {
-  paste(rr$method, rr$url,
-        if (length(rr$body)) paste(rr$body, collapse = "") else "",
-        sep = "\x1f")
+  paste(
+    rr$method,
+    rr$url,
+    if (length(rr$body)) paste(rr$body, collapse = "") else "",
+    sep = "\x1f"
+  )
 }
 
-redacted_response <- function(resp) {
+cassette_response <- function(resp) {
   list(
-    status      = zu_resp_status(resp),
-    headers     = zu_redact_headers_for_display(resp$headers),
-    body        = as.raw(resp$body %||% raw()),
-    url         = zu_redact_url(resp$url %||% ""),
+    status = zu_resp_status(resp),
+    headers = zu_redact_headers_for_display(resp$headers),
+    body = as.raw(resp$body %||% raw()),
+    url = zu_redact_url(resp$url %||% ""),
     tls_version = resp$tls_version,
-    redirects   = resp$redirects %||% 0L
+    redirects = resp$redirects %||% 0L
   )
 }
 
 replay_response <- function(rec) {
-  r <- zu_response(status = rec$status, headers = rec$headers, body = rec$body,
-                   url = rec$url, tls_version = rec$tls_version,
-                   redirects = rec$redirects %||% 0L)
+  r <- zu_response(
+    status = rec$status,
+    headers = rec$headers,
+    body = rec$body,
+    url = rec$url,
+    tls_version = rec$tls_version,
+    redirects = rec$redirects %||% 0L
+  )
   r$replayed <- TRUE
   r
 }
@@ -130,13 +137,16 @@ replay_response <- function(rec) {
 #' rep <- zu_cassette_transport(dir, "demo", mode = "replay")
 #' zu_resp_text(zu_get("https://x.test/a", client = zu_client(transport = rep)))
 #' zu_cassette_clear(dir, "demo")
-zu_cassette_transport <- function(dir = file.path(tempdir(), "zuhttp-cassettes"),
-                                  name = "default",
-                                  mode = c("auto", "replay", "record"),
-                                  transport = zu_native_transport()) {
+zu_cassette_transport <- function(
+  dir = file.path(tempdir(), "zuhttp-cassettes"),
+  name = "default",
+  mode = c("auto", "replay", "record"),
+  transport = zu_native_transport()
+) {
   mode <- match.arg(mode)
-  if (!is.character(name) || length(name) != 1L || !nzchar(name))
+  if (!is.character(name) || length(name) != 1L || !nzchar(name)) {
     stop("`name` must be a single non-empty string", call. = FALSE)
+  }
   structure(
     list(dir = dir, name = name, mode = mode, transport = transport),
     class = c("zu_cassette_transport", "zu_transport")
@@ -154,23 +164,40 @@ print.zu_cassette_transport <- function(x, ...) {
 
 #' @export
 zu_transport_perform.zu_cassette_transport <- function(transport, req) {
-  rr  <- redacted_request(req)
+  rr <- cassette_request(req)
   key <- interaction_key(rr)
   tape <- cassette_read(transport$dir, transport$name)
-  hit  <- Position(function(i) identical(i$key, key), tape, nomatch = 0L)
+  hit <- Position(function(i) identical(i$key, key), tape, nomatch = 0L)
 
-  if (transport$mode != "record" && hit > 0L)
+  if (transport$mode != "record" && hit > 0L) {
     return(replay_response(tape[[hit]]$response))
+  }
 
-  if (transport$mode == "replay")
-    stop("no recorded interaction for ", rr$method, " ", rr$url,
-         "\n  cassette: ", cassette_file(transport$dir, transport$name),
-         "\n  record it first with mode = \"auto\"", call. = FALSE)
+  if (transport$mode == "replay") {
+    stop(
+      "no recorded interaction for ",
+      rr$method,
+      " ",
+      rr$url,
+      "\n  cassette: ",
+      cassette_file(transport$dir, transport$name),
+      "\n  record it first with mode = \"auto\"",
+      call. = FALSE
+    )
+  }
 
   resp <- zu_transport_perform(transport$transport, req)
-  entry <- list(key = key, request = rr, response = redacted_response(resp),
-                recorded_at = as.character(Sys.time()))
-  if (hit > 0L) tape[[hit]] <- entry else tape[[length(tape) + 1L]] <- entry
+  entry <- list(
+    key = key,
+    request = rr,
+    response = cassette_response(resp),
+    recorded_at = as.character(Sys.time())
+  )
+  if (hit > 0L) {
+    tape[[hit]] <- entry
+  } else {
+    tape[[length(tape) + 1L]] <- entry
+  }
   cassette_write(transport$dir, transport$name, tape)
   resp
 }
@@ -191,15 +218,21 @@ zu_transport_perform.zu_cassette_transport <- function(transport, req) {
 #' @export
 #' @examples
 #' zu_cassette_interactions(tempdir(), "no-such-cassette")
-zu_cassette_interactions <- function(dir = file.path(tempdir(), "zuhttp-cassettes"),
-                                     name = "default") {
-  lapply(cassette_read(dir, name), function(i) i[c("request", "response", "recorded_at")])
+zu_cassette_interactions <- function(
+  dir = file.path(tempdir(), "zuhttp-cassettes"),
+  name = "default"
+) {
+  lapply(cassette_read(dir, name), function(i) {
+    i[c("request", "response", "recorded_at")]
+  })
 }
 
 #' @rdname zu_cassette_interactions
 #' @export
-zu_cassette_clear <- function(dir = file.path(tempdir(), "zuhttp-cassettes"),
-                              name = "default") {
+zu_cassette_clear <- function(
+  dir = file.path(tempdir(), "zuhttp-cassettes"),
+  name = "default"
+) {
   f <- cassette_file(dir, name)
   invisible(file.exists(f) && file.remove(f))
 }

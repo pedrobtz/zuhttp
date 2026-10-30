@@ -282,7 +282,7 @@ void suite_redact(void) {
     ZUH_CASE("every chain ends zu_error, zuhttp_error (D-65)");
     {
         int code;
-        for (code = 1; code < (int)ZUH_CODE_COUNT; code++) {
+        for (code = 1; code < (int)ZUH_CODE_PUBLIC_COUNT; code++) {
             const char *chain[ZUH_CLASS_CHAIN_MAX];
             int n = zuh_code_class_chain((zuh_code)code, chain, ZUH_CLASS_CHAIN_MAX);
             ZUH_CHECK(n >= 3);
@@ -298,6 +298,13 @@ void suite_redact(void) {
         ZUH_CHECK_EQ_INT(zuh_code_class_chain(ZUH_OK, chain, ZUH_CLASS_CHAIN_MAX), 0);
         ZUH_CHECK_EQ_INT(zuh_code_class_chain((zuh_code)999, chain, ZUH_CLASS_CHAIN_MAX), 0);
         ZUH_CHECK_EQ_INT(zuh_code_class_chain(ZUH_ERR_DNS, chain, 0), 0);
+        /* The internal stream signals are not §34.1 classes: they once
+         * reached R as `zu_closed`, a class no handler could know about. */
+        ZUH_CHECK_EQ_INT(zuh_code_class_chain(ZUH_ERR_CLOSED, chain, ZUH_CLASS_CHAIN_MAX), 0);
+        ZUH_CHECK_EQ_INT(zuh_code_class_chain(ZUH_ERR_WOULDBLOCK, chain, ZUH_CLASS_CHAIN_MAX), 0);
+        ZUH_CHECK_EQ_INT(zuh_code_public(ZUH_ERR_CLOSED), ZUH_ERR_IO);
+        ZUH_CHECK_EQ_INT(zuh_code_public(ZUH_ERR_WOULDBLOCK), ZUH_ERR_IO);
+        ZUH_CHECK_EQ_INT(zuh_code_public(ZUH_ERR_TLS_CERT), ZUH_ERR_TLS_CERT);
     }
 
     ZUH_CASE("no leaks across the suite");

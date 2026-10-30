@@ -24,8 +24,13 @@ withCallingHandlers(
 )
 
 masked <- grep("masked", msgs, value = TRUE)
-cat("attached httr2", format(packageVersion("httr2")), "then zuhttp;",
-    length(msgs), "startup message(s)\n")
+cat(
+  "attached httr2",
+  format(packageVersion("httr2")),
+  "then zuhttp;",
+  length(msgs),
+  "startup message(s)\n"
+)
 if (length(masked)) {
   cat(masked, sep = "\n")
   stop("attaching zuhttp after httr2 masks something (§61.13)")

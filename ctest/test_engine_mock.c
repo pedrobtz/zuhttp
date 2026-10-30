@@ -85,6 +85,12 @@ static zuh_code dial(void *ctx, const char *host, uint16_t port,
     d->port[i] = port;
     t = (tap_impl *)zuh_calloc(1, sizeof *t);
     s = (zuh_stream *)zuh_calloc(1, sizeof *s);
+    /* The allocation-failure sweep below fails these too. */
+    if (!t || !s) {
+        zuh_free(t); zuh_free(s);
+        zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_CONNECT, "out of memory");
+        return ZUH_ERR_NOMEM;
+    }
     d->steps[i][0].kind = ZUH_MOCK_DATA;
     d->steps[i][0].data = c->bytes;
     d->steps[i][0].len  = c->len ? c->len : strlen(c->bytes);
@@ -92,6 +98,11 @@ static zuh_code dial(void *ctx, const char *host, uint16_t port,
     d->steps[i][1].data = c->next;
     d->steps[i][1].len  = c->next ? strlen(c->next) : 0;
     t->inner = zuh_mock_stream_new(d->steps[i], c->next ? 2 : 1, c->max_read, 0);
+    if (!t->inner) {
+        zuh_free(t); zuh_free(s);
+        zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_CONNECT, "out of memory");
+        return ZUH_ERR_NOMEM;
+    }
     if (c->not_readable) zuh_mock_stream_set_readable(t->inner, 1, 0);
     t->d = d; t->idx = i;
     s->vt = &k_tap_vt; s->impl = t;
@@ -833,4 +844,259 @@ void suite_engine_mock(void) {
         ZUH_CHECK_EQ_INT(d.sent[0].len, 0);
         dialer_free(&d);
     }
+
+    ZUH_CASE("engine: §17.2 defaults: a bare User-Agent without a version, Connection follows the pool");
+    {
+        /* R passes "zuhttp/<version>"; C holds no version to go stale. */
+        conn_script sc[] = {{ OK200(2) "ok", 0, 0, 0, NULL }};
+        conn_script sk[] = {{ OK200(2) "ok", 0, 0, 1, NULL }};
+        zuh_pool *pool = zuh_pool_new(NULL);
+        dialer_init(&d, sc, 1); opts_for(&o, &d);
+        ZUH_CHECK_EQ_INT(zuh_engine_get(&r, "http://example.test/", &o, &e), ZUH_OK);
+        ZUH_CHECK(has(sent(&d, 0), "User-Agent: zuhttp\r\n"));
+        /* no pool: the connection is closed after the response, so say so */
+        ZUH_CHECK(has(sent(&d, 0), "Connection: close\r\n"));
+        ZUH_CHECK(!has(sent(&d, 0), "keep-alive"));
+        zuh_result_free(&r); dialer_free(&d);
+        dialer_init(&d, sk, 1); opts_for(&o, &d); o.pool = pool;
+        o.user_agent = "zuhttp/9.9.9";
+        ZUH_CHECK_EQ_INT(zuh_engine_get(&r, "http://example.test/", &o, &e), ZUH_OK);
+        ZUH_CHECK(has(sent(&d, 0), "User-Agent: zuhttp/9.9.9\r\n"));
+        ZUH_CHECK(has(sent(&d, 0), "Connection: keep-alive\r\n"));
+        zuh_result_free(&r); dialer_free(&d); zuh_pool_free(pool);
+    }
+
+    ZUH_CASE("engine: a request header is bounded by the 64 KiB block, not §40's response limits (§17)");
+    {
+        /* A 9 KB bearer token was refused as a "body limit" by the 8 KiB
+         * per-value cap meant for untrusted responses. */
+        static char tok[9100];
+        static const char *hn[] = { "Authorization" };
+        const char *hv[1];
+        zuh_req_spec spec;
+        conn_script sc[] = {{ OK200(2) "ok", 0, 0, 0, NULL }};
+        memcpy(tok, "Bearer ", 7); memset(tok + 7, 'a', sizeof tok - 8); tok[sizeof tok - 1] = '\0';
+        hv[0] = tok;
+        memset(&spec, 0, sizeof spec);
+        spec.header_names = hn; spec.header_values = hv; spec.n_headers = 1;
+        dialer_init(&d, sc, 1); opts_for(&o, &d);
+        rc = zuh_engine_perform(&r, "http://example.test/", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        ZUH_CHECK(has(sent(&d, 0), tok));
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        dialer_free(&d);
+    }
+
+    ZUH_CASE("engine: a request header carrying CR/LF is refused before connecting, naming the header (§17.1)");
+    {
+        static const char *hn[]  = { "Accept", "X-Evil" };
+        static const char *hv[]  = { "*/*", "a\r\nInjected: 1" };
+        static const char *bn[]  = { "Bad Name" };
+        static const char *bv[]  = { "v" };
+        zuh_req_spec spec;
+        conn_script sc[] = {{ OK200(2) "ok", 0, 0, 0, NULL }};
+        memset(&spec, 0, sizeof spec);
+        spec.header_names = hn; spec.header_values = hv; spec.n_headers = 2;
+        dialer_init(&d, sc, 1); opts_for(&o, &d);
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_ERR_PARSE);
+        ZUH_CHECK(has(e.message, "`X-Evil`") && has(e.message, "invalid value"));
+        ZUH_CHECK(!has(e.message, "Injected"));      /* never the value */
+        ZUH_CHECK_EQ_INT(d.next, 0);                  /* refused before connecting */
+        dialer_free(&d);
+        spec.header_names = bn; spec.header_values = bv; spec.n_headers = 1;
+        dialer_init(&d, sc, 1); opts_for(&o, &d);
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_ERR_PARSE);
+        ZUH_CHECK(has(e.message, "header 1 has an invalid name"));
+        ZUH_CHECK(!has(e.message, "Bad Name"));
+        ZUH_CHECK_EQ_INT(d.next, 0);
+        dialer_free(&d);
+    }
+
+    ZUH_CASE("engine: a redirect back to a URL already requested is a loop, raised at once (§19.4)");
+    {
+        conn_script self[] = {
+            { "HTTP/1.1 302 Found\r\nLocation: /loop\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", 0, 0, 0, NULL },
+            { "HTTP/1.1 302 Found\r\nLocation: /loop\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", 0, 0, 0, NULL } };
+        conn_script ab[] = {
+            { "HTTP/1.1 302 Found\r\nLocation: /b\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", 0, 0, 0, NULL },
+            { "HTTP/1.1 302 Found\r\nLocation: /a\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", 0, 0, 0, NULL },
+            { OK200(2) "no", 0, 0, 0, NULL } };
+        conn_script see_other[] = {
+            { "HTTP/1.1 303 See Other\r\nLocation: /x\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", 0, 0, 0, NULL },
+            { OK200(2) "ok", 0, 0, 0, NULL } };
+        zuh_req_spec spec;
+        /* /loop -> /loop: one round trip, not max_redirects of them */
+        dialer_init(&d, self, 2); opts_for(&o, &d);
+        zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(zuh_engine_get(&r, "http://example.test/loop", &o, &e), ZUH_ERR_REDIRECT);
+        ZUH_CHECK_EQ_INT(d.next, 1);
+        ZUH_CHECK(has(e.message, "redirect loop"));
+        dialer_free(&d);
+        /* /a -> /b -> /a */
+        dialer_init(&d, ab, 3); opts_for(&o, &d);
+        ZUH_CHECK_EQ_INT(zuh_engine_get(&r, "http://example.test/a", &o, &e), ZUH_ERR_REDIRECT);
+        ZUH_CHECK_EQ_INT(d.next, 2);
+        dialer_free(&d);
+        /* the method is part of the pair: POST /x -> 303 -> GET /x is no loop */
+        memset(&spec, 0, sizeof spec); spec.method = "POST";
+        dialer_init(&d, see_other, 2); opts_for(&o, &d);
+        rc = zuh_engine_perform(&r, "http://example.test/x", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        dialer_free(&d);
+    }
+
+    ZUH_CASE("engine: a pooled connection still reports that it runs through the proxy (§35.2)");
+    {
+        zuh_pool *pool = zuh_pool_new(NULL);
+        zuh_pool_stats st;
+        conn_script sc[] = {{ OK200(1) "A", 0, 0, 1, OK200(1) "B" }};
+        dialer_init(&d, sc, 1); opts_for(&o, &d); o.pool = pool;
+        o.proxy = "http://proxy.test:3128";
+        ZUH_CHECK_EQ_INT(zuh_engine_get(&r, "http://origin.test/", &o, &e), ZUH_OK);
+        ZUH_CHECK_EQ_INT(r.proxy_used, 1);
+        ZUH_CHECK_EQ_INT(r.reused_connection, 0);
+        zuh_result_free(&r);
+        ZUH_CHECK_EQ_INT(zuh_engine_get(&r, "http://origin.test/", &o, &e), ZUH_OK);
+        ZUH_CHECK_EQ_INT(r.reused_connection, 1);
+        ZUH_CHECK_EQ_INT(r.proxy_used, 1);            /* was 0 on every reuse */
+        ZUH_CHECK(r.body.len == 1 && r.body.data[0] == 'B');
+        zuh_result_free(&r);
+        zuh_pool_stats_get(pool, &st);
+        ZUH_CHECK_EQ_INT(st.hits, 1);
+        dialer_free(&d); zuh_pool_free(pool);
+    }
+
+    ZUH_CASE("engine: a response header block over 64 KiB is refused (§40)");
+    {
+        static char big[80000];
+        size_t k, n = 0;
+        conn_script sc[1];
+        n += (size_t)snprintf(big + n, sizeof big - n, "HTTP/1.1 200 OK\r\n");
+        for (k = 0; k < 60; k++) {
+            n += (size_t)snprintf(big + n, sizeof big - n, "X-%02lu: ", (unsigned long)k);
+            memset(big + n, 'v', 1200); n += 1200;
+            n += (size_t)snprintf(big + n, sizeof big - n, "\r\n");
+        }
+        n += (size_t)snprintf(big + n, sizeof big - n, "Content-Length: 0\r\n\r\n");
+        memset(sc, 0, sizeof sc); sc[0].bytes = big; sc[0].len = n;
+        dialer_init(&d, sc, 1); opts_for(&o, &d);
+        zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(zuh_engine_get(&r, "http://example.test/", &o, &e), ZUH_ERR_BODY_LIMIT);
+        ZUH_CHECK(has(e.message, "header block exceeds"));
+        dialer_free(&d);
+    }
+
+    ZUH_CASE("engine: protocol failures in the response head each raise their own error");
+    {
+        static const struct { const char *bytes; zuh_code want; const char *says; } cases[] = {
+            { "HTTP/1.1 200 OK\r\nContent-Le",             ZUH_ERR_PARSE, "before the response headers ended" },
+            { "HTTP/1.2 200 OK\r\nContent-Length: 0\r\n\r\n", ZUH_ERR_PARSE, "unsupported HTTP/1.2" },
+            { "HTTP/1.1 999 Odd\r\nContent-Length: 0\r\n\r\n", ZUH_ERR_PARSE, "invalid status code 999" },
+            { "HTTP/1.1 099 Odd\r\nContent-Length: 0\r\n\r\n", ZUH_ERR_PARSE, "invalid status code" } };
+        size_t k;
+        for (k = 0; k < sizeof cases / sizeof cases[0]; k++) {
+            conn_script sc[1];
+            memset(sc, 0, sizeof sc); sc[0].bytes = cases[k].bytes;
+            dialer_init(&d, sc, 1); opts_for(&o, &d);
+            zuh_error_clear(&e);
+            ZUH_CHECK_EQ_INT(zuh_engine_get(&r, "http://example.test/", &o, &e), cases[k].want);
+            ZUH_CHECK(has(e.message, cases[k].says));
+            dialer_free(&d);
+        }
+    }
+
+    ZUH_CASE("engine: a CONNECT reply that never ends, or a proxy that hangs up, is a proxy error (§20.3)");
+    {
+        static char big[70000];
+        size_t n;
+        conn_script hang[] = {{ "HTTP/1.1 200 Connection est", 0, 0, 0, NULL }};
+        conn_script huge[1];
+        n = (size_t)snprintf(big, sizeof big, "HTTP/1.1 200 OK\r\n");
+        while (n + 1200 < sizeof big) {
+            n += (size_t)snprintf(big + n, sizeof big - n, "X-Pad: ");
+            memset(big + n, 'p', 1000); n += 1000;
+            n += (size_t)snprintf(big + n, sizeof big - n, "\r\n");
+        }
+        memset(huge, 0, sizeof huge); huge[0].bytes = big; huge[0].len = n;
+        dialer_init(&d, hang, 1); opts_for(&o, &d); o.proxy = "http://proxy.test:3128";
+        zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(zuh_engine_get(&r, "https://origin.test/", &o, &e), ZUH_ERR_PROXY);
+        ZUH_CHECK(has(e.message, "closed the connection during CONNECT"));
+        dialer_free(&d);
+        dialer_init(&d, huge, 1); opts_for(&o, &d); o.proxy = "http://proxy.test:3128";
+        zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(zuh_engine_get(&r, "https://origin.test/", &o, &e), ZUH_ERR_PROXY);
+        ZUH_CHECK(has(e.message, "too large"));
+        dialer_free(&d);
+    }
+
+    ZUH_CASE("engine: corrupt deflate data after a valid gzip header is a decode error (§21)");
+    {
+        /* D-76 covers a stream that ends early; this one is wrong from the
+         * first block, which is inflate()'s Z_DATA_ERROR branch. */
+        static const char resp[] =
+            "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: 18\r\n\r\n"
+            "\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03" "\xff\xff\xff\xff\xff\xff\xff\xff";
+        conn_script sc[1];
+        memset(sc, 0, sizeof sc); sc[0].bytes = resp; sc[0].len = sizeof resp - 1;
+        dialer_init(&d, sc, 1); opts_for(&o, &d);
+        zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(zuh_engine_get(&r, "http://example.test/", &o, &e), ZUH_ERR_BODY_DECODE);
+        dialer_free(&d);
+    }
+
+    ZUH_CASE("engine: every allocation failure on a proxied, pooled redirect fails cleanly (§11, §43)");
+    {
+        /* The engine has dozens of hand-written exits on allocation failure.
+         * Fail each allocation in turn: every run must succeed or report
+         * ZUH_ERR_NOMEM with the error filled in, and leave nothing live —
+         * the proxy password above all (§42). */
+        conn_script sc[] = {
+            { "HTTP/1.1 302 Found\r\nLocation: http://other.test/b\r\nContent-Length: 0\r\n\r\n", 0, 0, 1, NULL },
+            { OK200(2) "ok", 0, 0, 1, NULL } };
+        static const char *hn[] = { "Authorization", "Accept" };
+        static const char *hv[] = { "Bearer s3cret", "*/*" };
+        zuh_req_spec spec;
+        zuh_alloc_stats before, after, counted;
+        long n, total, failed_cleanly = 0, bad = 0;
+        memset(&spec, 0, sizeof spec);
+        spec.header_names = hn; spec.header_values = hv; spec.n_headers = 2;
+        /* One clean run to count the allocations the scenario makes. */
+        {
+            zuh_pool *pool = zuh_pool_new(NULL);
+            dialer_init(&d, sc, 2); opts_for(&o, &d); o.pool = pool;
+            o.proxy = "http://u:p@proxy.test:3128";
+            zuh_alloc_stats_get(&before);
+            ZUH_CHECK_EQ_INT(zuh_engine_perform(&r, "http://example.test/a", &spec, &o, &e), ZUH_OK);
+            zuh_alloc_stats_get(&counted);
+            zuh_result_free(&r); dialer_free(&d); zuh_pool_free(pool);
+            total = (long)(counted.total_allocs - before.total_allocs);
+        }
+        ZUH_CHECK(total > 20);
+        for (n = 0; n < total; n++) {
+            zuh_pool *pool;
+            zuh_alloc_stats_get(&before);
+            pool = zuh_pool_new(NULL);
+            dialer_init(&d, sc, 2); opts_for(&o, &d); o.pool = pool;
+            o.proxy = "http://u:p@proxy.test:3128";
+            zuh_error_clear(&e);
+            zuh_alloc_fail_after(n);
+            rc = zuh_engine_perform(&r, "http://example.test/a", &spec, &o, &e);
+            zuh_alloc_fail_after(-1);
+            if (rc == ZUH_OK) zuh_result_free(&r);
+            else if (rc == ZUH_ERR_NOMEM && e.code == ZUH_ERR_NOMEM) failed_cleanly++;
+            else bad++;
+            zuh_pool_free(pool); dialer_free(&d);
+            zuh_alloc_stats_get(&after);
+            if (after.live_blocks != before.live_blocks) bad++;
+        }
+        ZUH_CHECK(failed_cleanly > 0);   /* the sweep reached failures at all */
+        ZUH_CHECK_EQ_INT(bad, 0);
+    }
+
 }

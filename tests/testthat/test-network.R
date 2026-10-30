@@ -59,8 +59,10 @@ test_that("the redirect budget is respected", {
 
 test_that("certificate verification is on and raises a catchable condition", {
   skip_unless_online()
-  e <- tryCatch(zu_get_badssl("https://expired.badssl.com/"),
-                zu_tls_error = function(e) e)
+  e <- tryCatch(
+    zu_get_badssl("https://expired.badssl.com/"),
+    zu_tls_error = function(e) e
+  )
 
   # The whole §34.1 point: a caller can catch "any TLS problem" without
   # enumerating the leaves.
@@ -74,8 +76,10 @@ test_that("certificate verification is on and raises a catchable condition", {
 
 test_that("a hostname mismatch is a distinct class from a bad chain", {
   skip_unless_online()
-  e <- tryCatch(zu_get_badssl("https://wrong.host.badssl.com/"),
-                zu_tls_error = function(e) e)
+  e <- tryCatch(
+    zu_get_badssl("https://wrong.host.badssl.com/"),
+    zu_tls_error = function(e) e
+  )
   expect_s3_class(e, "zu_tls_hostname_error")
   # Distinct, not merely "some TLS error": a user can tell these apart.
   expect_false(inherits(e, "zu_tls_certificate_error"))
@@ -88,25 +92,67 @@ test_that("a non-HTTP scheme is refused before any connection is made", {
   expect_s3_class(e, "zu_error")
 })
 
-test_that("verify = FALSE warns loudly", {
+test_that("verify = FALSE warns loudly, and the request still goes ahead", {
+  # Offline. The warning is raised while resolving the request, so a mock
+  # transport is enough; this test once went to expired.badssl.com with no
+  # network gate, so every R CMD check spent 15 s on a third-party host.
+  called <- FALSE
+  cli <- zu_client(
+    transport = zu_mock_transport(function(req) {
+      called <<- TRUE
+      zu_response(200L)
+    })
+  )
   expect_warning(
-    tryCatch(zu_get_badssl("https://expired.badssl.com/", verify = FALSE, timeout = 5),
-             zu_error = function(e) NULL),
+    r <- zu_get("https://expired.example/", verify = FALSE, client = cli),
     "disables certificate AND hostname"
   )
+  expect_true(called)
+  expect_identical(zu_resp_status(r), 200L)
 })
 
-test_that("the total timeout is enforced", {
+test_that("verify = FALSE reaches an expired certificate", {
   skip_unless_online()
-  e <- tryCatch(zu_get("https://example.com", timeout = 0.001),
-                zu_error = function(e) e)
-  expect_s3_class(e, "zu_error")
+  r <- suppressWarnings(tryCatch(
+    zu_get_badssl("https://expired.badssl.com/", verify = FALSE, timeout = 5),
+    zu_error = function(e) e
+  ))
+  if (inherits(r, "zu_error")) {
+    expect_false(inherits(r, "zu_tls_certificate_error"))
+  } else {
+    expect_identical(zu_resp_status(r), 200L)
+  }
+})
+
+test_that("the total timeout is enforced, as a timeout (§24)", {
+  skip_on_cran()
+  skip_under_gctorture() # a wall-clock bound
+  skip_if(getRversion() < "4.0.0", "serverSocket() is R 4.0")
+  # Offline: a socket that listens and never accepts, so the request is sent
+  # and no response ever comes. Asserting only "some zu_error" against a
+  # public host let a DNS or TLS failure stand in for the timeout.
+  port <- sample(20000:59000, 1L)
+  srv <- serverSocket(port)
+  on.exit(close(srv), add = TRUE)
+  t0 <- proc.time()[["elapsed"]]
+  e <- expect_error(
+    zu_get(
+      sprintf("http://127.0.0.1:%d/", port),
+      timeout = 0.5,
+      client = zu_client(pool = NULL, proxy = FALSE)
+    ),
+    class = "zu_timeout_error"
+  )
+  expect_true(e$phase %in% c("ttfb", "read"))
+  expect_lt(proc.time()[["elapsed"]] - t0, 5)
 })
 
 test_that("an error status raises by default and is inspectable with check = FALSE", {
   skip_unless_online()
-  expect_error(zu_get("https://httpbin.org/status/404", timeout = 30),
-               class = "zu_http_client_error")
+  expect_error(
+    zu_get("https://httpbin.org/status/404", timeout = 30),
+    class = "zu_http_client_error"
+  )
   r <- zu_get("https://httpbin.org/status/404", check = FALSE, timeout = 30)
   expect_identical(zu_resp_status(r), 404L)
 })
@@ -114,8 +160,11 @@ test_that("an error status raises by default and is inspectable with check = FAL
 test_that("a JSON POST reaches the server as JSON", {
   skip_unless_online()
   skip_if_not_installed("jsonlite")
-  r <- zu_post("https://httpbin.org/post", json = list(name = "Alice", active = TRUE),
-               timeout = 30)
+  r <- zu_post(
+    "https://httpbin.org/post",
+    json = list(name = "Alice", active = TRUE),
+    timeout = 30
+  )
   echo <- zu_resp_json(r)
   expect_identical(echo$data, '{"name":"Alice","active":true}')
   expect_identical(echo$headers$`Content-Type`, "application/json")
@@ -124,7 +173,7 @@ test_that("a JSON POST reaches the server as JSON", {
 test_that("decode = FALSE returns the wire bytes (§21.2)", {
   skip_unless_online()
   decoded <- zu_get("https://httpbin.org/gzip", timeout = 30)
-  wire    <- zu_get("https://httpbin.org/gzip", decode = FALSE, timeout = 30)
+  wire <- zu_get("https://httpbin.org/gzip", decode = FALSE, timeout = 30)
 
   expect_identical(zu_resp_header(decoded, "content-encoding"), character())
   expect_identical(zu_resp_header(wire, "content-encoding"), "gzip")
@@ -135,8 +184,11 @@ test_that("decode = FALSE returns the wire bytes (§21.2)", {
 test_that("a client's base_url and headers reach the server", {
   skip_unless_online()
   skip_if_not_installed("jsonlite")
-  api <- zu_client(base_url = "https://httpbin.org",
-                   headers = c("X-Zu-Test" = "1"), timeout = 30)
+  api <- zu_client(
+    base_url = "https://httpbin.org",
+    headers = c("X-Zu-Test" = "1"),
+    timeout = 30
+  )
   echo <- zu_resp_json(zu_get("/get", query = list(q = "a b"), client = api))
   expect_identical(echo$headers$`X-Zu-Test`, "1")
   expect_identical(echo$args$q, "a b")

@@ -1,6 +1,3 @@
-#' @useDynLib zuhttp, .registration = TRUE
-NULL
-
 # The §34.1 condition hierarchy.
 #
 # Built with base R only (§34.3): `structure(class = ...)` and `stop()`, not
@@ -19,24 +16,20 @@ NULL
 #'
 #' @return A named integer vector.
 #' @noRd
-#' @examples
-#' zu_error_codes()[["zu_tls_certificate_error"]]
 zu_error_codes <- function() {
   .Call(C_zu_error_codes)
 }
 
-#' Is an error code worth retrying?
+#' Whether an error code is worth retrying
 #'
 #' @param code An integer code, or the class name of a zuhttp condition.
 #' @return `TRUE`, `FALSE`, or `NA` if the code is unknown.
 #' @noRd
-#' @examples
-#' zu_code_retryable("zu_connect_error")          # a transport failure: yes
-#' zu_code_retryable("zu_tls_certificate_error")  # will not fix itself: no
-#' zu_code_retryable("not_a_zuhttp_class")        # unknown: NA
 zu_code_retryable <- function(code) {
   code <- as_zu_code(code)
-  if (is.na(code)) return(NA)
+  if (is.na(code)) {
+    return(NA)
+  }
   .Call(C_zu_code_retryable, code)
 }
 
@@ -78,28 +71,37 @@ as_zu_code <- function(code) {
 #'
 #' # Raise it, and catch it by any class in its chain.
 #' tryCatch(stop(cnd), zu_error = function(e) conditionMessage(e))
-zu_condition <- function(code, message, url = NULL, phase = NULL,
-                         backend = NULL, backend_code = NULL,
-                         request = NULL, response = NULL,
-                         call = sys.call(-1)) {
+zu_condition <- function(
+  code,
+  message,
+  url = NULL,
+  phase = NULL,
+  backend = NULL,
+  backend_code = NULL,
+  request = NULL,
+  response = NULL,
+  call = sys.call(-1)
+) {
   icode <- as_zu_code(code)
-  if (is.na(icode)) stop("unknown zuhttp error code: ", format(code))
+  if (is.na(icode)) {
+    stop("unknown zuhttp error code: ", format(code))
+  }
 
   structure(
     class = .Call(C_zu_condition_classes, icode),
     list(
-      message      = message,
-      call         = call,
-      code         = icode,
+      message = message,
+      call = call,
+      code = icode,
       # §42.3: the stored URL is redacted because a condition is a formatting
       # artefact, not something anyone re-executes.
-      url          = if (is.null(url)) NULL else zu_redact_url(url),
-      phase        = phase,
-      backend      = backend,
+      url = if (is.null(url)) NULL else zu_redact_url(url),
+      phase = phase,
+      backend = backend,
       backend_code = backend_code,
-      retryable    = .Call(C_zu_code_retryable, icode),
-      request      = request,
-      response     = response
+      retryable = .Call(C_zu_code_retryable, icode),
+      request = request,
+      response = response
     )
   )
 }
@@ -112,11 +114,12 @@ zu_stop <- function(code, message, ..., call = sys.call(-1)) {
 # rather than in C keeps the §34.1 hierarchy in exactly one place.
 zu_stop_from_c <- function(code, message, url, phase, backend, backend_code) {
   stop(zu_condition(
-    code, message,
-    url          = url,
-    phase        = if (identical(phase, "none")) NULL else phase,
-    backend      = backend,
+    code,
+    message,
+    url = url,
+    phase = if (identical(phase, "none")) NULL else phase,
+    backend = backend,
     backend_code = if (is.null(backend)) NULL else backend_code,
-    call         = sys.call(-1)
+    call = sys.call(-1)
   ))
 }

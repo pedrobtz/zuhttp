@@ -35,7 +35,11 @@ jobs:
   # ---------------------------------------------------------------
   # S0 — macOS: OpenSSL engine + SecTrustEvaluateWithError (Keychain)
   # ---------------------------------------------------------------
+  # On demand only: the spike's findings are recorded (.agents/history/), and
+  # re-running it on every pull request bought a brew install and a matrix
+  # whose last step could only ever pass.
   macos-s0:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     name: S0 macOS (engine + Keychain trust)
     steps:
@@ -69,17 +73,27 @@ jobs:
           make
           ./run.sh
 
+      # Asserts finding F-5 rather than printing it: no continue-on-error,
+      # which would turn a changed finding into a green tick (CLAUDE.md). If
+      # A starts surviving, D-32's zu_fork_error is worth revisiting.
       - name: Is SecTrust fork-safe?  (finding F-5)
         working-directory: spike/macos-tls
-        continue-on-error: true
         run: |
           make fork_trust_test
           "$(brew --prefix openssl@3)/bin/openssl" x509 -in tmp/ca.pem -outform DER -out tmp/ca.der
           echo "A. parent uses Security, then forks (expect: child killed):"
-          ./fork_trust_test tmp/ca.der || true
+          a="$(./fork_trust_test tmp/ca.der 2>&1)"; echo "$a"
           echo
           echo "B. parent does not, then forks (expect: child survives):"
-          ./fork_trust_test tmp/ca.der --no-parent-eval || true
+          b="$(./fork_trust_test tmp/ca.der --no-parent-eval 2>&1)"; echo "$b"
+          if printf '%s' "$a" | grep -q 'CHILD\] SURVIVED'; then
+            echo "::error::F-5 no longer holds: a child forked after SecTrust use survived"
+            exit 1
+          fi
+          if ! printf '%s' "$b" | grep -q 'CHILD\] SURVIVED'; then
+            echo "::error::the control failed: a child forked before any SecTrust use did not survive"
+            exit 1
+          fi
 
   # ---------------------------------------------------------------
   # S1 — Windows: does the Rtools mingw-w64 SDK expose SCH_CREDENTIALS?
@@ -309,6 +323,20 @@ jobs:
         env:
           PKG_CONFIG_PATH: /opt/homebrew/opt/openssl@3/lib/pkgconfig:/usr/local/opt/openssl@3/lib/pkgconfig
         run: make engine
+
+      # D-86, offline: a TLS server that closes without close_notify, and one
+      # that sends close_notify behind the body. Both broke the OpenSSL
+      # backend at 237bf96 (#99, #100) and passed every other suite.
+      - name: OpenSSL end of stream and pool liveness
+        timeout-minutes: 5
+        working-directory: ctest
+        env:
+          PKG_CONFIG_PATH: /opt/homebrew/opt/openssl@3/lib/pkgconfig:/usr/local/opt/openssl@3/lib/pkgconfig
+        run: |
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            export OPENSSL="$(brew --prefix openssl@3)/bin/openssl"
+          fi
+          make tls-eof
 
   # The macOS system stack: Network.framework engine + SecTrust trust (D-63,
   # W13). Needs no OpenSSL at all, which is the point (§2). The slice covers

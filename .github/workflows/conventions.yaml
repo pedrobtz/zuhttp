@@ -33,6 +33,16 @@ jobs:
             echo "ok: $f"
           done
 
+  # The R formatter (#110): air.toml configures it, and code it would change
+  # fails here rather than turning up as noise in the next contributor's diff.
+  air-format:
+    runs-on: ubuntu-latest
+    name: R code is air-formatted
+    steps:
+      - uses: actions/checkout@v6
+      - uses: posit-dev/setup-air@v1
+      - run: air format . --check
+
   # Design §51.3's budget for project-owned C, measured on every change so that
   # R-4 is read before a work package lands rather than after.
   code-lines:

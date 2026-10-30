@@ -2,7 +2,7 @@
 % Please edit documentation in R/retry.R
 \name{zu_body_rewindable}
 \alias{zu_body_rewindable}
-\title{Can this request's body be replayed?}
+\title{Whether a request's body can be replayed}
 \usage{
 zu_body_rewindable(req)
 }
