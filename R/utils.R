@@ -6,9 +6,15 @@
 # One check, one message, for every function that takes a client: a bare
 # stopifnot() said `inherits(client, "zu_client") is not TRUE`.
 check_client <- function(client, arg = "client") {
-  if (!inherits(client, "zu_client"))
-    stop("`", arg, "` must be a zu_client(); got ", class(client)[[1]],
-         call. = FALSE)
+  if (!inherits(client, "zu_client")) {
+    stop(
+      "`",
+      arg,
+      "` must be a zu_client(); got ",
+      class(client)[[1]],
+      call. = FALSE
+    )
+  }
   invisible(client)
 }
 

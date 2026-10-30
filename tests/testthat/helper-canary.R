@@ -22,20 +22,27 @@ raw_contains <- function(haystack, needle) {
 # it was supposed to be checking. Depth is not a refinement here — without it
 # the assertion does not touch the value at all.
 deep_strings <- function(x) {
-  if (is.function(x) || is.environment(x) || is.null(x)) return(character())
+  if (is.function(x) || is.environment(x) || is.null(x)) {
+    return(character())
+  }
   if (is.raw(x)) {
     # Raw bodies may hold NULs, which rawToChar() refuses; drop them rather
     # than lose the whole vector, since a credential is never a NUL.
     return(rawToChar(x[x != as.raw(0)]))
   }
-  if (is.atomic(x)) return(c(names(x), as.character(x)))
-  if (is.list(x))
+  if (is.atomic(x)) {
+    return(c(names(x), as.character(x)))
+  }
+  if (is.list(x)) {
     return(c(names(x), unlist(lapply(x, deep_strings), use.names = FALSE)))
+  }
   character()
 }
 
 expect_no_canary <- function(x, label) {
   txt <- c(utils::capture.output(print(x)), deep_strings(x))
-  expect_false(any(grepl(CANARY, txt, fixed = TRUE)),
-               info = paste("canary leaked via", label))
+  expect_false(
+    any(grepl(CANARY, txt, fixed = TRUE)),
+    info = paste("canary leaked via", label)
+  )
 }

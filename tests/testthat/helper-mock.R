@@ -7,7 +7,9 @@
 # A transport that answers 200, optionally recording the request it was given.
 null_transport <- function(record = NULL) {
   zu_mock_transport(function(req) {
-    if (!is.null(record)) record$req <- req
+    if (!is.null(record)) {
+      record$req <- req
+    }
     zu_response(200L)
   })
 }
@@ -26,7 +28,10 @@ recorder <- function(respond = function(req) zu_response(200L, body = "ok")) {
 counting <- function(f) {
   n <- 0L
   list(
-    transport = zu_mock_transport(function(req) { n <<- n + 1L; f(n, req) }),
+    transport = zu_mock_transport(function(req) {
+      n <<- n + 1L
+      f(n, req)
+    }),
     n = function() n
   )
 }
@@ -50,6 +55,9 @@ cassette_dir <- function() {
 # against an INSTALLED zuhttp -- which is how CI runs them, and how a user
 # would. It passed locally only because R CMD check supplies that context.
 without_jsonlite <- function(env = parent.frame()) {
-  testthat::local_mocked_bindings(has_jsonlite = function() FALSE,
-                                  .package = "zuhttp", .env = env)
+  testthat::local_mocked_bindings(
+    has_jsonlite = function() FALSE,
+    .package = "zuhttp",
+    .env = env
+  )
 }

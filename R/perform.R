@@ -42,24 +42,37 @@ zu_native_transport <- function() {
 #' @rdname zu_transport
 #' @export
 zu_mock_transport <- function(handler = NULL, ...) {
-  stubs <- c(if (inherits(handler, "zu_stub")) list(handler)
-             else if (is.list(handler) && !is.function(handler)) handler,
-             list(...))
+  stubs <- c(
+    if (inherits(handler, "zu_stub")) {
+      list(handler)
+    } else if (is.list(handler) && !is.function(handler)) {
+      handler
+    },
+    list(...)
+  )
   if (length(stubs)) {
-    if (!all(vapply(stubs, inherits, logical(1), "zu_stub")))
+    if (!all(vapply(stubs, inherits, logical(1), "zu_stub"))) {
       stop("every stub must come from zu_stub()", call. = FALSE)
+    }
     # An environment, not a list: `times` has to count across calls, and a
     # transport is copied by value into every request that uses it.
     state <- new.env(parent = emptyenv())
     state$stubs <- stubs
-    return(structure(list(state = state),
-                     class = c("zu_mock_transport", "zu_transport")))
+    return(structure(
+      list(state = state),
+      class = c("zu_mock_transport", "zu_transport")
+    ))
   }
-  if (!is.function(handler))
-    stop("zu_mock_transport() needs a handler function or one or more zu_stub()s",
-         call. = FALSE)
-  structure(list(handler = handler),
-            class = c("zu_mock_transport", "zu_transport"))
+  if (!is.function(handler)) {
+    stop(
+      "zu_mock_transport() needs a handler function or one or more zu_stub()s",
+      call. = FALSE
+    )
+  }
+  structure(
+    list(handler = handler),
+    class = c("zu_mock_transport", "zu_transport")
+  )
 }
 
 #' Perform a request through a transport
@@ -72,45 +85,53 @@ zu_mock_transport <- function(handler = NULL, ...) {
 #' @param req A resolved `zu_request`.
 #' @return A `zu_response`.
 #' @noRd
-zu_transport_perform <- function(transport, req) UseMethod("zu_transport_perform")
+zu_transport_perform <- function(transport, req) {
+  UseMethod("zu_transport_perform")
+}
 
 #' @export
 zu_transport_perform.zu_native_transport <- function(transport, req) {
   p <- req$resolved
   h <- req$headers
-  raw <- .Call(C_zu_perform,
-               req$method,
-               req$url,
-               if (length(h)) names(h) else NULL,
-               if (length(h)) unname(h) else NULL,
-               req$body,
-               # §24.3: this attempt's share of the budget when the retry
-               # loop set one; the whole merged `timeout` when the transport
-               # is driven directly, as the zu_transport_perform() example is.
-               timeout_ms(req$attempt_budget %||% p$timeout),
-               as.integer(p$redirects),
-               isTRUE(p$verify),
-               as.numeric(p$max_body),
-               p$user_agent %||% default_user_agent(),
-               isTRUE(p$decode),
-               req$pool,
-               req$path,
-               req$callback,
-               p$proxy,
-               check_tls(p$tls),
-               isTRUE(req$trace),
-               # §42.1's configurable names. Parameters for the URLs the engine
-               # traces and puts in messages, which it redacts itself (§42.2)
-               # rather than handing R something to remember to clean; headers
-               # for what a cross-origin redirect must not carry on (§19.2).
-               list(zu_redact_opt("zuhttp.redact_params"),
-                    zu_redact_opt("zuhttp.redact_headers")))
+  raw <- .Call(
+    C_zu_perform,
+    req$method,
+    req$url,
+    if (length(h)) names(h) else NULL,
+    if (length(h)) unname(h) else NULL,
+    req$body,
+    # §24.3: this attempt's share of the budget when the retry
+    # loop set one; the whole merged `timeout` when the transport
+    # is driven directly, as the zu_transport_perform() example is.
+    timeout_ms(req$attempt_budget %||% p$timeout),
+    as.integer(p$redirects),
+    isTRUE(p$verify),
+    as.numeric(p$max_body),
+    p$user_agent %||% default_user_agent(),
+    isTRUE(p$decode),
+    req$pool,
+    req$path,
+    req$callback,
+    p$proxy,
+    check_tls(p$tls),
+    isTRUE(req$trace),
+    # §42.1's configurable names. Parameters for the URLs the engine
+    # traces and puts in messages, which it redacts itself (§42.2)
+    # rather than handing R something to remember to clean; headers
+    # for what a cross-origin redirect must not carry on (§19.2).
+    list(
+      zu_redact_opt("zuhttp.redact_params"),
+      zu_redact_opt("zuhttp.redact_headers")
+    )
+  )
   # §27.1: by here the sink has been committed, so the destination is a fact
   # about this response rather than something that was merely asked for. Set
   # in the transport and not in zu_perform() because only a transport that
   # actually wrote the file can honestly claim one — a mock or a cassette
   # replay did not, and must keep reporting NULL.
-  if (!is.null(req$path)) raw$path <- req$path
+  if (!is.null(req$path)) {
+    raw$path <- req$path
+  }
   structure(raw, class = "zu_response")
 }
 
@@ -127,8 +148,11 @@ default_user_agent <- function() {
 # INT_MIN and silently replace with the 30-second default.
 timeout_ms <- function(seconds) {
   ms <- seconds * 1000
-  if (!is.finite(ms) || ms > .Machine$integer.max) .Machine$integer.max
-  else as.integer(ms)
+  if (!is.finite(ms) || ms > .Machine$integer.max) {
+    .Machine$integer.max
+  } else {
+    as.integer(ms)
+  }
 }
 
 #' @export
@@ -136,7 +160,9 @@ zu_transport_perform.zu_mock_transport <- function(transport, req) {
   if (!is.null(transport$state)) {
     stubs <- transport$state$stubs
     for (i in seq_along(stubs)) {
-      if (!stub_matches(stubs[[i]], req)) next
+      if (!stub_matches(stubs[[i]], req)) {
+        next
+      }
       # Count the match before running the response, so a handler that itself
       # performs a request cannot re-enter this stub past its `times`.
       stubs[[i]]$matched <- stubs[[i]]$matched + 1L
@@ -147,40 +173,64 @@ zu_transport_perform.zu_mock_transport <- function(transport, req) {
     }
     # Naming the request is the whole value of this error: an unmatched mock
     # otherwise surfaces as a confusing NULL several frames later.
-    stop("no zu_stub() matched ", req$method, " ", zu_redact_url(req$url),
-         "\n  ", length(stubs), " stub(s) were tried", call. = FALSE)
+    stop(
+      "no zu_stub() matched ",
+      req$method,
+      " ",
+      zu_redact_url(req$url),
+      "\n  ",
+      length(stubs),
+      " stub(s) were tried",
+      call. = FALSE
+    )
   }
   check_mock_response(transport$handler(req))
 }
 
 check_mock_response <- function(resp) {
-  if (!inherits(resp, "zu_response"))
-    stop("a mock transport must return a zu_response(); got ",
-         class(resp)[[1]], call. = FALSE)
+  if (!inherits(resp, "zu_response")) {
+    stop(
+      "a mock transport must return a zu_response(); got ",
+      class(resp)[[1]],
+      call. = FALSE
+    )
+  }
   resp
 }
 
 #' @export
 zu_transport_perform.default <- function(transport, req) {
-  stop("`transport` must be a transport object, e.g. zu_mock_transport(); got ",
-       class(transport)[[1]], call. = FALSE)
+  stop(
+    "`transport` must be a transport object, e.g. zu_mock_transport(); got ",
+    class(transport)[[1]],
+    call. = FALSE
+  )
 }
 
 # Apply §31.9 to produce a request that needs no further context: absolute URL
 # with the query attached, every header merged, every policy decided.
 resolve_request <- function(req, client) {
   url <- req$url
-  if (!is_absolute_url(url)) url <- join_url(client$base_url, url)
+  if (!is_absolute_url(url)) {
+    url <- join_url(client$base_url, url)
+  }
 
   headers <- merge_headers(client$headers, req$headers)
   # The content type implied by the body is a default, so it loses to any
   # header that survived the merge (§31.2: "unless explicitly overridden").
-  if (!is.null(req$content_type) &&
-      !any(tolower(names(headers)) == "content-type"))
+  if (
+    !is.null(req$content_type) &&
+      !any(tolower(names(headers)) == "content-type")
+  ) {
     headers <- c(headers, structure(req$content_type, names = "Content-Type"))
+  }
 
-  policy <- lapply(policy_fields(), merge_policy,
-                   client = client, req_policy = req$policy)
+  policy <- lapply(
+    policy_fields(),
+    merge_policy,
+    client = client,
+    req_policy = req$policy
+  )
   names(policy) <- policy_fields()
 
   # Before the warning below: `verify = NA` or `"yes"` would otherwise turn
@@ -189,49 +239,71 @@ resolve_request <- function(req, client) {
   # unreadable setting is refused, never read as the weaker one).
   for (f in c("verify", "check", "decode")) {
     v <- policy[[f]]
-    if (!is.logical(v) || length(v) != 1L || is.na(v))
+    if (!is.logical(v) || length(v) != 1L || is.na(v)) {
       stop("`", f, "` must be TRUE or FALSE", call. = FALSE)
+    }
   }
   if (!isTRUE(policy$verify)) {
     # Not a message that can be switched off: turning verification off is the
     # most consequential thing a caller can do here (§14.1).
-    warning("verify = FALSE disables certificate AND hostname checking; ",
-            "anyone on the network path can read and alter this request.",
-            call. = FALSE)
+    warning(
+      "verify = FALSE disables certificate AND hostname checking; ",
+      "anyone on the network path can read and alter this request.",
+      call. = FALSE
+    )
   }
-  if (!is.numeric(policy$timeout) || length(policy$timeout) != 1L ||
-      is.na(policy$timeout) || policy$timeout <= 0)
+  if (
+    !is.numeric(policy$timeout) ||
+      length(policy$timeout) != 1L ||
+      is.na(policy$timeout) ||
+      policy$timeout <= 0
+  ) {
     stop("`timeout` must be a positive number of seconds", call. = FALSE)
-  if (!is.numeric(policy$redirects) || length(policy$redirects) != 1L ||
-      is.na(policy$redirects) || policy$redirects < 0)
+  }
+  if (
+    !is.numeric(policy$redirects) ||
+      length(policy$redirects) != 1L ||
+      is.na(policy$redirects) ||
+      policy$redirects < 0
+  ) {
     stop("`redirects` must be 0 or more", call. = FALSE)
+  }
   # Not merely a range check: the C side reads max_body == 0 as "use the
   # default", so a caller writing max_body = 0 to mean "refuse any body"
   # would silently get 16 MB. Refuse the value rather than honour the
   # opposite of what it says.
-  if (!is.numeric(policy$max_body) || length(policy$max_body) != 1L ||
-      is.na(policy$max_body) || policy$max_body < 1)
+  if (
+    !is.numeric(policy$max_body) ||
+      length(policy$max_body) != 1L ||
+      is.na(policy$max_body) ||
+      policy$max_body < 1
+  ) {
     stop("`max_body` must be at least 1 byte", call. = FALSE)
+  }
 
   # §27: a response body has one destination. init.c picks the callback when
   # both are set, so a caller who passed both got no file and no warning — the
   # download simply did not happen. Refused here rather than in zu_req_path()
   # and zu_req_callback(), so the pipeline and the one-shot form give the same
   # answer, and so the order the two were set in cannot change it.
-  if (!is.null(req$path) && !is.null(req$callback))
-    stop("`path` and `callback` are mutually exclusive: a response body has ",
-         "one destination. Write to the file and read it back, or take the ",
-         "chunks and write them yourself.", call. = FALSE)
+  if (!is.null(req$path) && !is.null(req$callback)) {
+    stop(
+      "`path` and `callback` are mutually exclusive: a response body has ",
+      "one destination. Write to the file and read it back, or take the ",
+      "chunks and write them yourself.",
+      call. = FALSE
+    )
+  }
 
-  req$url      <- url_with_query(url, merge_query(client$query, req$query))
-  req$query    <- NULL          # folded into the URL; one representation
-  req$headers  <- headers
+  req$url <- url_with_query(url, merge_query(client$query, req$query))
+  req$query <- NULL # folded into the URL; one representation
+  req$headers <- headers
   req$resolved <- policy
   # §26.5: resolved here, not in the transport, because this is the last point
   # that can see the client. A transport receives a request that needs no
   # further context — that is the whole contract (§31.12) — so the pool has to
   # travel with it rather than be looked up later.
-  req$pool     <- client_pool(client)
+  req$pool <- client_pool(client)
   req
 }
 
@@ -261,14 +333,19 @@ zu_perform <- function(req, client = zu_default_client()) {
   # carries, and it is set only while the user's callback is on the stack, so
   # ordinary nesting through middleware is unaffected.
   st <- attr(client, "pool_state")
-  if (is.environment(st) && isTRUE(st$in_callback))
-    stop("a streaming callback cannot make a request on the same client\n",
-         "  it would reuse the connection it is currently reading from\n",
-         "  use a different client, or collect the data and request afterwards",
-         call. = FALSE)
+  if (is.environment(st) && isTRUE(st$in_callback)) {
+    stop(
+      "a streaming callback cannot make a request on the same client\n",
+      "  it would reuse the connection it is currently reading from\n",
+      "  use a different client, or collect the data and request afterwards",
+      call. = FALSE
+    )
+  }
 
   r <- resolve_request(req, client)
-  if (is.function(r$callback)) r$callback <- guard_callback(r$callback, st)
+  if (is.function(r$callback)) {
+    r$callback <- guard_callback(r$callback, st)
+  }
   hooks <- client$hooks %||% list()
 
   t0 <- proc.time()[["elapsed"]]
@@ -283,25 +360,38 @@ zu_perform <- function(req, client = zu_default_client()) {
   resp <- compose_middleware(check_middleware(client$middleware), terminal)(r)
   elapsed <- proc.time()[["elapsed"]] - t0
 
-  if (!inherits(resp, "zu_response"))
-    stop("middleware must return a zu_response(); got ", class(resp)[[1]],
-         call. = FALSE)
+  if (!inherits(resp, "zu_response")) {
+    stop(
+      "middleware must return a zu_response(); got ",
+      class(resp)[[1]],
+      call. = FALSE
+    )
+  }
 
   # Fields the transport should not have to fill in, and that a mock would
   # otherwise have to fake to keep the accessors honest.
-  resp$method  <- r$method
-  if (is.null(resp$url)) resp$url <- zu_redact_url(r$url)
+  resp$method <- r$method
+  if (is.null(resp$url)) {
+    resp$url <- zu_redact_url(r$url)
+  }
   resp$timings <- c(total = elapsed)
   # Without the pool: a response is a value, and holding the live pool's
   # external pointer kept every idle connection reachable for as long as any
   # response was, and made identical() on two responses compare pointers.
   resp$request <- r
   resp$request$pool <- NULL
-  if (is.null(resp$redirects)) resp$redirects <- 0L
+  if (is.null(resp$redirects)) {
+    resp$redirects <- 0L
+  }
 
-  fire_hook(hooks, "after_response",
-            list(request = r, response = resp, attempt = resp$attempts %||% 1L))
-  if (isTRUE(r$resolved$check)) zu_resp_check(resp)
+  fire_hook(
+    hooks,
+    "after_response",
+    list(request = r, response = resp, attempt = resp$attempts %||% 1L)
+  )
+  if (isTRUE(r$resolved$check)) {
+    zu_resp_check(resp)
+  }
   resp
 }
 
@@ -319,10 +409,13 @@ attempt_with_retries <- function(r, client, hooks, deadline_at) {
   # truncate. Raised eagerly: a caller who asked for retries on a body that
   # cannot be replayed has a bug, and discovering it only on the first
   # failure makes it intermittent.
-  if (may_replay && !zu_body_rewindable(r))
-    zu_stop("zu_body_not_replayable",
-            "this request's body cannot be replayed, so it cannot be retried",
-            url = r$url)
+  if (may_replay && !zu_body_rewindable(r)) {
+    zu_stop(
+      "zu_body_not_replayable",
+      "this request's body cannot be replayed, so it cannot be retried",
+      url = r$url
+    )
+  }
 
   attempt <- 1L
   repeat {
@@ -330,35 +423,53 @@ attempt_with_retries <- function(r, client, hooks, deadline_at) {
     cnd <- NULL
     ar <- attempt_request(r, policy, deadline_at)
     delivered <- watch_delivery(ar)
-    resp <- tryCatch(zu_transport_perform(client$transport, delivered$request),
-                     zu_error = function(e) { cnd <<- e; NULL })
+    resp <- tryCatch(
+      zu_transport_perform(client$transport, delivered$request),
+      zu_error = function(e) {
+        cnd <<- e
+        NULL
+      }
+    )
 
-    if (!may_replay || attempt >= policy$attempts) break
+    if (!may_replay || attempt >= policy$attempts) {
+      break
+    }
     # D-81: bytes a callback has received, and whatever it did with them,
     # cannot be taken back. A retry after that handed it a second body
     # behind the first — a 503's "ERROR" then a 200's "OK", as "ERROROK",
     # reported as one clean 200. Replay safety is a property of the request;
     # this is a property of what already happened to the response.
-    if (delivered$any()) break
+    if (delivered$any()) {
+      break
+    }
     v <- retry_verdict(resp, cnd, policy)
-    if (!isTRUE(v$retry)) break
+    if (!isTRUE(v$retry)) {
+      break
+    }
 
     delay <- backoff_delay(policy, attempt, v$after)
     # §33.3: check the budget BEFORE sleeping and fail now rather than sleep
     # past the deadline. Without this, `timeout = 30` with three retries is a
     # promise the client cannot keep.
     left <- deadline_at - proc.time()[["elapsed"]]
-    if (left <= 0 || delay >= left) break
+    if (left <= 0 || delay >= left) {
+      break
+    }
 
-    fire_hook(hooks, "before_retry",
-              list(request = r, attempt = attempt, delay = delay, why = v$why))
+    fire_hook(
+      hooks,
+      "before_retry",
+      list(request = r, attempt = attempt, delay = delay, why = v$why)
+    )
     retry_sleep(delay, deadline_at)
     attempt <- attempt + 1L
     fire_hook(hooks, "after_retry", list(request = r, attempt = attempt))
   }
 
   # A condition that survived the loop is the caller's to see, unchanged.
-  if (is.null(resp)) stop(cnd)
+  if (is.null(resp)) {
+    stop(cnd)
+  }
   resp$attempts <- attempt
   resp
 }
@@ -385,8 +496,10 @@ attempt_with_retries <- function(r, client, hooks, deadline_at) {
 # was asked.
 attempt_request <- function(r, policy, deadline_at) {
   left <- deadline_at - proc.time()[["elapsed"]]
-  r$attempt_budget <- max(0.001, min(r$resolved$timeout, left,
-                                     policy$attempt_timeout %||% Inf))
+  r$attempt_budget <- max(
+    0.001,
+    min(r$resolved$timeout, left, policy$attempt_timeout %||% Inf)
+  )
   r
 }
 
@@ -396,11 +509,14 @@ attempt_request <- function(r, policy, deadline_at) {
 watch_delivery <- function(req) {
   seen <- FALSE
   f <- req$callback
-  if (is.function(f))
+  if (is.function(f)) {
     req$callback <- function(chunk) {
-      if (length(chunk)) seen <<- TRUE
+      if (length(chunk)) {
+        seen <<- TRUE
+      }
       f(chunk)
     }
+  }
   list(request = req, any = function() seen)
 }
 
@@ -419,7 +535,9 @@ guard_callback <- function(f, state) {
   # "evaluation nested too deeply" from inside a C callback, which points
   # nowhere near the actual cause.
   force(f)
-  if (!is.environment(state)) return(f)
+  if (!is.environment(state)) {
+    return(f)
+  }
   function(chunk) {
     state$in_callback <- TRUE
     on.exit(state$in_callback <- FALSE, add = TRUE)

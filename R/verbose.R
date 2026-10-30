@@ -55,7 +55,9 @@ zu_verbose <- function(to = stderr(), body = TRUE) {
     before_request = function(p) {
       say("> ", p$request$method %||% "GET", " ", p$request$url %||% "")
       h <- p$request$headers
-      for (i in seq_along(h)) say(">   ", names(h)[i], ": ", h[[i]])
+      for (i in seq_along(h)) {
+        say(">   ", names(h)[i], ": ", h[[i]])
+      }
     },
     after_response = function(p) {
       r <- p$response
@@ -69,26 +71,46 @@ zu_verbose <- function(to = stderr(), body = TRUE) {
         for (i in seq_len(nrow(tr))) {
           gap <- tr$at_ms[i] - prev
           prev <- tr$at_ms[i]
-          say("* ", format(sprintf("%.0fms", tr$at_ms[i]), width = 7),
-              " +", format(sprintf("%.0f", gap), width = 4), "  ",
-              format(tr$event[i], width = 18),
-              if (nzchar(tr$detail[i])) tr$detail[i] else "",
-              if (tr$n[i] > 0) paste0("  (", tr$n[i], ")") else "")
+          say(
+            "* ",
+            format(sprintf("%.0fms", tr$at_ms[i]), width = 7),
+            " +",
+            format(sprintf("%.0f", gap), width = 4),
+            "  ",
+            format(tr$event[i], width = 18),
+            if (nzchar(tr$detail[i])) tr$detail[i] else "",
+            if (tr$n[i] > 0) paste0("  (", tr$n[i], ")") else ""
+          )
         }
-        if (!is.null(attr(tr, "dropped")))
+        if (!is.null(attr(tr, "dropped"))) {
           say("* ", attr(tr, "dropped"), " further events not recorded")
+        }
       }
-      say("< HTTP ", r$status %||% NA,
-          if (!is.null(r$tls_version)) paste0(" over ", r$tls_version) else "")
+      say(
+        "< HTTP ",
+        r$status %||% NA,
+        if (!is.null(r$tls_version)) paste0(" over ", r$tls_version) else ""
+      )
       h <- r$headers
-      for (i in seq_along(h)) say("<   ", names(h)[i], ": ", h[[i]])
-      if (isTRUE(body)) say("< ", length(r$body %||% raw()), " bytes")
+      for (i in seq_along(h)) {
+        say("<   ", names(h)[i], ": ", h[[i]])
+      }
+      if (isTRUE(body)) {
+        say("< ", length(r$body %||% raw()), " bytes")
+      }
       t <- r$timings[["total"]]
       if (!is.null(t) && !is.na(t)) say("< ", sprintf("%.3fs", t))
     },
     before_retry = function(p) {
-      say("* retry ", p$attempt, " after ", sprintf("%.2fs", p$delay %||% 0),
-          " (", p$why %||% "?", ")")
+      say(
+        "* retry ",
+        p$attempt,
+        " after ",
+        sprintf("%.2fs", p$delay %||% 0),
+        " (",
+        p$why %||% "?",
+        ")"
+      )
     }
   )
 }

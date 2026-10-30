@@ -14,8 +14,16 @@
 library(testthat)
 library(zuhttp)
 seed <- suppressWarnings(as.integer(Sys.getenv("ZU_TEST_SEED")))
-if (is.na(seed)) seed <- as.integer(Sys.time()) %% 100000L
+if (is.na(seed)) {
+  seed <- as.integer(Sys.time()) %% 100000L
+}
 cat("test order seed:", seed, "(ZU_TEST_SEED to replay)\n")
 set.seed(seed)
-test_dir("tests/testthat", package = "zuhttp", load_package = "installed",
-         reporter = "summary", stop_on_failure = TRUE, shuffle = TRUE)
+test_dir(
+  "tests/testthat",
+  package = "zuhttp",
+  load_package = "installed",
+  reporter = "summary",
+  stop_on_failure = TRUE,
+  shuffle = TRUE
+)

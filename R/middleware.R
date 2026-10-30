@@ -39,21 +39,35 @@
 #'                  transport = zu_mock_transport(function(r) zu_response(200L)))
 #' invisible(zu_get("https://x.test/a", client = cli))
 #' seen
-zu_hooks <- function(before_request = NULL, after_response = NULL,
-                     before_retry = NULL, after_retry = NULL) {
-  h <- list(before_request = before_request, after_response = after_response,
-            before_retry = before_retry, after_retry = after_retry)
+zu_hooks <- function(
+  before_request = NULL,
+  after_response = NULL,
+  before_retry = NULL,
+  after_retry = NULL
+) {
+  h <- list(
+    before_request = before_request,
+    after_response = after_response,
+    before_retry = before_retry,
+    after_retry = after_retry
+  )
   h <- h[!vapply(h, is.null, logical(1))]
-  for (nm in names(h))
-    if (!is.function(h[[nm]]))
+  for (nm in names(h)) {
+    if (!is.function(h[[nm]])) {
       stop("hook `", nm, "` must be a function of one argument", call. = FALSE)
+    }
+  }
   structure(h, class = "zu_hooks")
 }
 
 #' @export
 print.zu_hooks <- function(x, ...) {
-  cat("<zu_hooks: ", if (length(x)) paste(names(x), collapse = ", ") else "none",
-      ">\n", sep = "")
+  cat(
+    "<zu_hooks: ",
+    if (length(x)) paste(names(x), collapse = ", ") else "none",
+    ">\n",
+    sep = ""
+  )
   invisible(x)
 }
 
@@ -62,10 +76,13 @@ print.zu_hooks <- function(x, ...) {
 # the thing it observes is worse than no observability.
 fire_hook <- function(hooks, event, payload) {
   f <- hooks[[event]]
-  if (is.null(f)) return(invisible(NULL))
+  if (is.null(f)) {
+    return(invisible(NULL))
+  }
   payload <- redact_payload(payload)
-  tryCatch(f(payload), error = function(e)
-    warning("hook `", event, "` failed: ", conditionMessage(e), call. = FALSE))
+  tryCatch(f(payload), error = function(e) {
+    warning("hook `", event, "` failed: ", conditionMessage(e), call. = FALSE)
+  })
   invisible(NULL)
 }
 
@@ -73,8 +90,12 @@ fire_hook <- function(hooks, event, payload) {
 # the handler sees it." Applied to the request and response a payload carries,
 # not to the payload's scalars.
 redact_payload <- function(p) {
-  if (!is.null(p$request))  p$request  <- redact_request_fields(p$request)
-  if (!is.null(p$response)) p$response <- redact_response_fields(p$response)
+  if (!is.null(p$request)) {
+    p$request <- redact_request_fields(p$request)
+  }
+  if (!is.null(p$response)) {
+    p$response <- redact_response_fields(p$response)
+  }
   p
 }
 
@@ -86,7 +107,7 @@ compose_middleware <- function(middleware, terminal) {
   for (m in rev(middleware)) {
     local({
       inner <- f
-      mw    <- m
+      mw <- m
       f <<- function(req) mw(req, inner)
     })
   }
@@ -94,10 +115,19 @@ compose_middleware <- function(middleware, terminal) {
 }
 
 check_middleware <- function(middleware) {
-  if (is.null(middleware)) return(list())
-  if (is.function(middleware)) middleware <- list(middleware)
-  if (!is.list(middleware) || !all(vapply(middleware, is.function, logical(1))))
-    stop("`middleware` must be a function of (req, next_fn), or a list of them",
-         call. = FALSE)
+  if (is.null(middleware)) {
+    return(list())
+  }
+  if (is.function(middleware)) {
+    middleware <- list(middleware)
+  }
+  if (
+    !is.list(middleware) || !all(vapply(middleware, is.function, logical(1)))
+  ) {
+    stop(
+      "`middleware` must be a function of (req, next_fn), or a list of them",
+      call. = FALSE
+    )
+  }
   middleware
 }

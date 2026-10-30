@@ -31,18 +31,19 @@
 zu_request <- function(method, url) {
   stopifnot(is.character(method), length(method) == 1L, !is.na(method))
   stopifnot(is.character(url), length(url) == 1L, !is.na(url))
-  if (!grepl("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$", method))
+  if (!grepl("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$", method)) {
     stop("`", method, "` is not a valid HTTP method token", call. = FALSE)
+  }
   structure(
     list(
-      method       = toupper(method),
-      url          = url,
-      query        = NULL,
-      headers      = NULL,
-      body         = NULL,
-      body_kind    = NULL,   # for printing: "JSON", "form", "raw", "file"
-      content_type = NULL,   # implied by the body; a header still wins
-      policy       = list()
+      method = toupper(method),
+      url = url,
+      query = NULL,
+      headers = NULL,
+      body = NULL,
+      body_kind = NULL, # for printing: "JSON", "form", "raw", "file"
+      content_type = NULL, # implied by the body; a header still wins
+      policy = list()
     ),
     class = "zu_request"
   )
@@ -78,8 +79,11 @@ zu_request <- function(method, url) {
 #'                    file.path(tempdir(), "big.bin"))
 zu_req_path <- function(req, path) {
   req <- check_req(req)
-  if (!is.character(path) || length(path) != 1L || is.na(path) || !nzchar(path))
+  if (
+    !is.character(path) || length(path) != 1L || is.na(path) || !nzchar(path)
+  ) {
     stop("`path` must be a single non-empty file path", call. = FALSE)
+  }
   req$path <- path.expand(path)
   req
 }
@@ -115,9 +119,12 @@ zu_req_path <- function(req, path) {
 #'                        function(chunk) total <<- total + length(chunk))
 zu_req_callback <- function(req, callback) {
   req <- check_req(req)
-  if (!is.function(callback))
-    stop("`callback` must be a function of one argument (a raw vector)",
-         call. = FALSE)
+  if (!is.function(callback)) {
+    stop(
+      "`callback` must be a function of one argument (a raw vector)",
+      call. = FALSE
+    )
+  }
   req$callback <- callback
   req
 }
@@ -139,9 +146,13 @@ zu_req_trace <- function(req, trace = TRUE) {
 }
 
 check_req <- function(req) {
-  if (!inherits(req, "zu_request"))
-    stop("expected a request from zu_request(); got ", class(req)[[1]],
-         call. = FALSE)
+  if (!inherits(req, "zu_request")) {
+    stop(
+      "expected a request from zu_request(); got ",
+      class(req)[[1]],
+      call. = FALSE
+    )
+  }
   req
 }
 
@@ -162,7 +173,9 @@ zu_query <- function(req, ...) {
   # Not merge_query(): an NA here is an instruction to erase a parameter the
   # *client* supplies, and it has to survive on the request until that merge
   # happens at perform time. Applying it now would erase nothing.
-  for (nm in names(q)) out[[nm]] <- q[[nm]]
+  for (nm in names(q)) {
+    out[[nm]] <- q[[nm]]
+  }
   req$query <- if (length(out)) out else NULL
   req
 }
@@ -179,7 +192,9 @@ zu_query <- function(req, ...) {
 zu_headers <- function(req, ...) {
   req <- check_req(req)
   h <- list(...)
-  if (length(h) == 1L && is.null(names(h))) h <- h[[1]]   # a bare named vector
+  if (length(h) == 1L && is.null(names(h))) {
+    h <- h[[1]]
+  } # a bare named vector
   h <- as_header_vec(h)
   out <- if (is.null(req$headers)) character() else req$headers
   # As in zu_query(): an NA is carried, not applied, because what it erases is
@@ -225,8 +240,12 @@ NULL
 #' @export
 zu_body_json <- function(req, x, auto_unbox = TRUE) {
   req <- check_req(req)
-  set_body(req, charToRaw(json_encode(x, auto_unbox = auto_unbox)),
-           "JSON", "application/json")
+  set_body(
+    req,
+    charToRaw(json_encode(x, auto_unbox = auto_unbox)),
+    "JSON",
+    "application/json"
+  )
 }
 
 #' @rdname zu_body
@@ -234,8 +253,12 @@ zu_body_json <- function(req, x, auto_unbox = TRUE) {
 zu_body_form <- function(req, x) {
   req <- check_req(req)
   body <- build_query(as_query_list(x))
-  set_body(req, charToRaw(if (is.null(body)) "" else body),
-           "form", "application/x-www-form-urlencoded")
+  set_body(
+    req,
+    charToRaw(if (is.null(body)) "" else body),
+    "form",
+    "application/x-www-form-urlencoded"
+  )
 }
 
 #' @rdname zu_body
@@ -243,12 +266,15 @@ zu_body_form <- function(req, x) {
 zu_body_raw <- function(req, x, type = NULL) {
   req <- check_req(req)
   if (is.character(x)) {
-    if (length(x) != 1L || is.na(x))
+    if (length(x) != 1L || is.na(x)) {
       stop("a character body must be a single non-NA string", call. = FALSE)
+    }
     x <- charToRaw(enc2utf8(x))
     if (is.null(type)) type <- "text/plain; charset=UTF-8"
   }
-  if (!is.raw(x)) stop("body must be a raw vector or a string", call. = FALSE)
+  if (!is.raw(x)) {
+    stop("body must be a raw vector or a string", call. = FALSE)
+  }
   set_body(req, x, "raw", type)
 }
 
@@ -256,14 +282,16 @@ zu_body_raw <- function(req, x, type = NULL) {
 #' @export
 zu_body_file <- function(req, file, type = "application/octet-stream") {
   req <- check_req(req)
-  if (!file.exists(file)) stop("no such file: ", file, call. = FALSE)
+  if (!file.exists(file)) {
+    stop("no such file: ", file, call. = FALSE)
+  }
   n <- file.info(file)$size
   set_body(req, readBin(file, "raw", n = n), "file", type)
 }
 
 set_body <- function(req, bytes, kind, type) {
-  req$body         <- bytes
-  req$body_kind    <- kind
+  req$body <- bytes
+  req$body_kind <- kind
   req$content_type <- type
   req
 }
@@ -291,7 +319,11 @@ NULL
 #' @export
 zu_req_timeout <- function(req, total) {
   req <- check_req(req)
-  req$policy[["timeout"]] <- if (missing(total) || is.null(total)) .zu_reset else total
+  req$policy[["timeout"]] <- if (missing(total) || is.null(total)) {
+    .zu_reset
+  } else {
+    total
+  }
   req
 }
 
@@ -299,7 +331,11 @@ zu_req_timeout <- function(req, total) {
 #' @export
 zu_req_redirects <- function(req, max) {
   req <- check_req(req)
-  req$policy[["redirects"]] <- if (missing(max) || is.null(max)) .zu_reset else max
+  req$policy[["redirects"]] <- if (missing(max) || is.null(max)) {
+    .zu_reset
+  } else {
+    max
+  }
   req
 }
 
@@ -316,22 +352,41 @@ print.zu_request <- function(x, ...) {
   # §42.2: a printed request is an egress like any other, so the URL and the
   # header values go through the redaction filter first.
   cat("<zu_request>\n")
-  cat(x$method, " ", zu_redact_url(url_with_query(x$url, x$query)), "\n", sep = "")
+  cat(
+    x$method,
+    " ",
+    zu_redact_url(url_with_query(x$url, x$query)),
+    "\n",
+    sep = ""
+  )
   h <- zu_redact_headers_for_display(x$headers)
-  for (i in seq_along(h)) cat(names(h)[i], ": ", h[[i]], "\n", sep = "")
-  if (!is.null(x$content_type) &&
-      !any(tolower(names(x$headers)) == "content-type"))
+  for (i in seq_along(h)) {
+    cat(names(h)[i], ": ", h[[i]], "\n", sep = "")
+  }
+  if (
+    !is.null(x$content_type) &&
+      !any(tolower(names(x$headers)) == "content-type")
+  ) {
     cat("Content-Type: ", x$content_type, "\n", sep = "")
-  if (!is.null(x$body))
+  }
+  if (!is.null(x$body)) {
     cat("Body: ", x$body_kind, ", ", length(x$body), " bytes\n", sep = "")
+  }
   # A resolved request (one that has been through zu_perform) knows every
   # policy value, not just the ones the caller named; show those instead.
   pol <- if (!is.null(x$resolved)) x$resolved else x$policy
   for (f in names(pol)) {
     v <- if (f == "proxy") redact_proxy(pol[[f]]) else pol[[f]]
-    if (is.null(v)) next
-    cat(f, ": ", if (inherits(v, "zu_reset")) "package default" else format(v),
-        "\n", sep = "")
+    if (is.null(v)) {
+      next
+    }
+    cat(
+      f,
+      ": ",
+      if (inherits(v, "zu_reset")) "package default" else format(v),
+      "\n",
+      sep = ""
+    )
   }
   invisible(x)
 }

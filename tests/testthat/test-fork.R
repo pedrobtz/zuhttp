@@ -23,12 +23,22 @@ test_that("HTTPS in a forked child raises zu_fork_error and does not kill the wo
 
   # Two children, not one: R-12 is about the trust evaluator being dead in
   # every child, so "every child raised it" is the claim worth asserting.
-  res <- parallel::mclapply(1:2, function(i) {
-    tryCatch(
-      { zu_get("https://example.com"); "UNEXPECTED SUCCESS" },
-      condition = function(e) list(classes = class(e), message = conditionMessage(e))
-    )
-  }, mc.cores = 2, mc.cleanup = FALSE)
+  res <- parallel::mclapply(
+    1:2,
+    function(i) {
+      tryCatch(
+        {
+          zu_get("https://example.com")
+          "UNEXPECTED SUCCESS"
+        },
+        condition = function(e) {
+          list(classes = class(e), message = conditionMessage(e))
+        }
+      )
+    },
+    mc.cores = 2,
+    mc.cleanup = FALSE
+  )
 
   for (r in res) {
     # (1) The worker came back at all. NULL here means it died on a signal.
@@ -47,9 +57,14 @@ test_that("the parent's own requests still work after a child has tripped the gu
   skip_unless_forked_https_is_testable()
 
   expect_identical(zu_resp_status(zu_get("https://example.com")), 200L)
-  parallel::mclapply(1, function(i)
-    tryCatch(zu_get("https://example.com"), condition = function(e) "tripped"),
-    mc.cores = 1, mc.cleanup = FALSE)
+  parallel::mclapply(
+    1,
+    function(i) {
+      tryCatch(zu_get("https://example.com"), condition = function(e) "tripped")
+    },
+    mc.cores = 1,
+    mc.cleanup = FALSE
+  )
 
   # The guard is per-process state; a child tripping it must not disarm the
   # parent, which never forked and whose trustd connection is intact.

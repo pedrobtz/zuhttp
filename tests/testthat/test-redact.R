@@ -66,7 +66,7 @@ test_that("redacting an already-redacted URL is stable", {
   # record.R redacts a response URL the engine has already redacted (§42.2),
   # so a second pass has to be a no-op. It is, and nothing said so — a
   # redactor that re-escaped its own marker would corrupt every cassette.
-  u    <- "https://user:pw@h/x?access_token=SECRET&page=2"
+  u <- "https://user:pw@h/x?access_token=SECRET&page=2"
   once <- zu_redact_url(u)
   expect_false(grepl("SECRET", once, fixed = TRUE))
   expect_false(grepl("pw", once, fixed = TRUE))
@@ -75,10 +75,18 @@ test_that("redacting an already-redacted URL is stable", {
 
 test_that("the default header list matches §42.1", {
   expect_true(all(zu_is_secret_header(c(
-    "Authorization", "proxy-authorization", "Cookie", "Set-Cookie",
-    "X-Api-Key", "X-Auth-Token"
+    "Authorization",
+    "proxy-authorization",
+    "Cookie",
+    "Set-Cookie",
+    "X-Api-Key",
+    "X-Auth-Token"
   ))))
-  expect_false(any(zu_is_secret_header(c("Accept", "Content-Type", "X-Request-Id"))))
+  expect_false(any(zu_is_secret_header(c(
+    "Accept",
+    "Content-Type",
+    "X-Request-Id"
+  ))))
 })
 
 test_that("extra names add to the defaults and cannot remove them", {
@@ -98,8 +106,10 @@ test_that("extra query parameters are honoured", {
   expect_true(zu_is_secret_param("session_id"))
   # Exact names only: a parameter that merely contains a secret name is not
   # one, or every `page_token` cursor would be hidden from the person paging.
-  expect_identical(zu_is_secret_param(c("token", "page_token", "api_key", "page")),
-                   c(TRUE, FALSE, TRUE, FALSE))
+  expect_identical(
+    zu_is_secret_param(c("token", "page_token", "api_key", "page")),
+    c(TRUE, FALSE, TRUE, FALSE)
+  )
   expect_identical(
     zu_redact_url("https://h/?session_id=abc&x=1"),
     "https://h/?session_id=<redacted>&x=1"
@@ -158,16 +168,32 @@ test_that("the canary does not leak through displayed headers (§42.4)", {
 })
 
 test_that("the canary does not leak through a redacted URL or form (§42.4)", {
-  expect_false(grepl(CANARY, zu_redact_url(
-    paste0("https://u:", CANARY, "@h/x?access_token=", CANARY)), fixed = TRUE))
-  expect_false(grepl(CANARY, zu_redact_form(
-    paste0("api_key=", CANARY, "&x=1")), fixed = TRUE))
+  expect_false(grepl(
+    CANARY,
+    zu_redact_url(
+      paste0("https://u:", CANARY, "@h/x?access_token=", CANARY)
+    ),
+    fixed = TRUE
+  ))
+  expect_false(grepl(
+    CANARY,
+    zu_redact_form(
+      paste0("api_key=", CANARY, "&x=1")
+    ),
+    fixed = TRUE
+  ))
 })
 
 test_that("the canary does not leak through a printed request (§42.4)", {
-  req <- zu_request("POST", paste0("https://api.example.com/x?api_key=", CANARY))
+  req <- zu_request(
+    "POST",
+    paste0("https://api.example.com/x?api_key=", CANARY)
+  )
   req <- zu_headers(req, Authorization = paste("Bearer", CANARY))
-  req <- zu_body_form(req, list(client_secret = CANARY, grant_type = "client_credentials"))
+  req <- zu_body_form(
+    req,
+    list(client_secret = CANARY, grant_type = "client_credentials")
+  )
 
   # PRINTED, not stored: §42.3 requires the live request to keep the real
   # credential, or a redacted request would no longer be executable. What must
@@ -185,10 +211,14 @@ test_that("the canary does not leak through a printed request (§42.4)", {
   expect_true(grepl(CANARY, rawToChar(req$body), fixed = TRUE))
 
   # And through a printed response, and the request a condition carries.
-  api <- zu_client(headers = c(Authorization = paste("Bearer", CANARY)),
-                   transport = zu_mock_transport(function(r) zu_response(500L)))
-  e <- tryCatch(zu_get(paste0("https://h/x?api_key=", CANARY), client = api),
-                zu_error = function(e) e)
+  api <- zu_client(
+    headers = c(Authorization = paste("Bearer", CANARY)),
+    transport = zu_mock_transport(function(r) zu_response(500L))
+  )
+  e <- tryCatch(
+    zu_get(paste0("https://h/x?api_key=", CANARY), client = api),
+    zu_error = function(e) e
+  )
   expect_no_canary(e, "condition payload from a failed request")
   expect_no_canary(e$request, "the request stored on a condition")
   expect_no_canary(e$response, "the response stored on a condition")
@@ -203,13 +233,21 @@ test_that("the canary does not reach a cassette on disk (§37, §42.4)", {
   on.exit(unlink(dir, recursive = TRUE), add = TRUE)
   unlink(dir, recursive = TRUE)
 
-  live <- zu_mock_transport(function(req)
-    zu_response(200L, headers = c("Set-Cookie" = paste0("s=", CANARY)), body = "ok"))
-  api <- zu_client(headers = c(Authorization = paste("Bearer", CANARY)),
-                   transport = zu_cassette_transport(dir, "canary", transport = live))
+  live <- zu_mock_transport(function(req) {
+    zu_response(
+      200L,
+      headers = c("Set-Cookie" = paste0("s=", CANARY)),
+      body = "ok"
+    )
+  })
+  api <- zu_client(
+    headers = c(Authorization = paste("Bearer", CANARY)),
+    transport = zu_cassette_transport(dir, "canary", transport = live)
+  )
   req <- zu_body_form(
     zu_request("POST", paste0("https://h/x?api_key=", CANARY)),
-    list(password = CANARY, client_secret = CANARY, page = "2"))
+    list(password = CANARY, client_secret = CANARY, page = "2")
+  )
   expect_identical(zu_resp_status(zu_perform(req, client = api)), 200L)
 
   f <- file.path(dir, "canary.rds")
@@ -224,7 +262,10 @@ test_that("the canary does not reach a cassette on disk (§37, §42.4)", {
   rec <- zu_cassette_interactions(dir, "canary")
   expect_length(rec, 1L)
   expect_match(rec[[1]]$request$url, "api_key=<redacted>", fixed = TRUE)
-  expect_identical(unname(rec[[1]]$request$headers[["Authorization"]]), "<redacted>")
+  expect_identical(
+    unname(rec[[1]]$request$headers[["Authorization"]]),
+    "<redacted>"
+  )
   expect_match(rawToChar(rec[[1]]$request$body), "page=2", fixed = TRUE)
 })
 
@@ -235,10 +276,13 @@ test_that("the canary does not reach a hook payload (§35.3, §42.4)", {
   # whole point, since logging is exactly what hooks are for.
   seen <- list()
   cli <- zu_client(
-    headers   = c(Authorization = paste("Bearer", CANARY)),
+    headers = c(Authorization = paste("Bearer", CANARY)),
     transport = zu_mock_transport(function(r) zu_response(200L)),
-    hooks     = zu_hooks(before_request = function(p) seen$before <<- p,
-                         after_response = function(p) seen$after  <<- p))
+    hooks = zu_hooks(
+      before_request = function(p) seen$before <<- p,
+      after_response = function(p) seen$after <<- p
+    )
+  )
   invisible(zu_get(paste0("https://h/x?api_key=", CANARY), client = cli))
 
   expect_length(seen, 2L)
@@ -255,15 +299,22 @@ test_that("the canary does not reach a hook payload through a form body (§35.3,
   seen <- list()
   cli <- zu_client(
     transport = zu_mock_transport(function(r) zu_response(503L)),
-    retry     = zu_retry(attempts = 2L, base = 0.001, jitter = FALSE),
-    hooks     = zu_hooks(before_request = function(p) seen$before <<- p,
-                         before_retry   = function(p) seen$retry  <<- p,
-                         after_response = function(p) seen$after  <<- p))
+    retry = zu_retry(attempts = 2L, base = 0.001, jitter = FALSE),
+    hooks = zu_hooks(
+      before_request = function(p) seen$before <<- p,
+      before_retry = function(p) seen$retry <<- p,
+      after_response = function(p) seen$after <<- p
+    )
+  )
   for (ct in c(NA, "application/x-www-form-urlencoded; charset=UTF-8")) {
     seen <- list()
-    req <- zu_body_form(zu_request("PUT", "https://h/login"),
-                        list(user = "me", password = CANARY))
-    if (!is.na(ct)) req <- zu_headers(req, "Content-Type" = ct)
+    req <- zu_body_form(
+      zu_request("PUT", "https://h/login"),
+      list(user = "me", password = CANARY)
+    )
+    if (!is.na(ct)) {
+      req <- zu_headers(req, "Content-Type" = ct)
+    }
     invisible(zu_perform(req, client = zu_client_update(cli, check = FALSE)))
     expect_length(seen, 3L)
     expect_no_canary(seen$before, "the before_request payload's form body")
@@ -279,8 +330,14 @@ test_that("the canary does not reach zu_info() (§39, §42.2)", {
   # likelier places for a credential to escape — and a proxy URL routinely
   # carries one.
   saved <- Sys.getenv("http_proxy", unset = NA)
-  on.exit(if (is.na(saved)) Sys.unsetenv("http_proxy") else
-            Sys.setenv(http_proxy = saved), add = TRUE)
+  on.exit(
+    if (is.na(saved)) {
+      Sys.unsetenv("http_proxy")
+    } else {
+      Sys.setenv(http_proxy = saved)
+    },
+    add = TRUE
+  )
   Sys.setenv(http_proxy = paste0("http://user:", CANARY, "@corp:3128"))
 
   i <- zu_info()
@@ -291,8 +348,10 @@ test_that("the canary does not reach zu_info() (§39, §42.2)", {
 test_that("the canary does not leak through the message of a URL that does not parse (§42.2)", {
   # The native path, not the helper: the engine put the raw URL into its
   # message, and redacting the separate `url` field did not touch it.
-  for (u in c(paste0("http://example.test:bad/?token=", CANARY),
-              paste0("http://u:", CANARY, "@example.test:bad/"))) {
+  for (u in c(
+    paste0("http://example.test:bad/?token=", CANARY),
+    paste0("http://u:", CANARY, "@example.test:bad/")
+  )) {
     e <- tryCatch(zu_get(u, proxy = FALSE), error = function(e) e)
     expect_s3_class(e, "zu_url_error")
     expect_no_canary(e, paste("a malformed URL's condition:", u))
@@ -301,11 +360,23 @@ test_that("the canary does not leak through the message of a URL that does not p
 })
 
 test_that("a percent-encoded secret name is redacted like the plain one (§42.1)", {
-  expect_no_canary(zu_redact_url(paste0("https://h/?%74oken=", CANARY)), "an encoded token")
-  expect_no_canary(zu_redact_url(paste0("https://h/?%61PI_KEY=", CANARY)), "an encoded api_key")
-  expect_no_canary(zu_redact_form(paste0("%70assword=", CANARY)), "an encoded password")
+  expect_no_canary(
+    zu_redact_url(paste0("https://h/?%74oken=", CANARY)),
+    "an encoded token"
+  )
+  expect_no_canary(
+    zu_redact_url(paste0("https://h/?%61PI_KEY=", CANARY)),
+    "an encoded api_key"
+  )
+  expect_no_canary(
+    zu_redact_form(paste0("%70assword=", CANARY)),
+    "an encoded password"
+  )
   # The spelling is kept; only the value goes.
-  expect_identical(zu_redact_url("https://h/?%74oken=x&a=1"), "https://h/?%74oken=<redacted>&a=1")
+  expect_identical(
+    zu_redact_url("https://h/?%74oken=x&a=1"),
+    "https://h/?%74oken=<redacted>&a=1"
+  )
 })
 
 test_that("the canary does not leak through a configured proxy URL (§42.1, §42.2)", {
@@ -314,21 +385,32 @@ test_that("the canary does not leak through a configured proxy URL (§42.1, §42
   # request a condition carries and a hook payload. Both spellings the engine
   # accepts are covered; the schemeless one is what zu_redact_url() alone
   # misses, since without "://" it cannot tell userinfo from a path.
-  for (px in c(paste0("http://u:", CANARY, "@corp:3128"),
-               paste0("u:", CANARY, "@corp:3128"))) {
+  for (px in c(
+    paste0("http://u:", CANARY, "@corp:3128"),
+    paste0("u:", CANARY, "@corp:3128")
+  )) {
     seen <- list()
     cli <- zu_client(
-      proxy     = px,
+      proxy = px,
       transport = zu_mock_transport(function(r) zu_response(500L)),
-      hooks     = zu_hooks(before_request = function(p) seen$before <<- p,
-                           after_response = function(p) seen$after  <<- p))
-    expect_false(any(grepl(CANARY, capture.output(print(cli)), fixed = TRUE)),
-                 info = paste("printed client,", px))
+      hooks = zu_hooks(
+        before_request = function(p) seen$before <<- p,
+        after_response = function(p) seen$after <<- p
+      )
+    )
+    expect_false(
+      any(grepl(CANARY, capture.output(print(cli)), fixed = TRUE)),
+      info = paste("printed client,", px)
+    )
 
     # Set on the client (resolved) and on the request (policy): both travel.
-    e1 <- tryCatch(zu_get("https://h/x", client = cli), zu_error = function(e) e)
-    e2 <- tryCatch(zu_get("https://h/x", proxy = px, client = cli),
-                   zu_error = function(e) e)
+    e1 <- tryCatch(zu_get("https://h/x", client = cli), zu_error = function(e) {
+      e
+    })
+    e2 <- tryCatch(
+      zu_get("https://h/x", proxy = px, client = cli),
+      zu_error = function(e) e
+    )
     expect_s3_class(e1, "zu_http_server_error")
     expect_no_canary(e1, "a condition from a client with a proxy")
     expect_no_canary(e2, "a condition from a request with a proxy")
@@ -353,14 +435,16 @@ test_that("the canary does not reach verbose output (§42.2, §42.4)", {
   on.exit(try(close(out), silent = TRUE), add = TRUE)
 
   cli <- zu_client(
-    headers   = c(Authorization = paste("Bearer", CANARY)),
-    hooks     = zu_verbose(to = out),
-    transport = zu_mock_transport(function(r)
-      zu_response(200L, c("Set-Cookie" = paste0("s=", CANARY)), "ok")))
+    headers = c(Authorization = paste("Bearer", CANARY)),
+    hooks = zu_verbose(to = out),
+    transport = zu_mock_transport(function(r) {
+      zu_response(200L, c("Set-Cookie" = paste0("s=", CANARY)), "ok")
+    })
+  )
   invisible(zu_get(paste0("https://h/x?api_key=", CANARY), client = cli))
   close(out)
 
-  expect_gt(length(trace), 0L)                  # something was actually traced
+  expect_gt(length(trace), 0L) # something was actually traced
   expect_false(any(grepl(CANARY, trace, fixed = TRUE)))
   # ...and the trace is still useful: the request line and the header NAME
   # survive, only the value goes.
@@ -379,26 +463,39 @@ test_that("the canary does not reach a §35.3 trace (§42.2, §42.4)", {
   # This drives the real engine against a loopback origin, so both URL-bearing
   # events are exercised: request.start from the URL the caller passed, and
   # redirect.followed from the one the engine resolved.
-  with_redirect_origin(function(start, target) {
-    out <- textConnection("trace", "w", local = TRUE)
-    on.exit(try(close(out), silent = TRUE), add = TRUE)
+  with_redirect_origin(
+    function(start, target) {
+      out <- textConnection("trace", "w", local = TRUE)
+      on.exit(try(close(out), silent = TRUE), add = TRUE)
 
-    r <- zu_get(paste0(start, "?access_token=", CANARY),
-                trace = TRUE, redirects = 1, check = FALSE, timeout = 20,
-                client = zu_client(hooks = zu_verbose(to = out), pool = NULL))
-    close(out)
+      r <- zu_get(
+        paste0(start, "?access_token=", CANARY),
+        trace = TRUE,
+        redirects = 1,
+        check = FALSE,
+        timeout = 20,
+        client = zu_client(hooks = zu_verbose(to = out), pool = NULL)
+      )
+      close(out)
 
-    tr <- zu_resp_trace(r)
-    expect_true("request.start" %in% tr$event)
-    expect_true("redirect.followed" %in% tr$event)   # both paths really ran
-    expect_no_canary(tr, "the §35.3 trace")
-    expect_false(any(grepl(CANARY, trace, fixed = TRUE)))
+      tr <- zu_resp_trace(r)
+      expect_true("request.start" %in% tr$event)
+      expect_true("redirect.followed" %in% tr$event) # both paths really ran
+      expect_no_canary(tr, "the §35.3 trace")
+      expect_false(any(grepl(CANARY, trace, fixed = TRUE)))
 
-    # ...and the trace is still useful: the URL survives, only its secret
-    # goes. Without this the arm would pass on an empty detail.
-    expect_true(all(grepl("access_token=<redacted>", tr$detail[
-      tr$event %in% c("request.start", "redirect.followed")], fixed = TRUE)))
-  }, target_query = paste0("?access_token=", CANARY))
+      # ...and the trace is still useful: the URL survives, only its secret
+      # goes. Without this the arm would pass on an empty detail.
+      expect_true(all(grepl(
+        "access_token=<redacted>",
+        tr$detail[
+          tr$event %in% c("request.start", "redirect.followed")
+        ],
+        fixed = TRUE
+      )))
+    },
+    target_query = paste0("?access_token=", CANARY)
+  )
 })
 
 test_that("the canary does not reach zu_resp_url() (§42.2, §42.4)", {
@@ -407,23 +504,31 @@ test_that("the canary does not reach zu_resp_url() (§42.2, §42.4)", {
   # and this one would have failed: url_of() omits userinfo, so
   # "credential-free" held for half of §42.1 while a ?access_token= came
   # straight back out of the response.
-  with_redirect_origin(function(start, target) {
-    r <- zu_get(paste0(start, "?access_token=", CANARY),
-                trace = TRUE, redirects = 1, check = FALSE, timeout = 20,
-                client = zu_client(pool = NULL))
-    u  <- zu_resp_url(r)
-    tr <- zu_resp_trace(r)
+  with_redirect_origin(
+    function(start, target) {
+      r <- zu_get(
+        paste0(start, "?access_token=", CANARY),
+        trace = TRUE,
+        redirects = 1,
+        check = FALSE,
+        timeout = 20,
+        client = zu_client(pool = NULL)
+      )
+      u <- zu_resp_url(r)
+      tr <- zu_resp_trace(r)
 
-    expect_no_canary(u, "zu_resp_url()")
-    # ...on a URL that is otherwise intact, or an empty string would pass.
-    expect_true(grepl("access_token=<redacted>", u, fixed = TRUE))
-    expect_true(grepl("/final", u, fixed = TRUE))
+      expect_no_canary(u, "zu_resp_url()")
+      # ...on a URL that is otherwise intact, or an empty string would pass.
+      expect_true(grepl("access_token=<redacted>", u, fixed = TRUE))
+      expect_true(grepl("/final", u, fixed = TRUE))
 
-    # The final URL and the event that recorded arriving at it are the same
-    # string, secret and all. They share a builder in C, and this is what
-    # keeps the two renderings from drifting now that both are redacted.
-    expect_identical(u, tr$detail[tr$event == "redirect.followed"][[1]])
-  }, target_query = paste0("?access_token=", CANARY))
+      # The final URL and the event that recorded arriving at it are the same
+      # string, secret and all. They share a builder in C, and this is what
+      # keeps the two renderings from drifting now that both are redacted.
+      expect_identical(u, tr$detail[tr$event == "redirect.followed"][[1]])
+    },
+    target_query = paste0("?access_token=", CANARY)
+  )
 })
 
 test_that("every §42.2 egress now has a canary arm", {
@@ -431,14 +536,26 @@ test_that("every §42.2 egress now has a canary arm", {
   # output path is added", so the list is checked against this file's own
   # test names rather than remembered: a new egress needs a new line here,
   # and a line here needs a test whose name says it covers that egress.
-  covered <- c("condition object", "printed request", "cassette on disk",
-               "hook payload", "form body", "zu_info()", "verbose output",
-               "§35.3 trace", "zu_resp_url()", "proxy URL",
-               "URL that does not parse")
+  covered <- c(
+    "condition object",
+    "printed request",
+    "cassette on disk",
+    "hook payload",
+    "form body",
+    "zu_info()",
+    "verbose output",
+    "§35.3 trace",
+    "zu_resp_url()",
+    "proxy URL",
+    "URL that does not parse"
+  )
   src <- readLines(test_path("test-redact.R"), encoding = "UTF-8")
   names <- regmatches(src, regexpr('^test_that\\("[^"]*', src))
   arms <- names[grepl("canary", names, fixed = TRUE)]
-  for (egress in covered)
-    expect_true(any(grepl(egress, arms, fixed = TRUE)),
-                info = paste("no canary arm names", egress))
+  for (egress in covered) {
+    expect_true(
+      any(grepl(egress, arms, fixed = TRUE)),
+      info = paste("no canary arm names", egress)
+    )
+  }
 })

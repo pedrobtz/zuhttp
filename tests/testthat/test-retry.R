@@ -27,52 +27,84 @@ test_that("retrying is off by default", {
 
   c1 <- counting(function(n, req) zu_response(503L))
   expect_identical(
-    zu_resp_status(zu_get("https://h/x", check = FALSE,
-                          client = zu_client(transport = c1$transport))), 503L)
+    zu_resp_status(zu_get(
+      "https://h/x",
+      check = FALSE,
+      client = zu_client(transport = c1$transport)
+    )),
+    503L
+  )
   expect_identical(c1$n(), 1L)
 })
 
 # --- §33.1 admissibility --------------------------------------------------
 
 test_that("an idempotent method retries and a POST does not", {
-  make <- function() counting(function(n, req)
-    if (n < 3L) zu_response(503L) else zu_response(200L))
+  make <- function() {
+    counting(function(n, req) {
+      if (n < 3L) zu_response(503L) else zu_response(200L)
+    })
+  }
 
   for (m in c("GET", "HEAD", "PUT", "DELETE", "OPTIONS", "TRACE")) {
     c1 <- make()
-    cli <- zu_client(transport = c1$transport, retry = zu_retry(3, base = 0.001))
-    expect_identical(zu_resp_status(zu_perform(zu_request(m, "https://h/x"), client = cli)),
-                     200L, info = m)
+    cli <- zu_client(
+      transport = c1$transport,
+      retry = zu_retry(3, base = 0.001)
+    )
+    expect_identical(
+      zu_resp_status(zu_perform(zu_request(m, "https://h/x"), client = cli)),
+      200L,
+      info = m
+    )
     expect_identical(c1$n(), 3L, info = m)
   }
 
   # POST is not idempotent and is never retried automatically (§33.1).
   c1 <- make()
   cli <- zu_client(transport = c1$transport, retry = zu_retry(3, base = 0.001))
-  expect_error(zu_perform(zu_request("POST", "https://h/x"), client = cli),
-               class = "zu_http_server_error")
+  expect_error(
+    zu_perform(zu_request("POST", "https://h/x"), client = cli),
+    class = "zu_http_server_error"
+  )
   expect_identical(c1$n(), 1L)
 })
 
 test_that("a POST opts in with replay_safe or an Idempotency-Key", {
-  make <- function() counting(function(n, req)
-    if (n < 2L) zu_response(503L) else zu_response(200L))
+  make <- function() {
+    counting(function(n, req) {
+      if (n < 2L) zu_response(503L) else zu_response(200L)
+    })
+  }
 
-  c1 <- make(); cli <- zu_client(transport = c1$transport)
-  req <- zu_req_retry(zu_request("POST", "https://h/x"), attempts = 3,
-                      base = 0.001, replay_safe = TRUE)
+  c1 <- make()
+  cli <- zu_client(transport = c1$transport)
+  req <- zu_req_retry(
+    zu_request("POST", "https://h/x"),
+    attempts = 3,
+    base = 0.001,
+    replay_safe = TRUE
+  )
   expect_identical(zu_resp_status(zu_perform(req, client = cli)), 200L)
   expect_identical(c1$n(), 2L)
 
-  c2 <- make(); cli2 <- zu_client(transport = c2$transport)
-  req2 <- zu_req_retry(zu_request("POST", "https://h/x"), attempts = 3,
-                       base = 0.001, idempotency_key = TRUE)
+  c2 <- make()
+  cli2 <- zu_client(transport = c2$transport)
+  req2 <- zu_req_retry(
+    zu_request("POST", "https://h/x"),
+    attempts = 3,
+    base = 0.001,
+    idempotency_key = TRUE
+  )
   expect_match(req2$headers[["Idempotency-Key"]], "^[0-9a-f]{32}$")
   expect_identical(zu_resp_status(zu_perform(req2, client = cli2)), 200L)
   expect_identical(c2$n(), 2L)
 
   # A caller-supplied key is honoured as given.
-  req3 <- zu_req_retry(zu_request("POST", "https://h/x"), idempotency_key = "my-key")
+  req3 <- zu_req_retry(
+    zu_request("POST", "https://h/x"),
+    idempotency_key = "my-key"
+  )
   expect_identical(unname(req3$headers[["Idempotency-Key"]]), "my-key")
 })
 
@@ -81,28 +113,36 @@ test_that("zu_req_replay_safe() states §33.1's second condition", {
   expect_true(zu_req_replay_safe(zu_request("delete", "https://h/x")))
   expect_false(zu_req_replay_safe(zu_request("POST", "https://h/x")))
   expect_true(zu_req_replay_safe(
-    zu_headers(zu_request("POST", "https://h/x"), "idempotency-key" = "k")))
+    zu_headers(zu_request("POST", "https://h/x"), "idempotency-key" = "k")
+  ))
   expect_true(zu_req_replay_safe(
-    zu_req_retry(zu_request("POST", "https://h/x"), replay_safe = TRUE)))
+    zu_req_retry(zu_request("POST", "https://h/x"), replay_safe = TRUE)
+  ))
 })
 
 test_that("a non-rewindable body refuses rather than truncating (§28.2)", {
   expect_true(zu_body_rewindable(zu_request("GET", "https://h/x")))
   expect_true(zu_body_rewindable(
-    zu_body_raw(zu_request("POST", "https://h/x"), "bytes")))
+    zu_body_raw(zu_request("POST", "https://h/x"), "bytes")
+  ))
 
   # No public API produces a non-rewindable body yet — §28.2's connection and
   # callback rows arrive with S17 — so the marker is set directly. The
   # MECHANISM is what this asserts, and it is the mechanism S17 will hand a
   # real body to.
-  req <- zu_req_retry(zu_request("POST", "https://h/x"), attempts = 3,
-                      replay_safe = TRUE)
+  req <- zu_req_retry(
+    zu_request("POST", "https://h/x"),
+    attempts = 3,
+    replay_safe = TRUE
+  )
   req$body_rewindable <- FALSE
   expect_false(zu_body_rewindable(req))
 
   c1 <- counting(function(n, req) zu_response(200L))
-  expect_error(zu_perform(req, client = zu_client(transport = c1$transport)),
-               class = "zu_body_not_replayable")
+  expect_error(
+    zu_perform(req, client = zu_client(transport = c1$transport)),
+    class = "zu_body_not_replayable"
+  )
   # Refused BEFORE any attempt: discovering this only on the first failure
   # would make it intermittent.
   expect_identical(c1$n(), 0L)
@@ -112,24 +152,40 @@ test_that("a non-rewindable body refuses rather than truncating (§28.2)", {
 
 test_that("only the §33.2 statuses are retried", {
   check_status <- function(st, expect_retry) {
-    c1 <- counting(function(n, req) if (n < 2L) zu_response(st) else zu_response(200L))
-    cli <- zu_client(transport = c1$transport,
-                     retry = zu_retry(3, base = 0.001), check = FALSE)
+    c1 <- counting(function(n, req) {
+      if (n < 2L) zu_response(st) else zu_response(200L)
+    })
+    cli <- zu_client(
+      transport = c1$transport,
+      retry = zu_retry(3, base = 0.001),
+      check = FALSE
+    )
     invisible(zu_get("https://h/x", client = cli))
-    expect_identical(c1$n(), if (expect_retry) 2L else 1L,
-                     info = paste("status", st))
+    expect_identical(
+      c1$n(),
+      if (expect_retry) 2L else 1L,
+      info = paste("status", st)
+    )
   }
-  for (st in c(408L, 429L, 500L, 502L, 503L, 504L)) check_status(st, TRUE)
+  for (st in c(408L, 429L, 500L, 502L, 503L, 504L)) {
+    check_status(st, TRUE)
+  }
   # "Other 5xx: no by default" — 501 and 505 are not in the table.
-  for (st in c(400L, 401L, 403L, 404L, 409L, 418L, 501L, 505L)) check_status(st, FALSE)
+  for (st in c(400L, 401L, 403L, 404L, 409L, 418L, 501L, 505L)) {
+    check_status(st, FALSE)
+  }
   # A success is obviously not retried.
   check_status(200L, FALSE)
 })
 
 test_that("`on` extends the retryable status set without replacing it", {
-  c1 <- counting(function(n, req) if (n < 2L) zu_response(418L) else zu_response(200L))
-  cli <- zu_client(transport = c1$transport,
-                   retry = zu_retry(3, base = 0.001, on = 418L))
+  c1 <- counting(function(n, req) {
+    if (n < 2L) zu_response(418L) else zu_response(200L)
+  })
+  cli <- zu_client(
+    transport = c1$transport,
+    retry = zu_retry(3, base = 0.001, on = 418L)
+  )
   expect_identical(zu_resp_status(zu_get("https://h/x", client = cli)), 200L)
   expect_identical(c1$n(), 2L)
 })
@@ -137,9 +193,17 @@ test_that("`on` extends the retryable status set without replacing it", {
 test_that("a raised condition is retried only when its code says so", {
   # A TLS trust failure will not fix itself (§33.2); an I/O failure might.
   retried_for <- function(cls) {
-    c1 <- counting(function(n, req)
-      if (n < 2L) zu_stop(cls, "boom", url = "https://h/x") else zu_response(200L))
-    cli <- zu_client(transport = c1$transport, retry = zu_retry(3, base = 0.001))
+    c1 <- counting(function(n, req) {
+      if (n < 2L) {
+        zu_stop(cls, "boom", url = "https://h/x")
+      } else {
+        zu_response(200L)
+      }
+    })
+    cli <- zu_client(
+      transport = c1$transport,
+      retry = zu_retry(3, base = 0.001)
+    )
     tryCatch(zu_get("https://h/x", client = cli), zu_error = function(e) NULL)
     c1$n()
   }
@@ -151,8 +215,9 @@ test_that("a raised condition is retried only when its code says so", {
 })
 
 test_that("a condition that outlives the retries reaches the caller unchanged", {
-  c1 <- counting(function(n, req) zu_stop("zu_io_error", "still broken",
-                                          url = "https://h/x"))
+  c1 <- counting(function(n, req) {
+    zu_stop("zu_io_error", "still broken", url = "https://h/x")
+  })
   cli <- zu_client(transport = c1$transport, retry = zu_retry(3, base = 0.001))
   e <- tryCatch(zu_get("https://h/x", client = cli), zu_error = function(e) e)
   expect_s3_class(e, "zu_io_error")
@@ -174,15 +239,21 @@ test_that("Retry-After is parsed in both RFC 7231 forms and clamped", {
   # format(), whose %a and %b follow the session's LC_TIME.
   http_date <- function(t) {
     lt <- as.POSIXlt(t, tz = "GMT")
-    sprintf("%s, %02d %s %04d %02d:%02d:%02d GMT",
-            c("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")[lt$wday + 1L],
-            lt$mday, month.abb[lt$mon + 1L], lt$year + 1900L,
-            lt$hour, lt$min, as.integer(lt$sec))
+    sprintf(
+      "%s, %02d %s %04d %02d:%02d:%02d GMT",
+      c("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")[lt$wday + 1L],
+      lt$mday,
+      month.abb[lt$mon + 1L],
+      lt$year + 1900L,
+      lt$hour,
+      lt$min,
+      as.integer(lt$sec)
+    )
   }
   future <- http_date(Sys.time() + 30)
   expect_true(abs(parse_retry_after(future) - 30) < 5)
   past <- http_date(Sys.time() - 3600)
-  expect_identical(parse_retry_after(past), 0)   # never negative
+  expect_identical(parse_retry_after(past), 0) # never negative
   expect_null(parse_retry_after("Sun, 06 Foo 1994 08:49:37 GMT"))
   expect_null(parse_retry_after("Sun, 06 Nov 1994 08:49:37 PST"))
 
@@ -201,7 +272,8 @@ test_that("Retry-After is parsed in both RFC 7231 forms and clamped", {
 test_that("jitter and idempotency keys leave the session's random stream alone", {
   # A retry must not advance a user's set.seed() simulation.
   p <- zu_retry(base = 1, jitter = TRUE)
-  set.seed(1); expected <- runif(3)
+  set.seed(1)
+  expected <- runif(3)
   set.seed(1)
   invisible(backoff_delay(p, 1L, NULL))
   invisible(zuhttp:::new_idempotency_key())
@@ -229,10 +301,16 @@ test_that("exponential backoff grows, is capped, and full jitter stays in range"
   expect_identical(backoff_delay(p, 2L, NULL), 2)
   expect_identical(backoff_delay(p, 3L, NULL), 4)
   expect_identical(backoff_delay(p, 4L, NULL), 8)
-  expect_identical(backoff_delay(p, 9L, NULL), 8)   # capped
+  expect_identical(backoff_delay(p, 9L, NULL), 8) # capped
 
-  expect_identical(backoff_delay(zu_retry(base = 2, backoff = "constant",
-                                          jitter = FALSE), 5L, NULL), 2)
+  expect_identical(
+    backoff_delay(
+      zu_retry(base = 2, backoff = "constant", jitter = FALSE),
+      5L,
+      NULL
+    ),
+    2
+  )
 
   # Full jitter is uniform over [0, d] — not d plus a wiggle. Asserting the
   # range AND that it actually varies; a constant would satisfy the range.
@@ -240,21 +318,33 @@ test_that("exponential backoff grows, is capped, and full jitter stays in range"
   d <- vapply(1:200, function(i) backoff_delay(pj, 1L, NULL), numeric(1))
   expect_true(all(d >= 0 & d <= 4))
   expect_gt(length(unique(d)), 100)
-  expect_lt(min(d), 1)      # values near zero are the point of full jitter
+  expect_lt(min(d), 1) # values near zero are the point of full jitter
 })
 
 test_that("a Retry-After header drives the delay when honoured", {
-  c1 <- counting(function(n, req)
-    if (n < 2L) zu_response(429L, headers = c("Retry-After" = "0")) else zu_response(200L))
+  c1 <- counting(function(n, req) {
+    if (n < 2L) {
+      zu_response(429L, headers = c("Retry-After" = "0"))
+    } else {
+      zu_response(200L)
+    }
+  })
   cli <- zu_client(transport = c1$transport, retry = zu_retry(3))
   expect_identical(zu_resp_status(zu_get("https://h/x", client = cli)), 200L)
   expect_identical(c1$n(), 2L)
 
   # retry_after = FALSE ignores it and uses backoff instead.
-  c2 <- counting(function(n, req)
-    if (n < 2L) zu_response(429L, headers = c("Retry-After" = "3600")) else zu_response(200L))
-  cli2 <- zu_client(transport = c2$transport,
-                    retry = zu_retry(3, base = 0.001, retry_after = FALSE))
+  c2 <- counting(function(n, req) {
+    if (n < 2L) {
+      zu_response(429L, headers = c("Retry-After" = "3600"))
+    } else {
+      zu_response(200L)
+    }
+  })
+  cli2 <- zu_client(
+    transport = c2$transport,
+    retry = zu_retry(3, base = 0.001, retry_after = FALSE)
+  )
   expect_identical(zu_resp_status(zu_get("https://h/x", client = cli2)), 200L)
 })
 
@@ -265,9 +355,11 @@ test_that("the total timeout bounds the whole call, retries included", {
   # per-attempt reading, three retries with exponential backoff run for
   # minutes while the caller was promised 30 seconds.
   c1 <- counting(function(n, req) zu_response(503L))
-  cli <- zu_client(transport = c1$transport,
-                   retry = zu_retry(attempts = 20, base = 5, jitter = FALSE),
-                   check = FALSE)
+  cli <- zu_client(
+    transport = c1$transport,
+    retry = zu_retry(attempts = 20, base = 5, jitter = FALSE),
+    check = FALSE
+  )
   t0 <- proc.time()[["elapsed"]]
   invisible(zu_get("https://h/x", timeout = 1, client = cli))
   elapsed <- proc.time()[["elapsed"]] - t0
@@ -290,8 +382,11 @@ test_that("each attempt is given what is left of the budget, not all of it (§24
     Sys.sleep(0.3)
     zu_response(503L)
   })
-  cli <- zu_client(transport = slow$transport, check = FALSE,
-                   retry = zu_retry(attempts = 3, base = 0.01, jitter = FALSE))
+  cli <- zu_client(
+    transport = slow$transport,
+    check = FALSE,
+    retry = zu_retry(attempts = 3, base = 0.01, jitter = FALSE)
+  )
   invisible(zu_get("https://h/x", timeout = 2, client = cli))
 
   expect_identical(slow$n(), 3L)
@@ -305,13 +400,20 @@ test_that("attempt_timeout bounds each attempt within the budget (§24.3)", {
   seen <- numeric()
   merged <- numeric()
   c1 <- counting(function(n, req) {
-    seen[[n]]   <<- req$attempt_budget
+    seen[[n]] <<- req$attempt_budget
     merged[[n]] <<- req$resolved$timeout
     zu_response(503L)
   })
-  cli <- zu_client(transport = c1$transport, check = FALSE,
-                   retry = zu_retry(attempts = 2, base = 0.01, jitter = FALSE,
-                                    attempt_timeout = 0.25))
+  cli <- zu_client(
+    transport = c1$transport,
+    check = FALSE,
+    retry = zu_retry(
+      attempts = 2,
+      base = 0.01,
+      jitter = FALSE,
+      attempt_timeout = 0.25
+    )
+  )
   resp <- zu_get("https://h/x", timeout = 30, client = cli)
   expect_identical(seen, c(0.25, 0.25))
   # The budget is a field of its own: the resolved policy the transport sees
@@ -331,27 +433,41 @@ test_that("attempt_timeout reaches the engine: a stalled server is retried, not 
   port <- sample(20000:59000, 1L)
   srv <- serverSocket(port)
   on.exit(close(srv), add = TRUE)
-  cli <- zu_client(pool = NULL,
-                   retry = zu_retry(attempts = 2, base = 0.01, jitter = FALSE,
-                                    attempt_timeout = 0.5))
+  cli <- zu_client(
+    pool = NULL,
+    retry = zu_retry(
+      attempts = 2,
+      base = 0.01,
+      jitter = FALSE,
+      attempt_timeout = 0.5
+    )
+  )
   t0 <- proc.time()[["elapsed"]]
-  e <- tryCatch(zu_get(sprintf("http://127.0.0.1:%d/", port), timeout = 20,
-                       client = cli),
-                zu_error = function(e) e)
+  e <- tryCatch(
+    zu_get(sprintf("http://127.0.0.1:%d/", port), timeout = 20, client = cli),
+    zu_error = function(e) e
+  )
   elapsed <- proc.time()[["elapsed"]] - t0
   expect_s3_class(e, "zu_timeout_error")
-  expect_gt(elapsed, 0.9)     # both attempts ran...
-  expect_lt(elapsed, 5)       # ...and neither waited for the budget
+  expect_gt(elapsed, 0.9) # both attempts ran...
+  expect_lt(elapsed, 5) # ...and neither waited for the budget
 })
 
 test_that("a backoff that fits the budget is actually slept", {
   # The mirror of the test above: proving the budget is respected is only
   # half of it, since "never sleeps at all" would also pass that one.
-  c1 <- counting(function(n, req) if (n < 2L) zu_response(503L) else zu_response(200L))
-  cli <- zu_client(transport = c1$transport,
-                   retry = zu_retry(attempts = 2, base = 0.3, jitter = FALSE))
+  c1 <- counting(function(n, req) {
+    if (n < 2L) zu_response(503L) else zu_response(200L)
+  })
+  cli <- zu_client(
+    transport = c1$transport,
+    retry = zu_retry(attempts = 2, base = 0.3, jitter = FALSE)
+  )
   t0 <- proc.time()[["elapsed"]]
-  expect_identical(zu_resp_status(zu_get("https://h/x", timeout = 30, client = cli)), 200L)
+  expect_identical(
+    zu_resp_status(zu_get("https://h/x", timeout = 30, client = cli)),
+    200L
+  )
   expect_gt(proc.time()[["elapsed"]] - t0, 0.2)
 })
 
@@ -365,14 +481,18 @@ test_that("retry_sleep() wakes early when the deadline is closer than the delay"
 
 test_that("middleware composes outside-in and can see both directions", {
   order <- character()
-  mw <- function(tag) function(req, next_fn) {
-    order <<- c(order, paste0("enter:", tag))
-    resp <- next_fn(req)
-    order <<- c(order, paste0("exit:", tag))
-    resp
+  mw <- function(tag) {
+    function(req, next_fn) {
+      order <<- c(order, paste0("enter:", tag))
+      resp <- next_fn(req)
+      order <<- c(order, paste0("exit:", tag))
+      resp
+    }
   }
-  cli <- zu_client(transport = zu_mock_transport(function(r) zu_response(200L)),
-                   middleware = list(mw("a"), mw("b")))
+  cli <- zu_client(
+    transport = zu_mock_transport(function(r) zu_response(200L)),
+    middleware = list(mw("a"), mw("b"))
+  )
   expect_identical(zu_resp_status(zu_get("https://h/x", client = cli)), 200L)
   # First in the list is outermost, which is what the §31.13 diagram draws.
   expect_identical(order, c("enter:a", "enter:b", "exit:b", "exit:a"))
@@ -381,54 +501,85 @@ test_that("middleware composes outside-in and can see both directions", {
 test_that("middleware can modify the request and short-circuit the transport", {
   called <- FALSE
   cli <- zu_client(
-    transport = zu_mock_transport(function(r) { called <<- TRUE; zu_response(200L) }),
-    middleware = function(req, next_fn) zu_response(418L))
-  expect_identical(zu_resp_status(zu_get("https://h/x", check = FALSE, client = cli)), 418L)
+    transport = zu_mock_transport(function(r) {
+      called <<- TRUE
+      zu_response(200L)
+    }),
+    middleware = function(req, next_fn) zu_response(418L)
+  )
+  expect_identical(
+    zu_resp_status(zu_get("https://h/x", check = FALSE, client = cli)),
+    418L
+  )
   expect_false(called)
 
   seen <- NULL
   cli2 <- zu_client(
-    transport = zu_mock_transport(function(r) { seen <<- r$headers; zu_response(200L) }),
+    transport = zu_mock_transport(function(r) {
+      seen <<- r$headers
+      zu_response(200L)
+    }),
     middleware = function(req, next_fn) {
-      req$headers <- c(req$headers, c("X-Signed" = "yes")); next_fn(req)
-    })
+      req$headers <- c(req$headers, c("X-Signed" = "yes"))
+      next_fn(req)
+    }
+  )
   invisible(zu_get("https://h/x", client = cli2))
   expect_identical(unname(seen[["X-Signed"]]), "yes")
 })
 
 test_that("middleware is validated and must return a response", {
   expect_error(zu_client(middleware = "nope"), "must be a function")
-  expect_error(zu_client(middleware = list(function(a, b) NULL, 42)),
-               "must be a function")
-  cli <- zu_client(transport = zu_mock_transport(function(r) zu_response(200L)),
-                   middleware = function(req, next_fn) "not a response")
+  expect_error(
+    zu_client(middleware = list(function(a, b) NULL, 42)),
+    "must be a function"
+  )
+  cli <- zu_client(
+    transport = zu_mock_transport(function(r) zu_response(200L)),
+    middleware = function(req, next_fn) "not a response"
+  )
   expect_error(zu_get("https://h/x", client = cli), "must return a zu_response")
 })
 
 test_that("the retry loop sits inside middleware, so middleware sees one request", {
   entries <- 0L
-  c1 <- counting(function(n, req) if (n < 3L) zu_response(503L) else zu_response(200L))
-  cli <- zu_client(transport = c1$transport, retry = zu_retry(3, base = 0.001),
-                   middleware = function(req, next_fn) {
-                     entries <<- entries + 1L; next_fn(req)
-                   })
+  c1 <- counting(function(n, req) {
+    if (n < 3L) zu_response(503L) else zu_response(200L)
+  })
+  cli <- zu_client(
+    transport = c1$transport,
+    retry = zu_retry(3, base = 0.001),
+    middleware = function(req, next_fn) {
+      entries <<- entries + 1L
+      next_fn(req)
+    }
+  )
   expect_identical(zu_resp_status(zu_get("https://h/x", client = cli)), 200L)
-  expect_identical(c1$n(), 3L)      # three attempts...
-  expect_identical(entries, 1L)     # ...one logical request
+  expect_identical(c1$n(), 3L) # three attempts...
+  expect_identical(entries, 1L) # ...one logical request
 })
 
 # --- §35.3 hooks ----------------------------------------------------------
 
 test_that("hooks observe the lifecycle, including every retry (§33.4)", {
   events <- list()
-  note <- function(tag) function(p) events[[length(events) + 1L]] <<- c(list(tag = tag), p)
+  note <- function(tag) {
+    function(p) events[[length(events) + 1L]] <<- c(list(tag = tag), p)
+  }
 
-  c1 <- counting(function(n, req) if (n < 3L) zu_response(503L) else zu_response(200L))
-  cli <- zu_client(transport = c1$transport, retry = zu_retry(3, base = 0.001),
-                   hooks = zu_hooks(before_request = note("before_request"),
-                                    after_response = note("after_response"),
-                                    before_retry   = note("before_retry"),
-                                    after_retry    = note("after_retry")))
+  c1 <- counting(function(n, req) {
+    if (n < 3L) zu_response(503L) else zu_response(200L)
+  })
+  cli <- zu_client(
+    transport = c1$transport,
+    retry = zu_retry(3, base = 0.001),
+    hooks = zu_hooks(
+      before_request = note("before_request"),
+      after_response = note("after_response"),
+      before_retry = note("before_retry"),
+      after_retry = note("after_retry")
+    )
+  )
   expect_identical(zu_resp_status(zu_get("https://h/x", client = cli)), 200L)
 
   tags <- vapply(events, function(e) e$tag, character(1))
@@ -454,7 +605,9 @@ test_that("hook payloads are redacted before the handler sees them (§35.3)", {
     transport = zu_mock_transport(function(r) zu_response(200L)),
     hooks = zu_hooks(
       before_request = function(p) seen$req <<- p$request,
-      after_response = function(p) seen$resp <<- p$response))
+      after_response = function(p) seen$resp <<- p$response
+    )
+  )
   invisible(zu_get(paste0("https://h/x?api_key=", CANARY), client = cli))
 
   # A trace handler that logs request headers must not be how a bearer token
@@ -464,24 +617,38 @@ test_that("hook payloads are redacted before the handler sees them (§35.3)", {
   expect_false(any(grepl(CANARY, unlist(seen$resp$request), fixed = TRUE)))
 
   # ...and the real request still carries the real credential (§42.3).
-  expect_true(grepl(CANARY, zu_client(headers = c(Authorization = paste("Bearer", CANARY)))$headers[[1]],
-                    fixed = TRUE))
+  expect_true(grepl(
+    CANARY,
+    zu_client(headers = c(Authorization = paste("Bearer", CANARY)))$headers[[
+      1
+    ]],
+    fixed = TRUE
+  ))
 })
 
 test_that("a hook cannot modify the request, and a failing hook cannot break it", {
   seen <- NULL
   cli <- zu_client(
-    transport = zu_mock_transport(function(r) { seen <<- r$headers; zu_response(200L) }),
+    transport = zu_mock_transport(function(r) {
+      seen <<- r$headers
+      zu_response(200L)
+    }),
     hooks = zu_hooks(before_request = function(p) {
       p$request$headers <- c(p$request$headers, c("X-Injected" = "1"))
-      p  # returning it must change nothing: a hook that mutates is middleware
-    }))
+      p # returning it must change nothing: a hook that mutates is middleware
+    })
+  )
   invisible(zu_get("https://h/x", client = cli))
   expect_false("X-Injected" %in% names(seen %||% character()))
 
-  cli2 <- zu_client(transport = zu_mock_transport(function(r) zu_response(200L)),
-                    hooks = zu_hooks(before_request = function(p) stop("hook blew up")))
-  expect_warning(r <- zu_get("https://h/x", client = cli2), "hook `before_request` failed")
+  cli2 <- zu_client(
+    transport = zu_mock_transport(function(r) zu_response(200L)),
+    hooks = zu_hooks(before_request = function(p) stop("hook blew up"))
+  )
+  expect_warning(
+    r <- zu_get("https://h/x", client = cli2),
+    "hook `before_request` failed"
+  )
   expect_identical(zu_resp_status(r), 200L)
 })
 
@@ -500,56 +667,73 @@ test_that("a backoff sleep responds to Ctrl-C", {
   # and require the process to react. If Sys.sleep() were not interruptible,
   # or the sleep were one long block outside R's control, this would time out.
   skip_on_cran()
-  if (.Platform$OS.type != "unix") skip("SIGINT delivery here is POSIX-only")
-  if (!nzchar(Sys.which("Rscript"))) skip("Rscript not on PATH")
+  if (.Platform$OS.type != "unix") {
+    skip("SIGINT delivery here is POSIX-only")
+  }
+  if (!nzchar(Sys.which("Rscript"))) {
+    skip("Rscript not on PATH")
+  }
 
-  tmp    <- tempfile("zu-sigint-"); dir.create(tmp)
+  tmp <- tempfile("zu-sigint-")
+  dir.create(tmp)
   on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
   script <- file.path(tmp, "run.R")
-  outf   <- file.path(tmp, "out.txt")
-  pidf   <- file.path(tmp, "pid.txt")
+  outf <- file.path(tmp, "out.txt")
+  pidf <- file.path(tmp, "pid.txt")
 
-  writeLines(c(
-    # deparse() of a long vector comes back in SEVERAL elements; collapsing is
-    # not cosmetic here, since sprintf() would otherwise silently use only the
-    # first line and write a script with unbalanced parentheses.
-    sprintf(".libPaths(%s)", paste(deparse(.libPaths()), collapse = "")),
-    "library(zuhttp)",
-    sprintf('con <- file(%s, "w")', deparse(outf)),
-    'writeLines("START", con); flush(con)',
-    "cli <- zu_client(transport = zu_mock_transport(function(r) zu_response(503L)),",
-    "                 retry = zu_retry(attempts = 5, base = 60, jitter = FALSE),",
-    "                 check = FALSE)",
-    "tryCatch(zu_get('https://h/x', timeout = 600, client = cli),",
-    "         interrupt = function(e) {",
-    "           writeLines('INTERRUPTED', con); flush(con); quit(save = 'no') })",
-    # Only reachable if the retries ran to completion, which needs 4 backoffs
-    # of 60s. Its presence would mean the interrupt was swallowed.
-    'writeLines("DONE", con); flush(con); close(con)'
-  ), script)
+  writeLines(
+    c(
+      # deparse() of a long vector comes back in SEVERAL elements; collapsing is
+      # not cosmetic here, since sprintf() would otherwise silently use only the
+      # first line and write a script with unbalanced parentheses.
+      sprintf(".libPaths(%s)", paste(deparse(.libPaths()), collapse = "")),
+      "library(zuhttp)",
+      sprintf('con <- file(%s, "w")', deparse(outf)),
+      'writeLines("START", con); flush(con)',
+      "cli <- zu_client(transport = zu_mock_transport(function(r) zu_response(503L)),",
+      "                 retry = zu_retry(attempts = 5, base = 60, jitter = FALSE),",
+      "                 check = FALSE)",
+      "tryCatch(zu_get('https://h/x', timeout = 600, client = cli),",
+      "         interrupt = function(e) {",
+      "           writeLines('INTERRUPTED', con); flush(con); quit(save = 'no') })",
+      # Only reachable if the retries ran to completion, which needs 4 backoffs
+      # of 60s. Its presence would mean the interrupt was swallowed.
+      'writeLines("DONE", con); flush(con); close(con)'
+    ),
+    script
+  )
 
   # `exec` so the recorded pid is R's own and not a shell that wraps it.
-  system2("sh", c("-c", shQuote(sprintf("echo $$ > %s; exec Rscript %s", pidf, script))),
-          wait = FALSE, stdout = NULL, stderr = NULL)
+  system2(
+    "sh",
+    c("-c", shQuote(sprintf("echo $$ > %s; exec Rscript %s", pidf, script))),
+    wait = FALSE,
+    stdout = NULL,
+    stderr = NULL
+  )
 
   wait_for <- function(f, what, limit = 30) {
     deadline <- Sys.time() + limit
     while (Sys.time() < deadline) {
-      if (file.exists(f) && any(grepl(what, readLines(f, warn = FALSE)))) return(TRUE)
+      if (file.exists(f) && any(grepl(what, readLines(f, warn = FALSE)))) {
+        return(TRUE)
+      }
       Sys.sleep(0.05)
     }
     FALSE
   }
 
-  if (!wait_for(outf, "START")) skip("the helper R process did not start")
+  if (!wait_for(outf, "START")) {
+    skip("the helper R process did not start")
+  }
   pid <- as.integer(readLines(pidf, warn = FALSE)[[1]])
-  Sys.sleep(0.5)                      # let it reach the backoff sleep
+  Sys.sleep(0.5) # let it reach the backoff sleep
 
   t0 <- Sys.time()
   tools::pskill(pid, tools::SIGINT)
   reacted <- wait_for(outf, "INTERRUPTED", limit = 10)
   elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
-  tools::pskill(pid, tools::SIGKILL)  # whatever happened, do not leave it running
+  tools::pskill(pid, tools::SIGKILL) # whatever happened, do not leave it running
 
   expect_true(reacted)
   # The sleep was 60s and the deadline 600s, so anything under a couple of
@@ -572,35 +756,60 @@ test_that("no automatic retry once a callback has been handed bytes (§27, §33.
   # the zuhttp namespace makes that process load zuhttp too. Under covr that
   # copy is instrumented, and being stopped while it writes its trace file
   # left a truncated one that failed every coverage run on CI (W1).
-  app <- local({
-    app <- webfakes::new_app()
-    app$locals$n <- c(body = 0, empty = 0)
-    app$get("/body", function(req, res) {
-      req$app$locals$n[["body"]] <- req$app$locals$n[["body"]] + 1
-      if (req$app$locals$n[["body"]] == 1) res$set_status(503L)$send("ERROR")
-      else res$send("OK")
-    })
-    app$get("/empty", function(req, res) {
-      req$app$locals$n[["empty"]] <- req$app$locals$n[["empty"]] + 1
-      if (req$app$locals$n[["empty"]] == 1) res$set_status(503L)$send("")
-      else res$send("OK")
-    })
-    app
-  }, envir = new.env(parent = globalenv()))
+  app <- local(
+    {
+      app <- webfakes::new_app()
+      app$locals$n <- c(body = 0, empty = 0)
+      app$get("/body", function(req, res) {
+        req$app$locals$n[["body"]] <- req$app$locals$n[["body"]] + 1
+        if (req$app$locals$n[["body"]] == 1) {
+          res$set_status(503L)$send("ERROR")
+        } else {
+          res$send("OK")
+        }
+      })
+      app$get("/empty", function(req, res) {
+        req$app$locals$n[["empty"]] <- req$app$locals$n[["empty"]] + 1
+        if (req$app$locals$n[["empty"]] == 1) {
+          res$set_status(503L)$send("")
+        } else {
+          res$send("OK")
+        }
+      })
+      app
+    },
+    envir = new.env(parent = globalenv())
+  )
   web <- webfakes::local_app_process(app)
-  cli <- zu_client(pool = NULL, proxy = FALSE, check = FALSE,
-                   retry = zu_retry(2, base = 0, jitter = FALSE))
+  cli <- zu_client(
+    pool = NULL,
+    proxy = FALSE,
+    check = FALSE,
+    retry = zu_retry(2, base = 0, jitter = FALSE)
+  )
 
   got <- raw()
-  r <- zu_get(web$url("/body"), callback = function(x) { got <<- c(got, x); TRUE },
-              client = cli)
+  r <- zu_get(
+    web$url("/body"),
+    callback = function(x) {
+      got <<- c(got, x)
+      TRUE
+    },
+    client = cli
+  )
   expect_identical(rawToChar(got), "ERROR")
   expect_identical(zu_resp_status(r), 503L)
   expect_identical(r$attempts, 1L)
 
   got <- raw()
-  r <- zu_get(web$url("/empty"), callback = function(x) { got <<- c(got, x); TRUE },
-              client = cli)
+  r <- zu_get(
+    web$url("/empty"),
+    callback = function(x) {
+      got <<- c(got, x)
+      TRUE
+    },
+    client = cli
+  )
   expect_identical(rawToChar(got), "OK")
   expect_identical(zu_resp_status(r), 200L)
   expect_identical(r$attempts, 2L)

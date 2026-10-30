@@ -16,31 +16,47 @@ test_that("`path` and `callback` are mutually exclusive (§27.1)", {
   # would pass today and attempt a DNS lookup the moment the check regressed,
   # which is the wrong way round — the offline suite must stay offline in
   # both states, not only in the passing one.
-  f   <- tempfile()
-  cli <- zu_client(transport = zu_mock_transport(function(req) zu_response(200L)))
-  cb  <- function(chunk) NULL
+  f <- tempfile()
+  cli <- zu_client(
+    transport = zu_mock_transport(function(req) zu_response(200L))
+  )
+  cb <- function(chunk) NULL
 
-  expect_error(zu_get("https://x.test/a", path = f, callback = cb, client = cli),
-               "one destination")
+  expect_error(
+    zu_get("https://x.test/a", path = f, callback = cb, client = cli),
+    "one destination"
+  )
   expect_false(file.exists(f))
 
   # Both orderings, and the composable form as well as the one-shot: the
   # check lives where the request is resolved precisely so that where the
   # two were set cannot change the answer.
-  req <- zu_req_callback(zu_req_path(zu_request("GET", "https://x.test/a"), f), cb)
+  req <- zu_req_callback(
+    zu_req_path(zu_request("GET", "https://x.test/a"), f),
+    cb
+  )
   expect_error(zu_perform(req, client = cli), "one destination")
-  req2 <- zu_req_path(zu_req_callback(zu_request("GET", "https://x.test/a"), cb), f)
+  req2 <- zu_req_path(
+    zu_req_callback(zu_request("GET", "https://x.test/a"), cb),
+    f
+  )
   expect_error(zu_perform(req2, client = cli), "one destination")
 })
 
 test_that("a download lands whole, and reports where (§27.1)", {
   with_redirect_origin(function(start, target) {
-    d <- tempfile(); dir.create(d)
+    d <- tempfile()
+    dir.create(d)
     on.exit(unlink(d, recursive = TRUE), add = TRUE)
     f <- file.path(d, "out.bin")
 
-    r <- zu_get(start, path = f, redirects = 1, timeout = 20,
-                client = zu_client(pool = NULL))
+    r <- zu_get(
+      start,
+      path = f,
+      redirects = 1,
+      timeout = 20,
+      client = zu_client(pool = NULL)
+    )
 
     expect_identical(zu_resp_status(r), 200L)
     expect_identical(zu_resp_path(r), f)
@@ -56,13 +72,19 @@ test_that("a download lands whole, and reports where (§27.1)", {
 
 test_that("an existing file is replaced, and only on success (§27.1)", {
   with_redirect_origin(function(start, target) {
-    d <- tempfile(); dir.create(d)
+    d <- tempfile()
+    dir.create(d)
     on.exit(unlink(d, recursive = TRUE), add = TRUE)
     f <- file.path(d, "out.bin")
     writeLines("previous contents", f)
 
-    r <- zu_get(start, path = f, redirects = 1, timeout = 20,
-                client = zu_client(pool = NULL))
+    r <- zu_get(
+      start,
+      path = f,
+      redirects = 1,
+      timeout = 20,
+      client = zu_client(pool = NULL)
+    )
     expect_identical(zu_resp_status(r), 200L)
     expect_identical(rawToChar(readBin(f, "raw", file.size(f))), "hi")
   })
@@ -70,14 +92,17 @@ test_that("an existing file is replaced, and only on success (§27.1)", {
   # ...and the other half of the same rule: a request that fails leaves what
   # was already there untouched, because nothing touches the destination
   # until the body has arrived whole. Port 9 (discard) refuses.
-  d <- tempfile(); dir.create(d)
+  d <- tempfile()
+  dir.create(d)
   on.exit(unlink(d, recursive = TRUE), add = TRUE)
   f <- file.path(d, "keep.bin")
   writeLines("previous contents", f)
-  expect_error(zu_get("http://127.0.0.1:9/x", path = f, timeout = 5),
-               class = "zu_connect_error")
+  expect_error(
+    zu_get("http://127.0.0.1:9/x", path = f, timeout = 5),
+    class = "zu_connect_error"
+  )
   expect_identical(readLines(f, warn = FALSE), "previous contents")
-  expect_identical(list.files(d), "keep.bin")   # no temporary file left over
+  expect_identical(list.files(d), "keep.bin") # no temporary file left over
 })
 
 test_that("a response that was not written to a file reports no path", {
@@ -86,7 +111,9 @@ test_that("a response that was not written to a file reports no path", {
   # accessor that echoed the request back would be reporting an intention as
   # though it were a fact.
   f <- tempfile()
-  cli <- zu_client(transport = zu_mock_transport(function(req) zu_response(200L)))
+  cli <- zu_client(
+    transport = zu_mock_transport(function(req) zu_response(200L))
+  )
   expect_null(zu_resp_path(zu_get("https://x.test/a", path = f, client = cli)))
   expect_false(file.exists(f))
   expect_null(zu_resp_path(zu_response(200L)))

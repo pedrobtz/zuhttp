@@ -32,16 +32,20 @@ test_that("repeated requests do not accumulate state", {
 test_that("zu_interrupted_error is a distinct, catchable class (§34.1)", {
   # A person pressing Ctrl-C and a programmatic cancellation want different
   # handling, which is why these are separate classes rather than one.
-  e <- tryCatch(stop(zu_condition("zu_interrupted_error", "interrupted")),
-                zu_cancelled_error = function(e) e)
+  e <- tryCatch(
+    stop(zu_condition("zu_interrupted_error", "interrupted")),
+    zu_cancelled_error = function(e) e
+  )
   expect_s3_class(e, "zu_interrupted_error")
   expect_s3_class(e, "zu_cancelled_error")
   expect_s3_class(e, "zu_error")
 
   # And catching the specific class does not catch its parent.
   expect_error(
-    tryCatch(stop(zu_condition("zu_cancelled_error", "cancelled")),
-             zu_interrupted_error = function(e) "wrong"),
+    tryCatch(
+      stop(zu_condition("zu_cancelled_error", "cancelled")),
+      zu_interrupted_error = function(e) "wrong"
+    ),
     class = "zu_cancelled_error"
   )
 })

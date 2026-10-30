@@ -26,14 +26,29 @@
 #' @export
 #' @examples
 #' zu_response(200L, c("Content-Type" = "text/plain"), "hello")
-zu_response <- function(status = 200L, headers = NULL, body = raw(),
-                        url = NULL, tls_version = NULL, redirects = 0L) {
-  if (is.character(body)) body <- charToRaw(enc2utf8(paste0(body, collapse = "")))
+zu_response <- function(
+  status = 200L,
+  headers = NULL,
+  body = raw(),
+  url = NULL,
+  tls_version = NULL,
+  redirects = 0L
+) {
+  if (is.character(body)) {
+    body <- charToRaw(enc2utf8(paste0(body, collapse = "")))
+  }
   structure(
-    list(status = as.integer(status), headers = as_header_vec(headers),
-         body = body, url = url, tls_version = tls_version,
-         redirects = as.integer(redirects), method = NULL,
-         timings = c(total = NA_real_), request = NULL),
+    list(
+      status = as.integer(status),
+      headers = as_header_vec(headers),
+      body = body,
+      url = url,
+      tls_version = tls_version,
+      redirects = as.integer(redirects),
+      method = NULL,
+      timings = c(total = NA_real_),
+      request = NULL
+    ),
     class = "zu_response"
   )
 }
@@ -94,7 +109,9 @@ zu_resp_headers <- function(resp) resp$headers
 #' @export
 zu_resp_header <- function(resp, name) {
   h <- resp$headers
-  if (is.null(h)) return(character())
+  if (is.null(h)) {
+    return(character())
+  }
   # A character vector, never a comma-joined scalar: Set-Cookie is why (§18.3).
   unname(h[tolower(names(h)) == tolower(name)])
 }
@@ -140,17 +157,17 @@ zu_resp_connection <- function(resp) {
   v <- resp$http_minor
   list(
     reused_connection = isTRUE(resp$reused_connection),
-    remote_ip         = resp$remote_ip,
-    tls_protocol      = resp$tls_version,
-    tls_cipher        = resp$tls_cipher,
-    trust_backend     = resp$trust_backend,
-    http_version      = if (is.null(v) || is.na(v)) NULL else paste0("HTTP/1.", v),
-    proxy_used        = isTRUE(resp$proxy_used),
+    remote_ip = resp$remote_ip,
+    tls_protocol = resp$tls_version,
+    tls_cipher = resp$tls_cipher,
+    trust_backend = resp$trust_backend,
+    http_version = if (is.null(v) || is.na(v)) NULL else paste0("HTTP/1.", v),
+    proxy_used = isTRUE(resp$proxy_used),
     # Filled by the retry layer (§33) and the engine respectively, so a
     # response that went through neither still answers 1 and 0 rather than
     # NULL — "how many attempts?" always has an answer.
     retries_performed = max(0L, (resp$attempts %||% 1L) - 1L),
-    redirect_count    = resp$redirects %||% 0L
+    redirect_count = resp$redirects %||% 0L
   )
 }
 
@@ -165,9 +182,18 @@ zu_resp_timings <- function(resp) {
   # connection has no dns or connect time and an http:// request has no tls
   # time. Zero would claim they were instantaneous.
   ms <- resp$timings_ms
-  if (is.null(ms)) return(resp$timings)          # a hand-built zu_response()
-  secs <- c("dns", "connect", "tls", "request_write", "ttfb",
-            "response_read", "total")
+  if (is.null(ms)) {
+    return(resp$timings)
+  } # a hand-built zu_response()
+  secs <- c(
+    "dns",
+    "connect",
+    "tls",
+    "request_write",
+    "ttfb",
+    "response_read",
+    "total"
+  )
   out <- ms
   out[secs] <- ms[secs] / 1000
   # The elapsed total measured in R covers the whole zu_perform() including
@@ -176,9 +202,13 @@ zu_resp_timings <- function(resp) {
   # never below C's: proc.time() ticks in whole milliseconds, so a 1.8 ms
   # request read total 0.001 beside a ttfb of 0.002, a total shorter than
   # one of its own phases.
-  if (!is.null(resp$timings) && !is.na(resp$timings[["total"]]))
-    out[["total"]] <- max(unname(resp$timings[["total"]]), out[["total"]],
-                          na.rm = TRUE)
+  if (!is.null(resp$timings) && !is.na(resp$timings[["total"]])) {
+    out[["total"]] <- max(
+      unname(resp$timings[["total"]]),
+      out[["total"]],
+      na.rm = TRUE
+    )
+  }
   out
 }
 
@@ -219,12 +249,21 @@ zu_resp_timings <- function(resp) {
 #' }
 zu_resp_trace <- function(resp) {
   tr <- resp$trace
-  if (is.null(tr)) return(NULL)
-  df <- data.frame(event = tr$event, at_ms = tr$at_ms, n = tr$n,
-                   detail = tr$detail, stringsAsFactors = FALSE)
+  if (is.null(tr)) {
+    return(NULL)
+  }
+  df <- data.frame(
+    event = tr$event,
+    at_ms = tr$at_ms,
+    n = tr$n,
+    detail = tr$detail,
+    stringsAsFactors = FALSE
+  )
   # Surfaced, not hidden: a truncated trace that looked complete would read as
   # a request that stopped early.
-  if (isTRUE(tr$dropped > 0L)) attr(df, "dropped") <- tr$dropped
+  if (isTRUE(tr$dropped > 0L)) {
+    attr(df, "dropped") <- tr$dropped
+  }
   df
 }
 
@@ -269,46 +308,71 @@ zu_resp_raw <- function(resp) resp$body
 #' @export
 #' @examples
 #' zu_resp_text(zu_response(200L, c("Content-Type" = "text/plain"), "hi"))
-zu_resp_text <- function(resp, encoding = NULL, on_invalid = c("error", "substitute")) {
+zu_resp_text <- function(
+  resp,
+  encoding = NULL,
+  on_invalid = c("error", "substitute")
+) {
   on_invalid <- match.arg(on_invalid)
-  b  <- resp$body
-  if (is.null(b) || !length(b)) return("")
+  b <- resp$body
+  if (is.null(b) || !length(b)) {
+    return("")
+  }
   ct <- content_type_of(resp)
 
   enc <- NULL
   if (!is.null(encoding)) {
     enc <- encoding
   } else if (identical(ct$type, "application/json")) {
-    enc <- "UTF-8"                                   # RFC 8259: skip steps 2-4
+    enc <- "UTF-8" # RFC 8259: skip steps 2-4
   } else {
     cs <- ct$params[["charset"]]
     if (!is.null(cs) && nzchar(cs) && iconv_knows(cs)) enc <- cs
   }
 
   bom <- bom_of(b)
-  if (is.null(enc)) enc <- if (is.null(bom)) "UTF-8" else bom$encoding
+  if (is.null(enc)) {
+    enc <- if (is.null(bom)) "UTF-8" else bom$encoding
+  }
   # A BOM is a signature, not content: strip it whenever it matches what we
   # are about to decode as, however we arrived at that encoding.
-  if (!is.null(bom) && sub("-BE$|-LE$", "", toupper(enc)) ==
-                       sub("-BE$|-LE$", "", bom$encoding))
+  if (
+    !is.null(bom) &&
+      sub("-BE$|-LE$", "", toupper(enc)) == sub("-BE$|-LE$", "", bom$encoding)
+  ) {
     b <- b[-seq_len(bom$n)]
+  }
 
   out <- try_iconv(b, enc)
   if (is.na(out)) {
-    if (on_invalid == "error")
-      zu_stop("zu_body_decode_error",
-              paste0("the response body is not valid ", enc, ".\n",
-                     "  * If the server's charset is wrong, say so: ",
-                     "zu_resp_text(resp, encoding = \"...\")\n",
-                     "  * To accept lossy conversion: ",
-                     "zu_resp_text(resp, on_invalid = \"substitute\")"),
-              url = resp$url, phase = "decode", response = resp)
+    if (on_invalid == "error") {
+      zu_stop(
+        "zu_body_decode_error",
+        paste0(
+          "the response body is not valid ",
+          enc,
+          ".\n",
+          "  * If the server's charset is wrong, say so: ",
+          "zu_resp_text(resp, encoding = \"...\")\n",
+          "  * To accept lossy conversion: ",
+          "zu_resp_text(resp, on_invalid = \"substitute\")"
+        ),
+        url = resp$url,
+        phase = "decode",
+        response = resp
+      )
+    }
     out <- try_iconv(b, enc, sub = "byte")
   }
-  if (is.na(out))
-    zu_stop("zu_body_decode_error",
-            paste0("could not decode the response body as ", enc),
-            url = resp$url, phase = "decode", response = resp)
+  if (is.na(out)) {
+    zu_stop(
+      "zu_body_decode_error",
+      paste0("could not decode the response body as ", enc),
+      url = resp$url,
+      phase = "decode",
+      response = resp
+    )
+  }
   Encoding(out) <- "UTF-8"
   out
 }
@@ -325,13 +389,22 @@ zu_resp_text <- function(resp, encoding = NULL, on_invalid = c("error", "substit
 # cannot hold one anyway.
 try_iconv <- function(bytes, from, sub = NA_character_) {
   out <- tryCatch(
-    suppressWarnings(iconv(list(bytes), from = from, to = "UTF-8", sub = sub,
-                           toRaw = TRUE)),
+    suppressWarnings(iconv(
+      list(bytes),
+      from = from,
+      to = "UTF-8",
+      sub = sub,
+      toRaw = TRUE
+    )),
     error = function(e) NULL
   )
-  if (length(out) != 1L || is.null(out[[1L]])) return(NA_character_)
+  if (length(out) != 1L || is.null(out[[1L]])) {
+    return(NA_character_)
+  }
   out <- out[[1L]]
-  if (any(out == as.raw(0L))) return(NA_character_)
+  if (any(out == as.raw(0L))) {
+    return(NA_character_)
+  }
   out <- rawToChar(out)
   # With toRaw = TRUE a UTF-8 to UTF-8 "conversion" copies invalid bytes
   # through rather than failing, so the result is checked here.
@@ -343,19 +416,23 @@ try_iconv <- function(bytes, from, sub = NA_character_) {
 # probed only once iconvlist() has it.
 iconv_knows <- function(enc) {
   known <- tryCatch(toupper(iconvlist()), error = function(e) character())
-  length(known) > 0L && toupper(enc) %in% known &&
+  length(known) > 0L &&
+    toupper(enc) %in% known &&
     !is.na(try_iconv(charToRaw("a"), enc))
 }
 
 bom_of <- function(b) {
-  if (length(b) >= 3 && all(b[1:3] == as.raw(c(0xEF, 0xBB, 0xBF))))
+  if (length(b) >= 3 && all(b[1:3] == as.raw(c(0xEF, 0xBB, 0xBF)))) {
     return(list(encoding = "UTF-8", n = 3L))
+  }
   # UTF-16 must be tested after UTF-8 and, between themselves, either order:
   # the two 2-byte marks are distinct sequences, not prefixes of each other.
-  if (length(b) >= 2 && all(b[1:2] == as.raw(c(0xFF, 0xFE))))
+  if (length(b) >= 2 && all(b[1:2] == as.raw(c(0xFF, 0xFE)))) {
     return(list(encoding = "UTF-16LE", n = 2L))
-  if (length(b) >= 2 && all(b[1:2] == as.raw(c(0xFE, 0xFF))))
+  }
+  if (length(b) >= 2 && all(b[1:2] == as.raw(c(0xFE, 0xFF)))) {
     return(list(encoding = "UTF-16BE", n = 2L))
+  }
   NULL
 }
 
@@ -372,25 +449,46 @@ bom_of <- function(b) {
 #' str(zu_resp_json(r))
 zu_resp_json <- function(resp, ...) {
   txt <- zu_resp_text(resp, encoding = "UTF-8")
-  if (!nzchar(trimws(txt)))
-    zu_stop("zu_body_decode_error",
-            paste0("the response body is empty, so there is no JSON to parse",
-                   " (HTTP ", resp$status, ").\n",
-                   "  A 204 or an empty 200 is a valid response; check",
-                   " zu_resp_status() before decoding."),
-            url = resp$url, phase = "decode", response = redact_response_fields(resp))
+  if (!nzchar(trimws(txt))) {
+    zu_stop(
+      "zu_body_decode_error",
+      paste0(
+        "the response body is empty, so there is no JSON to parse",
+        " (HTTP ",
+        resp$status,
+        ").\n",
+        "  A 204 or an empty 200 is a valid response; check",
+        " zu_resp_status() before decoding."
+      ),
+      url = resp$url,
+      phase = "decode",
+      response = redact_response_fields(resp)
+    )
+  }
   # §34.4: the backend's own complaint is useful but is not a first line. A
   # user seeing "premature EOF (right here) ---^" has to work out that it came
   # from their HTTP call at all.
   tryCatch(json_decode(txt, ...), error = function(e) {
-    if (inherits(e, "zu_error")) stop(e)
-    zu_stop("zu_body_decode_error",
-            paste0("the response body is not valid JSON (HTTP ", resp$status,
-                   ", ", length(resp$body), " bytes).\n",
-                   "  * If the server sent something else, zu_resp_text()",
-                   " shows what.\n",
-                   "  * Parser: ", conditionMessage(e)),
-            url = resp$url, phase = "decode", response = redact_response_fields(resp))
+    if (inherits(e, "zu_error")) {
+      stop(e)
+    }
+    zu_stop(
+      "zu_body_decode_error",
+      paste0(
+        "the response body is not valid JSON (HTTP ",
+        resp$status,
+        ", ",
+        length(resp$body),
+        " bytes).\n",
+        "  * If the server sent something else, zu_resp_text()",
+        " shows what.\n",
+        "  * Parser: ",
+        conditionMessage(e)
+      ),
+      url = resp$url,
+      phase = "decode",
+      response = redact_response_fields(resp)
+    )
   })
 }
 
@@ -411,66 +509,127 @@ zu_resp_json <- function(resp, ...) {
 #' r <- zu_response(404L, url = "https://example.com/missing")
 #' tryCatch(zu_resp_check(r), zu_http_client_error = function(e) conditionMessage(e))
 zu_resp_check <- function(resp) {
-  if (zu_resp_ok(resp)) return(invisible(resp))
+  if (zu_resp_ok(resp)) {
+    return(invisible(resp))
+  }
   # 407 is sent only by a proxy, so it is the proxy-auth failure a CONNECT
   # tunnel already reports as zu_proxy_auth_error (§20.4) — the same class
   # whichever scheme the request used.
-  code <- if (resp$status == 407L) "zu_proxy_auth_error"
-          else if (resp$status < 500L) "zu_http_client_error"
-          else "zu_http_server_error"
+  code <- if (resp$status == 407L) {
+    "zu_proxy_auth_error"
+  } else if (resp$status < 500L) {
+    "zu_http_client_error"
+  } else {
+    "zu_http_server_error"
+  }
   msg <- paste0(
     if (!is.null(resp$method)) paste0(resp$method, " ") else "",
-    resp$url %||% "request", " failed: HTTP ", resp$status,
-    if (nzchar(status_text(resp$status))) paste0(" ", status_text(resp$status)) else ""
+    resp$url %||% "request",
+    " failed: HTTP ",
+    resp$status,
+    if (nzchar(status_text(resp$status))) {
+      paste0(" ", status_text(resp$status))
+    } else {
+      ""
+    }
   )
   hint <- status_hint(resp$status)
-  if (nzchar(hint)) msg <- paste0(msg, "\n  ", hint)
+  if (nzchar(hint)) {
+    msg <- paste0(msg, "\n  ", hint)
+  }
   excerpt <- body_excerpt(resp)
-  if (nzchar(excerpt)) msg <- paste0(msg, "\n  Server said: ", excerpt)
+  if (nzchar(excerpt)) {
+    msg <- paste0(msg, "\n  Server said: ", excerpt)
+  }
   # The stored request and response are display artefacts (§42.3), so they are
   # redacted copies. The originals stay executable in the caller's hands.
-  zu_stop(code, msg, url = resp$url, response = redact_response_fields(resp),
-          request = redact_request_fields(resp$request), call = sys.call(-1))
+  zu_stop(
+    code,
+    msg,
+    url = resp$url,
+    response = redact_response_fields(resp),
+    request = redact_request_fields(resp$request),
+    call = sys.call(-1)
+  )
 }
 
 # A short piece of the server's own error text. Worth having: "HTTP 422" alone
 # sends people to a browser, and the body usually says exactly what was wrong.
 body_excerpt <- function(resp, n = 200L) {
   ct <- content_type_of(resp)
-  if (is.null(ct$type)) return("")
-  if (!grepl("^text/", ct$type) &&
-      !ct$type %in% c("application/json", "application/problem+json",
-                      "application/xml", "application/x-www-form-urlencoded"))
+  if (is.null(ct$type)) {
     return("")
-  txt <- tryCatch(zu_resp_text(resp, on_invalid = "substitute"),
-                  error = function(e) "")
+  }
+  if (
+    !grepl("^text/", ct$type) &&
+      !ct$type %in%
+        c(
+          "application/json",
+          "application/problem+json",
+          "application/xml",
+          "application/x-www-form-urlencoded"
+        )
+  ) {
+    return("")
+  }
+  txt <- tryCatch(
+    zu_resp_text(resp, on_invalid = "substitute"),
+    error = function(e) ""
+  )
   txt <- gsub("[[:space:]]+", " ", trimws(txt))
-  if (!nzchar(txt)) return("")
+  if (!nzchar(txt)) {
+    return("")
+  }
   if (nchar(txt) > n) paste0(substr(txt, 1L, n), "...") else txt
 }
 
 status_text <- function(s) {
   known <- c(
-    "200" = "OK", "201" = "Created", "202" = "Accepted", "204" = "No Content",
-    "301" = "Moved Permanently", "302" = "Found", "303" = "See Other",
-    "304" = "Not Modified", "307" = "Temporary Redirect",
+    "200" = "OK",
+    "201" = "Created",
+    "202" = "Accepted",
+    "204" = "No Content",
+    "301" = "Moved Permanently",
+    "302" = "Found",
+    "303" = "See Other",
+    "304" = "Not Modified",
+    "307" = "Temporary Redirect",
     "308" = "Permanent Redirect",
-    "400" = "Bad Request", "401" = "Unauthorized", "402" = "Payment Required",
-    "403" = "Forbidden", "404" = "Not Found", "405" = "Method Not Allowed",
-    "406" = "Not Acceptable", "407" = "Proxy Authentication Required",
-    "408" = "Request Timeout", "409" = "Conflict",
-    "410" = "Gone", "411" = "Length Required", "412" = "Precondition Failed",
-    "413" = "Content Too Large", "414" = "URI Too Long",
-    "415" = "Unsupported Media Type", "416" = "Range Not Satisfiable",
-    "418" = "I'm a teapot", "421" = "Misdirected Request",
-    "422" = "Unprocessable Content", "423" = "Locked", "425" = "Too Early",
-    "426" = "Upgrade Required", "428" = "Precondition Required",
-    "429" = "Too Many Requests", "431" = "Request Header Fields Too Large",
+    "400" = "Bad Request",
+    "401" = "Unauthorized",
+    "402" = "Payment Required",
+    "403" = "Forbidden",
+    "404" = "Not Found",
+    "405" = "Method Not Allowed",
+    "406" = "Not Acceptable",
+    "407" = "Proxy Authentication Required",
+    "408" = "Request Timeout",
+    "409" = "Conflict",
+    "410" = "Gone",
+    "411" = "Length Required",
+    "412" = "Precondition Failed",
+    "413" = "Content Too Large",
+    "414" = "URI Too Long",
+    "415" = "Unsupported Media Type",
+    "416" = "Range Not Satisfiable",
+    "418" = "I'm a teapot",
+    "421" = "Misdirected Request",
+    "422" = "Unprocessable Content",
+    "423" = "Locked",
+    "425" = "Too Early",
+    "426" = "Upgrade Required",
+    "428" = "Precondition Required",
+    "429" = "Too Many Requests",
+    "431" = "Request Header Fields Too Large",
     "451" = "Unavailable For Legal Reasons",
-    "500" = "Internal Server Error", "501" = "Not Implemented",
-    "502" = "Bad Gateway", "503" = "Service Unavailable",
-    "504" = "Gateway Timeout", "505" = "HTTP Version Not Supported",
-    "507" = "Insufficient Storage", "511" = "Network Authentication Required"
+    "500" = "Internal Server Error",
+    "501" = "Not Implemented",
+    "502" = "Bad Gateway",
+    "503" = "Service Unavailable",
+    "504" = "Gateway Timeout",
+    "505" = "HTTP Version Not Supported",
+    "507" = "Insufficient Storage",
+    "511" = "Network Authentication Required"
   )
   # Single brackets: `[[` on a named vector errors on a missing name instead
   # of returning NULL, so every status not listed here (407 was the one found)
@@ -482,7 +641,8 @@ status_text <- function(s) {
 # §34.4: what was attempted, what failed, and the most likely fix. The fix is
 # the part a bare status code cannot give.
 status_hint <- function(s) {
-  switch(as.character(s),
+  switch(
+    as.character(s),
     "401" = "The request was not authenticated. Check the credential you sent, and that it goes in the header the API expects.",
     "403" = "Authenticated but not permitted. The credential is valid and lacks this scope, or the resource belongs to someone else.",
     "404" = "The server has no such resource. If you are using a client base_url, check the join: base_url and path are concatenated, not resolved.",
@@ -491,8 +651,10 @@ status_hint <- function(s) {
     "413" = "The request body was too large for the server.",
     "415" = "The server rejected the body's Content-Type.",
     "429" = "Rate limited. Any Retry-After header is in zu_resp_header(resp, \"retry-after\").",
-    "500" = , "502" = , "503" = , "504" =
-      "A server-side failure, not a request the server rejected. Retrying is often reasonable for an idempotent request.",
+    "500" = ,
+    "502" = ,
+    "503" = ,
+    "504" = "A server-side failure, not a request the server rejected. Retrying is often reasonable for an idempotent request.",
     ""
   )
 }
@@ -501,50 +663,81 @@ status_hint <- function(s) {
 # Enough of RFC 9110 5.6.6 to read a charset out of a real header, including
 # the quoted form that servers do send: text/plain; charset="utf-8".
 parse_content_type <- function(v) {
-  if (is.null(v) || !length(v) || is.na(v[[1]]) || !nzchar(v[[1]]))
+  if (is.null(v) || !length(v) || is.na(v[[1]]) || !nzchar(v[[1]])) {
     return(list(type = NULL, params = list()))
+  }
   v <- v[[1]]
   parts <- strsplit(v, ";", fixed = TRUE)[[1]]
   type <- tolower(trimws(parts[[1]]))
   params <- list()
   for (p in parts[-1]) {
     kv <- regmatches(p, regexpr("=", p, fixed = TRUE), invert = TRUE)[[1]]
-    if (length(kv) != 2L) next
+    if (length(kv) != 2L) {
+      next
+    }
     k <- tolower(trimws(kv[[1]]))
     val <- trimws(kv[[2]])
-    if (startsWith(val, "\"")) val <- gsub("\\\\(.)", "\\1", sub("\"$", "", sub("^\"", "", val)))
+    if (startsWith(val, "\"")) {
+      val <- gsub("\\\\(.)", "\\1", sub("\"$", "", sub("^\"", "", val)))
+    }
     params[[k]] <- val
   }
   list(type = type, params = params)
 }
 
-content_type_of <- function(resp) parse_content_type(zu_resp_header(resp, "content-type"))
+content_type_of <- function(resp) {
+  parse_content_type(zu_resp_header(resp, "content-type"))
+}
 
 #' @export
 print.zu_response <- function(x, ...) {
   st <- status_text(x$status)
-  cat("<zu_response [", x$status, if (nzchar(st)) paste0(" ", st), "]>\n", sep = "")
+  cat(
+    "<zu_response [",
+    x$status,
+    if (nzchar(st)) paste0(" ", st),
+    "]>\n",
+    sep = ""
+  )
   # A hand-built response may have neither, and an empty line reads as a bug.
-  if (!is.null(x$method) || !is.null(x$url))
-    cat(x$method %||% "", if (!is.null(x$method)) " ", zu_redact_url(x$url %||% ""),
-        "\n", sep = "")
+  if (!is.null(x$method) || !is.null(x$url)) {
+    cat(
+      x$method %||% "",
+      if (!is.null(x$method)) " ",
+      zu_redact_url(x$url %||% ""),
+      "\n",
+      sep = ""
+    )
+  }
   h <- zu_redact_headers_for_display(x$headers)
   if (length(h)) {
     n <- min(length(h), 8L)
-    for (i in seq_len(n)) cat(names(h)[i], ": ", h[[i]], "\n", sep = "")
-    if (length(h) > n) cat("... and ", length(h) - n, " more headers\n", sep = "")
+    for (i in seq_len(n)) {
+      cat(names(h)[i], ": ", h[[i]], "\n", sep = "")
+    }
+    if (length(h) > n) {
+      cat("... and ", length(h) - n, " more headers\n", sep = "")
+    }
   }
   cat("Body: ", format_bytes(length(x$body)), " in memory\n", sep = "")
-  if (!is.na(x$timings[["total"]]))
+  if (!is.na(x$timings[["total"]])) {
     cat("Total: ", round(x$timings[["total"]] * 1000), " ms\n", sep = "")
-  if (!is.null(x$tls_version)) cat("TLS: ", x$tls_version, "\n", sep = "")
-  if (!is.null(x$redirects) && x$redirects > 0L)
+  }
+  if (!is.null(x$tls_version)) {
+    cat("TLS: ", x$tls_version, "\n", sep = "")
+  }
+  if (!is.null(x$redirects) && x$redirects > 0L) {
     cat("Redirects: ", x$redirects, "\n", sep = "")
+  }
   invisible(x)
 }
 
 format_bytes <- function(n) {
-  if (n < 1000) return(paste0(n, " B"))
-  if (n < 1000^2) return(paste0(format(round(n / 1000, 1), trim = TRUE), " kB"))
+  if (n < 1000) {
+    return(paste0(n, " B"))
+  }
+  if (n < 1000^2) {
+    return(paste0(format(round(n / 1000, 1), trim = TRUE), " kB"))
+  }
   paste0(format(round(n / 1000^2, 1), trim = TRUE), " MB")
 }

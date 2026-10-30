@@ -12,7 +12,13 @@ test_that("every export uses the zu_ prefix (D-1)", {
 
   expect_true(
     all(grepl("^zu_", exports)),
-    info = paste("non-conforming:", paste(setdiff(exports, grep("^zu_", exports, value = TRUE)), collapse = ", "))
+    info = paste(
+      "non-conforming:",
+      paste(
+        setdiff(exports, grep("^zu_", exports, value = TRUE)),
+        collapse = ", "
+      )
+    )
   )
 })
 
@@ -25,10 +31,12 @@ test_that("no export masks an httr2 export (D-2, success criterion 61.13)", {
 
   collisions <- intersect(ours, theirs)
   expect_identical(
-    collisions, character(0),
+    collisions,
+    character(0),
     info = paste(
       "zuhttp and httr2 are expected to coexist in one session (design 5).",
-      "Colliding:", paste(collisions, collapse = ", ")
+      "Colliding:",
+      paste(collisions, collapse = ", ")
     )
   )
 })
@@ -40,8 +48,11 @@ test_that("response accessors use the zu_resp_ prefix (D-1)", {
   # and zu_is_secret_header() — neither of which is a response accessor. The
   # anchored form below tests the rule rather than the spelling.
   exports <- getNamespaceExports("zuhttp")
-  bare <- grep("^zu_(status|headers?|body|json|text|raw|url|timings)$",
-               exports, value = TRUE)
+  bare <- grep(
+    "^zu_(status|headers?|body|json|text|raw|url|timings)$",
+    exports,
+    value = TRUE
+  )
 
   # §31.11 names zu_headers() and zu_query() as REQUEST transformers, and they
   # take a request as argument one: zu_headers(req, Accept = "..."). They are
@@ -51,9 +62,12 @@ test_that("response accessors use the zu_resp_ prefix (D-1)", {
   bare <- setdiff(bare, "zu_headers")
 
   expect_identical(
-    bare, character(0),
-    info = paste("these read as response accessors and should be zu_resp_*:",
-                 paste(bare, collapse = ", "))
+    bare,
+    character(0),
+    info = paste(
+      "these read as response accessors and should be zu_resp_*:",
+      paste(bare, collapse = ", ")
+    )
   )
 
   # And anything that IS a response accessor must use the prefix.
@@ -69,11 +83,21 @@ test_that("the export surface is D-65's: 61 functions, none of the 14 removed", 
   exports <- exports[!grepl(".", exports, fixed = TRUE)]
   expect_length(exports, 61L)
 
-  removed <- c(paste0("zu_client_", c("get", "head", "post", "put", "patch", "delete")),
-               "zu_transport_perform", "zu_native_transport", "zu_error_codes",
-               "zu_code_retryable", "zu_is_secret_header", "zu_is_secret_param",
-               "zu_redact_form", "zu_redact_headers_for_display")
+  removed <- c(
+    paste0("zu_client_", c("get", "head", "post", "put", "patch", "delete")),
+    "zu_transport_perform",
+    "zu_native_transport",
+    "zu_error_codes",
+    "zu_code_retryable",
+    "zu_is_secret_header",
+    "zu_is_secret_param",
+    "zu_redact_form",
+    "zu_redact_headers_for_display"
+  )
   expect_identical(intersect(removed, exports), character(0))
   # Kept by the maintainer's amendment: each is the only supported way to do it.
-  expect_true(all(c("zu_redact_headers", "zu_redact_params", "zu_set_json_backend") %in% exports))
+  expect_true(all(
+    c("zu_redact_headers", "zu_redact_params", "zu_set_json_backend") %in%
+      exports
+  ))
 })

@@ -18,31 +18,51 @@ test_that("transformers return a new request and leave the original alone", {
 })
 
 test_that("zu_headers() accepts a named vector as well as named arguments", {
-  a <- zu_headers(zu_request("GET", "https://x/"),
-                  c(Accept = "text/plain", "X-A" = "1"))
-  b <- zu_headers(zu_request("GET", "https://x/"), Accept = "text/plain", "X-A" = "1")
+  a <- zu_headers(
+    zu_request("GET", "https://x/"),
+    c(Accept = "text/plain", "X-A" = "1")
+  )
+  b <- zu_headers(
+    zu_request("GET", "https://x/"),
+    Accept = "text/plain",
+    "X-A" = "1"
+  )
   expect_identical(a$headers, b$headers)
 })
 
 test_that("the body helpers set bytes and an implied content type", {
-  expect_identical(rawToChar(zu_body_raw(zu_request("POST", "https://x/"), "hi")$body), "hi")
-  expect_identical(zu_body_raw(zu_request("POST", "https://x/"), "hi")$content_type,
-                   "text/plain; charset=UTF-8")
+  expect_identical(
+    rawToChar(zu_body_raw(zu_request("POST", "https://x/"), "hi")$body),
+    "hi"
+  )
+  expect_identical(
+    zu_body_raw(zu_request("POST", "https://x/"), "hi")$content_type,
+    "text/plain; charset=UTF-8"
+  )
 
   f <- zu_body_form(zu_request("POST", "https://x/"), list(a = "1 2", b = TRUE))
   expect_identical(rawToChar(f$body), "a=1%202&b=true")
   expect_identical(f$content_type, "application/x-www-form-urlencoded")
 
-  path <- tempfile(); on.exit(unlink(path), add = TRUE)
+  path <- tempfile()
+  on.exit(unlink(path), add = TRUE)
   writeBin(charToRaw("filebytes"), path)
-  expect_identical(rawToChar(zu_body_file(zu_request("PUT", "https://x/"), path)$body),
-                   "filebytes")
+  expect_identical(
+    rawToChar(zu_body_file(zu_request("PUT", "https://x/"), path)$body),
+    "filebytes"
+  )
 })
 
 test_that("body arguments are mutually exclusive", {
   expect_error(
-    zu_post("https://x/", body = "a", json = list(b = 1),
-            client = zu_client(transport = zu_mock_transport(function(req) zu_response()))),
+    zu_post(
+      "https://x/",
+      body = "a",
+      json = list(b = 1),
+      client = zu_client(
+        transport = zu_mock_transport(function(req) zu_response())
+      )
+    ),
     "mutually exclusive"
   )
 })
@@ -56,7 +76,11 @@ test_that("a request prints its method, URL, headers and body (§31.4)", {
   req <- zu_req_timeout(req, total = 10)
 
   out <- paste(capture.output(print(req)), collapse = "\n")
-  expect_match(out, "POST https://api.example.com/users?verbose=true", fixed = TRUE)
+  expect_match(
+    out,
+    "POST https://api.example.com/users?verbose=true",
+    fixed = TRUE
+  )
   expect_match(out, "Accept: application/json", fixed = TRUE)
   expect_match(out, "Content-Type: application/json", fixed = TRUE)
   expect_match(out, "Body: JSON, 16 bytes", fixed = TRUE)
@@ -66,11 +90,19 @@ test_that("a request prints its method, URL, headers and body (§31.4)", {
 test_that("the one-shot helpers lower to the same request (§31.1 principle 3)", {
   skip_if_not_installed("jsonlite")
   seen <- NULL
-  api <- zu_client(transport = zu_mock_transport(function(req) {
-    seen <<- req; zu_response(200L)
-  }))
+  api <- zu_client(
+    transport = zu_mock_transport(function(req) {
+      seen <<- req
+      zu_response(200L)
+    })
+  )
 
-  zu_post("https://x/users", json = list(name = "Alice"), timeout = 10, client = api)
+  zu_post(
+    "https://x/users",
+    json = list(name = "Alice"),
+    timeout = 10,
+    client = api
+  )
   one_shot <- seen
 
   req <- zu_request("POST", "https://x/users")
@@ -93,9 +125,12 @@ test_that("the one-shot helpers lower to the same request (§31.1 principle 3)",
 
 test_that("every method helper sends its own method", {
   seen <- NULL
-  api <- zu_client(transport = zu_mock_transport(function(req) {
-    seen <<- req$method; zu_response(200L)
-  }))
+  api <- zu_client(
+    transport = zu_mock_transport(function(req) {
+      seen <<- req$method
+      zu_response(200L)
+    })
+  )
   for (m in c("get", "head", "post", "put", "patch", "delete")) {
     do.call(paste0("zu_", m), list("https://x/", client = api))
     expect_identical(seen, toupper(m))
@@ -104,25 +139,33 @@ test_that("every method helper sends its own method", {
 
 test_that("a client is never argument one (§31.3)", {
   # The zu_client_*() wrappers went with D-65; the rule they softened stays.
-  api <- zu_client(base_url = "https://api.example.com",
-                   transport = zu_mock_transport(function(req) {
-                     zu_response(200L, body = req$url)
-                   }))
-  expect_identical(zu_resp_text(zu_get("/users", client = api)),
-                   "https://api.example.com/users")
+  api <- zu_client(
+    base_url = "https://api.example.com",
+    transport = zu_mock_transport(function(req) {
+      zu_response(200L, body = req$url)
+    })
+  )
+  expect_identical(
+    zu_resp_text(zu_get("/users", client = api)),
+    "https://api.example.com/users"
+  )
   # The plain form refuses a client in argument one, with a message that says
   # what to do rather than failing somewhere in the URL parser.
   expect_error(zu_get(api), "url")
 })
 
 test_that("zu_perform() rejects a non-client and a non-request", {
-  expect_error(zu_perform(zu_request("GET", "https://x/"), client = list()),
-               "must be a zu_client")
+  expect_error(
+    zu_perform(zu_request("GET", "https://x/"), client = list()),
+    "must be a zu_client"
+  )
   expect_error(zu_perform("https://x/"), "zu_request")
 })
 
 test_that("a transport must return a response", {
-  api <- zu_client(transport = zu_mock_transport(function(req) "not a response"))
+  api <- zu_client(
+    transport = zu_mock_transport(function(req) "not a response")
+  )
   expect_error(zu_get("https://x/", client = api), "must return a zu_response")
 })
 
@@ -130,8 +173,13 @@ test_that("a request header carrying CR/LF is refused before connecting, naming 
   # Port 1 on loopback: were anything attempted, this would be a connect error.
   cli <- zu_client(pool = NULL, proxy = FALSE)
   e <- expect_error(
-    zu_get("http://127.0.0.1:1/", headers = c(`X-Evil` = "a\r\nInjected: 1"), client = cli),
-    class = "zu_http_parse_error")
+    zu_get(
+      "http://127.0.0.1:1/",
+      headers = c(`X-Evil` = "a\r\nInjected: 1"),
+      client = cli
+    ),
+    class = "zu_http_parse_error"
+  )
   expect_match(conditionMessage(e), "`X-Evil`", fixed = TRUE)
   expect_false(grepl("Injected", conditionMessage(e), fixed = TRUE))
 })
@@ -140,14 +188,35 @@ test_that("the body decides the framing: a conflicting header is refused before 
   # Port 1 on loopback: were anything sent, this would be a connect error.
   url <- "http://127.0.0.1:1/"
   cli <- zu_client(pool = NULL, proxy = FALSE, retry = zu_retry(1))
-  expect_error(zu_post(url, body = "hello", headers = c(`Content-Length` = "1"),
-                       client = cli),
-               class = "zu_http_parse_error", regexp = "does not match the 5-byte body")
-  expect_error(zu_post(url, body = "hello", headers = c(`Transfer-Encoding` = "chunked"),
-                       client = cli),
-               class = "zu_http_parse_error", regexp = "Transfer-Encoding")
+  expect_error(
+    zu_post(
+      url,
+      body = "hello",
+      headers = c(`Content-Length` = "1"),
+      client = cli
+    ),
+    class = "zu_http_parse_error",
+    regexp = "does not match the 5-byte body"
+  )
+  expect_error(
+    zu_post(
+      url,
+      body = "hello",
+      headers = c(`Transfer-Encoding` = "chunked"),
+      client = cli
+    ),
+    class = "zu_http_parse_error",
+    regexp = "Transfer-Encoding"
+  )
   # A matching length is not a conflict, so the request proceeds to connect.
-  expect_error(zu_post(url, body = "hello", headers = c(`Content-Length` = "5"),
-                       client = cli, timeout = 5),
-               class = "zu_connect_error")
+  expect_error(
+    zu_post(
+      url,
+      body = "hello",
+      headers = c(`Content-Length` = "5"),
+      client = cli,
+      timeout = 5
+    ),
+    class = "zu_connect_error"
+  )
 })

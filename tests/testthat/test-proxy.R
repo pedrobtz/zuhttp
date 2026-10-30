@@ -25,25 +25,47 @@ test_that("proxy = FALSE forces a direct connection, NULL consults the env", {
 test_that("a bogus proxy in the environment is actually used, and FALSE escapes it", {
   skip_unless_online()
   old <- Sys.getenv("http_proxy", unset = NA)
-  on.exit(if (is.na(old)) Sys.unsetenv("http_proxy") else
-            Sys.setenv(http_proxy = old), add = TRUE)
+  on.exit(
+    if (is.na(old)) {
+      Sys.unsetenv("http_proxy")
+    } else {
+      Sys.setenv(http_proxy = old)
+    },
+    add = TRUE
+  )
 
   # Port 9 (discard) refuses, so reaching it proves the request went to the
   # proxy rather than to the origin.
   Sys.setenv(http_proxy = "http://127.0.0.1:9")
-  expect_error(zu_get("http://example.com", timeout = 5),
-               class = "zu_connect_error")
-  expect_identical(zu_resp_status(zu_get("http://example.com", proxy = FALSE)), 200L)
+  expect_error(
+    zu_get("http://example.com", timeout = 5),
+    class = "zu_connect_error"
+  )
+  expect_identical(
+    zu_resp_status(zu_get("http://example.com", proxy = FALSE)),
+    200L
+  )
 })
 
 test_that("NO_PROXY takes a host out of the proxy's path", {
   skip_unless_online()
   old_p <- Sys.getenv("http_proxy", unset = NA)
   old_n <- Sys.getenv("no_proxy", unset = NA)
-  on.exit({
-    if (is.na(old_p)) Sys.unsetenv("http_proxy") else Sys.setenv(http_proxy = old_p)
-    if (is.na(old_n)) Sys.unsetenv("no_proxy") else Sys.setenv(no_proxy = old_n)
-  }, add = TRUE)
+  on.exit(
+    {
+      if (is.na(old_p)) {
+        Sys.unsetenv("http_proxy")
+      } else {
+        Sys.setenv(http_proxy = old_p)
+      }
+      if (is.na(old_n)) {
+        Sys.unsetenv("no_proxy")
+      } else {
+        Sys.setenv(no_proxy = old_n)
+      }
+    },
+    add = TRUE
+  )
 
   Sys.setenv(http_proxy = "http://127.0.0.1:9", no_proxy = "example.com")
   expect_identical(zu_resp_status(zu_get("http://example.com")), 200L)
@@ -54,8 +76,12 @@ test_that("NO_PROXY takes a host out of the proxy's path", {
 test_that("plain HTTP through a proxy uses absolute-form (§20.3)", {
   skip_unless_forkable()
   seen <- with_fake_proxy("ok", function(px) {
-    r <- zu_get("http://target.example/some/path?q=1", proxy = px, timeout = 15,
-                check = FALSE)
+    r <- zu_get(
+      "http://target.example/some/path?q=1",
+      proxy = px,
+      timeout = 15,
+      check = FALSE
+    )
     expect_identical(zu_resp_status(r), 200L)
   })
   skip_if(is.null(seen), "the helper proxy recorded nothing")
@@ -63,7 +89,10 @@ test_that("plain HTTP through a proxy uses absolute-form (§20.3)", {
   # The request line carries the whole origin, which is how the proxy knows
   # where to forward. Origin-form here would be a request the proxy cannot
   # route.
-  expect_match(seen, "^GET http://target\\.example/some/path\\?q=1 HTTP/1\\.1\r\n")
+  expect_match(
+    seen,
+    "^GET http://target\\.example/some/path\\?q=1 HTTP/1\\.1\r\n"
+  )
   expect_match(seen, "Host: target\\.example")
 })
 
@@ -73,8 +102,12 @@ test_that("proxy credentials go to the proxy and are not in the URL (§20.4)", {
     # Credentials in the proxy URL, percent-encoded, as a corporate proxy
     # config usually supplies them.
     auth_px <- sub("^http://", "http://user:p%40ss@", px)
-    r <- zu_get("http://target.example/x", proxy = auth_px, timeout = 15,
-                check = FALSE)
+    r <- zu_get(
+      "http://target.example/x",
+      proxy = auth_px,
+      timeout = 15,
+      check = FALSE
+    )
     expect_identical(zu_resp_status(r), 200L)
   })
   skip_if(is.null(seen), "the helper proxy recorded nothing")
@@ -90,8 +123,12 @@ test_that("the request line never carries proxy credentials or origin userinfo",
   skip_unless_forkable()
   seen <- with_fake_proxy("ok", function(px) {
     auth_px <- sub("^http://", "http://user:secret@", px)
-    invisible(zu_get("http://u:pw@target.example/x", proxy = auth_px,
-                     timeout = 15, check = FALSE))
+    invisible(zu_get(
+      "http://u:pw@target.example/x",
+      proxy = auth_px,
+      timeout = 15,
+      check = FALSE
+    ))
   })
   skip_if(is.null(seen), "the helper proxy recorded nothing")
 
@@ -108,8 +145,10 @@ test_that("the request line never carries proxy credentials or origin userinfo",
 test_that("a 407 CONNECT is zu_proxy_auth_error, not a generic failure", {
   skip_unless_forkable()
   seen <- with_fake_proxy("407", function(px) {
-    e <- tryCatch(zu_get("https://target.example/x", proxy = px, timeout = 15),
-                  condition = function(e) e)
+    e <- tryCatch(
+      zu_get("https://target.example/x", proxy = px, timeout = 15),
+      condition = function(e) e
+    )
     expect_s3_class(e, "zu_proxy_auth_error")
     expect_s3_class(e, "zu_proxy_error")
     expect_match(conditionMessage(e), "407")
@@ -123,8 +162,10 @@ test_that("a 407 CONNECT is zu_proxy_auth_error, not a generic failure", {
 test_that("a non-2xx CONNECT surfaces the proxy's own status (§20.3)", {
   skip_unless_forkable()
   invisible(with_fake_proxy("502", function(px) {
-    e <- tryCatch(zu_get("https://target.example/x", proxy = px, timeout = 15),
-                  condition = function(e) e)
+    e <- tryCatch(
+      zu_get("https://target.example/x", proxy = px, timeout = 15),
+      condition = function(e) e
+    )
     expect_s3_class(e, "zu_proxy_error")
     expect_false(inherits(e, "zu_proxy_auth_error"))
     # In a corporate environment the proxy's status is frequently the only
@@ -132,9 +173,10 @@ test_that("a non-2xx CONNECT surfaces the proxy's own status (§20.3)", {
     # would remove the one useful piece of information. Network.framework runs
     # the CONNECT itself and does not report that status (D-71, §20.3), so on
     # macOS the message must at least say the proxy refused the tunnel.
-    if (identical(zu_tls_backend(), "network-framework"))
+    if (identical(zu_tls_backend(), "network-framework")) {
       expect_match(conditionMessage(e), "proxy did not open a tunnel")
-    else
+    } else {
       expect_match(conditionMessage(e), "502")
+    }
   }))
 })

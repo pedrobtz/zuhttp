@@ -9,9 +9,13 @@
 # --- the object (offline) ------------------------------------------------
 
 test_that("zu_tls() validates and keeps ca_file and ca_extra apart", {
-  t <- zu_tls(ca_file = "/etc/hosts", ca_extra = "/etc/hosts",
-              pins = "sha256//YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg=",
-              revocation = TRUE, min_version = 12)
+  t <- zu_tls(
+    ca_file = "/etc/hosts",
+    ca_extra = "/etc/hosts",
+    pins = "sha256//YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg=",
+    revocation = TRUE,
+    min_version = 12
+  )
   expect_s3_class(t, "zu_tls_config")
   expect_true(t$revocation)
   expect_identical(t$min_version, 12L)
@@ -26,17 +30,21 @@ test_that("zu_tls() validates and keeps ca_file and ca_extra apart", {
   expect_error(zu_tls(ca_file = c("a", "b")), "single file path")
   expect_error(zu_tls(ca_file = NA_character_), "single file path")
 
-  expect_false(zu_tls()$revocation)          # §14.5: off by default
+  expect_false(zu_tls()$revocation) # §14.5: off by default
   expect_identical(zu_tls()$min_version, 0L)
 })
 
 test_that("a missing CA file is reported by argument name", {
   # "cannot load CA file" without saying which of the two is the error this
   # replaces; the caller has two arguments that take a PEM path.
-  expect_error(zuhttp:::check_tls(zu_tls(ca_file = "/no/such/a.pem")),
-               "`ca_file` does not exist")
-  expect_error(zuhttp:::check_tls(zu_tls(ca_extra = "/no/such/b.pem")),
-               "`ca_extra` does not exist")
+  expect_error(
+    zuhttp:::check_tls(zu_tls(ca_file = "/no/such/a.pem")),
+    "`ca_file` does not exist"
+  )
+  expect_error(
+    zuhttp:::check_tls(zu_tls(ca_extra = "/no/such/b.pem")),
+    "`ca_extra` does not exist"
+  )
   expect_error(zuhttp:::check_tls(list(ca_file = "x")), "must come from zu_tls")
   expect_null(zuhttp:::check_tls(NULL))
 })
@@ -44,9 +52,15 @@ test_that("a missing CA file is reported by argument name", {
 test_that("the printed form says `replaces` and `adds to` (§14.2)", {
   # The section requires those words in the first sentence of the help; the
   # printed object is where a user actually looks when debugging trust.
-  out <- paste(capture.output(print(zu_tls(ca_file = "/etc/hosts"))), collapse = " ")
+  out <- paste(
+    capture.output(print(zu_tls(ca_file = "/etc/hosts"))),
+    collapse = " "
+  )
   expect_match(out, "REPLACES", fixed = TRUE)
-  out2 <- paste(capture.output(print(zu_tls(ca_extra = "/etc/hosts"))), collapse = " ")
+  out2 <- paste(
+    capture.output(print(zu_tls(ca_extra = "/etc/hosts"))),
+    collapse = " "
+  )
   expect_match(out2, "adds to", fixed = TRUE)
 })
 
@@ -66,8 +80,10 @@ test_that("ca_extra ADDS to system trust and ca_file REPLACES it", {
   r <- zu_get("https://example.com", tls = zu_tls(ca_extra = ca$pem))
   expect_identical(zu_resp_status(r), 200L)
 
-  e <- tryCatch(zu_get("https://example.com", tls = zu_tls(ca_file = ca$pem)),
-                condition = function(e) e)
+  e <- tryCatch(
+    zu_get("https://example.com", tls = zu_tls(ca_file = ca$pem)),
+    condition = function(e) e
+  )
   expect_s3_class(e, "zu_tls_certificate_error")
   expect_s3_class(e, "zu_tls_error")
 })
@@ -84,8 +100,12 @@ test_that("revocation = TRUE does not break ordinary verification (§14.5)", {
   # flag outright (no CRL or OCSP source, #6); that is asserted offline below.
   skip_unless_tls_supports("revocation")
   expect_identical(
-    zu_resp_status(zu_get("https://example.com", tls = zu_tls(revocation = TRUE))),
-    200L)
+    zu_resp_status(zu_get(
+      "https://example.com",
+      tls = zu_tls(revocation = TRUE)
+    )),
+    200L
+  )
 })
 
 # --- D-56: refused, never downgraded (offline) ------------------------------
@@ -101,11 +121,13 @@ test_that("zu_info() reports the zu_tls() capabilities from C", {
   expect_true(all(caps %in% names(unsupported_cases())))
   # Pinned to what each backend's zuh_tls_backend_caps() says, so a change to a
   # backend's support has to be made here on purpose.
-  expected <- switch(zu_tls_backend(),
-    openssl           = c("pins", "tls13", "ca_file", "ca_extra"),
+  expected <- switch(
+    zu_tls_backend(),
+    openssl = c("pins", "tls13", "ca_file", "ca_extra"),
     `network-framework` = c("tls13", "ca_file", "ca_extra", "revocation"),
-    schannel        = "revocation",
-    character())
+    schannel = "revocation",
+    character()
+  )
   expect_setequal(caps, expected)
 })
 
@@ -113,7 +135,7 @@ test_that("a setting the backend cannot honour is refused; one it can is not", {
   cases <- unsupported_cases()
   caps <- zu_info()$tls_capabilities
   refused <- setdiff(names(cases), caps)
-  expect_gt(length(refused), 0L)   # the refusal half is never empty
+  expect_gt(length(refused), 0L) # the refusal half is never empty
   for (nm in names(cases)) {
     e <- tryCatch(zuhttp:::check_tls(cases[[nm]]), condition = function(e) e)
     if (nm %in% caps) {
@@ -125,7 +147,12 @@ test_that("a setting the backend cannot honour is refused; one it can is not", {
       # stay distinguishable (#12).
       expect_false(inherits(e, "zu_tls_pin_error"), info = nm)
       expect_false(isTRUE(e$retryable), info = nm)
-      expect_match(conditionMessage(e), zu_tls_backend(), fixed = TRUE, info = nm)
+      expect_match(
+        conditionMessage(e),
+        zu_tls_backend(),
+        fixed = TRUE,
+        info = nm
+      )
     }
   }
 })
@@ -137,8 +164,10 @@ test_that("the refusal happens before any network I/O", {
   cases <- unsupported_cases()
   refused <- setdiff(names(cases), zu_info()$tls_capabilities)
   for (nm in refused) {
-    e <- tryCatch(zu_get("https://zuhttp-test.invalid/", tls = cases[[nm]]),
-                  condition = function(e) e)
+    e <- tryCatch(
+      zu_get("https://zuhttp-test.invalid/", tls = cases[[nm]]),
+      condition = function(e) e
+    )
     expect_s3_class(e, "zu_tls_unsupported_error")
     expect_false(inherits(e, "zu_dns_error"), info = nm)
   }
@@ -147,7 +176,12 @@ test_that("the refusal happens before any network I/O", {
 test_that("min_version = 12 works everywhere (§14.1)", {
   skip_unless_online()
   expect_identical(
-    zu_resp_status(zu_get("https://example.com", tls = zu_tls(min_version = 12))), 200L)
+    zu_resp_status(zu_get(
+      "https://example.com",
+      tls = zu_tls(min_version = 12)
+    )),
+    200L
+  )
 })
 
 test_that("a wrong pin against a public host is a pin mismatch (§14.4)", {
@@ -158,9 +192,14 @@ test_that("a wrong pin against a public host is a pin mismatch (§14.4)", {
   # Windows, which never compared a pin at all (#12).
   skip_unless_tls_supports("pins")
   e <- tryCatch(
-    zu_get("https://example.com",
-           tls = zu_tls(pins = "sha256//YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg=")),
-    condition = function(e) e)
+    zu_get(
+      "https://example.com",
+      tls = zu_tls(
+        pins = "sha256//YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg="
+      )
+    ),
+    condition = function(e) e
+  )
   expect_s3_class(e, "zu_tls_pin_error")
   expect_false(inherits(e, "zu_tls_unsupported_error"))
   expect_false(inherits(e, "zu_response"))
@@ -174,7 +213,10 @@ test_that("a connection is never shared across a TLS-config difference", {
   ca <- local_ca()
 
   api <- zu_client()
-  expect_identical(zu_resp_status(zu_get("https://example.com", client = api)), 200L)
+  expect_identical(
+    zu_resp_status(zu_get("https://example.com", client = api)),
+    200L
+  )
   expect_identical(zu_pool_stats(api)[["idle"]], 1)
 
   # Same origin, different trust configuration. §26.1 calls a key that ignores
@@ -182,16 +224,26 @@ test_that("a connection is never shared across a TLS-config difference", {
   # run a request that asked for extra trust over a connection established
   # without it.
   expect_identical(
-    zu_resp_status(zu_get("https://example.com", tls = zu_tls(ca_extra = ca$pem),
-                          client = api)), 200L)
+    zu_resp_status(zu_get(
+      "https://example.com",
+      tls = zu_tls(ca_extra = ca$pem),
+      client = api
+    )),
+    200L
+  )
   st <- zu_pool_stats(api)
   expect_identical(st[["hits"]], 0)
   expect_identical(st[["misses"]], 2)
 
   # ...and the same settings again DO share, or the key would be useless.
   expect_identical(
-    zu_resp_status(zu_get("https://example.com", tls = zu_tls(ca_extra = ca$pem),
-                          client = api)), 200L)
+    zu_resp_status(zu_get(
+      "https://example.com",
+      tls = zu_tls(ca_extra = ca$pem),
+      client = api
+    )),
+    200L
+  )
   expect_identical(zu_pool_stats(api)[["hits"]], 1)
 })
 
@@ -207,13 +259,22 @@ test_that("a pinned request is never served over an unpinned connection", {
   # — never runs at all. The pin is not bypassed by a flaw in pinning; it is
   # bypassed by never being reached.
   api <- zu_client()
-  expect_identical(zu_resp_status(zu_get("https://example.com", client = api)), 200L)
+  expect_identical(
+    zu_resp_status(zu_get("https://example.com", client = api)),
+    200L
+  )
   expect_identical(zu_pool_stats(api)[["idle"]], 1)
 
   r <- tryCatch(
-    zu_get("https://example.com", client = api,
-           tls = zu_tls(pins = "sha256//YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg=")),
-    condition = function(e) e)
+    zu_get(
+      "https://example.com",
+      client = api,
+      tls = zu_tls(
+        pins = "sha256//YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg="
+      )
+    ),
+    condition = function(e) e
+  )
 
   # Whatever the backend does with the pin — enforce it, or refuse to pin at
   # all — a SUCCESSFUL response here means the connection was reused and the
@@ -229,10 +290,18 @@ test_that("revocation and min_version are part of the key too", {
   # min_version rather than revocation as the distinguishing field: both are
   # in the key, and only this one can complete a request on every backend
   # (OpenSSL refuses revocation = TRUE, D-56).
-  expect_identical(zu_resp_status(zu_get("https://example.com", client = api)), 200L)
   expect_identical(
-    zu_resp_status(zu_get("https://example.com", tls = zu_tls(min_version = 12),
-                          client = api)), 200L)
+    zu_resp_status(zu_get("https://example.com", client = api)),
+    200L
+  )
+  expect_identical(
+    zu_resp_status(zu_get(
+      "https://example.com",
+      tls = zu_tls(min_version = 12),
+      client = api
+    )),
+    200L
+  )
   # A field left out of the key is invisible until it is a vulnerability, so
   # each one is asserted rather than assumed to have been included.
   expect_identical(zu_pool_stats(api)[["hits"]], 0)
@@ -244,11 +313,21 @@ test_that("a DER certificate file is named as such, with the fix", {
   # the content decides. Before this check the backends said only "cannot
   # read CA file".
   pem <- tempfile(fileext = ".crt")
-  writeLines(c("-----BEGIN CERTIFICATE-----", "MIIB", "-----END CERTIFICATE-----"), pem)
+  writeLines(
+    c("-----BEGIN CERTIFICATE-----", "MIIB", "-----END CERTIFICATE-----"),
+    pem
+  )
   expect_null(zuhttp:::check_pem(pem, "ca_extra"))
   der <- tempfile(fileext = ".crt")
   writeBin(as.raw(c(0x30, 0x82, 0x01, 0x0a, 0x02)), der)
-  expect_error(zuhttp:::check_tls(zu_tls(ca_extra = der)), "DER .*openssl x509 -inform der")
-  junk <- tempfile(fileext = ".crt"); writeLines("not a certificate", junk)
-  expect_error(zuhttp:::check_tls(zu_tls(ca_file = junk)), "`ca_file` has no PEM certificate")
+  expect_error(
+    zuhttp:::check_tls(zu_tls(ca_extra = der)),
+    "DER .*openssl x509 -inform der"
+  )
+  junk <- tempfile(fileext = ".crt")
+  writeLines("not a certificate", junk)
+  expect_error(
+    zuhttp:::check_tls(zu_tls(ca_file = junk)),
+    "`ca_file` has no PEM certificate"
+  )
 })

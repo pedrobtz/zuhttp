@@ -23,27 +23,27 @@
 # nothing set land here.
 zu_defaults <- function() {
   list(
-    timeout    = 30,
+    timeout = 30,
     # §19.4, D-68: an exhausted chain raises zu_too_many_redirects rather than
     # returning its last 3xx, so the default must clear an ordinary
     # http -> https -> www chain with room to spare.
-    redirects  = 10L,
-    verify     = TRUE,
-    max_body   = 16 * 1024^2,
+    redirects = 10L,
+    verify = TRUE,
+    max_body = 16 * 1024^2,
     user_agent = NULL,
-    check      = TRUE,
-    decode     = TRUE,
+    check = TRUE,
+    decode = TRUE,
     # Retrying is off by default (§33): attempts counts the FIRST try, so 1
     # means "no retrying". A client that silently replayed requests would be
     # the data-integrity bug §33 opens by warning about.
-    retry      = zu_retry(attempts = 1L),
+    retry = zu_retry(attempts = 1L),
     # §20.1: NULL is "consult the environment", which is what an unconfigured
     # client must do. Disabling is FALSE — see D-48 and the note in
     # zu_client()'s docs for why it cannot be NULL.
-    proxy      = NULL,
+    proxy = NULL,
     # §14.1's defaults are what zu_tls() itself produces, so "unset" and
     # "default" are the same object rather than two things to keep in step.
-    tls        = NULL
+    tls = NULL
   )
 }
 
@@ -57,8 +57,12 @@ policy_fields <- function() names(zu_defaults())
 collect_policy <- function(env = parent.frame()) {
   out <- list()
   for (f in policy_fields()) {
-    if (!exists(f, envir = env, inherits = FALSE)) next
-    if (isTRUE(eval(call("missing", as.name(f)), env))) next
+    if (!exists(f, envir = env, inherits = FALSE)) {
+      next
+    }
+    if (isTRUE(eval(call("missing", as.name(f)), env))) {
+      next
+    }
     v <- get(f, envir = env)
     out[[f]] <- if (is.null(v)) .zu_reset else v
   }
@@ -128,35 +132,48 @@ collect_policy <- function(env = parent.frame()) {
 #'   headers  = c(Accept = "application/json")
 #' )
 #' api
-zu_client <- function(base_url = NULL, headers = NULL, query = NULL,
-                      timeout = NULL, redirects = NULL, verify = NULL,
-                      max_body = NULL, user_agent = NULL, check = NULL,
-                      decode = NULL, transport = zu_native_transport(),
-                      pool = zu_pool(), retry = NULL, middleware = NULL,
-                      hooks = NULL, proxy = NULL, tls = NULL) {
+zu_client <- function(
+  base_url = NULL,
+  headers = NULL,
+  query = NULL,
+  timeout = NULL,
+  redirects = NULL,
+  verify = NULL,
+  max_body = NULL,
+  user_agent = NULL,
+  check = NULL,
+  decode = NULL,
+  transport = zu_native_transport(),
+  pool = zu_pool(),
+  retry = NULL,
+  middleware = NULL,
+  hooks = NULL,
+  proxy = NULL,
+  tls = NULL
+) {
   structure(
     list(
-      base_url   = base_url,
-      headers    = as_header_vec(headers),
-      query      = as_query_list(query),
-      timeout    = timeout,
-      redirects  = redirects,
-      verify     = verify,
-      max_body   = max_body,
+      base_url = base_url,
+      headers = as_header_vec(headers),
+      query = as_query_list(query),
+      timeout = timeout,
+      redirects = redirects,
+      verify = verify,
+      max_body = max_body,
       user_agent = user_agent,
-      check      = check,
-      decode     = decode,
-      retry      = retry,
-      proxy      = proxy,
-      tls        = tls,
-      transport  = transport,
-      pool       = pool,
+      check = check,
+      decode = decode,
+      retry = retry,
+      proxy = proxy,
+      tls = tls,
+      transport = transport,
+      pool = pool,
       # §31.13: NOT policy. Middleware and hooks are user-supplied behaviour
       # and observability; they do not take part in the §31.9 three-state
       # merge, because "reset to the package default" is meaningless for a
       # list of the caller's own functions.
       middleware = check_middleware(middleware),
-      hooks      = hooks %||% list()
+      hooks = hooks %||% list()
     ),
     class = "zu_client",
     # §26.5. The live pool is native state, so it does NOT belong in the list
@@ -187,51 +204,82 @@ zu_client <- function(base_url = NULL, headers = NULL, query = NULL,
 zu_client_update <- function(client, ...) {
   check_client(client)
   changes <- list(...)
-  if (length(changes) && (is.null(names(changes)) || any(!nzchar(names(changes)))))
+  if (
+    length(changes) && (is.null(names(changes)) || any(!nzchar(names(changes))))
+  ) {
     stop("all arguments to zu_client_update() must be named", call. = FALSE)
+  }
   # Checked against the constructor, not the list: a client read back from
   # an older serialization may lack a field it is still entitled to set.
   bad <- setdiff(names(changes), names(formals(zu_client)))
-  if (length(bad))
-    stop("not a client setting: ", paste(bad, collapse = ", "),
-         "\n  settings are: ", paste(names(formals(zu_client)), collapse = ", "),
-         call. = FALSE)
+  if (length(bad)) {
+    stop(
+      "not a client setting: ",
+      paste(bad, collapse = ", "),
+      "\n  settings are: ",
+      paste(names(formals(zu_client)), collapse = ", "),
+      call. = FALSE
+    )
+  }
   # Derived headers merge with the parent's, which is what makes the
   # base -> authenticated -> admin chain in §31.10 work.
-  if (!is.null(changes$headers))
-    changes$headers <- merge_headers(client$headers, as_header_vec(changes$headers))
-  if (!is.null(changes$query))
+  if (!is.null(changes$headers)) {
+    changes$headers <- merge_headers(
+      client$headers,
+      as_header_vec(changes$headers)
+    )
+  }
+  if (!is.null(changes$query)) {
     changes$query <- merge_query(client$query, as_query_list(changes$query))
+  }
   # §26.5: a child that changes the pool settings gets a pool of its own.
   # Sharing one slot made parent and child each rebuild the pool the other
   # had just built, dropping every idle connection on each alternation.
-  if ("pool" %in% names(changes) && !identical(changes$pool, client$pool))
+  if ("pool" %in% names(changes) && !identical(changes$pool, client$pool)) {
     attr(client, "pool_state") <- new.env(parent = emptyenv())
+  }
   # `[<-` with a list, not `[[<-`: assigning NULL through `[[<-` deletes the
   # element, and NULL is how §31.9 spells "reset to the package default".
-  for (nm in names(changes)) client[nm] <- list(changes[[nm]])
+  for (nm in names(changes)) {
+    client[nm] <- list(changes[[nm]])
+  }
   client
 }
 
 as_header_vec <- function(h) {
-  if (is.null(h) || !length(h)) return(NULL)
-  if (is.list(h)) h <- unlist(h)
-  if (is.null(names(h)) || any(is.na(names(h))) || any(!nzchar(names(h))))
-    stop("headers must be a named vector, e.g. c(Accept = \"application/json\")",
-         call. = FALSE)
+  if (is.null(h) || !length(h)) {
+    return(NULL)
+  }
+  if (is.list(h)) {
+    h <- unlist(h)
+  }
+  if (is.null(names(h)) || any(is.na(names(h))) || any(!nzchar(names(h)))) {
+    stop(
+      "headers must be a named vector, e.g. c(Accept = \"application/json\")",
+      call. = FALSE
+    )
+  }
   # NA is meaningful (it erases), so it survives as.character() here.
   structure(as.character(h), names = names(h))
 }
 
 as_query_list <- function(q) {
-  if (is.null(q) || !length(q)) return(NULL)
+  if (is.null(q) || !length(q)) {
+    return(NULL)
+  }
   q <- as.list(q)
-  if (is.null(names(q)) || any(!nzchar(names(q))))
-    stop("query parameters must be named, e.g. list(q = \"HTTP\")", call. = FALSE)
+  if (is.null(names(q)) || any(!nzchar(names(q)))) {
+    stop(
+      "query parameters must be named, e.g. list(q = \"HTTP\")",
+      call. = FALSE
+    )
+  }
   # NULL and NA both mean "erase" (§31.9), and they have to mean the same
   # thing here: list(a = NULL) is a perfectly ordinary way to write it, but a
   # NULL cannot survive being carried through a list, so it becomes NA now.
-  for (nm in names(q)) if (is.null(q[[nm]])) q[[nm]] <- NA
+  for (nm in names(q)) {
+    if (is.null(q[[nm]])) q[[nm]] <- NA
+  }
   q
 }
 
@@ -262,10 +310,14 @@ merge_query <- function(client_q, req_q) {
 merge_policy <- function(field, client, req_policy) {
   if (field %in% names(req_policy)) {
     v <- req_policy[[field]]
-    if (inherits(v, "zu_reset")) return(zu_defaults()[[field]])
+    if (inherits(v, "zu_reset")) {
+      return(zu_defaults()[[field]])
+    }
     return(v)
   }
-  if (!is.null(client) && !is.null(client[[field]])) return(client[[field]])
+  if (!is.null(client) && !is.null(client[[field]])) {
+    return(client[[field]])
+  }
   zu_defaults()[[field]]
 }
 
@@ -287,7 +339,7 @@ zu_default_client <- function() {
   pid <- Sys.getpid()
   if (is.null(the_default$client) || !identical(the_default$pid, pid)) {
     the_default$client <- zu_client()
-    the_default$pid    <- pid
+    the_default$pid <- pid
   }
   the_default$client
 }
@@ -302,30 +354,49 @@ zu_default_client <- function() {
 #' zu_set_default_client(old)
 zu_set_default_client <- function(client) {
   old <- zu_default_client()
-  if (!is.null(client)) check_client(client)
+  if (!is.null(client)) {
+    check_client(client)
+  }
   the_default$client <- client
-  the_default$pid    <- Sys.getpid()
+  the_default$pid <- Sys.getpid()
   invisible(old)
 }
 
 #' @export
 print.zu_client <- function(x, ...) {
   cat("<zu_client>\n")
-  if (!is.null(x$base_url)) cat("  base_url:  ", x$base_url, "\n", sep = "")
+  if (!is.null(x$base_url)) {
+    cat("  base_url:  ", x$base_url, "\n", sep = "")
+  }
   # §42.2: printing is an egress, so values are redacted for display.
   h <- zu_redact_headers_for_display(x$headers)
-  for (i in seq_along(h)) cat("  ", names(h)[i], ": ", h[[i]], "\n", sep = "")
-  if (length(x$query))
+  for (i in seq_along(h)) {
+    cat("  ", names(h)[i], ": ", h[[i]], "\n", sep = "")
+  }
+  if (length(x$query)) {
     cat("  query:     ", format_query(x$query), "\n", sep = "")
+  }
   d <- zu_defaults()
   for (f in policy_fields()) {
     v <- if (is.null(x[[f]])) d[[f]] else x[[f]]
-    if (is.null(v)) next
-    if (f == "proxy") v <- redact_proxy(v)
-    cat("  ", f, ": ", format(v), if (is.null(x[[f]])) "  (default)" else "",
-        "\n", sep = "")
+    if (is.null(v)) {
+      next
+    }
+    if (f == "proxy") {
+      v <- redact_proxy(v)
+    }
+    cat(
+      "  ",
+      f,
+      ": ",
+      format(v),
+      if (is.null(x[[f]])) "  (default)" else "",
+      "\n",
+      sep = ""
+    )
   }
-  if (!inherits(x$transport, "zu_native_transport"))
+  if (!inherits(x$transport, "zu_native_transport")) {
     cat("  transport: ", class(x$transport)[[1]], "\n", sep = "")
+  }
   invisible(x)
 }

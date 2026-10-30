@@ -17,7 +17,11 @@ test_that("the shared object exports only R_init_zuhttp (D-66)", {
   # Non-vacuous: the entry point must be found, or the parse found nothing.
   expect_true("R_init_zuhttp" %in% syms)
   expect_identical(
-    setdiff(syms, "R_init_zuhttp"), character(0),
-    info = paste("also exported:", paste(head(setdiff(syms, "R_init_zuhttp"), 20), collapse = ", "))
+    setdiff(syms, "R_init_zuhttp"),
+    character(0),
+    info = paste(
+      "also exported:",
+      paste(head(setdiff(syms, "R_init_zuhttp"), 20), collapse = ", ")
+    )
   )
 })

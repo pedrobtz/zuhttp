@@ -33,8 +33,10 @@ test_that("an unknown issuer is rejected (§14.6)", {
   # would have failed: the handshake completes fine at the protocol level and
   # only trust evaluation can object.
   with_tls_server("untrusted", function(url) {
-    e <- tryCatch(zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10),
-                  condition = function(e) e)
+    e <- tryCatch(
+      zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10),
+      condition = function(e) e
+    )
     expect_s3_class(e, "zu_tls_certificate_error")
     expect_s3_class(e, "zu_tls_error")
     expect_s3_class(e, "zu_error")
@@ -50,8 +52,10 @@ test_that("a hostname mismatch is its OWN condition class (§14.6)", {
   # because the two have completely different fixes — one is a misconfigured
   # server, the other a missing root.
   with_tls_server("wronghost", function(url) {
-    e <- tryCatch(zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10),
-                  condition = function(e) e)
+    e <- tryCatch(
+      zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10),
+      condition = function(e) e
+    )
     expect_s3_class(e, "zu_tls_hostname_error")
     expect_false(inherits(e, "zu_tls_certificate_error"))
     expect_match(conditionMessage(e), "localhost", fixed = TRUE)
@@ -63,8 +67,10 @@ test_that("an expired certificate is rejected", {
   skip_unless_cert("expired")
   fx <- tls_fixture()
   with_tls_server("expired", function(url) {
-    e <- tryCatch(zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10),
-                  condition = function(e) e)
+    e <- tryCatch(
+      zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10),
+      condition = function(e) e
+    )
     expect_s3_class(e, "zu_tls_certificate_error")
     expect_match(conditionMessage(e), "expired", fixed = TRUE)
   })
@@ -75,8 +81,10 @@ test_that("a not-yet-valid certificate is rejected", {
   skip_unless_cert("notyet")
   fx <- tls_fixture()
   with_tls_server("notyet", function(url) {
-    e <- tryCatch(zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10),
-                  condition = function(e) e)
+    e <- tryCatch(
+      zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10),
+      condition = function(e) e
+    )
     # §14.6 groups "expired or not yet valid" as one bullet, and the platforms
     # agree: Security.framework reports a not-yet-valid certificate with the
     # word "expired" too. The class is what matters, and the class is right;
@@ -94,8 +102,10 @@ test_that("ca_file REPLACES: the system store no longer vouches for anything", {
   # local ca_file. Same rule from the other side: only these roots are
   # trusted, and nothing else is.
   with_tls_server("good", function(url) {
-    e <- tryCatch(zu_get(url, tls = zu_tls(ca_file = fx$rogue_ca), timeout = 10),
-                  condition = function(e) e)
+    e <- tryCatch(
+      zu_get(url, tls = zu_tls(ca_file = fx$rogue_ca), timeout = 10),
+      condition = function(e) e
+    )
     expect_s3_class(e, "zu_tls_certificate_error")
   })
 })
@@ -117,7 +127,11 @@ test_that("ca_extra adds to a ca_file too, not only to the system store (§14.2)
   # `else if` of the ca_file one, so the extra root was silently dropped and
   # this failed; OpenSSL has always added it on top.
   with_tls_server("good", function(url) {
-    r <- zu_get(url, tls = zu_tls(ca_file = fx$rogue_ca, ca_extra = fx$ca), timeout = 10)
+    r <- zu_get(
+      url,
+      tls = zu_tls(ca_file = fx$rogue_ca, ca_extra = fx$ca),
+      timeout = 10
+    )
     expect_identical(zu_resp_status(r), 200L)
   })
 })
@@ -150,8 +164,10 @@ test_that("verify = FALSE warns, every time, and names what it turns off", {
   # §14.1: no single "insecure" switch that disables both peer and hostname
   # checking without naming what it turns off.
   with_tls_server("untrusted", function(url) {
-    expect_warning(zu_get(url, verify = FALSE, timeout = 10),
-                   "certificate AND hostname")
+    expect_warning(
+      zu_get(url, verify = FALSE, timeout = 10),
+      "certificate AND hostname"
+    )
   })
 })
 
@@ -167,8 +183,11 @@ test_that("a matching pin connects", {
   skip_unless_tls_supports("pins")
   fx <- tls_fixture()
   with_tls_server("good", function(url) {
-    r <- zu_get(url, tls = zu_tls(ca_file = fx$ca, pins = spki_pin("good")),
-                timeout = 10)
+    r <- zu_get(
+      url,
+      tls = zu_tls(ca_file = fx$ca, pins = spki_pin("good")),
+      timeout = 10
+    )
     expect_identical(zu_resp_status(r), 200L)
   })
 })
@@ -181,10 +200,14 @@ test_that("a pin that does not match is zu_tls_pin_error, not a refusal", {
   # the MISMATCH one: zu_tls_unsupported_error here would mean the pin was
   # never compared, which is the vacuous pass #12 found on Windows.
   with_tls_server("good", function(url) {
-    e <- tryCatch(zu_get(url, tls = zu_tls(ca_file = fx$ca,
-                                           pins = spki_pin("wronghost")),
-                         timeout = 10),
-                  condition = function(e) e)
+    e <- tryCatch(
+      zu_get(
+        url,
+        tls = zu_tls(ca_file = fx$ca, pins = spki_pin("wronghost")),
+        timeout = 10
+      ),
+      condition = function(e) e
+    )
     expect_s3_class(e, "zu_tls_pin_error")
     expect_false(inherits(e, "zu_tls_unsupported_error"))
   })
@@ -197,10 +220,14 @@ test_that("a matching pin does not bypass chain verification (§14.4)", {
   # "Checked in addition to, never instead of": the pin matches the served
   # key exactly, and the untrusted issuer must still be rejected.
   with_tls_server("untrusted", function(url) {
-    e <- tryCatch(zu_get(url, tls = zu_tls(ca_file = fx$ca,
-                                           pins = spki_pin("untrusted")),
-                         timeout = 10),
-                  condition = function(e) e)
+    e <- tryCatch(
+      zu_get(
+        url,
+        tls = zu_tls(ca_file = fx$ca, pins = spki_pin("untrusted")),
+        timeout = 10
+      ),
+      condition = function(e) e
+    )
     expect_s3_class(e, "zu_tls_certificate_error")
   })
 })
@@ -226,10 +253,15 @@ test_that("revocation off by default: what each platform then does (§14.5)", {
   # on macOS either outcome is the platform's; what must not happen is a
   # failure of any other kind.
   if (identical(Sys.info()[["sysname"]], "Darwin")) {
-    r <- tryCatch(zu_get_badssl("https://revoked.badssl.com", timeout = 20),
-                  error = function(e) e)
-    if (inherits(r, "error")) expect_s3_class(r, "zu_tls_certificate_error")
-    else expect_identical(zu_resp_status(r), 200L)
+    r <- tryCatch(
+      zu_get_badssl("https://revoked.badssl.com", timeout = 20),
+      error = function(e) e
+    )
+    if (inherits(r, "error")) {
+      expect_s3_class(r, "zu_tls_certificate_error")
+    } else {
+      expect_identical(zu_resp_status(r), 200L)
+    }
   } else {
     r <- zu_get_badssl("https://revoked.badssl.com", timeout = 20)
     expect_identical(zu_resp_status(r), 200L)
@@ -247,9 +279,13 @@ test_that("zu_tls(revocation = TRUE) changes the outcome for a revoked host", {
   # its CRL check fails before the chain is judged. What both must agree on is
   # that the request does not succeed.
   expect_error(
-    zu_get_badssl("https://revoked.badssl.com", timeout = 20,
-           tls = zu_tls(revocation = TRUE)),
-    class = "zu_tls_error")
+    zu_get_badssl(
+      "https://revoked.badssl.com",
+      timeout = 20,
+      tls = zu_tls(revocation = TRUE)
+    ),
+    class = "zu_tls_error"
+  )
 })
 
 test_that("a revocation failure is ABOUT revocation (S9 criterion 4)", {
@@ -269,16 +305,23 @@ test_that("a revocation failure is ABOUT revocation (S9 criterion 4)", {
   # all: a same-CA valid certificate must PASS before the revoked one failing
   # means anything.
   tls <- zu_tls(revocation = TRUE)
-  control <- tryCatch(zu_get_badssl("https://badssl.com", timeout = 20, tls = tls),
-                      error = function(e) e)
-  if (inherits(control, "condition"))
-    skip(paste0("no usable control: a valid badssl.com certificate also fails ",
-                "under revocation = TRUE on this backend (", zu_tls_backend(),
-                "), so the revoked host proves nothing. S9 criterion 4 stays ",
-                "open until a CA that still answers revocation queries is used."))
+  control <- tryCatch(
+    zu_get_badssl("https://badssl.com", timeout = 20, tls = tls),
+    error = function(e) e
+  )
+  if (inherits(control, "condition")) {
+    skip(paste0(
+      "no usable control: a valid badssl.com certificate also fails ",
+      "under revocation = TRUE on this backend (",
+      zu_tls_backend(),
+      "), so the revoked host proves nothing. S9 criterion 4 stays ",
+      "open until a CA that still answers revocation queries is used."
+    ))
+  }
 
   expect_identical(zu_resp_status(control), 200L)
   expect_error(
     zu_get_badssl("https://revoked.badssl.com", timeout = 20, tls = tls),
-    class = "zu_tls_certificate_error")
+    class = "zu_tls_certificate_error"
+  )
 })

@@ -23,20 +23,34 @@
 zu_have_network <- local({
   known <- NULL
   function() {
-    if (!is.null(known)) return(known)
-    con <- try(suppressWarnings(
-      socketConnection("example.com", port = 80L, open = "r+",
-                       blocking = TRUE, timeout = 5L)), silent = TRUE)
+    if (!is.null(known)) {
+      return(known)
+    }
+    con <- try(
+      suppressWarnings(
+        socketConnection(
+          "example.com",
+          port = 80L,
+          open = "r+",
+          blocking = TRUE,
+          timeout = 5L
+        )
+      ),
+      silent = TRUE
+    )
     known <<- !inherits(con, "try-error")
-    if (known) try(close(con), silent = TRUE)
+    if (known) {
+      try(close(con), silent = TRUE)
+    }
     known
   }
 })
 
 skip_unless_online <- function() {
   testthat::skip_on_cran()
-  if (!identical(Sys.getenv("ZU_TEST_NETWORK"), "1"))
+  if (!identical(Sys.getenv("ZU_TEST_NETWORK"), "1")) {
     testthat::skip("set ZU_TEST_NETWORK=1 to run network tests")
+  }
   if (!zu_have_network()) testthat::skip("no network")
 }
 
@@ -48,9 +62,15 @@ skip_unless_online <- function() {
 tls_supports <- function(cap) cap %in% zu_info()$tls_capabilities
 
 skip_unless_tls_supports <- function(cap) {
-  if (!tls_supports(cap))
-    testthat::skip(paste0("the ", zu_tls_backend(), " backend refuses `", cap,
-                          "` (zu_tls_unsupported_error; see ?zuhttp_tls)"))
+  if (!tls_supports(cap)) {
+    testthat::skip(paste0(
+      "the ",
+      zu_tls_backend(),
+      " backend refuses `",
+      cap,
+      "` (zu_tls_unsupported_error; see ?zuhttp_tls)"
+    ))
+  }
 }
 
 # A test whose assertion is a wall-clock bound -- a request timeout that must
@@ -62,8 +82,9 @@ skip_unless_tls_supports <- function(cap) {
 # timeout somewhere, and what gctorture exists to check, the PROTECT
 # discipline of init.c, is exercised by every other test.
 skip_under_gctorture <- function() {
-  if (identical(Sys.getenv("ZU_GCTORTURE"), "true"))
+  if (identical(Sys.getenv("ZU_GCTORTURE"), "true")) {
     testthat::skip("a wall-clock bound, under gctorture")
+  }
 }
 
 # zu_get() against badssl.com, which resets connections from CI runners now
@@ -75,7 +96,9 @@ zu_get_badssl <- function(...) {
   transient <- c("zu_connect_error", "zu_io_error", "zu_timeout_error")
   for (attempt in 1:3) {
     r <- tryCatch(zu_get(...), error = function(e) e)
-    if (!inherits(r, "error")) return(r)
+    if (!inherits(r, "error")) {
+      return(r)
+    }
     if (!inherits(r, transient) || attempt == 3L) stop(r)
   }
 }
@@ -88,12 +111,15 @@ zu_get_badssl <- function(...) {
 # test pass for the wrong reason.
 skip_unless_forked_https_is_testable <- function() {
   testthat::skip_on_cran()
-  if (!identical(Sys.getenv("ZU_TEST_NETWORK"), "1"))
+  if (!identical(Sys.getenv("ZU_TEST_NETWORK"), "1")) {
     testthat::skip("set ZU_TEST_NETWORK=1 to run network tests")
-  if (!identical(Sys.info()[["sysname"]], "Darwin"))
+  }
+  if (!identical(Sys.info()[["sysname"]], "Darwin")) {
     testthat::skip("R-12 is a macOS Network.framework hazard")
-  if (!identical(zu_tls_backend(), "network-framework"))
+  }
+  if (!identical(zu_tls_backend(), "network-framework")) {
     testthat::skip("guard lives in the Network.framework backend")
+  }
   testthat::skip_if_not_installed("parallel")
   if (!zu_have_network()) testthat::skip("no network")
 }

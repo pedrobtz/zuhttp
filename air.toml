@@ -1,0 +1,7 @@
+# The R formatter (#110): `air format .` is what the portfolio runs, and the
+# conventions workflow checks it on every pull request. spike/ is a record of
+# edition 1's feasibility work and is kept as it was written.
+[format]
+line-width = 80
+indent-width = 2
+exclude = ["spike/"]
