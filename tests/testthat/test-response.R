@@ -161,7 +161,6 @@ test_that("zu_resp_raw() returns decoded bytes", {
 })
 
 test_that("zu_resp_json() says what went wrong, not what the parser thinks", {
-  skip_if_not_installed("jsonlite")
   # An empty body is a valid response, and the parser's "premature EOF" gives
   # no hint that it came from an HTTP call at all (§34.4).
   e <- tryCatch(zu_resp_json(zu_response(204L)), zu_error = function(e) e)

@@ -4,7 +4,8 @@ First release.
 
 A minimal HTTP/1.1 client that uses the platform's own TLS stack and trust
 store — Schannel, Network.framework with `SecTrust`, or system OpenSSL — and
-bundles neither cryptography nor a CA bundle. No hard R dependencies.
+bundles neither cryptography nor a CA bundle. One R dependency, its sibling
+`zujson`, for JSON.
 
 ## What is in it
 
@@ -28,6 +29,11 @@ bundles neither cryptography nor a CA bundle. No hard R dependencies.
   unwinds without leaking sockets or TLS contexts. Neither bounds DNS
   resolution, which is synchronous.
 * Retry policies, middleware, and observability hooks.
+* JSON request and response bodies through `zujson` (`json =`,
+  `zu_body_json()`, `zu_resp_json()`), replaceable with
+  `zu_set_json_backend()`; XML and HTML responses through `zuxml` and
+  `zuhtml` when installed (`zu_resp_xml()`, `zu_resp_html()`), with the
+  response's charset honoured.
 * Structured conditions (`zu_tls_certificate_error`, `zu_timeout_error`,
   `zu_fork_error`, …) rather than parsed message strings.
 * On macOS the TLS engine is Network.framework, with trust still decided by
@@ -47,7 +53,7 @@ bundles neither cryptography nor a CA bundle. No hard R dependencies.
 
 ## API surface
 
-61 exported functions. Every condition inherits `zuhttp_error`,
+63 exported functions. Every condition inherits `zuhttp_error`,
 directly above `error`, so `tryCatch(..., zuhttp_error = )` catches anything
 zuhttp raises and nothing else. The testing tools — `zu_mock_transport()`,
 `zu_stub()`, `zu_response()` and the cassette functions — are experimental

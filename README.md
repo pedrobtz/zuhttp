@@ -11,7 +11,8 @@
 A minimal HTTP/1.1 client for R that uses **each platform's own TLS stack and
 trust store** — Schannel on Windows, Network.framework with `SecTrust` on macOS,
 system OpenSSL elsewhere — rather than bundling cryptography or a CA bundle.
-Zero hard R dependencies.
+One R dependency, its sibling [zujson](https://github.com/pedrobtz/zujson), for
+JSON.
 
 zuhttp is not on CRAN yet. Install it from GitHub:
 
@@ -94,9 +95,12 @@ tryCatch(
 #> [1] 404
 ```
 
-`zu_resp_json()` uses `jsonlite` when it is installed, and says so plainly when
-it is not — everything else here, including sending a JSON body you have
-already encoded, works with no packages at all.
+JSON goes through [zujson](https://github.com/pedrobtz/zujson), written for
+zuhttp, and `zu_set_json_backend()` swaps in another implementation.
+`zu_resp_xml()` and `zu_resp_html()` parse with
+[zuxml](https://github.com/pedrobtz/zuxml) and
+[zuhtml](https://github.com/pedrobtz/zuhtml) when they are installed, honouring
+the response's charset.
 
 ## Why this rather than `curl`
 

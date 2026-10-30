@@ -136,7 +136,6 @@ test_that("a relative URL with no base_url is a clear error, not a bad request",
 })
 
 test_that("the body's content type loses to an explicit header (§31.2)", {
-  skip_if_not_installed("jsonlite")
   req <- zu_body_json(zu_request("POST", "https://x/"), list(a = 1))
   req <- zu_headers(req, "Content-Type" = "application/vnd.api+json")
   r <- resolved(req, zu_client())

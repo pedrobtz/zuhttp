@@ -2,28 +2,59 @@
 % Please edit documentation in R/response.R
 \name{zu_resp_json}
 \alias{zu_resp_json}
-\title{The response body as parsed JSON}
+\alias{zu_resp_xml}
+\alias{zu_resp_html}
+\title{The response body as parsed JSON, XML or HTML}
 \usage{
 zu_resp_json(resp, ...)
+
+zu_resp_xml(resp, ...)
+
+zu_resp_html(resp, ...)
 }
 \arguments{
 \item{resp}{A \code{zu_response}.}
 
-\item{...}{Passed to the JSON backend's parser.}
+\item{...}{Passed to the parser: \code{\link[zujson:json_parse]{zujson::json_parse()}} (for example
+\code{data_frame = TRUE}), \code{\link[zuxml:xml_parse]{zuxml::xml_parse()}} or \code{\link[zuhtml:html_parse]{zuhtml::html_parse()}}.}
 }
 \value{
-Whatever the backend returns, by default a list.
+\code{zu_resp_json()}: vectors and lists, by \code{zujson}'s type mapping (an
+array of objects stays a list unless \code{data_frame = TRUE}).
+\code{zu_resp_xml()}: a \code{zuxml} document. \code{zu_resp_html()}: a \code{zuhtml}
+document.
 }
 \description{
-The response body as parsed JSON
+\code{zu_resp_json()} parses with \code{zujson} (see \code{\link[=zu_set_json_backend]{zu_set_json_backend()}} to use
+another implementation). \code{zu_resp_xml()} and \code{zu_resp_html()} use the
+\code{zuxml} and \code{zuhtml} packages, which zuhttp suggests rather than requires:
+install the one you need.
+}
+\details{
+The body's bytes go to the parser as they arrived. A \code{charset} in
+\code{Content-Type} is passed on as the encoding, which for XML overrides the
+document's own declaration, as HTTP intends; without one the parser reads
+the byte-order mark or the declaration. JSON is always UTF-8 (RFC 8259).
+\code{zu_resp_html()} also passes the response's final URL as the base for
+resolving relative links.
+
+An empty body, or one the parser rejects, raises \code{zu_body_decode_error}
+naming the format; the parser's own message comes last (§34.4).
 }
 \examples{
-\dontshow{if (requireNamespace("jsonlite", quietly = TRUE)) withAutoprint(\{ # examplesIf}
 r <- zu_response(200L, c("Content-Type" = "application/json"),
                  '{"name": "Alice", "tags": ["a", "b"]}')
 str(zu_resp_json(r))
-\dontshow{\}) # examplesIf}
+
+if (requireNamespace("zuxml", quietly = TRUE)) {
+  x <- zu_resp_xml(zu_response(200L, c("Content-Type" = "application/xml"),
+                               "<feed><title>News</title></feed>"))
+  zuxml::xml_text(zuxml::xml_find_first(x, "//title"))
 }
-\seealso{
-\code{\link[=zu_set_json_backend]{zu_set_json_backend()}} if you would rather not use \code{jsonlite}.
+
+if (requireNamespace("zuhtml", quietly = TRUE)) {
+  h <- zu_resp_html(zu_response(200L, c("Content-Type" = "text/html"),
+                                "<title>Hello</title><p>World</p>"))
+  zuhtml::html_title(h)
+}
 }

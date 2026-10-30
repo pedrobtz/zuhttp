@@ -436,46 +436,126 @@ bom_of <- function(b) {
   NULL
 }
 
-#' The response body as parsed JSON
+#' The response body as parsed JSON, XML or HTML
+#'
+#' `zu_resp_json()` parses with `zujson` (see [zu_set_json_backend()] to use
+#' another implementation). `zu_resp_xml()` and `zu_resp_html()` use the
+#' `zuxml` and `zuhtml` packages, which zuhttp suggests rather than requires:
+#' install the one you need.
+#'
+#' The body's bytes go to the parser as they arrived. A `charset` in
+#' `Content-Type` is passed on as the encoding, which for XML overrides the
+#' document's own declaration, as HTTP intends; without one the parser reads
+#' the byte-order mark or the declaration. JSON is always UTF-8 (RFC 8259).
+#' `zu_resp_html()` also passes the response's final URL as the base for
+#' resolving relative links.
+#'
+#' An empty body, or one the parser rejects, raises `zu_body_decode_error`
+#' naming the format; the parser's own message comes last (§34.4).
 #'
 #' @param resp A `zu_response`.
-#' @param ... Passed to the JSON backend's parser.
-#' @return Whatever the backend returns, by default a list.
-#' @seealso [zu_set_json_backend()] if you would rather not use `jsonlite`.
+#' @param ... Passed to the parser: [zujson::json_parse()] (for example
+#'   `data_frame = TRUE`), [zuxml::xml_parse()] or [zuhtml::html_parse()].
+#' @return `zu_resp_json()`: vectors and lists, by `zujson`'s type mapping (an
+#'   array of objects stays a list unless `data_frame = TRUE`).
+#'   `zu_resp_xml()`: a `zuxml` document. `zu_resp_html()`: a `zuhtml`
+#'   document.
 #' @export
-#' @examplesIf requireNamespace("jsonlite", quietly = TRUE)
+#' @examples
 #' r <- zu_response(200L, c("Content-Type" = "application/json"),
 #'                  '{"name": "Alice", "tags": ["a", "b"]}')
 #' str(zu_resp_json(r))
+#'
+#' if (requireNamespace("zuxml", quietly = TRUE)) {
+#'   x <- zu_resp_xml(zu_response(200L, c("Content-Type" = "application/xml"),
+#'                                "<feed><title>News</title></feed>"))
+#'   zuxml::xml_text(zuxml::xml_find_first(x, "//title"))
+#' }
+#'
+#' if (requireNamespace("zuhtml", quietly = TRUE)) {
+#'   h <- zu_resp_html(zu_response(200L, c("Content-Type" = "text/html"),
+#'                                 "<title>Hello</title><p>World</p>"))
+#'   zuhtml::html_title(h)
+#' }
 zu_resp_json <- function(resp, ...) {
   txt <- zu_resp_text(resp, encoding = "UTF-8")
   if (!nzchar(trimws(txt))) {
-    zu_stop(
-      "zu_body_decode_error",
-      paste0(
-        "the response body is empty, so there is no JSON to parse",
-        " (HTTP ",
-        resp$status,
-        ").\n",
-        "  A 204 or an empty 200 is a valid response; check",
-        " zu_resp_status() before decoding."
-      ),
-      url = resp$url,
-      phase = "decode",
-      response = redact_response_fields(resp)
-    )
+    stop_empty_body(resp, "JSON")
   }
-  # §34.4: the backend's own complaint is useful but is not a first line. A
-  # user seeing "premature EOF (right here) ---^" has to work out that it came
-  # from their HTTP call at all.
-  tryCatch(json_decode(txt, ...), error = function(e) {
+  parse_body(resp, "JSON", function() json_decode(txt, ...))
+}
+
+#' @rdname zu_resp_json
+#' @export
+zu_resp_xml <- function(resp, ...) {
+  need_suggested("zuxml", "zu_resp_xml()")
+  if (blank_body(resp$body)) {
+    stop_empty_body(resp, "XML")
+  }
+  parse_body(resp, "XML", function() {
+    zuxml::xml_parse(resp$body, encoding = body_charset(resp), ...)
+  })
+}
+
+#' @rdname zu_resp_json
+#' @export
+zu_resp_html <- function(resp, ...) {
+  need_suggested("zuhtml", "zu_resp_html()")
+  if (blank_body(resp$body)) {
+    stop_empty_body(resp, "HTML")
+  }
+  parse_body(resp, "HTML", function() {
+    zuhtml::html_parse(
+      resp$body,
+      encoding = body_charset(resp),
+      base_url = resp$url,
+      ...
+    )
+  })
+}
+
+# The charset Content-Type declares, or NULL to let the parser decide.
+body_charset <- function(resp) {
+  cs <- content_type_of(resp)$params[["charset"]]
+  if (is.null(cs) || !nzchar(cs)) NULL else cs
+}
+
+blank_body <- function(b) {
+  !length(b) || all(b %in% as.raw(c(0x20, 0x09, 0x0a, 0x0d)))
+}
+
+stop_empty_body <- function(resp, format) {
+  zu_stop(
+    "zu_body_decode_error",
+    paste0(
+      "the response body is empty, so there is no ",
+      format,
+      " to parse (HTTP ",
+      resp$status,
+      ").\n",
+      "  A 204 or an empty 200 is a valid response; check",
+      " zu_resp_status() before decoding."
+    ),
+    url = resp$url,
+    phase = "decode",
+    response = redact_response_fields(resp)
+  )
+}
+
+# §34.4: the parser's own complaint is useful but is not a first line. A user
+# seeing "premature EOF (right here) ---^" has to work out that it came from
+# their HTTP call at all.
+parse_body <- function(resp, format, parse) {
+  tryCatch(parse(), error = function(e) {
     if (inherits(e, "zu_error")) {
       stop(e)
     }
     zu_stop(
       "zu_body_decode_error",
       paste0(
-        "the response body is not valid JSON (HTTP ",
+        "the response body is not valid ",
+        format,
+        " (HTTP ",
         resp$status,
         ", ",
         length(resp$body),

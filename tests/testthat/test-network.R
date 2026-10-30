@@ -159,7 +159,6 @@ test_that("an error status raises by default and is inspectable with check = FAL
 
 test_that("a JSON POST reaches the server as JSON", {
   skip_unless_online()
-  skip_if_not_installed("jsonlite")
   r <- zu_post(
     "https://httpbin.org/post",
     json = list(name = "Alice", active = TRUE),
@@ -183,7 +182,6 @@ test_that("decode = FALSE returns the wire bytes (§21.2)", {
 
 test_that("a client's base_url and headers reach the server", {
   skip_unless_online()
-  skip_if_not_installed("jsonlite")
   api <- zu_client(
     base_url = "https://httpbin.org",
     headers = c("X-Zu-Test" = "1"),

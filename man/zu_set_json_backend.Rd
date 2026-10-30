@@ -16,8 +16,9 @@ accept \code{...}, since request-level options are forwarded to it.}
 The previous backend, invisibly.
 }
 \description{
-\code{zuhttp} has no hard dependencies. \code{\link[=zu_body_json]{zu_body_json()}} and \code{\link[=zu_resp_json]{zu_resp_json()}}
-use \code{jsonlite} if it is installed, and this replaces it with anything else.
+\code{\link[=zu_body_json]{zu_body_json()}} and \code{\link[=zu_resp_json]{zu_resp_json()}} use \code{zujson} by default
+(\code{\link[zujson:json_write]{zujson::json_write()}} and \code{\link[zujson:json_parse]{zujson::json_parse()}}); this replaces it with
+anything else, \code{jsonlite} included.
 }
 \examples{
 # Any pair of functions will do; a real one would wrap a JSON package,

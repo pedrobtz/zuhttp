@@ -31,11 +31,14 @@ License: MIT + file LICENSE
 Encoding: UTF-8
 Depends:
     R (>= 3.5)
+Imports:
+    zujson (>= 0.1.0)
 Suggests:
-    jsonlite,
     parallel,
     testthat (>= 3.1.7),
-    webfakes
+    webfakes,
+    zuhtml (>= 0.1.0),
+    zuxml (>= 0.1.0)
 SystemRequirements: zlib; and each platform's own TLS stack, which
     ./configure selects: Schannel on Windows and Network.framework on macOS,
     both part of the operating system, and OpenSSL >= 1.1.1 on other Unix.

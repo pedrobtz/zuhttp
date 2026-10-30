@@ -68,7 +68,6 @@ test_that("body arguments are mutually exclusive", {
 })
 
 test_that("a request prints its method, URL, headers and body (§31.4)", {
-  skip_if_not_installed("jsonlite")
   req <- zu_request("POST", "https://api.example.com/users")
   req <- zu_query(req, verbose = TRUE)
   req <- zu_headers(req, Accept = "application/json")
@@ -88,7 +87,6 @@ test_that("a request prints its method, URL, headers and body (§31.4)", {
 })
 
 test_that("the one-shot helpers lower to the same request (§31.1 principle 3)", {
-  skip_if_not_installed("jsonlite")
   seen <- NULL
   api <- zu_client(
     transport = zu_mock_transport(function(req) {

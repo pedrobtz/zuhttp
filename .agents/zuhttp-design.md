@@ -68,7 +68,7 @@ Five rules keep it that way:
 | D-22 | The PID guard covers the pool **and** the trust evaluator | Accepted | 26.4 |
 | D-23 | Clients lazily re-create pools after serialization | Accepted | 26.5 |
 | D-24 | Body rewindability is a checked property | Accepted | 28.2 |
-| D-25 | `jsonlite` in Suggests; pluggable JSON backend | Accepted | 31.7 |
+| D-25 | `jsonlite` in Suggests; pluggable JSON backend | Superseded by D-88 (2026-10-30) | 31.7 |
 | D-26 | Conditions built with base R; no rlang | Accepted | 34.3 |
 | D-27 | Redaction is one policy applied at every egress | Accepted | 42 |
 | D-28 | zuhttp's own tests use the `zuh_stream` mock, not the R transport mock | Accepted | 50.1 |
@@ -97,7 +97,7 @@ Five rules keep it that way:
 | D-51 | A URL enters the trace only through `zuh_trace_add_url()`, which redacts in C | Accepted | 35.3, 42.2 |
 | D-52 | `final_url` is redacted in the engine | Accepted | 42.1, 42.2 |
 | D-53 | One response sink: `path` and `callback` are mutually exclusive | Accepted | 27.1 |
-| D-54 | zuhttp consumes no `zu*` sibling in 0.x; internal C moves off `zu_` | Accepted 2026-09-25 | 5.1 |
+| D-54 | zuhttp consumes no `zu*` sibling in 0.x; internal C moves off `zu_` | Accepted 2026-09-25; the first half amended by D-88 | 5.1 |
 | D-55 | Features deferred from 0.1.0 target 0.2.0; 0.1.x is fixes only | Accepted 2026-09-25 | 57 |
 | D-56 | An unhonourable `zu_tls()` setting raises `zu_tls_unsupported_error` before any I/O, from a per-backend capability mask in C | Accepted 2026-09-25 | 14, 34.1, 39 |
 
@@ -139,6 +139,7 @@ accepted when that work package's PR merges.
 | D-85 | **Request headers are bounded by the 64 KiB header block alone.** §40's per-field limits defend against an untrusted response and do not apply to what the caller sends; a rejected request header is named (never its value) and refused as `zu_http_parse_error` before connecting | Accepted 2026-10-30 (#95) | 17.1, 40 | — |
 | D-86 | **Only §34.1 classes reach R.** The stream signals `ZUH_ERR_CLOSED` and `ZUH_ERR_WOULDBLOCK` have no class and arrive as `zu_io_error`. On OpenSSL a TCP close without `close_notify` is end of stream while reading, as on Schannel and Network.framework (a truncated length-framed or chunked body is still caught by the framing), and a handshake failure during the handshake | Accepted 2026-10-30 (#99) | 18.1, 34.1 | — |
 | D-87 | `zu_redact_headers()` and `zu_redact_params()` **keep their names**: they register names to redact, as their titles say, and an alias with a configuring verb would grow the §53 export surface for no new behaviour | Accepted 2026-10-30 (#112) | 42.1, 53 | — |
+| D-88 | **JSON is `zujson`'s, in Imports; XML and HTML are `zuxml`'s and `zuhtml`'s, in Suggests.** `zujson` was written for zuhttp (raw bytes in and out, a documented type mapping, vendored parser, no R dependencies), so JSON works with nothing else installed and `zu_set_json_backend()` still replaces it. `zu_resp_xml()` and `zu_resp_html()` join 0.1.0. Supersedes D-25; amends D-54's "consumes no sibling" and §1's "no hard R dependencies" | Accepted 2026-10-30 | 1, 5.1, 31.7, 53 | — |
 
 ---
 
@@ -149,8 +150,8 @@ accepted when that work package's PR merges.
 **Status:** Built (0.1.0).
 
 zuhttp is a small HTTP/1.1 client for R that uses the platform's own TLS stack
-and trust store instead of bundling cryptography or a CA bundle, and has no
-hard R dependencies. It competes with the `curl` package at the transport
+and trust store instead of bundling cryptography or a CA bundle, and has one
+hard R dependency, its sibling `zujson` (D-88). It competes with the `curl` package at the transport
 layer for the common case — HTTPS requests with system trust, redirects,
 streaming, timeouts, proxies, cancellation, structured errors — and does not
 try to be libcurl.
@@ -255,9 +256,9 @@ merging, and a transport seam (§36). It MUST NOT mask an httr2 export (D-2).
 
 **Status:** Accepted 2026-09-25.
 
-zuhttp consumes no sibling in 0.x. Compression is system zlib; pin digests
-come from each TLS backend; `zuxml` is at most a `Suggests` for a future
-`zu_resp_xml()`. `zucrypt` is the named route for a bundled TLS engine on
+zuhttp imports one sibling, `zujson`, for JSON, and suggests `zuxml` and
+`zuhtml` for `zu_resp_xml()` and `zu_resp_html()` (D-88). Compression is still
+system zlib and pin digests still come from each TLS backend. `zucrypt` is the named route for a bundled TLS engine on
 macOS if native TLS ever stops being enough (D-63, §13.2); taking it would be
 zuhttp's first sibling dependency. The shared five-repository family table is in edition 1
 §5.1 and changes only in all five repositories at once; its zuhttp licence
@@ -1283,7 +1284,12 @@ Accessors are the contract; `$fields` are not. `zu_resp_raw()` is decoded
 bytes (D-9). `zu_resp_text()` chooses an encoding by: explicit `encoding`,
 then `charset`, then a BOM, then UTF-8; JSON is always UTF-8; invalid bytes
 raise `zu_body_decode_error` unless `on_invalid = "substitute"`.
-`zu_resp_json()` uses `jsonlite` if installed (D-25).
+`zu_resp_json()` parses with `zujson`, and `zu_set_json_backend()` replaces
+it (D-88). `zu_resp_xml()` and `zu_resp_html()` hand the raw body to `zuxml`
+and `zuhtml` with the `Content-Type` charset as the encoding, which for XML
+overrides the document's declaration; HTML also gets the final URL as its base.
+An empty body, or one the parser rejects, is `zu_body_decode_error` naming
+the format, from one helper shared by all three.
 
 #### 31.8 Response body lifecycle
 
@@ -1308,7 +1314,7 @@ default by the §31.9 rule; it is never removed from the client.
 
 Constructors `zu_client`, `zu_request`; execution `zu_perform`; transformers
 `zu_query`, `zu_headers`, `zu_body_*`, `zu_req_*`; responses `zu_resp_*`.
-The surface is 61 exports (D-65, §53).
+The surface is 63 exports (D-65's 61, and D-88's two; §53).
 
 #### 31.12 Transport as an explicit client dependency
 
@@ -1801,14 +1807,15 @@ version R supports; HTTPS through a proxy needs macOS 14 (D-63).
 
 **Status:** Built (W3).
 
-Only the R API is stable. 0.1.0 exports 61 functions (D-65), trimmed from 75
+Only the R API is stable. 0.1.0 exports 63 functions: D-65's 61, trimmed from 75
 by exactly these 14 removals: the six `zu_client_*` verb wrappers are removed;
 `zu_transport_perform`, `zu_native_transport`, `zu_error_codes`,
 `zu_code_retryable`, `zu_is_secret_header`, `zu_is_secret_param`,
 `zu_redact_form` and `zu_redact_headers_for_display` are internal.
 `zu_redact_url`, `zu_redact_headers`, `zu_redact_params` and
 `zu_set_json_backend` stay exported: the last three are the only supported
-way to extend redaction and to replace jsonlite. The testing tools
+way to extend redaction and to replace the JSON backend. D-88 adds
+`zu_resp_xml` and `zu_resp_html`. The testing tools
 (`zu_mock_transport`, `zu_stub`, `zu_response`, cassettes) are exported and
 marked experimental in their help. From 0.1.0 on, an export is removed only
 after a deprecation release. C headers stay in `src/`.

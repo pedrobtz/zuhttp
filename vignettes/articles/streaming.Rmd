@@ -93,7 +93,7 @@ r <- zu_get(url("/stream/5"), callback = function(chunk) {
   pending <<- if (endsWith(rawToChar(chunk), "\n")) "" else lines[length(lines)]
   complete <- if (nzchar(pending)) lines[-length(lines)] else lines
   for (l in complete[nzchar(complete)]) {
-    records[[length(records) + 1]] <<- jsonlite::fromJSON(l)$id
+    records[[length(records) + 1]] <<- zujson::json_parse(l)$id
   }
   TRUE
 })
