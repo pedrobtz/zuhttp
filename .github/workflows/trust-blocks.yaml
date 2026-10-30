@@ -1,0 +1,37 @@
+# Whether zuhttp, and the curl package beside it, inherit the platform's
+# emergency certificate blocks, measured against the eMudhra test hosts
+# (tools/check-trust-blocks.R). It contacts a third-party site, so it never
+# runs on a schedule or on ordinary pull requests: on demand, and when the
+# measurement itself changes. The README's and the TLS article's eMudhra
+# claims cite its results.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - tools/check-trust-blocks.R
+      - .github/workflows/trust-blocks.yaml
+
+name: trust-blocks.yaml
+
+permissions: read-all
+
+jobs:
+  measure:
+    runs-on: ${{ matrix.os }}
+    name: eMudhra test hosts (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::curl, local::.
+          needs: check
+      - name: Measure
+        timeout-minutes: 10
+        run: Rscript tools/check-trust-blocks.R
