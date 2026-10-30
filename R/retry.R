@@ -138,11 +138,48 @@ zu_req_retry <- function(req, attempts = 3L, replay_safe = NULL,
 # A random 32-hex-character token. Not a UUID: R has no uuid in base, and the
 # header's contract is only that the value be unique per logical operation.
 new_idempotency_key <- function() {
-  paste(format(as.hexmode(sample.int(16L, 32L, replace = TRUE) - 1L), width = 1),
-        collapse = "")
+  with_private_rng(
+    paste(format(as.hexmode(sample.int(16L, 32L, replace = TRUE) - 1L), width = 1),
+          collapse = "")
+  )
 }
 
-#' Is this request safe to replay?
+# Retry jitter and idempotency keys draw from a stream of their own, never the
+# session's: a retried request must not advance a user's set.seed()
+# simulation, and the session's stream is a poor source anyway — a fleet of
+# batch jobs that all call set.seed(42) would all jitter alike, which is the
+# synchronisation jitter exists to break. Seeded from the clock and the pid,
+# and reseeded in a forked child, so parallel::mclapply() workers do not hand
+# out the same keys.
+private_rng <- new.env(parent = emptyenv())
+
+with_private_rng <- function(expr) {
+  genv <- globalenv()
+  user <- if (exists(".Random.seed", envir = genv, inherits = FALSE))
+    get(".Random.seed", envir = genv, inherits = FALSE)
+  on.exit(
+    if (is.null(user)) {
+      if (exists(".Random.seed", envir = genv, inherits = FALSE))
+        rm(".Random.seed", envir = genv)
+    } else {
+      assign(".Random.seed", user, envir = genv)
+    },
+    add = TRUE
+  )
+  pid <- Sys.getpid()
+  if (is.null(private_rng$seed) || !identical(private_rng$pid, pid)) {
+    t <- as.numeric(Sys.time())
+    set.seed(as.integer((t - floor(t)) * 1e6) + pid %% 100000L)
+    private_rng$pid <- pid
+  } else {
+    assign(".Random.seed", private_rng$seed, envir = genv)
+  }
+  out <- expr
+  private_rng$seed <- get(".Random.seed", envir = genv, inherits = FALSE)
+  out
+}
+
+#' Whether a request is safe to replay
 #'
 #' `TRUE` when §33.1's second condition holds: the method is idempotent, or
 #' the caller declared it replay-safe, or the request carries an
@@ -164,7 +201,7 @@ zu_req_replay_safe <- function(req) {
   toupper(req$method) %in% c("GET", "HEAD", "PUT", "DELETE", "OPTIONS", "TRACE")
 }
 
-#' Can this request's body be replayed?
+#' Whether a request's body can be replayed
 #'
 #' §28.2 makes rewindability a property of the body rather than a convention,
 #' so the retry layer (§33) and the redirect layer (§19.1) can refuse rather
@@ -180,9 +217,9 @@ zu_req_replay_safe <- function(req) {
 zu_body_rewindable <- function(req) {
   req <- check_req(req)
   # Explicitly marked wins, so a body source that knows it cannot rewind can
-  # say so. Streaming bodies (§28.2's connection and callback rows) arrive
-  # with S17 and are the first things that will set this to FALSE; until then
-  # every body this package can build is a raw vector in memory.
+  # say so. Streaming bodies (§28.2's connection and callback rows) will be
+  # the first to set this to FALSE; today every body this package can build
+  # is a raw vector in memory.
   if (!is.null(req$body_rewindable)) return(isTRUE(req$body_rewindable))
   is.null(req$body) || is.raw(req$body)
 }
@@ -219,13 +256,18 @@ parse_retry_after <- function(v) {
   if (length(v) == 0 || is.na(v[[1]]) || !nzchar(v[[1]])) return(NULL)
   v <- trimws(v[[1]])
   if (grepl("^[0-9]+$", v)) return(as.numeric(v))
-  # HTTP-date. Parsed in C locale and UTC explicitly: the month abbreviations
-  # in an HTTP date are English regardless of the R session's locale, and
-  # %Z is not reliably parsed, so the offset is fixed rather than read.
-  old <- Sys.getlocale("LC_TIME")
-  on.exit(try(Sys.setlocale("LC_TIME", old), silent = TRUE), add = TRUE)
-  try(Sys.setlocale("LC_TIME", "C"), silent = TRUE)
-  t <- suppressWarnings(as.POSIXct(v, format = "%a, %d %b %Y %H:%M:%S", tz = "GMT"))
+  # HTTP-date, IMF-fixdate form ("Sun, 06 Nov 1994 08:49:37 GMT"). Parsed by
+  # hand rather than with strptime(): %b follows LC_TIME, and switching the
+  # locale to "C" for the call changed it for the whole process, under any
+  # other code running in the session. month.abb is English in every locale.
+  m <- regmatches(v, regexec(
+    "^[A-Za-z]{3}, ([0-9]{2}) ([A-Za-z]{3}) ([0-9]{4}) ([0-9]{2}):([0-9]{2}):([0-9]{2}) GMT$",
+    v))[[1]]
+  if (length(m) != 7L) return(NULL)
+  mon <- match(tolower(m[[3]]), tolower(month.abb))
+  if (is.na(mon)) return(NULL)
+  n <- as.integer(m[c(4L, 2L, 5L, 6L, 7L)])
+  t <- ISOdatetime(n[[1]], mon, n[[2]], n[[3]], n[[4]], n[[5]], tz = "GMT")
   if (is.na(t)) return(NULL)
   d <- as.numeric(difftime(t, Sys.time(), units = "secs"))
   # A date in the past means "now"; it must not become a negative delay.
@@ -244,7 +286,7 @@ backoff_delay <- function(policy, attempt, retry_after) {
   # Full jitter: uniform over [0, d], not d plus a wiggle. The point is to
   # decorrelate many sessions that failed at the same instant, and only the
   # full-jitter form actually does that.
-  if (isTRUE(policy$jitter)) d <- stats::runif(1, 0, d)
+  if (isTRUE(policy$jitter)) d <- with_private_rng(stats::runif(1, 0, d))
   d
 }
 

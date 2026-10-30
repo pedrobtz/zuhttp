@@ -22,7 +22,8 @@
 #' it. A trace handler that logs request headers must not be the mechanism by
 #' which a bearer token reaches a log file.
 #'
-#' @param before_request Called with `list(request)` before each attempt.
+#' @param before_request Called with `list(request, attempt)` before each
+#'   attempt.
 #' @param after_response Called with `list(request, response, attempt)`.
 #' @param before_retry Called with `list(request, attempt, delay, why)`
 #'   before sleeping — §33.4 requires that a retry be visible, because a
@@ -72,21 +73,8 @@ fire_hook <- function(hooks, event, payload) {
 # the handler sees it." Applied to the request and response a payload carries,
 # not to the payload's scalars.
 redact_payload <- function(p) {
-  if (!is.null(p$request)) {
-    p$request$url     <- zu_redact_url(p$request$url %||% "")
-    p$request$headers <- zu_redact_headers_for_display(p$request$headers)
-    p$request         <- redact_request_proxy(p$request)
-  }
-  if (!is.null(p$response)) {
-    p$response$url     <- zu_redact_url(p$response$url %||% "")
-    p$response$headers <- zu_redact_headers_for_display(p$response$headers)
-    if (!is.null(p$response$request)) {
-      p$response$request$url     <- zu_redact_url(p$response$request$url %||% "")
-      p$response$request$headers <-
-        zu_redact_headers_for_display(p$response$request$headers)
-      p$response$request <- redact_request_proxy(p$response$request)
-    }
-  }
+  if (!is.null(p$request))  p$request  <- redact_request_fields(p$request)
+  if (!is.null(p$response)) p$response <- redact_response_fields(p$response)
   p
 }
 

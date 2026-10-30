@@ -104,7 +104,8 @@ zu_req_path <- function(req, path) {
 #' *different* client is unrestricted.
 #'
 #' @param req A `zu_request`.
-#' @param f A function of one argument (a raw vector). Return `FALSE` to stop.
+#' @param callback A function of one argument (a raw vector). Return `FALSE`
+#'   to stop.
 #' @return The request, modified.
 #' @seealso [zu_req_path()] to stream to a file instead.
 #' @export
@@ -112,19 +113,20 @@ zu_req_path <- function(req, path) {
 #' total <- 0
 #' req <- zu_req_callback(zu_request("GET", "https://x.test/big"),
 #'                        function(chunk) total <<- total + length(chunk))
-zu_req_callback <- function(req, f) {
+zu_req_callback <- function(req, callback) {
   req <- check_req(req)
-  if (!is.function(f))
+  if (!is.function(callback))
     stop("`callback` must be a function of one argument (a raw vector)",
          call. = FALSE)
-  req$callback <- f
+  req$callback <- callback
   req
 }
 
 #' Record a §35.3 event trace for this request
 #'
 #' @param req A `zu_request`.
-#' @param trace `TRUE` to collect the trace; `FALSE` (the default) to not.
+#' @param trace `TRUE` (the default) to collect the trace; `FALSE` to turn
+#'   off one that an earlier step requested.
 #' @return The request, modified.
 #' @seealso [zu_resp_trace()] to read it back.
 #' @export
@@ -183,8 +185,7 @@ zu_headers <- function(req, ...) {
   # As in zu_query(): an NA is carried, not applied, because what it erases is
   # a client header that this request has not met yet.
   for (nm in names(h)) {
-    hit <- which(tolower(names(out)) == tolower(nm))
-    if (length(hit)) out <- out[-hit]
+    out <- drop_header(out, nm)
     out[[nm]] <- h[[nm]]
   }
   req$headers <- if (length(out)) out else NULL
@@ -210,8 +211,9 @@ zu_headers <- function(req, ...) {
 #'   `{"a":1}` rather than `{"a":[1]}`, which is what R users nearly always
 #'   mean.
 #' @param type Content type to declare.
-#' @param path A file path. The file is read into memory; streaming request
-#'   bodies are §27's, not this stage's.
+#' @param file A file path. The file is read into memory (§28 covers streaming
+#'   request bodies). Named `file` as in [zu_post()]: `path` is always where a
+#'   *response* goes (D-45).
 #' @return A `zu_request`.
 #' @name zu_body
 #' @examples
@@ -252,11 +254,11 @@ zu_body_raw <- function(req, x, type = NULL) {
 
 #' @rdname zu_body
 #' @export
-zu_body_file <- function(req, path, type = "application/octet-stream") {
+zu_body_file <- function(req, file, type = "application/octet-stream") {
   req <- check_req(req)
-  if (!file.exists(path)) stop("no such file: ", path, call. = FALSE)
-  n <- file.info(path)$size
-  set_body(req, readBin(path, "raw", n = n), "file", type)
+  if (!file.exists(file)) stop("no such file: ", file, call. = FALSE)
+  n <- file.info(file)$size
+  set_body(req, readBin(file, "raw", n = n), "file", type)
 }
 
 set_body <- function(req, bytes, kind, type) {

@@ -85,7 +85,7 @@ int zuh_code_class_chain(zuh_code code, const char **out, int max) {
     int n = 0;
     zuh_code c = code;
     if (!out || max <= 0) return 0;
-    if (code <= ZUH_OK || code >= ZUH_CODE_COUNT) return 0;
+    if (code <= ZUH_OK || code >= ZUH_CODE_PUBLIC_COUNT) return 0;
     for (;;) {
         if (n >= max) return n;
         out[n++] = k_class[c];
@@ -103,6 +103,10 @@ int zuh_code_class_chain(zuh_code code, const char **out, int max) {
 const char *zuh_code_class(zuh_code code) {
     if (code < 0 || code >= ZUH_CODE_COUNT) return "zu_error";
     return k_class[code];
+}
+
+zuh_code zuh_code_public(zuh_code code) {
+    return code >= ZUH_CODE_PUBLIC_COUNT && code < ZUH_CODE_COUNT ? ZUH_ERR_IO : code;
 }
 
 const char *zuh_phase_name(zuh_phase phase) {

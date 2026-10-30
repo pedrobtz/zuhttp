@@ -258,7 +258,7 @@ static SEXP C_zu_condition_classes(SEXP code_sexp) {
  * stable zuh_code. Lets the R layer build its constants from the C enum rather
  * than restating it. */
 static SEXP C_zu_error_codes(void) {
-    int i, n = (int)ZUH_CODE_COUNT;
+    int i, n = (int)ZUH_CODE_PUBLIC_COUNT;   /* §34.1 classes only */
     SEXP out = PROTECT(Rf_allocVector(INTSXP, n));
     SEXP nms = PROTECT(Rf_allocVector(STRSXP, n));
     for (i = 0; i < n; i++) {
@@ -503,7 +503,7 @@ static void raise_zu_error(const zuh_error *e, const char *url) {
     SEXP call   = PROTECT(Rf_lcons(fn, args));   /* lcons yields a LANGSXP */
     SEXP p      = args;
 
-    SETCAR(p, Rf_ScalarInteger((int)e->code));                          p = CDR(p);
+    SETCAR(p, Rf_ScalarInteger((int)zuh_code_public(e->code)));         p = CDR(p);
     SETCAR(p, Rf_mkString(e->message[0] ? e->message : "request failed")); p = CDR(p);
     SETCAR(p, url ? Rf_mkString(url) : R_NilValue);                     p = CDR(p);
     SETCAR(p, Rf_mkString(zuh_phase_name(e->phase)));                    p = CDR(p);
@@ -522,7 +522,15 @@ static SEXP headers_to_r(const zuh_headers *h) {
         const char *name = NULL, *value = NULL;
         zuh_headers_at(h, i, &name, &value);
         SET_STRING_ELT(nms, (R_xlen_t)i, Rf_mkChar(name ? name : ""));
-        SET_STRING_ELT(out, (R_xlen_t)i, Rf_mkCharCE(value ? value : "", CE_UTF8));
+        /* §18.3: a value may carry obs-text (RFC 9110 §5.5), which is not
+         * necessarily UTF-8. Marking such bytes UTF-8 made nchar(), grepl()
+         * and print() fail on a Latin-1 filename. Only valid UTF-8 is marked
+         * so; anything else is Latin-1, RFC 7230's nominal charset for
+         * obs-text and the one encoding in which every byte is a character. */
+        if (!value) value = "";
+        SET_STRING_ELT(out, (R_xlen_t)i,
+                       Rf_mkCharCE(value, zuh_utf8_valid(value, strlen(value))
+                                              ? CE_UTF8 : CE_LATIN1));
     }
     Rf_setAttrib(out, R_NamesSymbol, nms);
     UNPROTECT(2);
@@ -653,7 +661,17 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
     o.timeout_ms    = (long)Rf_asInteger(timeout_ms);
     o.max_redirects = Rf_asInteger(max_redirects);
     o.verify        = Rf_asLogical(verify) == TRUE;
-    o.max_body      = (uint64_t)Rf_asReal(max_body);
+    {
+        /* §40. A double above UINT64_MAX (Inf, 1e30) is undefined behaviour
+         * to cast (C11 6.3.1.4): one compiler saturates, another gives 0,
+         * which the engine reads as "the 16 MiB default". Inf is a natural
+         * spelling of "no limit", as it is for `timeout`, so it is clamped
+         * here rather than refused. 2^64 is exactly representable; anything
+         * at or above it is "as large as a uint64_t goes". The R layer has
+         * already refused NA and anything below 1. */
+        double mb = Rf_asReal(max_body);
+        o.max_body = mb >= 18446744073709551616.0 ? UINT64_MAX : (uint64_t)mb;
+    }
     o.no_decode     = Rf_asLogical(decode) != TRUE;
     if (Rf_isString(user_agent) && Rf_length(user_agent) == 1)
         o.user_agent = Rf_translateCharUTF8(STRING_ELT(user_agent, 0));

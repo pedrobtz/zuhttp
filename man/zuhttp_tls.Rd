@@ -49,19 +49,18 @@ TLS 1.3 is negotiated wherever the server offers it, except on Windows,
 where \code{zu_tls(min_version = 13)} is refused rather than silently
 downgraded: the Schannel build available through Rtools lacks
 \code{SCH_CREDENTIALS}. Asking for 1.3 there raises rather than quietly giving
-you 1.2 — silently weakening a
-security setting is worse than failing. Connections still negotiate the
-highest version both ends support; it is the \emph{floor} that cannot be raised.
+you 1.2 — silently weakening a security setting is worse than failing.
+Connections still negotiate the highest version both ends support; it is
+the \emph{floor} that cannot be raised.
 }
 
 \section{Certificate pinning}{
 
 \code{\link[=zu_tls]{zu_tls()}}'s \code{pins} works on \strong{OpenSSL only}. On macOS and Windows the
 platform will not hand over the SubjectPublicKeyInfo without hand-parsing
-DER, and that parser is not written yet. Both
-refuse, because a pin that silently compares the wrong bytes is worse than
-no pin. A pinned request either enforces the pin or raises; it never quietly
-succeeds unpinned.
+DER, and that parser is not written yet. Both refuse, because a pin that
+silently compares the wrong bytes is worse than no pin. A pinned request
+either enforces the pin or raises; it never quietly succeeds unpinned.
 }
 
 \section{Custom certificate authorities}{

@@ -9,7 +9,8 @@ zu_req_trace(req, trace = TRUE)
 \arguments{
 \item{req}{A \code{zu_request}.}
 
-\item{trace}{\code{TRUE} to collect the trace; \code{FALSE} (the default) to not.}
+\item{trace}{\code{TRUE} (the default) to collect the trace; \code{FALSE} to turn
+off one that an earlier step requested.}
 }
 \value{
 The request, modified.

@@ -2,15 +2,6 @@
 # rules and two erasers; each gets its own test, because "how do I turn this
 # off" is the first question the rules provoke and the answer must not drift.
 
-null_transport <- function(record = NULL) {
-  zu_mock_transport(function(req) {
-    if (!is.null(record)) record$req <- req
-    zu_response(200L)
-  })
-}
-
-resolved <- function(req, client) zuhttp:::resolve_request(req, client)
-
 test_that("collection-like options combine (headers)", {
   api <- zu_client(headers = c(Accept = "application/json",
                                Authorization = "Bearer xxx"))
@@ -129,6 +120,28 @@ test_that("the body's content type loses to an explicit header (§31.2)", {
 test_that("verify = FALSE warns, wherever it is set", {
   expect_warning(resolved(zu_request("GET", "https://x/"), zu_client(verify = FALSE)),
                  "disables certificate AND hostname")
+})
+
+test_that("verify, check and decode must be TRUE or FALSE, never read as the weaker one", {
+  # Downstream reads all three with isTRUE(), so NA or "yes" used to switch
+  # verification off with only a warning, and check and decode off silently.
+  req <- zu_request("GET", "https://x/")
+  for (f in c("verify", "check", "decode")) {
+    for (bad in list(NA, "yes", 1, c(TRUE, TRUE), logical())) {
+      cli <- do.call(zu_client, stats::setNames(list(bad), f))
+      expect_error(suppressWarnings(resolved(req, cli)),
+                   paste0("`", f, "` must be TRUE or FALSE"), fixed = TRUE,
+                   info = paste(f, deparse(bad)))
+    }
+  }
+  expect_no_error(resolved(req, zu_client(check = FALSE, decode = FALSE)))
+})
+
+test_that("max_body = Inf means no limit, as timeout = Inf does", {
+  r <- resolved(zu_request("GET", "https://x/"), zu_client(max_body = Inf))
+  expect_identical(r$resolved$max_body, Inf)
+  expect_error(resolved(zu_request("GET", "https://x/"), zu_client(max_body = NA)),
+               "max_body")
 })
 
 test_that("query values are encoded, and a vector repeats the key", {

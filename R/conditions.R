@@ -1,6 +1,3 @@
-#' @useDynLib zuhttp, .registration = TRUE
-NULL
-
 # The §34.1 condition hierarchy.
 #
 # Built with base R only (§34.3): `structure(class = ...)` and `stop()`, not
@@ -19,21 +16,15 @@ NULL
 #'
 #' @return A named integer vector.
 #' @noRd
-#' @examples
-#' zu_error_codes()[["zu_tls_certificate_error"]]
 zu_error_codes <- function() {
   .Call(C_zu_error_codes)
 }
 
-#' Is an error code worth retrying?
+#' Whether an error code is worth retrying
 #'
 #' @param code An integer code, or the class name of a zuhttp condition.
 #' @return `TRUE`, `FALSE`, or `NA` if the code is unknown.
 #' @noRd
-#' @examples
-#' zu_code_retryable("zu_connect_error")          # a transport failure: yes
-#' zu_code_retryable("zu_tls_certificate_error")  # will not fix itself: no
-#' zu_code_retryable("not_a_zuhttp_class")        # unknown: NA
 zu_code_retryable <- function(code) {
   code <- as_zu_code(code)
   if (is.na(code)) return(NA)

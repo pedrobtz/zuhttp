@@ -212,9 +212,7 @@ test_that("connection metadata is real over a live connection", {
 })
 
 test_that("proxy_used reports the truth", {
-  skip_on_cran()
-  if (.Platform$OS.type != "unix") skip("the helper proxy uses POSIX shell")
-  if (!nzchar(Sys.which("Rscript"))) skip("Rscript not on PATH")
+  skip_unless_forkable()
 
   # A field that always said FALSE would pass every test above.
   seen <- with_fake_proxy("ok", function(px) {
@@ -226,4 +224,22 @@ test_that("proxy_used reports the truth", {
     expect_match(cn$remote_ip, "^127\\.0\\.0\\.1$")
   })
   skip_if(is.null(seen), "the helper proxy recorded nothing")
+})
+
+test_that("a pooled connection through a proxy still says so (§35.2)", {
+  skip_unless_forkable()
+  # Both fields were reset on every pool hit: the second response claimed a
+  # direct connection with no peer, through the same proxy as the first.
+  seen <- with_fake_proxy("keepalive", function(px) {
+    cli <- zu_client(pool = zu_pool(), proxy = px, timeout = 15, check = FALSE)
+    r1 <- zu_get("http://target.example/a", client = cli)
+    r2 <- zu_get("http://target.example/b", client = cli)
+    c1 <- zu_resp_connection(r1); c2 <- zu_resp_connection(r2)
+    expect_false(c1$reused_connection)
+    expect_true(c2$reused_connection)
+    expect_true(c2$proxy_used)
+    expect_identical(c2$remote_ip, c1$remote_ip)
+  })
+  skip_if(is.null(seen), "the helper proxy recorded nothing")
+  expect_match(seen, "GET http://target.example/b HTTP/1.1", fixed = TRUE)
 })

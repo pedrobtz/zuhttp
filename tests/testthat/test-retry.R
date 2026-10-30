@@ -5,21 +5,6 @@
 # and "the budget ran out mid-backoff". A counting mock is the only way to
 # assert those, and §36.1 makes it faithful.
 
-# Internals, reached the way the rest of this suite reaches them.
-parse_retry_after <- function(...) zuhttp:::parse_retry_after(...)
-backoff_delay     <- function(...) zuhttp:::backoff_delay(...)
-retry_sleep       <- function(...) zuhttp:::retry_sleep(...)
-zu_defaults       <- function(...) zuhttp:::zu_defaults(...)
-zu_stop           <- function(...) zuhttp:::zu_stop(...)
-
-counting <- function(f) {
-  n <- 0L
-  list(
-    transport = zu_mock_transport(function(req) { n <<- n + 1L; f(n, req) }),
-    n = function() n
-  )
-}
-
 # --- §33 the policy object ------------------------------------------------
 
 test_that("zu_retry() counts the FIRST attempt, and validates", {
@@ -184,17 +169,58 @@ test_that("Retry-After is parsed in both RFC 7231 forms and clamped", {
   expect_null(parse_retry_after(NA_character_))
   expect_null(parse_retry_after("soon please"))
 
-  # HTTP-date, in the future and in the past. Month names are English
-  # regardless of the session's locale, which is why the parser fixes LC_TIME.
-  future <- format(Sys.time() + 30, "%a, %d %b %Y %H:%M:%S GMT", tz = "GMT")
+  # HTTP-date, in the future and in the past. Day and month names are English
+  # in every locale, so the date is built from month.abb rather than with
+  # format(), whose %a and %b follow the session's LC_TIME.
+  http_date <- function(t) {
+    lt <- as.POSIXlt(t, tz = "GMT")
+    sprintf("%s, %02d %s %04d %02d:%02d:%02d GMT",
+            c("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")[lt$wday + 1L],
+            lt$mday, month.abb[lt$mon + 1L], lt$year + 1900L,
+            lt$hour, lt$min, as.integer(lt$sec))
+  }
+  future <- http_date(Sys.time() + 30)
   expect_true(abs(parse_retry_after(future) - 30) < 5)
-  past <- format(Sys.time() - 3600, "%a, %d %b %Y %H:%M:%S GMT", tz = "GMT")
+  past <- http_date(Sys.time() - 3600)
   expect_identical(parse_retry_after(past), 0)   # never negative
+  expect_null(parse_retry_after("Sun, 06 Foo 1994 08:49:37 GMT"))
+  expect_null(parse_retry_after("Sun, 06 Nov 1994 08:49:37 PST"))
+
+  # Parsing changes nothing process-wide: it used to switch LC_TIME to "C"
+  # for the call, under any other code in the session.
+  before <- Sys.getlocale("LC_TIME")
+  invisible(parse_retry_after(future))
+  expect_identical(Sys.getlocale("LC_TIME"), before)
 
   # Clamped, not trusted: a hostile server must not pin the session.
   p <- zu_retry(max_retry_after = 60)
   expect_identical(backoff_delay(p, 1L, 86400), 60)
   expect_identical(backoff_delay(p, 1L, 5), 5)
+})
+
+test_that("jitter and idempotency keys leave the session's random stream alone", {
+  # A retry must not advance a user's set.seed() simulation.
+  p <- zu_retry(base = 1, jitter = TRUE)
+  set.seed(1); expected <- runif(3)
+  set.seed(1)
+  invisible(backoff_delay(p, 1L, NULL))
+  invisible(zuhttp:::new_idempotency_key())
+  expect_identical(runif(3), expected)
+  # ...and a session with no seed yet is not given one
+  if (exists(".Random.seed", envir = globalenv())) {
+    old <- get(".Random.seed", envir = globalenv())
+    on.exit(assign(".Random.seed", old, envir = globalenv()), add = TRUE)
+    rm(".Random.seed", envir = globalenv())
+  }
+  invisible(backoff_delay(p, 1L, NULL))
+  expect_false(exists(".Random.seed", envir = globalenv()))
+  # Keys still differ from one another, which is their whole contract.
+  keys <- replicate(20, zuhttp:::new_idempotency_key())
+  expect_identical(anyDuplicated(keys), 0L)
+  # The draws vary: a stream frozen by the restore would make every jitter
+  # the same, which is the synchronisation jitter exists to break.
+  d <- replicate(10, backoff_delay(p, 1L, NULL))
+  expect_gt(length(unique(d)), 1L)
 })
 
 test_that("exponential backoff grows, is capped, and full jitter stays in range", {

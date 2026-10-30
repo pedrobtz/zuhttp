@@ -98,6 +98,14 @@ test_that("an unknown code is refused rather than silently accepted", {
   expect_error(zu_condition(9999L, "x"), "unknown zuhttp error code")
 })
 
+test_that("the C core's stream signals are not condition classes (D-86)", {
+  # ZUH_ERR_CLOSED and ZUH_ERR_WOULDBLOCK once reached R as `zu_closed` and
+  # `zu_wouldblock`, classes no handler could know to catch.
+  codes <- zu_error_codes()
+  expect_false(any(c("zu_closed", "zu_wouldblock") %in% names(codes)))
+  expect_error(zu_condition("zu_closed", "x"), "unknown zuhttp error code")
+})
+
 test_that("codes are stable identifiers, names are the classes", {
   codes <- zu_error_codes()
   expect_true(is.integer(codes))

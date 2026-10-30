@@ -55,7 +55,11 @@ int zuh_response_is_informational(const zuh_response *r);
 typedef struct {
     void   *state;          /* opaque; picohttpparser's decoder */
     int     started;
-    uint64_t max_chunk;     /* §40 max_chunk_size; 0 disables */
+    uint64_t max_chunk;     /* §18.1 max_chunk_size; 0 disables. Checked
+                             * against the unread rest of the current chunk
+                             * when a feed ends inside it, so it is exact to
+                             * within one feed: a whole chunk delivered in one
+                             * call is not measured. */
     uint64_t total;         /* running decoded total */
     uint64_t max_total;     /* §40 max_body_bytes; 0 disables */
     size_t   surplus;       /* bytes after the final chunk and trailers, once

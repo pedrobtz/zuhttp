@@ -5,7 +5,7 @@
 # already serialised — and a package author who prefers another implementation
 # can swap it in rather than taking jsonlite transitively.
 
-json_state <- new.env(parent = emptyenv())
+the_json <- new.env(parent = emptyenv())
 
 #' Choose the JSON implementation
 #'
@@ -29,11 +29,11 @@ json_state <- new.env(parent = emptyenv())
 #'
 #' zu_set_json_backend(old$encode, old$decode)   # restore
 zu_set_json_backend <- function(encode = NULL, decode = NULL) {
-  old <- list(encode = json_state$encode, decode = json_state$decode)
+  old <- list(encode = the_json$encode, decode = the_json$decode)
   if (!is.null(encode)) stopifnot(is.function(encode))
   if (!is.null(decode)) stopifnot(is.function(decode))
-  json_state$encode <- encode
-  json_state$decode <- decode
+  the_json$encode <- encode
+  the_json$decode <- decode
   invisible(old)
 }
 
@@ -53,8 +53,8 @@ need_jsonlite <- function(what) {
 }
 
 json_encode <- function(x, ...) {
-  if (!is.null(json_state$encode)) {
-    out <- json_state$encode(x, ...)
+  if (!is.null(the_json$encode)) {
+    out <- the_json$encode(x, ...)
   } else {
     need_jsonlite("zu_body_json()")
     # digits = NA keeps full double precision; null = "null" stops NULL from
@@ -67,7 +67,7 @@ json_encode <- function(x, ...) {
 }
 
 json_decode <- function(txt, ...) {
-  if (!is.null(json_state$decode)) return(json_state$decode(txt, ...))
+  if (!is.null(the_json$decode)) return(the_json$decode(txt, ...))
   need_jsonlite("zu_resp_json()")
   jsonlite::fromJSON(txt, ...)
 }

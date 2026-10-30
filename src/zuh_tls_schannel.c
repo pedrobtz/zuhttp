@@ -23,6 +23,7 @@
 #define SECURITY_WIN32
 
 #include "zuh_tls.h"
+#include "zuh_net.h"
 #include "zuh_alloc.h"
 #include "zuh_buffer.h"
 #include "zuh_stream.h"
@@ -126,6 +127,15 @@ static zuh_code verify_peer(sch_impl *t, const char *hostname,
         if (wlen > 0) {
             whost = (LPWSTR)zuh_alloc((size_t)wlen * sizeof(WCHAR));
             if (whost) MultiByteToWideChar(CP_UTF8, 0, hostname, -1, whost, wlen);
+        }
+        /* A NULL pwszServerName skips the name check, so failing to build
+         * it must fail the connection, never quietly verify less (D-56). */
+        if (!whost) {
+            zuh_error_set(err, wlen > 0 ? ZUH_ERR_NOMEM : ZUH_ERR_TLS_HOSTNAME, ZUH_PHASE_TLS,
+                         "cannot prepare the host name for certificate verification");
+            CertFreeCertificateChain(chain);
+            CertFreeCertificateContext(leaf);
+            return wlen > 0 ? ZUH_ERR_NOMEM : ZUH_ERR_TLS_HOSTNAME;
         }
     }
 
@@ -604,7 +614,10 @@ zuh_code zuh_tls_dial(zuh_stream **out, const char *host, uint16_t port,
     return ZUH_ERR_TLS;
 }
 
+/* §35.2: this backend wraps a TCP stream, so the peer is the inner
+ * stream's. Asked of a pooled connection, which has no other record of whom
+ * it was opened to; through a proxy that is the proxy, as on a fresh dial. */
 int zuh_tls_peer_ip(const zuh_stream *s, char *buf, size_t n) {
-    (void)s; (void)buf; (void)n;
-    return 0;
+    if (!s || s->vt != &k_sch_vt || !s->impl) return 0;
+    return zuh_net_peer_ip(((sch_impl *)s->impl)->inner, buf, n);
 }

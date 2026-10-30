@@ -1,7 +1,5 @@
 # §31.7 — response accessors, the charset chain, and the status-error policy.
 
-resp <- function(...) zu_response(...)
-
 test_that("header lookup is case-insensitive and keeps repeats (§18.3)", {
   r <- resp(200L, c("Set-Cookie" = "a=1", "Set-Cookie" = "b=2",
                     "Content-Type" = "text/plain"))

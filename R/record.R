@@ -39,18 +39,13 @@ cassette_write <- function(dir, name, interactions) {
 # The redacted, storable form of a request, and the key at the same time —
 # they are deliberately the same thing, so a key can never carry a secret the
 # stored form redacted. See note 2 above.
-redacted_request <- function(req) {
-  body <- req$body
-  ct   <- tolower(paste(req$headers[tolower(names(req$headers) %||% "") ==
-                                    "content-type"], collapse = ""))
-  if (length(body) && grepl("application/x-www-form-urlencoded", ct, fixed = TRUE)) {
-    body <- charToRaw(zu_redact_form(rawToChar(as.raw(body))))
-  }
+cassette_request <- function(req) {
+  r <- redact_request_fields(req)
   list(
-    method  = toupper(req$method %||% "GET"),
-    url     = zu_redact_url(req$url %||% ""),
-    headers = zu_redact_headers_for_display(req$headers),
-    body    = if (length(body)) as.raw(body) else raw()
+    method  = toupper(r$method %||% "GET"),
+    url     = r$url %||% "",
+    headers = r$headers,
+    body    = if (length(r$body)) as.raw(r$body) else raw()
   )
 }
 
@@ -64,7 +59,7 @@ interaction_key <- function(rr) {
         sep = "\x1f")
 }
 
-redacted_response <- function(resp) {
+cassette_response <- function(resp) {
   list(
     status      = zu_resp_status(resp),
     headers     = zu_redact_headers_for_display(resp$headers),
@@ -154,7 +149,7 @@ print.zu_cassette_transport <- function(x, ...) {
 
 #' @export
 zu_transport_perform.zu_cassette_transport <- function(transport, req) {
-  rr  <- redacted_request(req)
+  rr  <- cassette_request(req)
   key <- interaction_key(rr)
   tape <- cassette_read(transport$dir, transport$name)
   hit  <- Position(function(i) identical(i$key, key), tape, nomatch = 0L)
@@ -168,7 +163,7 @@ zu_transport_perform.zu_cassette_transport <- function(transport, req) {
          "\n  record it first with mode = \"auto\"", call. = FALSE)
 
   resp <- zu_transport_perform(transport$transport, req)
-  entry <- list(key = key, request = rr, response = redacted_response(resp),
+  entry <- list(key = key, request = rr, response = cassette_response(resp),
                 recorded_at = as.character(Sys.time()))
   if (hit > 0L) tape[[hit]] <- entry else tape[[length(tape) + 1L]] <- entry
   cassette_write(transport$dir, transport$name, tape)

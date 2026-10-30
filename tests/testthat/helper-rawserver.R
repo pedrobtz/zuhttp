@@ -27,7 +27,7 @@ with_raw_server <- function(response, code) {
     "port <- as.integer(args[1]); respf <- args[2]; logf <- args[3]; readyf <- args[4]",
     "srv <- serverSocket(port)",
     "cat('ready\\n', file = readyf)",
-    "con <- socketAccept(srv, open = 'r+b', timeout = 20)",
+    "con <- socketAccept(srv, blocking = TRUE, open = 'r+b', timeout = 20)",
     "buf <- raw()",
     "repeat {",
     "  b <- readBin(con, 'raw', 1L)",

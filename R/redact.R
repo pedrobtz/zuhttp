@@ -97,13 +97,43 @@ redact_request_proxy <- function(req) {
   req
 }
 
+# §42.2: one rule for "this body is a form", at every egress. The builder's
+# mark, or the header that says so: there used to be one rule per egress, so a
+# zu_body_form() request with its Content-Type overridden was redacted in a
+# printout but not on a cassette, and a hook saw every form body in the clear.
+is_form_body <- function(req) {
+  if (identical(req$body_kind, "form")) return(TRUE)
+  h  <- req$headers
+  ct <- h[tolower(names(h) %||% character()) == "content-type"]
+  any(grepl("application/x-www-form-urlencoded", tolower(ct), fixed = TRUE))
+}
+
+# Every field of a request that §42.2 counts as an egress, redacted for
+# display. The one request walker: printing, conditions, hooks and cassettes
+# all go through it, so a field covered for one is covered for all.
+redact_request_fields <- function(req) {
+  if (is.null(req)) return(NULL)
+  if (!is.null(req$url)) req$url <- zu_redact_url(req$url)
+  req$headers <- zu_redact_headers_for_display(req$headers)
+  if (length(req$body) && is_form_body(req))
+    req$body <- charToRaw(zu_redact_form(rawToChar(as.raw(req$body))))
+  redact_request_proxy(req)
+}
+
+# The same for a response, and the request it carries.
+redact_response_fields <- function(resp) {
+  if (is.null(resp)) return(NULL)
+  resp$headers <- zu_redact_headers_for_display(resp$headers)
+  if (!is.null(resp$url)) resp$url <- zu_redact_url(resp$url)
+  resp$request <- redact_request_fields(resp$request)
+  resp
+}
+
 #' Redact a form-encoded request body
 #'
 #' @param body A single `application/x-www-form-urlencoded` string.
 #' @return The redacted string.
 #' @noRd
-#' @examples
-#' zu_redact_form("user=alice&password=hunter2&remember=1")
 zu_redact_form <- function(body) {
   extra <- zu_redact_opt("zuhttp.redact_params")
   vapply(as.character(body), function(b) {
@@ -111,26 +141,21 @@ zu_redact_form <- function(body) {
   }, character(1), USE.NAMES = FALSE)
 }
 
-#' Which header names carry a secret value?
+#' Header names that carry a secret value
 #'
 #' @param name A character vector of header names.
 #' @return A logical vector.
 #' @noRd
-#' @examples
-#' zu_is_secret_header(c("Authorization", "cookie", "Accept"))
 zu_is_secret_header <- function(name) {
   .Call(C_zu_is_secret_header, as.character(name),
         zu_redact_opt("zuhttp.redact_headers"))
 }
 
-#' Which query parameter names carry a secret value?
+#' Query parameter names that carry a secret value
 #'
 #' @param name A character vector of parameter names.
 #' @return A logical vector.
 #' @noRd
-#' @examples
-#' # Exact matches only: `token` is secret, `page_token` is not.
-#' zu_is_secret_param(c("token", "page_token", "api_key", "page"))
 zu_is_secret_param <- function(name) {
   .Call(C_zu_is_secret_param, as.character(name),
         zu_redact_opt("zuhttp.redact_params"))
@@ -147,9 +172,6 @@ zu_is_secret_param <- function(name) {
 #' @param headers A named character vector or list.
 #' @return The same shape, with secret values replaced by `<redacted>`.
 #' @noRd
-#' @examples
-#' zu_redact_headers_for_display(c(Authorization = "Bearer abc123",
-#'                                 Accept = "application/json"))
 zu_redact_headers_for_display <- function(headers) {
   if (length(headers) == 0) return(headers)
   nms <- names(headers)

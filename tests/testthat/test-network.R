@@ -88,19 +88,46 @@ test_that("a non-HTTP scheme is refused before any connection is made", {
   expect_s3_class(e, "zu_error")
 })
 
-test_that("verify = FALSE warns loudly", {
-  expect_warning(
-    tryCatch(zu_get_badssl("https://expired.badssl.com/", verify = FALSE, timeout = 5),
-             zu_error = function(e) NULL),
-    "disables certificate AND hostname"
-  )
+test_that("verify = FALSE warns loudly, and the request still goes ahead", {
+  # Offline. The warning is raised while resolving the request, so a mock
+  # transport is enough; this test once went to expired.badssl.com with no
+  # network gate, so every R CMD check spent 15 s on a third-party host.
+  called <- FALSE
+  cli <- zu_client(transport = zu_mock_transport(function(req) {
+    called <<- TRUE
+    zu_response(200L)
+  }))
+  expect_warning(r <- zu_get("https://expired.example/", verify = FALSE, client = cli),
+                 "disables certificate AND hostname")
+  expect_true(called)
+  expect_identical(zu_resp_status(r), 200L)
 })
 
-test_that("the total timeout is enforced", {
+test_that("verify = FALSE reaches an expired certificate", {
   skip_unless_online()
-  e <- tryCatch(zu_get("https://example.com", timeout = 0.001),
-                zu_error = function(e) e)
-  expect_s3_class(e, "zu_error")
+  r <- suppressWarnings(tryCatch(
+    zu_get_badssl("https://expired.badssl.com/", verify = FALSE, timeout = 5),
+    zu_error = function(e) e))
+  if (inherits(r, "zu_error")) expect_false(inherits(r, "zu_tls_certificate_error"))
+  else expect_identical(zu_resp_status(r), 200L)
+})
+
+test_that("the total timeout is enforced, as a timeout (§24)", {
+  skip_on_cran()
+  skip_if(getRversion() < "4.0.0", "serverSocket() is R 4.0")
+  # Offline: a socket that listens and never accepts, so the request is sent
+  # and no response ever comes. Asserting only "some zu_error" against a
+  # public host let a DNS or TLS failure stand in for the timeout.
+  port <- sample(20000:59000, 1L)
+  srv <- serverSocket(port)
+  on.exit(close(srv), add = TRUE)
+  t0 <- proc.time()[["elapsed"]]
+  e <- expect_error(
+    zu_get(sprintf("http://127.0.0.1:%d/", port), timeout = 0.5,
+           client = zu_client(pool = NULL, proxy = FALSE)),
+    class = "zu_timeout_error")
+  expect_true(e$phase %in% c("ttfb", "read"))
+  expect_lt(proc.time()[["elapsed"]] - t0, 5)
 })
 
 test_that("an error status raises by default and is inspectable with check = FALSE", {

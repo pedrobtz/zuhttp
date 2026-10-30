@@ -96,6 +96,10 @@ test_that("extra query parameters are honoured", {
 
   zu_redact_params("session_id")
   expect_true(zu_is_secret_param("session_id"))
+  # Exact names only: a parameter that merely contains a secret name is not
+  # one, or every `page_token` cursor would be hidden from the person paging.
+  expect_identical(zu_is_secret_param(c("token", "page_token", "api_key", "page")),
+                   c(TRUE, FALSE, TRUE, FALSE))
   expect_identical(
     zu_redact_url("https://h/?session_id=abc&x=1"),
     "https://h/?session_id=<redacted>&x=1"
@@ -132,44 +136,6 @@ test_that("form bodies are redacted with the same policy", {
 # marked with skip() rather than silently omitted — an incomplete canary that
 # LOOKS complete is worse than one that says what it does not cover.
 # ---------------------------------------------------------------------------
-
-CANARY <- "hunter2-DO-NOT-LEAK"
-
-# A byte-level search, so a scan of a file on disk cannot be defeated by an
-# encoding or a locale: grepRaw() takes a raw pattern and never converts.
-raw_contains <- function(haystack, needle) {
-  n <- charToRaw(needle)
-  length(haystack) >= length(n) &&
-    length(grepRaw(n, haystack, fixed = TRUE, all = FALSE)) > 0
-}
-
-# Every string reachable from `x`, at any depth, plus the names along the way.
-#
-# The shallow version of this walked one level and leaned on print(), which is
-# how the hook-payload arm below came to pass while redaction was disabled: a
-# payload is list(request = <zu_request>, ...), the request is not atomic so
-# the one-level unlist() skipped it, and print() of a zu_request redacts on
-# the way out. The canary was inspecting the redacted rendering of the thing
-# it was supposed to be checking. Depth is not a refinement here — without it
-# the assertion does not touch the value at all.
-deep_strings <- function(x) {
-  if (is.function(x) || is.environment(x) || is.null(x)) return(character())
-  if (is.raw(x)) {
-    # Raw bodies may hold NULs, which rawToChar() refuses; drop them rather
-    # than lose the whole vector, since a credential is never a NUL.
-    return(rawToChar(x[x != as.raw(0)]))
-  }
-  if (is.atomic(x)) return(c(names(x), as.character(x)))
-  if (is.list(x))
-    return(c(names(x), unlist(lapply(x, deep_strings), use.names = FALSE)))
-  character()
-}
-
-expect_no_canary <- function(x, label) {
-  txt <- c(utils::capture.output(print(x)), deep_strings(x))
-  expect_false(any(grepl(CANARY, txt, fixed = TRUE)),
-               info = paste("canary leaked via", label))
-}
 
 test_that("the canary does not leak through a condition object (§42.4)", {
   e <- tryCatch(
@@ -278,6 +244,34 @@ test_that("the canary does not reach a hook payload (§35.3, §42.4)", {
   expect_length(seen, 2L)
   expect_no_canary(seen$before, "the before_request hook payload")
   expect_no_canary(seen$after, "the after_response hook payload")
+})
+
+test_that("the canary does not reach a hook payload through a form body (§35.3, §42.2)", {
+  # The hook walker redacted the URL and headers and passed the body through,
+  # so a before_request hook that logged p$request$body logged the password.
+  # Content-Type is overridden on purpose: the printing walker decided "form"
+  # from the builder's mark and the cassette walker from the header, and
+  # there is now one rule for both (is_form_body()).
+  seen <- list()
+  cli <- zu_client(
+    transport = zu_mock_transport(function(r) zu_response(503L)),
+    retry     = zu_retry(attempts = 2L, base = 0.001, jitter = FALSE),
+    hooks     = zu_hooks(before_request = function(p) seen$before <<- p,
+                         before_retry   = function(p) seen$retry  <<- p,
+                         after_response = function(p) seen$after  <<- p))
+  for (ct in c(NA, "application/x-www-form-urlencoded; charset=UTF-8")) {
+    seen <- list()
+    req <- zu_body_form(zu_request("PUT", "https://h/login"),
+                        list(user = "me", password = CANARY))
+    if (!is.na(ct)) req <- zu_headers(req, "Content-Type" = ct)
+    invisible(zu_perform(req, client = zu_client_update(cli, check = FALSE)))
+    expect_length(seen, 3L)
+    expect_no_canary(seen$before, "the before_request payload's form body")
+    expect_no_canary(seen$retry, "the before_retry payload's form body")
+    expect_no_canary(seen$after, "the after_response payload's form body")
+    # redacted, not dropped: the non-secret field is still there to log
+    expect_match(rawToChar(seen$before$request$body), "user=me", fixed = TRUE)
+  }
 })
 
 test_that("the canary does not reach zu_info() (§39, §42.2)", {
@@ -434,10 +428,17 @@ test_that("the canary does not reach zu_resp_url() (§42.2, §42.4)", {
 
 test_that("every §42.2 egress now has a canary arm", {
   # §42.4 calls this "a regression class that reappears every time a new
-  # output path is added", so the list is asserted rather than remembered.
-  # A new egress means a new arm above and a new line here.
-  covered <- c("printed request", "printed response", "condition payload",
-               "hook payloads", "recordings", "zu_resp_url", "verbose output",
-               "zu_info", "§35.3 trace")
-  expect_length(covered, 9L)
+  # output path is added", so the list is checked against this file's own
+  # test names rather than remembered: a new egress needs a new line here,
+  # and a line here needs a test whose name says it covers that egress.
+  covered <- c("condition object", "printed request", "cassette on disk",
+               "hook payload", "form body", "zu_info()", "verbose output",
+               "§35.3 trace", "zu_resp_url()", "proxy URL",
+               "URL that does not parse")
+  src <- readLines(test_path("test-redact.R"), encoding = "UTF-8")
+  names <- regmatches(src, regexpr('^test_that\\("[^"]*', src))
+  arms <- names[grepl("canary", names, fixed = TRUE)]
+  for (egress in covered)
+    expect_true(any(grepl(egress, arms, fixed = TRUE)),
+                info = paste("no canary arm names", egress))
 })

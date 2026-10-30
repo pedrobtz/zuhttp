@@ -4,12 +4,13 @@
 \alias{zu_req_callback}
 \title{Stream the response body to a callback}
 \usage{
-zu_req_callback(req, f)
+zu_req_callback(req, callback)
 }
 \arguments{
 \item{req}{A \code{zu_request}.}
 
-\item{f}{A function of one argument (a raw vector). Return \code{FALSE} to stop.}
+\item{callback}{A function of one argument (a raw vector). Return \code{FALSE}
+to stop.}
 }
 \value{
 The request, modified.

@@ -1,14 +1,10 @@
 # §39 the information API.
 #
-# Two sections lean on this existing, which is why it is not cosmetic:
-#
-#   §14.5  "whatever the three platforms do, zu_info() must report the
-#          effective revocation policy, because this is exactly the kind of
-#          silent asymmetry that produces 'it works on my machine' reports."
-#   §31.3  the default client's configuration "is never invisible" BECAUSE
-#          zu_info() reports it.
-#
-# Until now both were claims the code did not support.
+# Two sections rely on it, which is why it is not cosmetic: §14.5 has
+# zu_info() report the effective revocation policy, because the three
+# platforms differ and a silent difference is an "it works on my machine"
+# report; and §31.3 makes the default client's configuration visible through
+# it rather than leaving it implicit.
 
 #' What this build of zuhttp can do
 #'
@@ -20,7 +16,8 @@
 #'   `tls_backend`, `trust`, `tls_available`, `revocation_default`,
 #'   `tls_capabilities` (the [zu_tls()] settings this backend honours, from
 #'   `"pins"`, `"tls13"`, `"ca_file"`, `"ca_extra"` and `"revocation"`; the
-#'   others raise `zu_tls_unsupported_error`), `compression`, `ipv6`, `proxy_env` and `default_client`.
+#'   others raise `zu_tls_unsupported_error`), `compression`, `ipv6`,
+#'   `proxy_env` and `default_client`.
 #'
 #' @section Why the TLS engine and the trust store are listed separately:
 #' §13.1 splits them deliberately. A build can speak TLS with one library and

@@ -140,25 +140,25 @@ static char *trail_key(const char *method, const zuh_uri *u) {
     return key;
 }
 
-int zuh_redirect_trail_add(zuh_redirect_trail *t, const char *method, const zuh_uri *u) {
+zuh_code zuh_redirect_trail_add(zuh_redirect_trail *t, const char *method, const zuh_uri *u) {
     char *key;
     size_t i;
-    if (!t || !method || !u) return 0;
+    if (!t || !method || !u) return ZUH_ERR_PARSE;
 
     key = trail_key(method, u);
-    if (!key) return 0;
+    if (!key) return ZUH_ERR_NOMEM;
 
     for (i = 0; i < t->n; i++) {
-        if (strcmp(t->seen[i], key) == 0) { zuh_free(key); return 0; }  /* loop */
+        if (strcmp(t->seen[i], key) == 0) { zuh_free(key); return ZUH_ERR_REDIRECT; }
     }
     if (t->n == t->cap) {
         size_t cap = t->cap ? t->cap * 2 : 8, bytes;
         char **p;
-        if (!zuh_size_mul(cap, sizeof *p, &bytes)) { zuh_free(key); return 0; }
+        if (!zuh_size_mul(cap, sizeof *p, &bytes)) { zuh_free(key); return ZUH_ERR_NOMEM; }
         p = (char **)zuh_realloc(t->seen, bytes);
-        if (!p) { zuh_free(key); return 0; }
+        if (!p) { zuh_free(key); return ZUH_ERR_NOMEM; }
         t->seen = p; t->cap = cap;
     }
     t->seen[t->n++] = key;
-    return 1;
+    return ZUH_OK;
 }

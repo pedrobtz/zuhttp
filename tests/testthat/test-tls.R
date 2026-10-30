@@ -6,16 +6,6 @@
 # the backend, that ca_file and ca_extra genuinely differ, and that the §26.1
 # pool key keeps connections with different TLS settings apart.
 
-# A CA that is real, correctly formed, and trusts nothing on the internet.
-# That is what distinguishes "adds to" from "replaces": with it added, a
-# public host still validates; with it substituted, the same host must not.
-# Shared with the §50.5 matrix in test-certs.R via helper-tlsfixture.R rather
-# than generated twice — two fixtures for one concept drift.
-local_ca <- function() {
-  fx <- tls_fixture()
-  list(dir = fx$dir, pem = fx$ca)
-}
-
 # --- the object (offline) ------------------------------------------------
 
 test_that("zu_tls() validates and keeps ca_file and ca_extra apart", {
@@ -104,20 +94,6 @@ test_that("revocation = TRUE does not break ordinary verification (§14.5)", {
 # honours must pass check_tls(); the ones it does not must raise
 # zu_tls_unsupported_error. Every backend has at least one of each today, so
 # neither half is empty on any CI leg.
-
-unsupported_cases <- function() {
-  # PEM-shaped, so check_tls()'s PEM check passes and the capability check is
-  # what decides; the certificate itself is never parsed on this path.
-  pem <- tempfile(fileext = ".pem")
-  writeLines(c("-----BEGIN CERTIFICATE-----", "MIIB", "-----END CERTIFICATE-----"), pem)
-  list(
-    pins       = zu_tls(pins = "sha256//YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg="),
-    tls13      = zu_tls(min_version = 13),
-    ca_file    = zu_tls(ca_file = pem),
-    ca_extra   = zu_tls(ca_extra = pem),
-    revocation = zu_tls(revocation = TRUE)
-  )
-}
 
 test_that("zu_info() reports the zu_tls() capabilities from C", {
   caps <- zu_info()$tls_capabilities

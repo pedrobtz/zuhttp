@@ -54,10 +54,11 @@ one_shot <- function(method, url, query, headers, policy, client,
 #'   bounded by it (nor by Ctrl-C); see [zuhttp_tls].
 #' @param redirects Maximum redirects to follow.
 #' @param verify Verify the certificate and hostname. Leave this `TRUE`.
-#' @param max_body Maximum decoded body size in bytes.
+#' @param max_body Maximum decoded body size in bytes; `Inf` for no limit.
 #' @param user_agent `User-Agent` to send.
 #' @param retry A [zu_retry()] policy for this request. Overrides the
-#'   client's; `NULL` inherits it (§31.9).
+#'   client's; `NULL` resets it to the package default, which retries nothing
+#'   (§31.9). Omit it to inherit the client's.
 #' @param trace Collect a §35.3 event trace, readable with
 #'   [zu_resp_trace()]. Off by default.
 #' @param tls Certificate trust settings from [zu_tls()] for this request.
@@ -75,10 +76,9 @@ one_shot <- function(method, url, query, headers, policy, client,
 #'   completes with a non-2xx status is a successful transfer of an error
 #'   page, so a 404 body is written and does replace it — `check` raises
 #'   afterwards, too late to prevent that. Mutually exclusive with
-#'   `callback`: a response body has one destination. Note the asymmetry with `file`, which
-#'   is a request *body* source (§31.6): `path` is where the response goes,
-#'   `file` is where a
-#'   request body comes from.
+#'   `callback`: a response body has one destination. Note the asymmetry
+#'   with `file`, which is a request *body* source (§31.6): `path` is where
+#'   the response goes, `file` is where a request body comes from.
 #' @param check Raise a condition for 4xx and 5xx (§31.14). `FALSE` returns the
 #'   response whatever its status.
 #' @param decode Decompress transparently. `FALSE` returns the wire bytes and
@@ -198,12 +198,3 @@ zu_delete <- function(url, query = NULL, headers = NULL, body = NULL,
   one_shot("DELETE", url, query, headers, collect_policy(environment()), client,
            body = body, json = json, form = form, file = file, path = path, callback = callback, trace = trace)
 }
-
-#' Which TLS backend was this build linked against?
-#'
-#' @return A short backend identifier, e.g. `"openssl"`, `"schannel"`,
-#'   `"network-framework"`.
-#' @export
-#' @examples
-#' zu_tls_backend()
-zu_tls_backend <- function() .Call(C_zu_tls_backend)

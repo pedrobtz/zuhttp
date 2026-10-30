@@ -94,6 +94,38 @@ have used: the client-first wrappers `zu_client_get()` and friends (use
   ("interrupted by the user"), so `withTimeout()` never saw it. A real Ctrl-C
   is still `zu_interrupted_error`.
 
+* The default `User-Agent` is `zuhttp/<version>`; it said `zuhttp/0.0.0.9000`.
+* A response header value that is not valid UTF-8 (a Latin-1 filename, say)
+  arrives marked Latin-1. It was marked UTF-8, so `nchar()`, `grepl()` and
+  `print()` failed on it.
+* A request header longer than 8 KB (a large bearer token) is sent; it was
+  refused as `zu_body_limit_error`. A header with CR, LF or another control
+  character is refused as `zu_http_parse_error` before connecting, naming the
+  header and never its value.
+* `zu_resp_connection()` reports `proxy_used` and `remote_ip` for a reused
+  connection too; both were reset on every pool hit.
+* A redirect back to a URL already requested raises `zu_redirect_error` at
+  once, rather than after `redirects` round trips.
+* A client with `pool = NULL` sends `Connection: close`.
+* `verify`, `check` and `decode` must be `TRUE` or `FALSE`. `verify = NA` used
+  to turn verification off with only a warning, and `check = NA` and
+  `decode = NA` turned theirs off silently.
+* `max_body = Inf` means no limit, and `zu_pool(idle_timeout = Inf)` keeps
+  connections as long as the server does; the second used to mean 30 seconds.
+* A `before_request`, `before_retry` or `after_response` hook no longer sees
+  a form body's secret fields.
+* On OpenSSL, a server that closes the connection without a TLS
+  `close_notify` ends the body as on the other backends, rather than failing
+  as `zu_closed`, a class that was not part of the condition tree; a closed
+  connection is now always `zu_io_error`. A pooled connection whose server
+  had already closed it is no longer reused.
+* Retry jitter and `zu_req_retry(idempotency_key = TRUE)` no longer advance
+  the session's random number stream, and parsing a `Retry-After` date no
+  longer switches `LC_TIME` for the whole session.
+* `zu_body_file()` takes `file =` rather than `path =`, as `zu_post()` does,
+  and `zu_req_callback()` takes `callback =` rather than `f =`: in zuhttp
+  `path` is always where a response goes.
+
 ## Known limitations
 
 See the README. In brief: TLS 1.2 maximum on Windows; pinning on OpenSSL

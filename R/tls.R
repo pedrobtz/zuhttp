@@ -137,3 +137,12 @@ check_tls <- function(tls) {
   .Call(C_zu_tls_check, unclass(tls))
   tls
 }
+
+#' The TLS backend this build was linked against
+#'
+#' @return A short backend identifier, e.g. `"openssl"`, `"schannel"`,
+#'   `"network-framework"`.
+#' @export
+#' @examples
+#' zu_tls_backend()
+zu_tls_backend <- function() .Call(C_zu_tls_backend)

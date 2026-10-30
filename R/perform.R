@@ -3,7 +3,7 @@
 # zu_perform() does the merging (§31.9) and then hands a fully resolved request
 # to a transport. Substituting the transport is therefore how you test package
 # code that makes HTTP calls, rather than mocking .Call or shimming the
-# network. Record/replay is S14's; the seam it needs is here.
+# network, and it is the seam record/replay (§37) is built on.
 
 #' Transports
 #'
@@ -34,7 +34,7 @@
 #' if (requireNamespace("jsonlite", quietly = TRUE)) zu_resp_json(r)
 NULL
 
-#' @noRd
+# The default transport: the network, through C_zu_perform.
 zu_native_transport <- function() {
   structure(list(), class = c("zu_native_transport", "zu_transport"))
 }
@@ -72,12 +72,6 @@ zu_mock_transport <- function(handler = NULL, ...) {
 #' @param req A resolved `zu_request`.
 #' @return A `zu_response`.
 #' @noRd
-#' @examples
-#' # This is what zu_perform() calls after resolving the request. Calling it
-#' # directly shows the contract: one request in, one zu_response out.
-#' tr <- zu_mock_transport(function(req) zu_response(204L))
-#' r <- zu_transport_perform(tr, zu_request("GET", "https://api.example.com/x"))
-#' zu_resp_status(r)
 zu_transport_perform <- function(transport, req) UseMethod("zu_transport_perform")
 
 #' @export
@@ -97,7 +91,7 @@ zu_transport_perform.zu_native_transport <- function(transport, req) {
                as.integer(p$redirects),
                isTRUE(p$verify),
                as.numeric(p$max_body),
-               p$user_agent,
+               p$user_agent %||% default_user_agent(),
                isTRUE(p$decode),
                req$pool,
                req$path,
@@ -118,6 +112,13 @@ zu_transport_perform.zu_native_transport <- function(transport, req) {
   # replay did not, and must keep reporting NULL.
   if (!is.null(req$path)) raw$path <- req$path
   structure(raw, class = "zu_response")
+}
+
+# §17.2 `zuhttp/<version>`, from DESCRIPTION, so the version on the wire has
+# one definition. Resolved here, in the transport that sends it, so a request
+# and its response still record `user_agent = NULL` for "the default".
+default_user_agent <- function() {
+  paste0("zuhttp/", getNamespaceVersion("zuhttp"))
 }
 
 # The deadline crosses into C as an int of milliseconds, so timeout = Inf --
@@ -182,6 +183,15 @@ resolve_request <- function(req, client) {
                    client = client, req_policy = req$policy)
   names(policy) <- policy_fields()
 
+  # Before the warning below: `verify = NA` or `"yes"` would otherwise turn
+  # verification off with only a warning, and `check`/`decode` silently, since
+  # everything downstream reads them with isTRUE() (§14.1; D-56 in spirit — an
+  # unreadable setting is refused, never read as the weaker one).
+  for (f in c("verify", "check", "decode")) {
+    v <- policy[[f]]
+    if (!is.logical(v) || length(v) != 1L || is.na(v))
+      stop("`", f, "` must be TRUE or FALSE", call. = FALSE)
+  }
   if (!isTRUE(policy$verify)) {
     # Not a message that can be switched off: turning verification off is the
     # most consequential thing a caller can do here (§14.1).
@@ -242,9 +252,7 @@ resolve_request <- function(req, client) {
 #'            client = zu_client(transport = fake))
 zu_perform <- function(req, client = zu_default_client()) {
   req <- check_req(req)
-  if (!inherits(client, "zu_client"))
-    stop("`client` must be a zu_client(); got ", class(client)[[1]],
-         call. = FALSE)
+  check_client(client)
   # §27.4. A streaming callback runs arbitrary R code, which may call zu_get()
   # again. Re-entrancy is permitted — but not on the client whose connection
   # is currently being read, which would deadlock on a pool slot or interleave
@@ -284,7 +292,11 @@ zu_perform <- function(req, client = zu_default_client()) {
   resp$method  <- r$method
   if (is.null(resp$url)) resp$url <- zu_redact_url(r$url)
   resp$timings <- c(total = elapsed)
+  # Without the pool: a response is a value, and holding the live pool's
+  # external pointer kept every idle connection reachable for as long as any
+  # response was, and made identical() on two responses compare pointers.
   resp$request <- r
+  resp$request$pool <- NULL
   if (is.null(resp$redirects)) resp$redirects <- 0L
 
   fire_hook(hooks, "after_response",
@@ -315,7 +327,7 @@ attempt_with_retries <- function(r, client, hooks, deadline_at) {
   attempt <- 1L
   repeat {
     fire_hook(hooks, "before_request", list(request = r, attempt = attempt))
-    resp <- NULL; cnd <- NULL
+    cnd <- NULL
     ar <- attempt_request(r, policy, deadline_at)
     delivered <- watch_delivery(ar)
     resp <- tryCatch(zu_transport_perform(client$transport, delivered$request),
@@ -379,8 +391,8 @@ attempt_request <- function(r, policy, deadline_at) {
 }
 
 # D-81: whether this attempt's callback was handed any bytes. Wraps the
-# callback of the attempt's copy only, so the request hooks and conditions see
-# is the caller's.
+# callback of the attempt's copy only, so the request that hooks and
+# conditions see is the caller's.
 watch_delivery <- function(req) {
   seen <- FALSE
   f <- req$callback

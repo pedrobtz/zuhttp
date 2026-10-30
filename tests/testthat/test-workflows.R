@@ -5,16 +5,6 @@
 # Everything runs against a mock transport (§31.12), so the file is
 # deterministic and CRAN-safe: it exercises the API, not the network.
 
-# A transport that records what it was asked to do and answers from a script.
-recorder <- function(respond = function(req) zu_response(200L, body = "ok")) {
-  calls <- list()
-  t <- zu_mock_transport(function(req) {
-    calls[[length(calls) + 1L]] <<- req
-    respond(req)
-  })
-  list(transport = t, calls = function() calls, n = function() length(calls))
-}
-
 test_that("1. one-line GET", {
   rec <- recorder(function(req) zu_response(200L, body = "hello"))
   r <- zu_get("https://example.com", client = zu_client(transport = rec$transport))

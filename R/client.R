@@ -24,9 +24,9 @@
 zu_defaults <- function() {
   list(
     timeout    = 30,
-    # §19.4. Was 1, the §63.2 slice's value, which made an ordinary
-    # http -> https -> www chain fail once an exhausted chain began to raise
-    # (zu_too_many_redirects) instead of returning its last 3xx.
+    # §19.4, D-68: an exhausted chain raises zu_too_many_redirects rather than
+    # returning its last 3xx, so the default must clear an ordinary
+    # http -> https -> www chain with room to spare.
     redirects  = 10L,
     verify     = TRUE,
     max_body   = 16 * 1024^2,
@@ -75,12 +75,16 @@ collect_policy <- function(env = parent.frame()) {
 #'   works. Joining is textual, not RFC 3986 resolution: see Details.
 #' @param headers Named character vector of default headers.
 #' @param query Named list of default query parameters.
-#' @param timeout Total seconds for a request, redirects included. DNS resolution is not
-#'   bounded by it (nor by Ctrl-C); see [zuhttp_tls].
+#' @param timeout Total seconds for a request, redirects included. DNS
+#'   resolution is not bounded by it (nor by Ctrl-C); see [zuhttp_tls].
 #' @param redirects Maximum redirects to follow. `0` returns the 3xx itself.
+#'   A `Location` that is not a valid URL reference — a raw space or non-ASCII
+#'   bytes — raises `zu_url_error` rather than being repaired (§8.2), and a
+#'   redirect back to a URL already requested raises `zu_redirect_error`.
 #' @param verify Verify the certificate and hostname. Leave this `TRUE`.
-#' @param max_body Maximum decoded body size in bytes.
-#' @param user_agent Default `User-Agent`.
+#' @param max_body Maximum decoded body size in bytes; `Inf` for no limit.
+#' @param user_agent Default `User-Agent`. Unset, requests send
+#'   `zuhttp/<version>`.
 #' @param check Raise a condition for 4xx and 5xx responses (§31.14). `FALSE`
 #'   returns the response whatever its status.
 #' @param decode Decompress the body transparently (§21.2).
@@ -181,7 +185,7 @@ zu_client <- function(base_url = NULL, headers = NULL, query = NULL,
 #' admin <- zu_client_update(api, headers = c(Authorization = "Bearer xyz"))
 #' identical(api$headers, NULL)   # unchanged
 zu_client_update <- function(client, ...) {
-  stopifnot(inherits(client, "zu_client"))
+  check_client(client)
   changes <- list(...)
   if (length(changes) && (is.null(names(changes)) || any(!nzchar(names(changes)))))
     stop("all arguments to zu_client_update() must be named", call. = FALSE)
@@ -236,11 +240,7 @@ as_query_list <- function(q) {
 merge_headers <- function(client_h, req_h) {
   out <- if (is.null(client_h)) character() else client_h
   for (nm in names(req_h)) {
-    # Case-insensitive, because HTTP field names are (§18.3). Without this a
-    # request's c(Accept=) would sit alongside a client's c(accept=) and both
-    # would go on the wire.
-    hit <- which(tolower(names(out)) == tolower(nm))
-    if (length(hit)) out <- out[-hit]
+    out <- drop_header(out, nm)
     if (!is.na(req_h[[nm]])) out[[nm]] <- req_h[[nm]]
   }
   out <- out[!is.na(out)]
@@ -302,7 +302,7 @@ zu_default_client <- function() {
 #' zu_set_default_client(old)
 zu_set_default_client <- function(client) {
   old <- zu_default_client()
-  if (!is.null(client)) stopifnot(inherits(client, "zu_client"))
+  if (!is.null(client)) check_client(client)
   the_default$client <- client
   the_default$pid    <- Sys.getpid()
   invisible(old)

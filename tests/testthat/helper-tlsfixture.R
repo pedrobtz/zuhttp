@@ -144,6 +144,17 @@ with_tls_server <- function(cert, code) {
       if (!inherits(con, "try-error")) { close(con); up <- TRUE; break }
       Sys.sleep(0.1)
     }
+    # A port that answered is only ours if s_server is still running: one that
+    # failed to bind (the port was taken) exits, and the probe then succeeded
+    # against someone else's listener, so the handshake below was aborted by
+    # a server that never spoke TLS. Seen once under shuffle (OSStatus -9816
+    # and -9836); not reproduced in isolation, so this closes the one hole
+    # that explains it rather than a confirmed cause.
+    Sys.sleep(0.1)
+    if (up && file.exists(pidf)) {
+      pid <- as.integer(readLines(pidf, warn = FALSE)[[1]])
+      up <- isTRUE(tools::pskill(pid, 0L))
+    }
     if (up) { port <- p; break }
     if (file.exists(pidf))
       try(tools::pskill(as.integer(readLines(pidf, warn = FALSE)[[1]]),
@@ -167,4 +178,30 @@ skip_unless_local_tls <- function() {
   if (is.null(openssl_bin())) testthat::skip("openssl CLI not available")
   # Every row of the matrix names its roots with ca_file.
   skip_unless_tls_supports("ca_file")
+}
+
+# A CA that is real, correctly formed, and trusts nothing on the internet.
+# That is what distinguishes "adds to" from "replaces": with it added, a
+# public host still validates; with it substituted, the same host must not.
+# Shared with the §50.5 matrix in test-certs.R via helper-tlsfixture.R rather
+# than generated twice — two fixtures for one concept drift.
+local_ca <- function() {
+  fx <- tls_fixture()
+  list(dir = fx$dir, pem = fx$ca)
+}
+
+# For test-tls.R's D-56 cases: one config per setting some backend cannot
+# honour.
+unsupported_cases <- function() {
+  # PEM-shaped, so check_tls()'s PEM check passes and the capability check is
+  # what decides; the certificate itself is never parsed on this path.
+  pem <- tempfile(fileext = ".pem")
+  writeLines(c("-----BEGIN CERTIFICATE-----", "MIIB", "-----END CERTIFICATE-----"), pem)
+  list(
+    pins       = zu_tls(pins = "sha256//YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg="),
+    tls13      = zu_tls(min_version = 13),
+    ca_file    = zu_tls(ca_file = pem),
+    ca_extra   = zu_tls(ca_extra = pem),
+    revocation = zu_tls(revocation = TRUE)
+  )
 }

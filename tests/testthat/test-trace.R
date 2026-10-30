@@ -5,13 +5,6 @@
 # The phases anyone actually wants to see — DNS, connect, TLS handshake —
 # were exactly the invisible ones.
 
-# A client of its own per test. The DEFAULT client pools, so a test that ran
-# earlier in the file leaves a warm connection and the next request correctly
-# skips dns/connect/tls — which then looks like missing instrumentation. The
-# pooling is right; sharing a client between tests that measure connection
-# setup is not.
-fresh <- function(...) zu_client(...)
-
 # --- offline -------------------------------------------------------------
 
 test_that("tracing is off by default", {

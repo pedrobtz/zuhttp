@@ -14,7 +14,8 @@ skip_unless_forkable <- function() {
 }
 
 # Starts the proxy, runs `code`, and returns the request bytes it received.
-# `mode` is what the proxy replies: "ok", "407" or "502".
+# `mode` is what the proxy replies: "ok", "407" or "502"; or "keepalive",
+# which answers two requests on one connection, for the pooled case.
 with_fake_proxy <- function(mode, code) {
   d <- tempfile("zu-proxy-"); dir.create(d)
   on.exit(unlink(d, recursive = TRUE), add = TRUE)
@@ -28,23 +29,31 @@ with_fake_proxy <- function(mode, code) {
     "port <- as.integer(args[1]); mode <- args[2]; logf <- args[3]; readyf <- args[4]",
     "srv <- serverSocket(port)",
     "cat('ready\\n', file = readyf)",
-    "con <- socketAccept(srv, open = 'r+b', timeout = 20)",
+    "con <- socketAccept(srv, blocking = TRUE, open = 'r+b', timeout = 20)",
+    # Blocking: socketAccept() defaults to non-blocking, and a read that
+    # finds nothing yet returned raw(0), which ended the request early. The
+    # keep-alive mode then answered a second request before it was asked.
+    "all <- raw()",
+    "for (i in seq_len(if (mode == 'keepalive') 2L else 1L)) {",
     # Read to the end of the header block. Byte at a time is slow and fine:
     # the request is a few hundred bytes and the alternative is guessing how
     # much has arrived.
-    "buf <- raw()",
-    "repeat {",
-    "  b <- readBin(con, 'raw', 1L)",
-    "  if (length(b) == 0L) break",
-    "  buf <- c(buf, b); n <- length(buf)",
-    "  if (n >= 4L && identical(buf[(n-3L):n], charToRaw('\\r\\n\\r\\n'))) break",
+    "  buf <- raw()",
+    "  repeat {",
+    "    b <- readBin(con, 'raw', 1L)",
+    "    if (length(b) == 0L) break",
+    "    buf <- c(buf, b); n <- length(buf)",
+    "    if (n >= 4L && identical(buf[(n-3L):n], charToRaw('\\r\\n\\r\\n'))) break",
+    "  }",
+    "  all <- c(all, buf)",
+    "  f <- file(logf, 'wb'); writeBin(all, f); close(f)",
+    "  resp <- switch(mode,",
+    "    ok  = 'HTTP/1.1 200 OK\\r\\nContent-Length: 2\\r\\nConnection: close\\r\\n\\r\\nhi',",
+    "    keepalive = 'HTTP/1.1 200 OK\\r\\nContent-Length: 2\\r\\n\\r\\nhi',",
+    "    `407` = 'HTTP/1.1 407 Proxy Authentication Required\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n',",
+    "    'HTTP/1.1 502 Bad Gateway\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n')",
+    "  writeBin(charToRaw(resp), con); flush(con)",
     "}",
-    "f <- file(logf, 'wb'); writeBin(buf, f); close(f)",
-    "resp <- switch(mode,",
-    "  ok  = 'HTTP/1.1 200 OK\\r\\nContent-Length: 2\\r\\nConnection: close\\r\\n\\r\\nhi',",
-    "  `407` = 'HTTP/1.1 407 Proxy Authentication Required\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n',",
-    "  'HTTP/1.1 502 Bad Gateway\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n')",
-    "writeBin(charToRaw(resp), con); flush(con)",
     "close(con); close(srv)"
   ), script)
 

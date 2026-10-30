@@ -3,10 +3,6 @@
 # are the parts §26.5 is actually about. The reuse tests at the bottom need a
 # server and are gated like the rest of the network suite.
 
-# Internals, reached the way the rest of this suite reaches them.
-client_pool <- function(...) zuhttp:::client_pool(...)
-pool_valid  <- function(ptr) .Call(zuhttp:::C_zu_pool_valid, ptr)
-
 # --- configuration -------------------------------------------------------
 
 test_that("zu_pool() validates its arguments and carries §26.2's defaults", {
@@ -22,6 +18,11 @@ test_that("zu_pool() validates its arguments and carries §26.2's defaults", {
   expect_error(zu_pool(max_idle = NA), "at least 1")
   expect_error(zu_pool(max_per_host = "four"), "at least 1")
   expect_error(zu_pool(max_idle = c(1, 2)), "at least 1")
+  # as.integer(Inf) is NA, which C read as "the default": Inf meant 30 s.
+  expect_error(zu_pool(max_idle = Inf), "whole number")
+  expect_identical(zu_pool(idle_timeout = Inf)$idle_timeout_ms, .Machine$integer.max)
+  expect_error(zu_pool(idle_timeout = 0), "idle_timeout")
+  expect_error(zu_pool(idle_timeout = NA), "idle_timeout")
 })
 
 test_that("a client pools by default and can opt out", {
@@ -111,8 +112,12 @@ test_that("a client survives saveRDS()/readRDS() and re-creates its pool (§26.5
 })
 
 test_that("zu_pool_reset() drops idle connections without touching config", {
-  api <- zu_client(pool = zu_pool(max_idle = 5))
-  invisible(client_pool(api))
+  web <- local_httpbin("keep-alive", keep_alive = TRUE)
+  api <- zu_client(pool = zu_pool(max_idle = 5), base_url = web$url())
+  invisible(zu_get("get", client = api))
+  # Something to drop, or the assertion below holds of a pool that never
+  # had a connection.
+  expect_identical(zu_pool_stats(api)[["idle"]], 1)
   expect_identical(zu_pool_reset(api), api)
   expect_identical(api$pool$max_idle, 5L)
   expect_identical(zu_pool_stats(api)[["idle"]], 0)

@@ -126,6 +126,16 @@ test_that("a transport must return a response", {
   expect_error(zu_get("https://x/", client = api), "must return a zu_response")
 })
 
+test_that("a request header carrying CR/LF is refused before connecting, naming it (§17.1, D-85)", {
+  # Port 1 on loopback: were anything attempted, this would be a connect error.
+  cli <- zu_client(pool = NULL, proxy = FALSE)
+  e <- expect_error(
+    zu_get("http://127.0.0.1:1/", headers = c(`X-Evil` = "a\r\nInjected: 1"), client = cli),
+    class = "zu_http_parse_error")
+  expect_match(conditionMessage(e), "`X-Evil`", fixed = TRUE)
+  expect_false(grepl("Injected", conditionMessage(e), fixed = TRUE))
+})
+
 test_that("the body decides the framing: a conflicting header is refused before connecting (D-78)", {
   # Port 1 on loopback: were anything sent, this would be a connect error.
   url <- "http://127.0.0.1:1/"

@@ -25,7 +25,7 @@ with_redirect_origin <- function(code, target_query = "") {
     "srv <- serverSocket(port)",
     "cat('ready\\n', file = readyf)",
     "for (hop in 1:2) {",
-    "  con <- socketAccept(srv, open = 'r+b', timeout = 20)",
+    "  con <- socketAccept(srv, blocking = TRUE, open = 'r+b', timeout = 20)",
     # Byte at a time to the end of the header block: slow and fine for a few
     # hundred bytes, and the alternative is guessing how much has arrived.
     "  buf <- raw()",
@@ -55,4 +55,43 @@ with_redirect_origin <- function(code, target_query = "") {
   Sys.sleep(0.2)
 
   code(sprintf("http://127.0.0.1:%d/start", port), target)
+}
+
+# A webfakes httpbin in a background process, started on first use and then
+# shared by every test that asks for the same `name` — one per session, not
+# one per file. A function rather than a file-level object so the tests that
+# use it run in any order (devtools::test(shuffle = TRUE)), and so the skips
+# that belong to it travel with it: a top-level skip in a shuffled file skips
+# whatever happens to come after it.
+#
+# A server that fails to start is a skip that says so. It is not what any
+# test here exists to detect, and under load callr's "Could not start R
+# session, timed out" surfaced as an error in whichever test came first.
+local_httpbin <- local({
+  servers <- list()
+  function(name = "plain", keep_alive = FALSE) {
+    skip_under_gctorture()   # local servers: timing, not memory
+    testthat::skip_if_not_installed("webfakes")
+    srv <- servers[[name]]
+    if (is.null(srv) || !identical(srv$get_state(), "live")) {
+      opts <- if (keep_alive)
+        webfakes::server_opts(remote = TRUE, enable_keep_alive = TRUE, num_threads = 4)
+      else webfakes::server_opts()
+      srv <- tryCatch(
+        webfakes::local_app_process(webfakes::httpbin_app(), opts = opts,
+                                    .local_envir = testthat::teardown_env()),
+        error = function(e)
+          testthat::skip(paste("the local httpbin did not start:", conditionMessage(e))))
+      servers[[name]] <<- srv
+    }
+    srv
+  }
+})
+
+# For test-redirect-live.R: a URL on `from` that redirects to `to`. The target
+# is percent-encoded by hand: webfakes' url(query = ) does not encode, and a
+# nested ?url= would otherwise be split at the wrong '='.
+redirect_to <- function(from, to, status_code = NULL) {
+  paste0(from$url("/redirect-to"), "?url=", utils::URLencode(to, reserved = TRUE, repeated = TRUE),
+         if (!is.null(status_code)) paste0("&status_code=", status_code))
 }

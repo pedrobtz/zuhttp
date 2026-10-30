@@ -42,7 +42,8 @@ zu_response <- function(status = 200L, headers = NULL, body = raw(),
 #'
 #' @param resp A `zu_response`.
 #' @param name A header name. Matching is case-insensitive (§18.3).
-#' @return `zu_resp_status()` an integer; `zu_resp_ok()` a logical;
+#' @return `zu_resp_status()` an integer; `zu_resp_ok()` a logical, `TRUE`
+#'   for a 2xx or 3xx status (a 3xx reaches you with `redirects = 0`);
 #'   `zu_resp_headers()` a named character vector; `zu_resp_header()` a
 #'   character vector, length 0 when the header is absent and longer than 1
 #'   when it repeats; `zu_resp_url()` the final URL after redirects, with
@@ -278,7 +279,7 @@ zu_resp_text <- function(resp, encoding = NULL, on_invalid = c("error", "substit
   if (!is.null(encoding)) {
     enc <- encoding
   } else if (identical(ct$type, "application/json")) {
-    enc <- "UTF-8"                                   # step 5: RFC 8259
+    enc <- "UTF-8"                                   # RFC 8259: skip steps 2-4
   } else {
     cs <- ct$params[["charset"]]
     if (!is.null(cs) && nzchar(cs) && iconv_knows(cs)) enc <- cs
@@ -377,7 +378,7 @@ zu_resp_json <- function(resp, ...) {
                    " (HTTP ", resp$status, ").\n",
                    "  A 204 or an empty 200 is a valid response; check",
                    " zu_resp_status() before decoding."),
-            url = resp$url, phase = "decode", response = redact_response(resp))
+            url = resp$url, phase = "decode", response = redact_response_fields(resp))
   # §34.4: the backend's own complaint is useful but is not a first line. A
   # user seeing "premature EOF (right here) ---^" has to work out that it came
   # from their HTTP call at all.
@@ -389,7 +390,7 @@ zu_resp_json <- function(resp, ...) {
                    "  * If the server sent something else, zu_resp_text()",
                    " shows what.\n",
                    "  * Parser: ", conditionMessage(e)),
-            url = resp$url, phase = "decode", response = redact_response(resp))
+            url = resp$url, phase = "decode", response = redact_response_fields(resp))
   })
 }
 
@@ -428,11 +429,9 @@ zu_resp_check <- function(resp) {
   if (nzchar(excerpt)) msg <- paste0(msg, "\n  Server said: ", excerpt)
   # The stored request and response are display artefacts (§42.3), so they are
   # redacted copies. The originals stay executable in the caller's hands.
-  zu_stop(code, msg, url = resp$url, response = redact_response(resp),
-          request = redact_request(resp$request), call = sys.call(-1))
+  zu_stop(code, msg, url = resp$url, response = redact_response_fields(resp),
+          request = redact_request_fields(resp$request), call = sys.call(-1))
 }
-
-`%||%` <- function(a, b) if (is.null(a)) b else a
 
 # A short piece of the server's own error text. Worth having: "HTTP 422" alone
 # sends people to a browser, and the body usually says exactly what was wrong.
@@ -520,25 +519,6 @@ parse_content_type <- function(v) {
 }
 
 content_type_of <- function(resp) parse_content_type(zu_resp_header(resp, "content-type"))
-
-# --- redaction for display (§42.2) -----------------------------------------
-redact_response <- function(resp) {
-  if (is.null(resp)) return(NULL)
-  resp$headers <- zu_redact_headers_for_display(resp$headers)
-  if (!is.null(resp$url)) resp$url <- zu_redact_url(resp$url)
-  resp$request <- redact_request(resp$request)
-  resp
-}
-
-redact_request <- function(req) {
-  if (is.null(req)) return(NULL)
-  req$headers <- zu_redact_headers_for_display(req$headers)
-  req$url     <- zu_redact_url(req$url)
-  # A form body carries credentials as often as a header does.
-  if (identical(req$body_kind, "form") && !is.null(req$body))
-    req$body <- charToRaw(zu_redact_form(rawToChar(req$body)))
-  redact_request_proxy(req)
-}
 
 #' @export
 print.zu_response <- function(x, ...) {

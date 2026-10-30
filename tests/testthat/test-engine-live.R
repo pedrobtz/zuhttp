@@ -60,6 +60,47 @@ test_that("a status line that is not HTTP/1.x is a parse error", {
   })
 })
 
+test_that("a header value that is not UTF-8 arrives as Latin-1, not as broken UTF-8 (D-84)", {
+  skip_unless_forkable()
+  # "café" with a Latin-1 é (0xE9), the common case of a Content-Disposition
+  # filename. Marked UTF-8, it made nchar(), grepl() and print() fail.
+  resp <- c(charToRaw("HTTP/1.1 200 OK\r\nX-Name: caf"), as.raw(0xE9),
+            charToRaw("\r\nX-Utf8: caf\u00e9\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"))
+  with_raw_server(resp, function(base) {
+    r <- zu_get(paste0(base, "/"))
+    latin <- zu_resp_header(r, "x-name")
+    expect_identical(Encoding(latin), "latin1")
+    expect_identical(nchar(latin), 4L)
+    expect_identical(enc2utf8(latin), "caf\u00e9")
+    expect_true(grepl("caf", latin))
+    # valid UTF-8 is still marked UTF-8
+    utf <- zu_resp_header(r, "x-utf8")
+    expect_identical(Encoding(utf), "UTF-8")
+    expect_identical(utf, "caf\u00e9")
+    expect_no_warning(capture.output(print(r)))
+  })
+})
+
+test_that("the default User-Agent carries the package version, and Connection follows the pool (§17.2)", {
+  skip_unless_forkable()
+  ok <- crlf("HTTP/1.1 200 OK", "Content-Length: 2", "Connection: close", "", "ok")
+  seen <- with_raw_server(ok, function(base) {
+    zu_get(paste0(base, "/"), client = zu_client(pool = NULL))
+  })
+  skip_if(is.null(seen), "the raw test server recorded nothing")
+  expect_match(seen, paste0("User-Agent: zuhttp/", packageVersion("zuhttp"), "\r\n"),
+               fixed = TRUE)
+  # no pool: the connection is closed after the response, and the request says so
+  expect_match(seen, "Connection: close\r\n", fixed = TRUE)
+
+  seen <- with_raw_server(ok, function(base) {
+    zu_get(paste0(base, "/"), user_agent = "mine/1", client = zu_client())
+  })
+  skip_if(is.null(seen), "the raw test server recorded nothing")
+  expect_match(seen, "User-Agent: mine/1\r\n", fixed = TRUE)
+  expect_match(seen, "Connection: keep-alive\r\n", fixed = TRUE)
+})
+
 test_that("a body shorter than its Content-Length is an error, not a short body", {
   skip_unless_forkable()
   # The server declares 100 bytes, sends 10, and closes. Returning the 10
@@ -134,15 +175,11 @@ test_that("with redirects = 0 the 3xx body goes to the caller's file", {
 
 # --- against a well-behaved server ----------------------------------------
 
-skip_under_gctorture()   # the rest of this file runs against a local server
-skip_if_not_installed("webfakes")
-web <- webfakes::local_app_process(
-  webfakes::httpbin_app(),
-  opts = webfakes::server_opts(remote = TRUE, enable_keep_alive = TRUE, num_threads = 4),
-  .local_envir = testthat::teardown_env()
-)
+# local_httpbin() (helper-origin.R) starts one keep-alive httpbin for these,
+# on first use, and skips under gctorture or without webfakes.
 
 test_that("a pooled connection is reused, offline, and says so", {
+  web <- local_httpbin("keep-alive", keep_alive = TRUE)
   api <- zu_client(base_url = web$url())
   first <- zu_get("get", client = api)
   second <- zu_get("get", client = api)
@@ -158,6 +195,7 @@ test_that("a pooled connection is reused, offline, and says so", {
 })
 
 test_that("a reused connection reads slow chunked bodies, before and after a callback", {
+  web <- local_httpbin("keep-alive", keep_alive = TRUE)
   # A pooled stream keeps the zuh_net_opts of the request that opened it, so
   # anything per-request stored there is stale on reuse. /stream sends its
   # chunks with pauses, which makes every read wait on the poll tick — the
@@ -174,6 +212,7 @@ test_that("a reused connection reads slow chunked bodies, before and after a cal
 })
 
 test_that("a callback sees every chunk, in order", {
+  web <- local_httpbin("keep-alive", keep_alive = TRUE)
   got <- raw()
   calls <- 0L
   r <- zu_get(web$url("/drip?numbytes=5&duration=0.5"), callback = function(chunk) {
@@ -188,6 +227,7 @@ test_that("a callback sees every chunk, in order", {
 })
 
 test_that("a callback returning FALSE stops early, and the connection is not reused", {
+  web <- local_httpbin("keep-alive", keep_alive = TRUE)
   api <- zu_client(base_url = web$url())
   calls <- 0L
   r <- zu_get("drip?numbytes=10&duration=1", client = api, callback = function(chunk) {
@@ -203,6 +243,7 @@ test_that("a callback returning FALSE stops early, and the connection is not reu
 })
 
 test_that("an error in a callback reaches the caller as that error", {
+  web <- local_httpbin("keep-alive", keep_alive = TRUE)
   # §27.3: the user's condition, with its own class, not a zuhttp one that
   # has swallowed it.
   api <- zu_client(base_url = web$url())
@@ -221,6 +262,7 @@ test_that("an error in a callback reaches the caller as that error", {
 })
 
 test_that("a warning inside a callback does not abort the transfer (D-47)", {
+  web <- local_httpbin("keep-alive", keep_alive = TRUE)
   n <- 0L
   r <- withCallingHandlers(
     zu_get(web$url("/stream/3"), callback = function(chunk) {
@@ -232,6 +274,7 @@ test_that("a warning inside a callback does not abort the transfer (D-47)", {
 })
 
 test_that("proxy = FALSE ignores a proxy in the environment, offline", {
+  web <- local_httpbin("keep-alive", keep_alive = TRUE)
   withr_local_env <- function(...) {
     old <- Sys.getenv(names(list(...)), unset = NA)
     do.call(Sys.setenv, list(...))
@@ -246,12 +289,16 @@ test_that("proxy = FALSE ignores a proxy in the environment, offline", {
 })
 
 test_that("a name that does not resolve is a DNS error", {
+  # A resolver lookup, which on a CRAN machine may be slow or intercepted.
+  skip_on_cran()
   e <- tryCatch(zu_get("http://zuhttp-test.invalid/"), error = function(e) e)
   expect_s3_class(e, "zu_dns_error")
   expect_identical(e$phase, "dns")
 })
 
 test_that("a time limit during a request surfaces as itself (§25.2)", {
+  skip_on_cran()   # a wall-clock bound, on a machine CRAN shares
+  web <- local_httpbin("keep-alive", keep_alive = TRUE)
   # setTimeLimit() -- and R.utils::withTimeout(), built on it -- raises its
   # error from inside R_CheckUserInterrupt(), the checkpoint the engine calls
   # every poll tick. Until 2026-09-26 that checkpoint ran under
@@ -272,6 +319,10 @@ test_that("a time limit during a request surfaces as itself (§25.2)", {
 })
 
 test_that("Ctrl-C (SIGINT) cancels within the 200 ms bound (§25, #7)", {
+  # Off CRAN: it signals the checking R process itself, and a kill that lands
+  # outside the request would abort the whole run rather than one test.
+  skip_on_cran()
+  web <- local_httpbin("keep-alive", keep_alive = TRUE)
   # A deterministic Ctrl-C: a background shell sends SIGINT to this R process
   # while a request waits on a server that will not answer for five seconds.
   # This measures the Rscript front end; Rgui and RStudio deliver interrupts

@@ -176,10 +176,10 @@ void suite_redirect(void) {
         zuh_redirect_trail_init(&t);
         mk(&a, "https", "x.com", 443, "/a");
         mk(&b, "https", "x.com", 443, "/b");
-        ZUH_CHECK(zuh_redirect_trail_add(&t, "GET", &a));
-        ZUH_CHECK(zuh_redirect_trail_add(&t, "GET", &b));
-        ZUH_CHECK(!zuh_redirect_trail_add(&t, "GET", &a));   /* loop */
-        ZUH_CHECK(zuh_redirect_trail_add(&t, "POST", &a));   /* method differs */
+        ZUH_CHECK_EQ_INT(zuh_redirect_trail_add(&t, "GET", &a), ZUH_OK);
+        ZUH_CHECK_EQ_INT(zuh_redirect_trail_add(&t, "GET", &b), ZUH_OK);
+        ZUH_CHECK_EQ_INT(zuh_redirect_trail_add(&t, "GET", &a), ZUH_ERR_REDIRECT);  /* loop */
+        ZUH_CHECK_EQ_INT(zuh_redirect_trail_add(&t, "POST", &a), ZUH_OK);   /* method differs */
         zuh_redirect_trail_free(&t);
         zuh_uri_free(&a); zuh_uri_free(&b);
     }

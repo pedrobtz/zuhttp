@@ -161,7 +161,7 @@ bounded by it (nor by Ctrl-C); see \link{zuhttp_tls}.}
 
 \item{verify}{Verify the certificate and hostname. Leave this \code{TRUE}.}
 
-\item{max_body}{Maximum decoded body size in bytes.}
+\item{max_body}{Maximum decoded body size in bytes; \code{Inf} for no limit.}
 
 \item{user_agent}{\code{User-Agent} to send.}
 
@@ -172,7 +172,8 @@ response whatever its status.}
 asks the server not to encode (§21.2).}
 
 \item{retry}{A \code{\link[=zu_retry]{zu_retry()}} policy for this request. Overrides the
-client's; \code{NULL} inherits it (§31.9).}
+client's; \code{NULL} resets it to the package default, which retries nothing
+(§31.9). Omit it to inherit the client's.}
 
 \item{path}{Write the response body to this file instead of holding it in
 memory (§27). The download is written beside the destination and renamed
@@ -183,10 +184,9 @@ the body has arrived whole. Note what that does and does not cover: a
 completes with a non-2xx status is a successful transfer of an error
 page, so a 404 body is written and does replace it — \code{check} raises
 afterwards, too late to prevent that. Mutually exclusive with
-\code{callback}: a response body has one destination. Note the asymmetry with \code{file}, which
-is a request \emph{body} source (§31.6): \code{path} is where the response goes,
-\code{file} is where a
-request body comes from.}
+\code{callback}: a response body has one destination. Note the asymmetry
+with \code{file}, which is a request \emph{body} source (§31.6): \code{path} is where
+the response goes, \code{file} is where a request body comes from.}
 
 \item{callback}{A function of one argument called with each decoded chunk
 as it arrives (§27). Returning \code{FALSE} stops the transfer. See

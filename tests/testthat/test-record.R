@@ -8,12 +8,6 @@
 # everything above it (merging, redirects, redaction) is the same code either
 # way.
 
-cassette_dir <- function() {
-  d <- file.path(tempdir(), paste0("zu-cass-", as.integer(runif(1, 1, 1e9))))
-  unlink(d, recursive = TRUE)
-  d
-}
-
 # --- §37 mock matching ---------------------------------------------------
 
 test_that("a stub matches on method, URL, headers and body", {

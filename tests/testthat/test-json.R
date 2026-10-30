@@ -16,15 +16,6 @@ test_that("auto_unbox = FALSE is honoured", {
   expect_identical(rawToChar(req$body), '{"n":[2]}')
 })
 
-# .package is required, not optional: without it testthat asks pkgload which
-# package is being developed, and there is no such package when the tests run
-# against an INSTALLED zuhttp -- which is how CI runs them, and how a user
-# would. It passed locally only because R CMD check supplies that context.
-without_jsonlite <- function(env = parent.frame()) {
-  testthat::local_mocked_bindings(has_jsonlite = function() FALSE,
-                                  .package = "zuhttp", .env = env)
-}
-
 test_that("without jsonlite the JSON helpers name the package and the fix", {
   without_jsonlite()
 

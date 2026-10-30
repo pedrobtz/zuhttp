@@ -79,3 +79,21 @@ zu_get_badssl <- function(...) {
     if (!inherits(r, transient) || attempt == 3L) stop(r)
   }
 }
+
+# For test-fork.R (D-32).
+# The guard is armed on the first zuh_tls_dial() in the process, so the
+# parent must have completed an HTTPS request before forking. A child forked
+# from a parent that never armed it arms it fresh and is not in a child at all
+# as far as the guard is concerned — which is correct, and would make this
+# test pass for the wrong reason.
+skip_unless_forked_https_is_testable <- function() {
+  testthat::skip_on_cran()
+  if (!identical(Sys.getenv("ZU_TEST_NETWORK"), "1"))
+    testthat::skip("set ZU_TEST_NETWORK=1 to run network tests")
+  if (!identical(Sys.info()[["sysname"]], "Darwin"))
+    testthat::skip("R-12 is a macOS Network.framework hazard")
+  if (!identical(zu_tls_backend(), "network-framework"))
+    testthat::skip("guard lives in the Network.framework backend")
+  testthat::skip_if_not_installed("parallel")
+  if (!zu_have_network()) testthat::skip("no network")
+}
