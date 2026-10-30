@@ -126,6 +126,7 @@ test_that("verify = FALSE reaches an expired certificate", {
 
 test_that("the total timeout is enforced, as a timeout (§24)", {
   skip_on_cran()
+  skip_under_gctorture() # a wall-clock bound
   skip_if(getRversion() < "4.0.0", "serverSocket() is R 4.0")
   # Offline: a socket that listens and never accepts, so the request is sent
   # and no response ever comes. Asserting only "some zu_error" against a
