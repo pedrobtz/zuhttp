@@ -13,8 +13,8 @@ and are excluded from the R package build:
 
 | File | What it is | When to read it |
 |----|----|----|
-| [`.agents/zuhttp-design.md`](https://pedrobtz.github.io/zuhttp/.agents/zuhttp-design.md) | The design, edition 2: a normative specification in 64 numbered sections, each with a status line; a Decision Register (D-1…D-70); a risk register. | Before changing behaviour. Cite the section, e.g. §31.9. |
-| [`.agents/roadmap.md`](https://pedrobtz.github.io/zuhttp/.agents/roadmap.md) | The plan, edition 2: milestones M0–M3 (0.1.0 on CRAN → 0.2.0 → 0.3.0 → 1.0), work packages W1–W19 with exit criteria, and an append-only findings log. | Before starting work, to see which work package owns it. |
+| [`.agents/zuhttp-design.md`](https://pedrobtz.github.io/zuhttp/.agents/zuhttp-design.md) | The design, edition 2: a normative specification in 65 numbered sections, each with a status line; a Decision Register (D-1…D-95); a risk register. | Before changing behaviour. Cite the section, e.g. §31.9. |
+| [`.agents/roadmap.md`](https://pedrobtz.github.io/zuhttp/.agents/roadmap.md) | The plan, edition 2: milestones M0–M4 (0.1.0 on CRAN → 0.2.0 → 0.3.0 → 1.0 → 1.1.0 with HTTP/2), work packages W1–W22 with exit criteria, and an append-only findings log. | Before starting work, to see which work package owns it. |
 | [`.agents/history/`](https://pedrobtz.github.io/zuhttp/.agents/history/) | Edition 1 of both, verbatim: every spike measurement and how each stage landed. | When you need the *why* behind a decision, or a measurement. |
 
 **Read the relevant section before implementing.** Nearly every
