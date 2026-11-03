@@ -195,7 +195,7 @@ fails is then found on CRAN rather than before. W14 and W15 in parallel.
 
 ### M4 — v1.1.0: HTTP/2 for gRPC
 
-**Status:** not started. Blocked on M3.
+**Status:** not started. Blocked on M3. Tracker: #128.
 
 The first minor after 1.0 adds HTTP/2 through vendored nghttp2 (design §60,
 §65, D-89 to D-95), so that `zugrpc` (RFC 0069 in `pedrobtz/packages`) can
@@ -595,7 +595,7 @@ cancellably (F-16).
 
 ### W20 — nghttp2 vendored, ALPN and h2c
 
-**Status:** not started. **Milestone:** M4. **Closes:** #—.
+**Status:** not started. **Milestone:** M4. **Closes:** #129.
 **Implements:** D-89, D-90, §48, §60, §65.1, §65.2, §65.8 (fuzz target
 twelve). **Estimate:** 5 days, medium — the vendoring is mechanical, ALPN
 on three backends is three small changes, and the unknown is `R CMD check`'s
@@ -643,7 +643,7 @@ and ALPN on every backend.
 
 ### W21 — Trailers, pull stream, cancel, keepalive
 
-**Status:** not started. **Milestone:** M4. **Closes:** #—.
+**Status:** not started. **Milestone:** M4. **Closes:** #130.
 **Implements:** D-91, D-92, D-93, D-94, §18.2, §25.5, §26.2, §31.8,
 §65.3–§65.6, §65.8 (the interop server). **Estimate:** 6 days, medium-low —
 four features
@@ -683,7 +683,7 @@ four land together before `zugrpc` Stage 4 can run.
 
 ### W22 — Streaming request body
 
-**Status:** not started. **Milestone:** M4. **Closes:** #—.
+**Status:** not started. **Milestone:** M4. **Closes:** #131.
 **Implements:** D-95, §28, §65.7. **Estimate:** 3 days, medium — the h2
 side is nghttp2's data provider; the HTTP/1.1 side is the first chunked
 request body zuhttp sends. **Depends on:** W21.
