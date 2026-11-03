@@ -1,6 +1,6 @@
 # zuhttp Roadmap
 
-**Edition:** 2 — from v0.1.0 to 1.0, written 2026-09-25
+**Edition:** 2 — from v0.1.0 to 1.0, written 2026-09-25; M4 (1.1.0, HTTP/2) added 2026-11-03
 **Companion:** [zuhttp-design.md](zuhttp-design.md), edition 2 — every work package cites the sections and decisions it implements
 **History:** [history/roadmap-v1.md](history/roadmap-v1.md) — edition 1 verbatim: stages S0–S21 and U1–U6, how each landed, the 2026-09-22 review and the amends merged with it
 **Status:** M0 ready to submit (2026-10-30) — 0.1.0 is the first CRAN submission (D-82); nothing is tagged until CRAN accepts
@@ -72,6 +72,7 @@ graph LR
   M0["M0 · v0.1.0<br/>first CRAN submission"] --> M1["M1 · v0.2.0<br/>complete the core"]
   M1 --> M2["M2 · v0.3.0<br/>parity, measured"]
   M2 --> M3["M3 · v1.0<br/>reviewed, measured"]
+  M3 --> M4["M4 · v1.1.0<br/>HTTP/2 for gRPC"]
 ```
 
 | Milestone | Version | Theme | Work packages | Gate |
@@ -80,6 +81,7 @@ graph LR
 | M1 | 0.2.0 | the design's promises, tested | W4, W7–W12 | every `zu_tls()` setting works on every backend except TLS 1.3 on Windows; phase timeouts |
 | M2 | 0.3.0 | parity, measured | W14, W15, W18 | §61.4 and §61.5 measured; TLS 1.3 on Windows or scope cut 1 taken |
 | M3 | 1.0 | others may depend on it | W17, W19 | all 14 §61 criteria; external review; `SECURITY.md` |
+| M4 | 1.1.0 | HTTP/2 for gRPC | W20, W21, W22 | `zugrpc`'s Stage 4 live test passes against zuhttp; every §65 subsection Built; project-owned C still ≤ 8,000 |
 
 D-55 holds from the first CRAN acceptance on: 0.x.y patch releases carry
 fixes only; features wait for the next minor. Before it, 0.1.0 is unreleased
@@ -190,6 +192,40 @@ fails is then found on CRAN rather than before. W14 and W15 in parallel.
 **Status:** not started.
 
 **Exit criteria** — "What 1.0 means", below.
+
+### M4 — v1.1.0: HTTP/2 for gRPC
+
+**Status:** not started. Blocked on M3.
+
+The first minor after 1.0 adds HTTP/2 through vendored nghttp2 (design §60,
+§65, D-89 to D-95), so that `zugrpc` (RFC 0069 in `pedrobtz/packages`) can
+be a pure-R gRPC client on zuhttp's request API and `zuspark` (RFC 0070) a
+Spark Connect client on it. D-55 holds: 1.0.x carries fixes only, and HTTP/2
+is 1.1.0.
+
+**Order, and why.**
+
+1. **W20 first.** Nothing else can be tested until nghttp2 compiles cleanly
+   on every §52 leg and a request negotiates `h2`; the symbol scan is the
+   one criterion that could send the whole plan back to the design (R-19).
+2. **W21 second.** Trailers, the pull stream, cancellation and keepalive are
+   one package because they share the stream's lifetime: a pulled body that
+   is aborted mid-window on a pooled connection is where the bugs are, and
+   they show only with all four present.
+3. **W22 last.** Client streaming has one consumer call (`AddArtifacts`)
+   and waits until `zugrpc` is on the air with the first two.
+
+**Exit criteria**
+
+- [ ] W20, W21 and W22 closed.
+- [ ] `zugrpc`'s Stage 4 live test (grpc-go interop server in Docker)
+      passes against this branch of zuhttp, on the Ubuntu legs.
+- [ ] Every §65 subsection reads Built; D-89 to D-95 read Accepted.
+- [ ] Project-owned C ≤ 8,000 code lines with the HTTP/2 driver in, by W1's
+      job; the §51.3 total-C row restated from the measured build.
+- [ ] Every HTTP/1.1 test passes unchanged: HTTP/2 off is HTTP/1.1 as
+      shipped.
+- [ ] NEWS lists every user-visible change.
 
 ---
 
@@ -557,6 +593,119 @@ cancellably (F-16).
       the top of the README.
 - [ ] The §34.4 message catalogue reviewed: no message is only a backend code.
 
+### W20 — nghttp2 vendored, ALPN and h2c
+
+**Status:** not started. **Milestone:** M4. **Closes:** #—.
+**Implements:** D-89, D-90, §48, §60, §65.1, §65.2, §65.8 (fuzz target
+twelve). **Estimate:** 5 days, medium — the vendoring is mechanical, ALPN
+on three backends is three small changes, and the unknown is `R CMD check`'s
+symbol scan on CRAN's flavours. **Depends on:** M3.
+
+Vendor nghttp2 1.71.0 `lib/` under `src/vendor/nghttp2/` with the six §48
+patches, `tools/update-nghttp2`, a `VENDOR` file and the checksum manifest;
+compile it from `src/Makevars` with `NGHTTP2_STATICLIB`, `BUILDING_NGHTTP2`,
+`NDEBUG` and the per-platform `HAVE_*` definitions, `HAVE_CONFIG_H` left
+undefined. Then the driver, `src/zuh_h2.c`, behind the §9 stream contract,
+and ALPN on every backend.
+
+**Exit criteria**
+
+- [ ] `R CMD check --as-cran`: 0 errors, 0 warnings, 0 notes on every §52
+      leg of the full profile, including the compiled-code scan for
+      `abort`, `exit`, `printf` and `stderr`; `test-abi.R` still finds only
+      `R_init_zuhttp` exported, nghttp2 symbols included.
+- [ ] `tools/vendor/verify` covers nghttp2; editing one vendored byte fails
+      CI; `tools/update-nghttp2` re-applies every §48 patch from a clean
+      tarball and produces the committed tree byte for byte.
+- [ ] `inst/COPYRIGHTS`, `inst/licenses/` and `LICENSE.note` carry nghttp2's
+      MIT text, equal to `src/vendor/nghttp2/COPYING` by
+      `tools/check-vendor-licenses` (#52).
+- [ ] `zuh_tls_config.alpn` is a list on all three backends; a TLS
+      connection to a public `h2` host negotiates `h2`, and
+      `zu_resp_connection()$http_version` reads `"2"`; `http2 = "off"`
+      negotiates `http/1.1` on the same host; `alpn` is in every backend's
+      capability mask.
+- [ ] `zu_client(http2 = "required")` on an `http://` URL sends the
+      connection preface with no `Upgrade`; one GET and one POST over h2c,
+      and the same two over `h2` with TLS, against a local nghttp2-capable
+      server (`nghttpd` or the grpc-go interop server) on the Ubuntu leg,
+      return the bytes sent.
+- [ ] `http2 = "required"` against an HTTP/1.1-only server raises
+      `zu_connect_error` before any request byte is sent.
+- [ ] Every HTTP/1.1 test, `ctest` and fuzz corpus passes unchanged.
+- [ ] Fuzz target twelve: the session fed hostile frames through the D-72
+      seam, built both ways (§43), with its corpus seeded from recorded
+      frames; 15 minutes clean under ASan and UBSan.
+- [ ] `tools/check-code-lines` still passes; the §51.3 total-C row restated
+      with the measured number, in the same PR.
+- [ ] Design §13.3, §15, §48 and §65.1–§65.2 updated to Built in the same
+      PR; D-89 and D-90 marked Accepted.
+
+### W21 — Trailers, pull stream, cancel, keepalive
+
+**Status:** not started. **Milestone:** M4. **Closes:** #—.
+**Implements:** D-91, D-92, D-93, D-94, §18.2, §25.5, §26.2, §31.8,
+§65.3–§65.6, §65.8 (the interop server). **Estimate:** 6 days, medium-low —
+four features
+that share one lifetime; the estimate's low end assumes the first three days
+find the pooled-abort bug, not the last. **Depends on:** W20.
+
+RFC 0069 §7.2 items 2 to 6. One PR, or several each green (rule 4), but the
+four land together before `zugrpc` Stage 4 can run.
+
+**Exit criteria**
+
+- [ ] `zu_resp_trailers()` returns the trailing block over h2 and over
+      chunked HTTP/1.1 with D-16's semantics; a trailer block over §40's
+      limits is `zu_http_parse_error`; a Trailers-Only response is a
+      response with headers, an empty body and no error.
+- [ ] `te: trailers` reaches the wire unchanged on both protocols, asserted
+      on the bytes.
+- [ ] `zu_perform(stream = TRUE)` plus `zu_resp_read()`: a 1 GiB streamed
+      response is read in 1 MiB pieces with peak RSS under 16 MB over
+      baseline (§51.3's streaming row, re-measured); an unread stream stops
+      the server after one window, shown by the server's own byte count
+      staying put; `max_body` fires across the stream; an interrupt inside
+      `zu_resp_read()` returns within 200 ms and leaves no descriptor open.
+- [ ] `zu_resp_abort()` over h2 sends `RST_STREAM(CANCEL)` (asserted on the
+      interop server's log) and the next request reuses the connection
+      (`zu_pool_stats()`); over HTTP/1.1 the connection is closed; a callback
+      returning `FALSE` does the same on both.
+- [ ] Keepalive: with `keepalive_time = 1, keepalive_timeout = 1` an idle h2
+      connection to a server that stops answering PING is evicted and the
+      next request opens a new one; a server that answers keeps it.
+- [ ] `zugrpc`'s Stage 4 live test passes against this branch on the Ubuntu
+      legs (grpc-go interop server in Docker behind `ZU_H2_TEST_SERVER`).
+- [ ] The §65.2 receive window set from measurement and written into the
+      design.
+- [ ] Three new exports in §53 (66 total); NEWS entry; D-91 to D-94 marked
+      Accepted; design §18.2, §25.5, §31.8 and §65.3–§65.6 Built.
+
+### W22 — Streaming request body
+
+**Status:** not started. **Milestone:** M4. **Closes:** #—.
+**Implements:** D-95, §28, §65.7. **Estimate:** 3 days, medium — the h2
+side is nghttp2's data provider; the HTTP/1.1 side is the first chunked
+request body zuhttp sends. **Depends on:** W21.
+
+RFC 0069 §7.2 item 7, for client-streaming gRPC (`AddArtifacts`).
+
+**Exit criteria**
+
+- [ ] `zu_body_stream(req, f)`: over h2 each piece is one or more DATA
+      frames under the peer's window and the stream is half-closed after
+      `NULL`; over HTTP/1.1 the body is chunked and terminated; the server
+      receives the bytes in order, 100 MB through a 1 MB generator with
+      peak RSS under 16 MB over baseline.
+- [ ] A retry or a 307/308 with a streaming body raises
+      `zu_body_not_replayable` before any attempt is repeated.
+- [ ] An error raised inside `f` unwinds under D-47's rules and the
+      connection is closed, never pooled.
+- [ ] Half-close works: a response that starts streaming while the request
+      body is still being sent is read by `zu_resp_read()` without deadlock,
+      against the interop server's `FullDuplexCall`.
+- [ ] D-95 marked Accepted; §28 and §65.7 Built; NEWS entry.
+
 ---
 
 ## What 1.0 means
@@ -860,3 +1009,30 @@ changed the plan or the design.
   clients, for a missing issuer. The README's Windows claims did not survive
   measurement: the runner had no Microsoft block, and zuhttp's failures there
   were #123, fixed in #121, after which both clients connected.
+- **2026-11-03 — decision: HTTP/2 after 1.0, through vendored nghttp2
+  (D-89).** The trigger was RFC 0069 (`zugrpc`) and RFC 0070 (`zuspark`) in
+  `pedrobtz/packages`: Spark Connect speaks only gRPC over HTTP/2, gRPC
+  needs trailers and per-stream reset that HTTP/1.1 cannot give, and the
+  RFCs' first draft, which vendored nghttp2 in `zugrpc` and asked zuhttp to
+  export its TLS stream as a C API, duplicated the transport and gated on
+  §54. The maintainer chose the other way round: HTTP/2 in zuhttp, `zugrpc`
+  pure R on its request API. That reverses §60's "not implemented" text;
+  its four conditions were re-read against the measured facts and each
+  holds, with nghttp2 `lib/` 1.71.0 read for the count: 23,133 lines of
+  `.c` including a 4,980-line generated Huffman table, 26 `.c` and 26 `.h`,
+  `nghttp2.h` 6,899 lines, 127 `assert()` calls, three `abort()` sites and
+  one unguarded `fprintf(stderr)` to patch, nothing linked, no `#pragma`.
+  What changed in the design: §60 now records the decision and points to
+  the new §65 (negotiation, session model, trailers, pull stream,
+  cancellation, keepalive, streaming request body, conformance, consumers);
+  §4, §6.1, §8, §11, §13.3, §15, §18.2, §25.5, §26.2, §28, §30.3,
+  §31.8, §43, §46.2, §48, §49.2, §51.3 and §61 carry the
+  cross-references; D-89 to D-95 are Proposed; Appendix A gains A.9 and
+  A.10, Appendix B gains R-19.
+  Two things the brief did not expect: the §51.3 "total C incl. vendored"
+  target of 25,000 code lines is exceeded by nghttp2 alone (20,281 code
+  lines by `tools/check-code-lines`' method, about 31k in all), under the
+  40,000 abort threshold, so the row reads as exceeded until W20 restates
+  it; and a streaming request body over HTTP/1.1 is a chunked request,
+  which D-78 forbade, so D-95 amends D-78 for that body alone. Nothing is
+  built; the roadmap gains M4 and W20–W22, blocked on M3.
