@@ -1171,3 +1171,13 @@ changed the plan or the design.
   now starts, is 92.6% on macOS, so the floors stand as set. New offline
   tests (`test-pull.R`, the chunked and HTTP/2 trailer limits in ctest)
   cover the R surface and the trailer error paths.
+- **2026-11-04 — W22's full profile: `zuh_pool_config_init()` left the
+  keepalive fields unset.** valgrind on #136 reported a conditional jump on
+  an uninitialised value in `entry_unusable()` (`zuh_pool.c`): W21 added
+  `keepalive_time_ms` and `keepalive_timeout_ms` to `zuh_pool_config` but
+  not to its init function, and `C_zu_pool_new()` keeps the config on its
+  stack, so a pool without keepalive read garbage when deciding whether to
+  PING. Merged in #135 on the quick profile, which has no valgrind. The init
+  now zeroes the whole struct first, so a field added later cannot repeat
+  it; a ctest case fills the struct with 0xA5 before init and fails without
+  the fix.

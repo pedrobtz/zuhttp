@@ -179,6 +179,12 @@ void suite_pool(void) {
 
     /* ---- §26.2 reuse and policy ---- */
 
+    ZUH_CASE("config_init sets every field: keepalive starts off (§65.6)");
+    memset(&cfg, 0xA5, sizeof cfg);   /* garbage, as an uninitialised stack has */
+    zuh_pool_config_init(&cfg);
+    ZUH_CHECK(cfg.keepalive_time_ms == 0);
+    ZUH_CHECK(cfg.keepalive_timeout_ms == 0);
+
     zuh_pool_config_init(&cfg);
     cfg.idle_timeout_ms = 30000;
     p = zuh_pool_new(&cfg);

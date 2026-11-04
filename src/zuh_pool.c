@@ -134,6 +134,9 @@ struct zuh_pool {
 
 void zuh_pool_config_init(zuh_pool_config *c) {
     if (!c) return;
+    /* Every field, including any added later, starts at zero, so a new one
+     * cannot be read uninitialised by a caller with the config on its stack. */
+    memset(c, 0, sizeof *c);
     c->max_idle        = 16;
     c->max_per_host    = 4;
     c->idle_timeout_ms = 30000;
