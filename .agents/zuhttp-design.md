@@ -2,7 +2,7 @@
 
 **Edition:** 2 — normative specification, rewritten 2026-09-25 after v0.1.0
 **Target:** R package, CRAN-compatible source package, C core
-**Scope:** HTTP/1.1 over HTTP and HTTPS, on each platform's own TLS stack and trust store; HTTP/2 after 1.0 (§65)
+**Scope:** HTTP/1.1 over HTTP and HTTPS, on each platform's own TLS stack and trust store; HTTP/2 from 0.1.0 (§65, D-96)
 **Companion:** [roadmap.md](roadmap.md) — milestones M0–M4 and work packages W1–W22
 **History:** [history/zuhttp-design-v1.md](history/zuhttp-design-v1.md) — edition 1 verbatim (4,330 lines), with every spike measurement and "how this landed" narrative
 
@@ -140,13 +140,14 @@ accepted when that work package's PR merges.
 | D-86 | **Only §34.1 classes reach R.** The stream signals `ZUH_ERR_CLOSED` and `ZUH_ERR_WOULDBLOCK` have no class and arrive as `zu_io_error`. On OpenSSL a TCP close without `close_notify` is end of stream while reading, as on Schannel and Network.framework (a truncated length-framed or chunked body is still caught by the framing), and a handshake failure during the handshake | Accepted 2026-10-30 (#99) | 18.1, 34.1 | — |
 | D-87 | `zu_redact_headers()` and `zu_redact_params()` **keep their names**: they register names to redact, as their titles say, and an alias with a configuring verb would grow the §53 export surface for no new behaviour | Accepted 2026-10-30 (#112) | 42.1, 53 | — |
 | D-88 | **JSON is `zujson`'s, in Imports; XML and HTML are `zuxml`'s and `zuhtml`'s, in Suggests.** `zujson` was written for zuhttp (raw bytes in and out, a documented type mapping, vendored parser, no R dependencies), so JSON works with nothing else installed and `zu_set_json_backend()` still replaces it. `zu_resp_xml()` and `zu_resp_html()` join 0.1.0. Supersedes D-25; amends D-54's "consumes no sibling" and §1's "no hard R dependencies" | Accepted 2026-10-30 | 1, 5.1, 31.7, 53 | — |
-| D-89 | **HTTP/2 after 1.0, through vendored nghttp2 `lib/`** (1.71.0, MIT; 23,133 raw lines of `.c`, 20,281 code lines by `tools/check-code-lines`' method, measured 2026-11-03). Supersedes §60's "not implemented" text: its four conditions are met by gRPC for Spark Connect (RFC 0069, RFC 0070). nghttp2 is vendored under §48, so it counts against §51.3's total-C row and never the project-owned row; HTTP/2 is written in project C under no circumstance (Appendix A.9) | Proposed (maintainer, 2026-11-03) | 60, 65, 48, 51.3 | W20 |
+| D-89 | **HTTP/2 through vendored nghttp2 `lib/`**, in 0.1.0 (D-96; this row first placed it after 1.0) (1.71.0, MIT; 23,133 raw lines of `.c`, 20,281 code lines by `tools/check-code-lines`' method, measured 2026-11-03). Supersedes §60's "not implemented" text: its four conditions are met by gRPC for Spark Connect (RFC 0069, RFC 0070). nghttp2 is vendored under §48, so it counts against §51.3's total-C row and never the project-owned row; HTTP/2 is written in project C under no circumstance (Appendix A.9) | Proposed (maintainer, 2026-11-03) | 60, 65, 48, 51.3 | W20 |
 | D-90 | **ALPN offers `h2` then `http/1.1` on every TLS connection by default**; `zuh_tls_config.alpn` becomes a list, and the negotiated protocol is reported by `zuh_tls_info`, `zu_resp_connection()` and `zu_info()`. Cleartext HTTP/2 (h2c) is prior knowledge only, on an explicit client option, and zuhttp never sends an `Upgrade: h2c` | Proposed | 65.1, 13.3, 15, 26.1 | W20 |
 | D-91 | **Response trailers are exposed** by `zu_resp_trailers(res, name = NULL)`, with `zu_resp_header()`'s semantics (D-16) and §40's limits, for HTTP/2 and chunked alike. Revises §18.2's "discarded". A Trailers-Only HTTP/2 response is headers with an empty body, never an error | Proposed | 65.3, 18.2, 40 | W21 |
 | D-92 | **A pull-based response stream, `zu_resp_read(res, n)`, is the one exception to §31.8**: `zu_perform(stream = TRUE)` returns after the headers, and the caller reads the body in bounded pieces, with `max_body` still enforced and the HTTP/2 window replenished as the caller reads. Mutually exclusive with `path` and `callback` (D-53) | Proposed | 65.4, 31.8, 27.1 | W21 |
-| D-93 | **`zu_resp_abort(res)` is the explicit cancellation**, after 1.0: `RST_STREAM(CANCEL)` on that stream with the connection kept poolable over HTTP/2, a closed connection over HTTP/1.1 (§26.3). A callback returning `FALSE` (§27.2) has the same meaning. Revises D-67's "not before 1.0" to "after 1.0" for this one token | Proposed | 65.5, 25.5, 27.2 | W21 |
+| D-93 | **`zu_resp_abort(res)` is the explicit cancellation**, from 0.1.0 (D-96): `RST_STREAM(CANCEL)` on that stream with the connection kept poolable over HTTP/2, a closed connection over HTTP/1.1 (§26.3). A callback returning `FALSE` (§27.2) has the same meaning. Revises D-67's "not before 1.0" to "in 0.1.0" for this one token | Proposed | 65.5, 25.5, 27.2 | W21 |
 | D-94 | **Keepalive PING** on idle HTTP/2 connections, `zu_pool(keepalive_time, keepalive_timeout)`, replaces the §26.2 readability probe for them: an idle h2 connection with no PING ACK inside `keepalive_timeout` is evicted | Proposed | 65.6, 26.2 | W21 |
 | D-95 | **A streaming request body** (a function yielding raw vectors), after W21, for client-streaming gRPC. Revises §28's "not planned"; amends D-78 and §17.4 for this body alone, which is sent chunked over HTTP/1.1. Not rewindable (§28.2), so never retried or replayed across a 307/308 | Proposed | 65.7, 28, 17.4 | W22 |
+| D-96 | **HTTP/2 ships in 0.1.0, the first CRAN submission**, not in 1.1.0 after 1.0 as D-89 first placed it. `zugrpc` and `zuspark` would otherwise wait on four more zuhttp releases at CRAN's six-week floor and on the 1.0 gate's external review; nothing in M1–M3 is a prerequisite of W20–W22, which touch the engine, pool and response object that exist now. Extends D-82's M0 list with W20, W21 and W22, and the 1.0 security review (W19) covers nghttp2 and the driver. D-89 to D-95 keep their content and only their timing changes. Cost accepted: the first submission carries a vendored library of about 20k code lines, and R-19's fallback (HTTP/2 off on a flavour whose symbol scan fails) must hold before submitting, not after | Accepted (maintainer, 2026-11-04) | 60, 65, 57 | W20, W21, W22 |
 
 ---
 
@@ -239,7 +240,7 @@ Unix-domain sockets (§59).
 
 | Not supported | Why, and what to do instead |
 |---|---|
-| HTTP/3 | §60. HTTP/2 is planned after 1.0 (§65). |
+| HTTP/3 | §60. HTTP/2 is planned for 0.1.0 (§65, D-96). |
 | WebSockets | Different lifecycle; a separate package could reuse the stream layer. |
 | Persistent cookie jars | §22. |
 | HSTS persistence, Alt-Svc, DNS-over-HTTPS | Durable client state; system resolvers are the predictable default. |
@@ -1192,7 +1193,7 @@ Retired: see edition 1 §27.6.
 ### 28. Request Body Sources
 
 **Status:** Built for memory and file bodies; a streaming request body is
-Planned (W22), after 1.0 (D-95, §65.7).
+Planned (W22), in 0.1.0 (D-95, D-96, §65.7).
 
 #### 28.1 Framing
 
@@ -1966,7 +1967,8 @@ satellite, D-54).
 **Status:** Planned (W20–W22) — decided 2026-11-03 (D-89); the
 specification is §65.
 
-HTTP/2 is built after 1.0, as the 1.1.0 minor, by vendoring nghttp2's
+HTTP/2 ships in 0.1.0, the first CRAN release (D-96; D-89 first placed it
+after 1.0, as the 1.1.0 minor), by vendoring nghttp2's
 `lib/` (§48). The four conditions this section set in edition 1 — a real R
 workload, parallel HTTP/1.1 insufficient, a small dependency-free library,
 the size budget holding — are each met, and the section records how rather
@@ -2077,7 +2079,7 @@ remaining estimate sits.
 **Status:** Planned (W20–W22) — D-89 to D-95, decided 2026-11-03; nothing
 below is built, and every number not marked measured is unmeasured.
 
-HTTP/2 is the 1.1.0 minor, after 1.0 (roadmap M4). It exists so that
+HTTP/2 ships in 0.1.0 (D-96; roadmap M0, W20–W22). It exists so that
 `zugrpc` can be a gRPC client in R on zuhttp's request API and `zuspark` a
 Spark Connect client on `zugrpc` (§65.9). It MUST change nothing for a
 caller who never asks for it: a request to a server that does not negotiate
@@ -2346,4 +2348,4 @@ R-14 is unused.
 | R-11 | No adopter | Medium | Medium | ship 0.2.0 to real users; ask | no interest by M2 → stop at M2, do not take on §46 |
 | R-16 | Untested merges: same-repository PRs get no CI | **Certain** today | High | W1 (D-70) | — |
 | R-17 | Helper-thread DNS (D-59) touches R or leaks without bound | Low | High | never calls R; cap of 8 abandoned lookups; W14 tests under TSan | any R API from the thread → revert to D-30 |
-| R-19 | An nghttp2 security advisory lands after 1.1 ships; or a patched nghttp2 object fails `R CMD check`'s symbol scan on one CRAN flavour | Medium | High | §46.2 watch; `tools/update-nghttp2` re-applies the §48 patches; W20's first exit criterion is the scan on every §52 leg | scan fails on a flavour W20 cannot reach → HTTP/2 off on that flavour, stated in `zu_info()$http` and the README |
+| R-19 | An nghttp2 security advisory lands after 0.1.0 ships; or a patched nghttp2 object fails `R CMD check`'s symbol scan on one CRAN flavour | Medium | High | §46.2 watch; `tools/update-nghttp2` re-applies the §48 patches; W20's first exit criterion is the scan on every §52 leg | scan fails on a flavour W20 cannot reach → HTTP/2 off on that flavour, stated in `zu_info()$http` and the README |
