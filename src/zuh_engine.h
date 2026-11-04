@@ -45,6 +45,9 @@ typedef struct {
     size_t             n_headers;
     const void        *body;           /* NULL => no body */
     size_t             body_len;
+    /* §65.7: a streamed body instead of `body`. The engine takes ownership
+     * and calls source.release once, whatever the outcome. */
+    zuh_body_source    source;
 } zuh_req_spec;
 
 typedef struct {
@@ -156,6 +159,10 @@ int  zuh_open_body_done(const zuh_open_body *b);   /* all read, failed or aborte
 const zuh_headers *zuh_open_body_trailers(const zuh_open_body *b);
 /* Aborts first if the body is still open. */
 void zuh_open_body_free(zuh_open_body *b);
+/* §65.7: the ctx of the request-body source a pulled body inherited, so
+ * the R layer can re-raise a condition the body function raised; NULL when
+ * there is none. */
+void *zuh_open_body_source_ctx(const zuh_open_body *b);
 
 void zuh_get_opts_init(zuh_get_opts *o);
 

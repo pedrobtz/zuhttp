@@ -124,7 +124,8 @@ zu_transport_perform.zu_native_transport <- function(transport, req) {
       zu_redact_opt("zuhttp.redact_headers")
     ),
     p$http2 %||% "auto",
-    isTRUE(req$stream)
+    isTRUE(req$stream),
+    req$body_stream
   )
   # §27.1: by here the sink has been committed, so the destination is a fact
   # about this response rather than something that was merely asked for. Set
@@ -159,6 +160,7 @@ timeout_ms <- function(seconds) {
 
 #' @export
 zu_transport_perform.zu_mock_transport <- function(transport, req) {
+  req <- collect_body_stream(req)
   if (!is.null(transport$state)) {
     stubs <- transport$state$stubs
     for (i in seq_along(stubs)) {
@@ -187,6 +189,32 @@ zu_transport_perform.zu_mock_transport <- function(transport, req) {
     )
   }
   check_mock_response(transport$handler(req))
+}
+
+# §65.7: a mock has no wire, so a streamed body is collected into an ordinary
+# one before the handler or a stub sees it; the handler sees what was sent.
+collect_body_stream <- function(req) {
+  f <- req$body_stream
+  if (is.null(f)) {
+    return(req)
+  }
+  pieces <- list()
+  repeat {
+    p <- f()
+    if (is.null(p)) {
+      break
+    }
+    if (!is.raw(p)) {
+      stop(
+        "the request body function must return a raw vector, or NULL at the end",
+        call. = FALSE
+      )
+    }
+    pieces[[length(pieces) + 1L]] <- p
+  }
+  req$body <- if (length(pieces)) do.call(c, pieces) else raw()
+  req$body_stream <- NULL
+  req
 }
 
 check_mock_response <- function(resp) {

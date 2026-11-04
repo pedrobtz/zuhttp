@@ -19,6 +19,7 @@
 #include "zuh_error.h"
 #include "zuh_redact.h"
 #include "zuh_buffer.h"
+#include "zuh_alloc.h"
 #include "zuh_engine.h"
 #include "zuh_headers.h"
 #include "zuh_tls.h"
@@ -56,6 +57,85 @@ typedef struct {
 } cb_ctx;
 
 typedef struct { cb_ctx *c; SEXP chunk; } cb_call;
+
+/* --- §65.7 a request body from an R function -----------------------------
+ *
+ * The engine calls next() while it sends, which over HTTP/2 is from inside
+ * nghttp2's data provider, so f must never longjmp through C: the call is
+ * made under R_tryCatch as cb_write's is (§27.3), and a condition is kept and
+ * re-raised once the engine has unwound. The engine owns the source and calls
+ * release() once. When C_zu_perform is still on the stack, release() frees
+ * the function and the buffer and leaves the context, whose condition
+ * C_zu_perform re-raises; when a pulled body inherited the source (`detached`,
+ * full duplex over HTTP/2), release() frees all of it. */
+typedef struct {
+    SEXP       fn;          /* preserved */
+    SEXP       caught;      /* preserved condition, or NULL */
+    zuh_buffer piece;       /* the last piece, valid until the next call */
+    int        released, detached;
+} src_ctx;
+
+static SEXP src_body(void *data) {
+    SEXP call = PROTECT(Rf_lang1(((src_ctx *)data)->fn));
+    SEXP res = Rf_eval(call, R_GlobalEnv);
+    UNPROTECT(1);
+    return res;
+}
+
+static SEXP src_handler(SEXP cond, void *data) {
+    src_ctx *c = (src_ctx *)data;
+    if (!c->caught) { R_PreserveObject(cond); c->caught = cond; }
+    return R_NilValue;
+}
+
+static zuh_code src_next(void *ctx, const void **data, size_t *len, zuh_error *err) {
+    src_ctx *c = (src_ctx *)ctx;
+    SEXP classes, res;
+    if (c->caught) return ZUH_ERR_CANCELLED;
+    classes = PROTECT(Rf_allocVector(STRSXP, 2));
+    SET_STRING_ELT(classes, 0, Rf_mkChar("error"));
+    SET_STRING_ELT(classes, 1, Rf_mkChar("interrupt"));
+    res = PROTECT(R_tryCatch(src_body, c, classes, src_handler, c, NULL, NULL));
+    if (c->caught) {
+        UNPROTECT(2);
+        zuh_error_set(err, ZUH_ERR_CANCELLED, ZUH_PHASE_WRITE,
+                      "the request body function raised a condition");
+        return ZUH_ERR_CANCELLED;
+    }
+    if (res == R_NilValue) { UNPROTECT(2); *len = 0; return ZUH_OK; }
+    if (TYPEOF(res) != RAWSXP) {
+        UNPROTECT(2);
+        zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_WRITE,
+                      "the request body function must return a raw vector, or NULL at the end");
+        return ZUH_ERR_PARSE;
+    }
+    c->piece.len = 0;
+    if (XLENGTH(res) && !zuh_buf_append(&c->piece, RAW(res), (size_t)XLENGTH(res))) {
+        UNPROTECT(2);
+        zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_WRITE, "out of memory");
+        return ZUH_ERR_NOMEM;
+    }
+    UNPROTECT(2);
+    /* An empty raw vector is a piece of nothing, not the end: ask again. */
+    if (c->piece.len == 0) return src_next(ctx, data, len, err);
+    *data = c->piece.data;
+    *len = c->piece.len;
+    return ZUH_OK;
+}
+
+static void src_free_all(src_ctx *c) {
+    if (c->caught) R_ReleaseObject(c->caught);
+    zuh_free(c);
+}
+
+static void src_release(void *ctx) {
+    src_ctx *c = (src_ctx *)ctx;
+    if (c->released) return;
+    c->released = 1;
+    R_ReleaseObject(c->fn);
+    zuh_buf_free(&c->piece);
+    if (c->detached) src_free_all(c);
+}
 
 static SEXP cb_body(void *data) {
     cb_call *cc = (cb_call *)data;
@@ -631,7 +711,8 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
                          SEXP max_redirects, SEXP verify, SEXP max_body,
                          SEXP user_agent, SEXP decode, SEXP pool,
                          SEXP path, SEXP callback, SEXP proxy, SEXP tls,
-                         SEXP trace, SEXP redact, SEXP http2, SEXP stream) {
+                         SEXP trace, SEXP redact, SEXP http2, SEXP stream,
+                         SEXP body_stream) {
     zuh_get_opts o;
     tick_ctx tick = { NULL };
     zuh_req_spec spec;
@@ -677,6 +758,20 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
         spec.n_headers     = (size_t)nh;
     }
 
+    if (Rf_isFunction(body_stream)) {
+        /* Allocated outside R's heap and preserved: the engine, or a pulled
+         * body after this .Call returns, owns it (see src_ctx). */
+        src_ctx *sc = (src_ctx *)zuh_calloc(1, sizeof *sc);
+        if (!sc || !zuh_buf_init(&sc->piece, 0, (size_t)-1)) {
+            zuh_free(sc);
+            Rf_error("out of memory");
+        }
+        sc->fn = body_stream;
+        R_PreserveObject(body_stream);
+        spec.source.next = src_next;
+        spec.source.release = src_release;
+        spec.source.ctx = sc;
+    }
     if (body != R_NilValue) {
         if (TYPEOF(body) != RAWSXP)
             Rf_error("body must be a raw vector; the R layer serialises everything else");
@@ -790,6 +885,33 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
         g_tick_current = &tick;
         rc = zuh_engine_perform(&r, u, &spec, &o, &e);
         g_tick_current = prev;
+    }
+
+    /* §65.7: the engine has released the body source, unless the pulled
+     * body inherited it. Either way it is no longer this frame's to free;
+     * a condition the body function raised is, and goes first. */
+    if (spec.source.ctx) {
+        src_ctx *sc = (src_ctx *)spec.source.ctx;
+        if (!sc->released) {
+            sc->detached = 1;           /* the pulled body frees it */
+        } else {
+            SEXP cond = sc->caught;
+            sc->caught = NULL;
+            src_free_all(sc);
+            spec.source.ctx = NULL;
+            if (cond) {
+                SEXP call;
+                tick_release(&tick);
+                if (o.sink && o.sink != &cb_sink) { zuh_sink_abort(o.sink); zuh_sink_free(o.sink); }
+                zuh_result_free(&r);
+                PROTECT(cond);
+                R_ReleaseObject(cond);
+                call = PROTECT(Rf_lang2(Rf_install("stop"), cond));
+                Rf_eval(call, R_GlobalEnv);
+                UNPROTECT(2);
+                return R_NilValue;   /* not reached */
+            }
+        }
     }
 
     /* §27.3: the loop has unwound and every C resource it held is released,
@@ -1113,7 +1235,21 @@ static SEXP C_zu_stream_read(SEXP ptr, SEXP n, SEXP url) {
         g_tick_current = prev;
     }
     if (rc != ZUH_OK) {
+        src_ctx *sc = (src_ctx *)zuh_open_body_source_ctx(b);
         zuh_buf_free(&got);
+        /* §65.7: the request body function, still running under a full
+         * duplex stream, raised a condition: that is the one to see. */
+        if (sc && sc->caught) {
+            SEXP cond = PROTECT(sc->caught);
+            SEXP call;
+            R_ReleaseObject(cond);
+            sc->caught = NULL;
+            tick_release(&tick);
+            call = PROTECT(Rf_lang2(Rf_install("stop"), cond));
+            Rf_eval(call, R_GlobalEnv);
+            UNPROTECT(2);
+            return R_NilValue;
+        }
         if (rc == ZUH_ERR_CANCELLED && tick.caught &&
             !Rf_inherits(tick.caught, "interrupt")) {
             SEXP cond = PROTECT(tick.caught);
@@ -1175,7 +1311,7 @@ static const R_CallMethodDef call_methods[] = {
     {"C_zu_redact_form",       (DL_FUNC) &C_zu_redact_form,       2},
     {"C_zu_is_secret_header",  (DL_FUNC) &C_zu_is_secret_header,  2},
     {"C_zu_is_secret_param",   (DL_FUNC) &C_zu_is_secret_param,   2},
-    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          20},
+    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          21},
     {"C_zu_stream_read",       (DL_FUNC) &C_zu_stream_read,       3},
     {"C_zu_stream_abort",      (DL_FUNC) &C_zu_stream_abort,      1},
     {"C_zu_stream_trailers",   (DL_FUNC) &C_zu_stream_trailers,   1},

@@ -18,6 +18,9 @@ vendors.
     GET  /sent      that count, as JSON; /sent?reset=1 zeroes it
     GET  /slow      a few bytes, then nothing for 30 seconds
     GET  /trailers  "x", then the trailer field grpc-status: 0 (HTTP/2)
+    POST /check     reads the body without keeping it; JSON: how many bytes,
+                    and whether byte k was k % 251 for every k (an order
+                    check for streamed uploads), and the HTTP version
 
 tests/testthat/test-http2.R reads ZU_H2_TEST_SERVER (the h2c base URL),
 ZU_H2_TEST_TLS (the TLS base URL) and ZU_H2_TEST_CA (the certificate to
@@ -77,6 +80,23 @@ async def app(scope, receive, send):
         await send({"type": "http.response.body", "body": b"x"})
         await send({"type": "http.response.trailers", "more_trailers": False,
                     "headers": [(b"grpc-status", b"0"), (b"grpc-message", b"ok")]})
+        return
+    if scope["path"] == "/check":
+        total, ordered = 0, True
+        while True:
+            msg = await receive()
+            chunk = msg.get("body", b"")
+            if ordered and chunk:
+                expect = bytes((total + k) % 251 for k in range(len(chunk)))
+                ordered = chunk == expect
+            total += len(chunk)
+            if not msg.get("more_body"):
+                break
+        out = json.dumps({"bytes": total, "ordered": ordered,
+                          "http_version": scope["http_version"]}).encode()
+        await send({"type": "http.response.start", "status": 200,
+                    "headers": [(b"content-type", b"application/json")]})
+        await send({"type": "http.response.body", "body": out})
         return
     body = b""
     while True:

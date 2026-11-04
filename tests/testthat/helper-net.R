@@ -197,3 +197,24 @@ mock_client <- function(
     })
   )
 }
+
+# §65.7 (test-http2.R, test-pull.R): a body function producing `total` bytes
+# in pieces of `piece`, byte k being k %% 251, which tools/h2-test-server.py's
+# /check verifies in order. Returns the function; `calls()` on its
+# environment counts how often it was asked.
+pattern_body <- function(total, piece) {
+  pos <- 0
+  n_calls <- 0L
+  f <- function() {
+    n_calls <<- n_calls + 1L
+    if (pos >= total) {
+      return(NULL)
+    }
+    n <- min(piece, total - pos)
+    out <- as.raw((pos + seq_len(n) - 1) %% 251)
+    pos <<- pos + n
+    out
+  }
+  attr(f, "calls") <- function() n_calls
+  f
+}

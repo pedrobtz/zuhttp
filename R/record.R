@@ -164,6 +164,9 @@ print.zu_cassette_transport <- function(x, ...) {
 
 #' @export
 zu_transport_perform.zu_cassette_transport <- function(transport, req) {
+  # §65.7: a cassette records and matches bodies, so a streamed one is
+  # collected first, as for zu_mock_transport().
+  req <- collect_body_stream(req)
   rr <- cassette_request(req)
   key <- interaction_key(rr)
   tape <- cassette_read(transport$dir, transport$name)

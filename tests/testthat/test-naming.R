@@ -76,12 +76,12 @@ test_that("response accessors use the zu_resp_ prefix (D-1)", {
   expect_true(all(grepl("^zu_resp_[a-z_]+$", resp)))
 })
 
-test_that("the export surface is D-65's 61, D-88's 2 and W21's 3, none of the 14 removed", {
+test_that("the export surface is D-65's 61, D-88's 2, W21's 3 and W22's 1, none of the 14 removed", {
   # From 0.1.0 on, an export goes only through a deprecation release (§53), so
   # an accidental @export is a commitment. This makes adding one a decision.
   exports <- getNamespaceExports("zuhttp")
   exports <- exports[!grepl(".", exports, fixed = TRUE)]
-  expect_length(exports, 66L)
+  expect_length(exports, 67L)
   expect_true(all(c("zu_resp_xml", "zu_resp_html") %in% exports))
   # §65.3-§65.5, D-91 to D-93.
   expect_true(all(

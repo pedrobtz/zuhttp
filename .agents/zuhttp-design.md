@@ -146,7 +146,7 @@ accepted when that work package's PR merges.
 | D-92 | **A pull-based response stream, `zu_resp_read(res, n)`, is the one exception to §31.8**: `zu_perform(stream = TRUE)` returns after the headers, and the caller reads the body in bounded pieces, with `max_body` still enforced and the HTTP/2 window replenished as the caller reads. Mutually exclusive with `path` and `callback` (D-53) | Accepted (built in W21, 2026-11-04) | 65.4, 31.8, 27.1 | W21 |
 | D-93 | **`zu_resp_abort(res)` is the explicit cancellation**, from 0.1.0 (D-96): `RST_STREAM(CANCEL)` on that stream with the connection kept poolable over HTTP/2, a closed connection over HTTP/1.1 (§26.3). A callback returning `FALSE` (§27.2) has the same meaning. Revises D-67's "not before 1.0" to "in 0.1.0" for this one token | Accepted (built in W21, 2026-11-04) | 65.5, 25.5, 27.2 | W21 |
 | D-94 | **Keepalive PING** on idle HTTP/2 connections, `zu_pool(keepalive_time, keepalive_timeout)`, replaces the §26.2 readability probe for them: an idle h2 connection with no PING ACK inside `keepalive_timeout` is evicted | Accepted (built in W21, 2026-11-04) | 65.6, 26.2 | W21 |
-| D-95 | **A streaming request body** (a function yielding raw vectors), after W21, for client-streaming gRPC. Revises §28's "not planned"; amends D-78 and §17.4 for this body alone, which is sent chunked over HTTP/1.1. Not rewindable (§28.2), so never retried or replayed across a 307/308 | Proposed | 65.7, 28, 17.4 | W22 |
+| D-95 | **A streaming request body** (a function yielding raw vectors), after W21, for client-streaming gRPC. Revises §28's "not planned"; amends D-78 and §17.4 for this body alone, which is sent chunked over HTTP/1.1. Not rewindable (§28.2), so never retried or replayed across a 307/308 | Accepted (built in W22, 2026-11-04) | 65.7, 28, 17.4 | W22 |
 | D-96 | **HTTP/2 ships in 0.1.0, the first CRAN submission**, not in 1.1.0 after 1.0 as D-89 first placed it. `zugrpc` and `zuspark` would otherwise wait on four more zuhttp releases at CRAN's six-week floor and on the 1.0 gate's external review; nothing in M1–M3 is a prerequisite of W20–W22, which touch the engine, pool and response object that exist now. Extends D-82's M0 list with W20, W21 and W22, and the 1.0 security review (W19) covers nghttp2 and the driver. D-89 to D-95 keep their content and only their timing changes. Cost accepted: the first submission carries a vendored library of about 20k code lines, and R-19's fallback (HTTP/2 off on a flavour whose symbol scan fails) must hold before submitting, not after | Accepted (maintainer, 2026-11-04) | 60, 65, 57 | W20, W21, W22 |
 | D-97 | **The project-owned C budget is 10,000 code lines**, raised from 8,000; the abort threshold stays at 12,000. HTTP/2 (D-96) brought the 8,000 into 0.1.0 with W20 at 7,989 and W21, W22 and M1 still to add: about 500 lines for the HTTP/2 accessors, keepalive and the streaming body (W20 cost about 200 around a 450-line driver), and the §51.3 estimate of 900 for W7–W14, so about 9,400. 10,000 holds that with a margin; raising it to 12,000 would remove the warning R-4 exists to give. The budget is a trigger to cut, not a target to fill | Accepted (maintainer, 2026-11-04) | 51.3, 61, B (R-4) | W20 |
 
@@ -1211,8 +1211,8 @@ Retired: see edition 1 §27.6.
 
 ### 28. Request Body Sources
 
-**Status:** Built for memory and file bodies; a streaming request body is
-Planned (W22), in 0.1.0 (D-95, D-96, §65.7).
+**Status:** Built: memory and file bodies, and since W22 (2026-11-04) a
+streamed body from a function, `zu_body_stream()` (D-95, §65.7).
 
 #### 28.1 Framing
 
@@ -1929,9 +1929,9 @@ version R supports; HTTPS through a proxy needs macOS 14 (D-63).
 
 **Status:** Built (W3).
 
-Only the R API is stable. 0.1.0 exports 66 functions: the 63 below, and
-since W21 `zu_resp_read()`, `zu_resp_abort()` and `zu_resp_trailers()`
-(§65.3–§65.5). The 63 are D-65's 61, trimmed from 75
+Only the R API is stable. 0.1.0 exports 67 functions: the 63 below, since
+W21 `zu_resp_read()`, `zu_resp_abort()` and `zu_resp_trailers()`
+(§65.3–§65.5), and since W22 `zu_body_stream()` (§65.7). The 63 are D-65's 61, trimmed from 75
 by exactly these 14 removals: the six `zu_client_*` verb wrappers are removed;
 `zu_transport_perform`, `zu_native_transport`, `zu_error_codes`,
 `zu_code_retryable`, `zu_is_secret_header`, `zu_is_secret_param`,
@@ -2001,8 +2001,8 @@ satellite, D-54).
 
 ### 60. HTTP/2 Policy
 
-**Status:** W20 built (negotiation, session model, 2026-11-04); W21–W22
-planned — decided 2026-11-03 (D-89); the specification is §65.
+**Status:** Built (W20–W22, 2026-11-04) — decided 2026-11-03 (D-89),
+shipped in 0.1.0 (D-96); the specification is §65.
 
 HTTP/2 ships in 0.1.0, the first CRAN release (D-96; D-89 first placed it
 after 1.0, as the 1.1.0 minor), by vendoring nghttp2's
@@ -2113,9 +2113,9 @@ remaining estimate sits.
 
 ### 65. HTTP/2
 
-**Status:** §65.1, §65.2 and the W20 half of §65.8 Built (W20, 2026-11-04);
-§65.3–§65.7 Planned (W21, W22) — D-89 to D-95, decided 2026-11-03. Every
-number not marked measured is unmeasured.
+**Status:** Built — §65.1, §65.2 (W20), §65.3–§65.6 (W21) and §65.7 (W22),
+2026-11-04; D-89 to D-95 Accepted. Every number not marked measured is
+unmeasured.
 
 HTTP/2 ships in 0.1.0 (D-96; roadmap M0, W20–W22). It exists so that
 `zugrpc` can be a gRPC client in R on zuhttp's request API and `zuspark` a
@@ -2334,7 +2334,7 @@ readability probe.
 
 #### 65.7 Streaming request body
 
-**Status:** Planned (W22), D-95 — after W21, for client-streaming gRPC.
+**Status:** Built (W22, 2026-11-04), D-95.
 
 `zu_body_stream(req, f)` takes a function that returns the next raw vector
 and `NULL` at the end. Over HTTP/2 the driver sends each piece as DATA under
@@ -2342,8 +2342,19 @@ the peer's window and ends the stream after `NULL`; over HTTP/1.1 it sends
 chunked, the one case in which zuhttp chunks a request (D-78 is amended by
 D-95 for this body alone). The body is not rewindable (§28.2), so a retry or
 a 307/308 raises `zu_body_not_replayable`. `f` runs on R's thread under the
-§27.3 rules. Half-close for a bidirectional call — a request body still open
-while the response streams — is W22's exit criterion, not an assumption.
+§27.3 rules: its errors and interrupts are caught at the call and re-raised,
+unchanged, once the engine has unwound, and the connection is closed, never
+pooled (D-47). An empty raw vector is a piece of nothing, not the end.
+
+Half-close works for a bidirectional call. With `zu_perform(stream = TRUE)`
+the call returns once the response headers are in, possibly before `f` has
+produced the whole body; the pulled body then owns `f`, and every
+`zu_resp_read()` sends what the peer's window allows before it reads, so
+neither side waits on the other. Shown against grpc-go's `FullDuplexCall`
+with a 6.4 MB body, past the server's window.
+
+A mock or cassette transport has no wire, so it collects the pieces into an
+ordinary body before the handler sees it.
 
 #### 65.8 Conformance
 

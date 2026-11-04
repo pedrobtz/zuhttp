@@ -703,6 +703,9 @@ struct zuh_open_body {
     size_t          staged_off;
     long            timeout_ms;
     int             ended, aborted, failed;
+    /* §65.7: a request body still being sent while the response streams
+     * (full duplex); released when this body is freed. */
+    zuh_body_source src;
 };
 
 /* Give the connection back, or close it, exactly once. */
@@ -826,13 +829,22 @@ void zuh_open_body_free(zuh_open_body *b) {
     zuh_body_pipe_free(&b->pipe);
     zuh_buf_free(&b->staged);
     if (b->have_key) zuh_pool_key_free(&b->key);
+    if (b->src.release) b->src.release(b->src.ctx);
     zuh_free(b);
+}
+
+void *zuh_open_body_source_ctx(const zuh_open_body *b) {
+    return b ? b->src.ctx : NULL;
 }
 
 static zuh_code perform_hops(zuh_result *out, const char *url,
                              const zuh_req_spec *req, const zuh_get_opts *o,
-                             zuh_redirect_trail *trail, zuh_error *err) {
+                             zuh_redirect_trail *trail, zuh_body_source *src,
+                             zuh_error *err) {
     zuh_get_opts defaults;
+    /* §65.7: a streamed body is sent on the first hop only; it cannot be
+     * replayed, so a redirect that would resend it is refused below. */
+    int src_live = src && src->next;
     zuh_uri cur;
     zuh_deadline total;
     size_t hops = 0;
@@ -999,7 +1011,11 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
                 }
             }
         }
-        if (body_len > 0) {
+        if (src_live) {
+            /* D-95: the one request zuhttp chunks (HTTP/1.1; HTTP/2 frames
+             * it as DATA), since its length is not known in advance. */
+            rq.body = ZUH_BODY_CHUNKED;
+        } else if (body_len > 0) {
             rq.body           = ZUH_BODY_LENGTH;
             rq.content_length = (uint64_t)body_len;
         } else {
@@ -1107,6 +1123,25 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
             if (rc == ZUH_OK && wire.len &&
                 !zuh_stream_write_all(s, wire.data, wire.len, total, err))
                 rc = err->code ? err->code : ZUH_ERR_IO;
+            /* §65.7 over HTTP/1.1: each piece as one chunk, then the last
+             * chunk. A failure leaves the request half-sent, so the
+             * connection is closed below, never pooled (D-47). */
+            while (rc == ZUH_OK && src_live) {
+                const void *d = NULL;
+                size_t l = 0;
+                char hex[24];
+                rc = src->next(src->ctx, &d, &l, err);
+                if (rc != ZUH_OK) break;
+                snprintf(hex, sizeof hex, "%lx\r\n", (unsigned long)l);
+                if (!zuh_stream_write_all(s, hex, strlen(hex), total, err) ||
+                    (l && !zuh_stream_write_all(s, d, l, total, err)) ||
+                    !zuh_stream_write_all(s, "\r\n", 2, total, err)) {
+                    rc = err->code ? err->code : ZUH_ERR_IO;
+                    break;
+                }
+                sent_bytes += l;
+                if (l == 0) break;
+            }
             if (rc == ZUH_OK) {
                 out->timings.request_write = (long)(zuh_now_ms() - t_start);
                 zuh_trace_add(o->trace, ZUH_EV_REQUEST_SENT, method, (uint64_t)sent_bytes);
@@ -1138,6 +1173,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
             hr.headers   = &rq.headers;
             hr.body      = body_len ? body : NULL;
             hr.body_len  = body_len;
+            hr.source    = src_live ? src : NULL;
             rc = zuh_h2_begin(s, &hr, &resp.status, &resp.headers, &bodiless, total, err);
             zuh_request_free(&rq);
             if (rc == ZUH_OK) {
@@ -1218,7 +1254,17 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
                                    &resp.headers, resp.minor_version, cap,
                                    o->no_decode || resp.framing.kind == ZUH_FRAME_NONE,
                                    o, &cur, &px, err);
-                if (rc == ZUH_OK) { s = NULL; streamed = 1; }
+                if (rc == ZUH_OK) {
+                    s = NULL;
+                    streamed = 1;
+                    /* §65.7: over HTTP/2 the request body may still be
+                     * going out as the response streams; the pulled body
+                     * keeps the source alive and releases it. */
+                    if (use_h2 && src_live) {
+                        out->open->src = *src;
+                        memset(src, 0, sizeof *src);
+                    }
+                }
             }
             if (!streamed && rc == ZUH_OK)
                 rc = zuh_body_pipe_init(&pipe, hop_sink, &resp.headers,
@@ -1344,6 +1390,19 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
                  * expects. */
                 if (dec.rewrite_to_get) { method = "GET"; is_head = 0; }
                 if (dec.drop_body) { body = NULL; body_len = 0; }
+                /* §28.2, §65.7: a streamed body has been sent and cannot
+                 * be sent again; a 307/308 that would resend it is refused
+                 * rather than sent short. A 303 drops it, as it drops any
+                 * body. */
+                if (src_live && !dec.drop_body) {
+                    zuh_error_set(err, ZUH_ERR_BODY_NOT_REPLAYABLE, ZUH_PHASE_NONE,
+                                  "a %d redirect would resend a streamed request body, "
+                                  "which cannot be replayed", out->status);
+                    zuh_uri_free(&next); zuh_uri_free(&cur); zuh_result_free(out);
+                    zuh_proxy_free(&px);
+                    return ZUH_ERR_BODY_NOT_REPLAYABLE;
+                }
+                src_live = 0;
                 if (dec.strip_credentials) strip_creds = 1;
                 zuh_uri_free(&cur);
                 cur = next;
@@ -1424,10 +1483,15 @@ zuh_code zuh_engine_perform(zuh_result *out, const char *url,
                           zuh_error *err) {
     zuh_redirect_trail trail;
     zuh_code rc;
+    zuh_body_source src;
     if (err) zuh_error_clear(err);   /* a stale code would hide a bare failure */
+    /* §65.7: the engine owns the source from here; released once, below,
+     * unless a pulled body took it over. */
+    if (req) src = req->source; else memset(&src, 0, sizeof src);
     zuh_redirect_trail_init(&trail);
-    rc = perform_hops(out, url, req, o, &trail, err);
+    rc = perform_hops(out, url, req, o, &trail, &src, err);
     zuh_redirect_trail_free(&trail);
+    if (src.release) src.release(src.ctx);
     /* Every failure carries a filled error object (§34.4). Dozens of exits
      * return ZUH_ERR_NOMEM bare; one place says so for all of them, rather
      * than leaving init.c's "request failed" fallback to guess. */

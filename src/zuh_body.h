@@ -65,6 +65,19 @@ zuh_code zuh_body_pipe_feed(zuh_body_pipe *p, const void *data, size_t n,
  * (§65.2), which feeds the pipe itself, calls it at END_STREAM. */
 zuh_code zuh_body_pipe_finish(zuh_body_pipe *p, zuh_error *err);
 
+/* §28, §65.7, D-95: a request body produced a piece at a time, by a
+ * function the caller supplies (R's zu_body_stream()). `next` sets *data and
+ * *len to the next piece, which stays valid until the following call, and
+ * *len to 0 at the end; anything but ZUH_OK stops the request. `release`
+ * frees `ctx`, and is called exactly once, by whoever owns the source last:
+ * the engine, or the pulled body it was handed to (§65.4). A source is not
+ * rewindable, so it is never replayed (§28.2). */
+typedef struct {
+    zuh_code (*next)(void *ctx, const void **data, size_t *len, zuh_error *err);
+    void     (*release)(void *ctx);
+    void      *ctx;
+} zuh_body_source;
+
 /* One response body under one framing, read a step at a time (§65.4).
  * zuh_body_read() loops over the steps; a pulled body takes them one by one.
  * `seed` is copied, so the caller's buffer need not outlive the reader. */
