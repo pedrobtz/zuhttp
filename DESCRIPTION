@@ -14,10 +14,18 @@ Authors@R: c(
     person("Weijia", "Song", role = "cph",
            comment = "uriparser, see inst/COPYRIGHTS"),
     person("Sebastian", "Pipping", role = "cph",
-           comment = "uriparser, see inst/COPYRIGHTS")
+           comment = "uriparser, see inst/COPYRIGHTS"),
+    person("Tatsuhiro", "Tsujikawa", role = "cph",
+           comment = "nghttp2, see inst/COPYRIGHTS"),
+    person(, "nghttp2 contributors", role = "cph",
+           comment = "nghttp2, see inst/COPYRIGHTS"),
+    person(, "sfparse contributors", role = "cph",
+           comment = "sfparse within nghttp2, see inst/COPYRIGHTS"),
+    person(, "nghttp3 contributors", role = "cph",
+           comment = "sfparse within nghttp2, see inst/COPYRIGHTS")
   )
-Description: A small client for the Hypertext Transfer Protocol (HTTP/1.1),
-    over plain connections and over Transport Layer Security (TLS), that uses
+Description: A small client for the Hypertext Transfer Protocol (HTTP/1.1 and
+    HTTP/2), over plain connections and over Transport Layer Security (TLS), that uses
     the operating system's own TLS implementation and certificate trust store
     instead of a bundled cryptography library or certificate bundle:
     'Schannel' on 'Windows', Apple's native TLS on 'macOS', and 'OpenSSL'
@@ -49,4 +57,4 @@ BugReports: https://github.com/pedrobtz/zuhttp/issues
 Config/Needs/website: rmarkdown, sys
 Config/testthat/edition: 3
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 8.0.0
+Config/roxygen2/version: 8.1.0

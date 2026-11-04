@@ -15,22 +15,36 @@ VENDOR  := $(SRC)/vendor/picohttpparser
 URIDIR  := $(SRC)/vendor/uriparser
 CORPUS  := corpus
 
-INC     := -I$(SRC) -I$(VENDOR) -I$(URIDIR)
+NGDIR   := $(SRC)/vendor/nghttp2
+INC     := -I$(SRC) -I$(VENDOR) -I$(URIDIR) -I$(NGDIR) -I../ctest
 URIFLAGS := -DURI_NO_UNICODE -DURI_STATIC_BUILD
-BASE    := -std=c99 -g -O1 $(INC) $(URIFLAGS)
+# nghttp2 (design §48, §65) is compiled into the engine and h2 targets with the
+# definitions src/Makevars.in gives it, minus NDEBUG, so its assert()s are
+# oracles too. gnu99 rather than c99 because nghttp2_time.c needs
+# clock_gettime(), which glibc hides under strict C99; ctest's `strict` build is
+# where project code is held to C99.
+ifeq ($(OS),Windows_NT)
+NGHAVE  := -DHAVE_WINDOWS_H -DHAVE_GETTICKCOUNT64
+else
+NGHAVE  := -DHAVE_ARPA_INET_H -DHAVE_NETINET_IN_H -DHAVE_CLOCK_GETTIME \
+           -DHAVE_DECL_CLOCK_MONOTONIC=1
+endif
+NGDEFS  := -DNGHTTP2_STATICLIB -DBUILDING_NGHTTP2 $(NGHAVE)
+NGSRC   := $(wildcard $(NGDIR)/*.c)
+BASE    := -std=gnu99 -g -O1 $(INC) $(URIFLAGS) $(NGDEFS)
 
 CORE := $(SRC)/zuh_alloc.c $(SRC)/zuh_buffer.c $(SRC)/zuh_error.c \
         $(SRC)/zuh_time.c $(SRC)/zuh_stream.c $(SRC)/zuh_headers.c \
         $(SRC)/zuh_request.c $(SRC)/zuh_framing.c $(SRC)/zuh_response.c \
         $(SRC)/zuh_uri.c $(SRC)/zuh_redirect.c $(SRC)/zuh_inflate.c \
         $(SRC)/zuh_proxy.c $(SRC)/zuh_redact.c \
-        $(SRC)/zuh_sink.c $(SRC)/zuh_body.c $(SRC)/zuh_mock_stream.c $(SRC)/zuh_fork.c \
+        $(SRC)/zuh_sink.c $(SRC)/zuh_body.c ../ctest/zuh_mock_stream.c $(SRC)/zuh_fork.c \
         $(VENDOR)/picohttpparser.c \
         $(URIDIR)/UriParse.c $(URIDIR)/UriParseBase.c $(URIDIR)/UriResolve.c \
         $(URIDIR)/UriRecompose.c $(URIDIR)/UriCommon.c $(URIDIR)/UriMemory.c \
         $(URIDIR)/UriIp4.c $(URIDIR)/UriIp4Base.c
 
-TARGETS := response chunked headers uri redirect inflate proxy redact body engine
+TARGETS := response chunked headers uri redirect inflate proxy redact body engine h2
 
 # The engine target links the whole request path. zuh_net.c is compiled but
 # never dialled (the harness supplies connections through the §50.1 seam), and
@@ -42,7 +56,8 @@ else
 NETLIBS :=
 endif
 ENGINE_EXTRA := $(SRC)/zuh_engine.c $(SRC)/zuh_net.c $(SRC)/zuh_pool.c \
-                $(SRC)/zuh_trace.c $(SRC)/zuh_tls.c ../ctest/tls_none.c
+                $(SRC)/zuh_trace.c $(SRC)/zuh_tls.c ../ctest/tls_none.c \
+                $(SRC)/zuh_h2.c $(NGSRC)
 
 # --- libFuzzer -------------------------------------------------------------
 FUZZ_CC     ?= clang
@@ -55,6 +70,11 @@ fuzz_%: fuzz_%.c $(CORE)
 	$(FUZZ_CC) $(BASE) $(FUZZ_FLAGS) -o $@ $< $(CORE) -lz
 
 fuzz_engine: fuzz_engine.c $(CORE) $(ENGINE_EXTRA)
+	$(FUZZ_CC) $(BASE) $(FUZZ_FLAGS) -o $@ $< $(CORE) $(ENGINE_EXTRA) -lz $(NETLIBS)
+
+# Target twelve (§65.8): the whole engine over prior-knowledge h2c, the
+# server's bytes from the fuzzer, through the same seam as `engine`.
+fuzz_h2: fuzz_h2.c $(CORE) $(ENGINE_EXTRA)
 	$(FUZZ_CC) $(BASE) $(FUZZ_FLAGS) -o $@ $< $(CORE) $(ENGINE_EXTRA) -lz $(NETLIBS)
 
 # One short run of every target. `make fuzz-run SECS=3600` for a longer soak;
@@ -78,6 +98,9 @@ replay_%: fuzz_%.c replay_main.c $(CORE)
 	$(CC) $(BASE) $(REPLAY_FLAGS) -o $@ $< replay_main.c $(CORE) -lz
 
 replay_engine: fuzz_engine.c replay_main.c $(CORE) $(ENGINE_EXTRA)
+	$(CC) $(BASE) $(REPLAY_FLAGS) -o $@ $< replay_main.c $(CORE) $(ENGINE_EXTRA) -lz $(NETLIBS)
+
+replay_h2: fuzz_h2.c replay_main.c $(CORE) $(ENGINE_EXTRA)
 	$(CC) $(BASE) $(REPLAY_FLAGS) -o $@ $< replay_main.c $(CORE) $(ENGINE_EXTRA) -lz $(NETLIBS)
 
 # Replay every seed. Two things this must get right:

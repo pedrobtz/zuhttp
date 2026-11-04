@@ -6,7 +6,7 @@
 \alias{zuhttp-package}
 \title{zuhttp: Minimal HTTP Client Using Native System TLS}
 \description{
-A small client for the Hypertext Transfer Protocol (HTTP/1.1), over plain connections and over Transport Layer Security (TLS), that uses the operating system's own TLS implementation and certificate trust store instead of a bundled cryptography library or certificate bundle: 'Schannel' on 'Windows', Apple's native TLS on 'macOS', and 'OpenSSL' elsewhere. Provides a total request timeout, cancellation from 'R' with an interrupt, connection reuse, streaming of response bodies to files or callbacks, structured error conditions, and a pluggable transport layer for testing without a network. Intended as a focused alternative to full multi-protocol clients for packages that only need reliable HTTP requests.
+A small client for the Hypertext Transfer Protocol (HTTP/1.1 and HTTP/2), over plain connections and over Transport Layer Security (TLS), that uses the operating system's own TLS implementation and certificate trust store instead of a bundled cryptography library or certificate bundle: 'Schannel' on 'Windows', Apple's native TLS on 'macOS', and 'OpenSSL' elsewhere. Provides a total request timeout, cancellation from 'R' with an interrupt, connection reuse, streaming of response bodies to files or callbacks, structured error conditions, and a pluggable transport layer for testing without a network. Intended as a focused alternative to full multi-protocol clients for packages that only need reliable HTTP requests.
 }
 \seealso{
 Useful links:
@@ -33,6 +33,10 @@ Other contributors:
   \item Shigeo Mitsunari (picohttpparser, see inst/COPYRIGHTS) [copyright holder]
   \item Weijia Song (uriparser, see inst/COPYRIGHTS) [copyright holder]
   \item Sebastian Pipping (uriparser, see inst/COPYRIGHTS) [copyright holder]
+  \item Tatsuhiro Tsujikawa (nghttp2, see inst/COPYRIGHTS) [copyright holder]
+  \item  nghttp2 contributors (nghttp2, see inst/COPYRIGHTS) [copyright holder]
+  \item  sfparse contributors (sfparse within nghttp2, see inst/COPYRIGHTS) [copyright holder]
+  \item  nghttp3 contributors (sfparse within nghttp2, see inst/COPYRIGHTS) [copyright holder]
 }
 
 }

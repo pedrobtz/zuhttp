@@ -97,7 +97,7 @@ zuh_code zuh_body_pipe_feed(zuh_body_pipe *p, const void *data, size_t n, zuh_er
  * framing mode ends here, because each of them used to report success on a
  * compressed stream that stopped short — the byte count was right and the
  * body was not. Whatever the decoder still holds is delivered first. */
-static zuh_code pipe_finish(zuh_body_pipe *p, zuh_error *err) {
+zuh_code zuh_body_pipe_finish(zuh_body_pipe *p, zuh_error *err) {
     zuh_code rc;
     if (!p->inflating) return ZUH_OK;
     p->staging.len = 0;
@@ -115,7 +115,7 @@ zuh_code zuh_body_read(zuh_stream *s, const zuh_framing *fr, zuh_body_pipe *p,
                          const char *seed, size_t seed_len,
                          uint64_t max_body, zuh_deadline dl, zuh_error *err) {
     zuh_code rc = body_read_framed(s, fr, p, seed, seed_len, max_body, dl, err);
-    return rc == ZUH_OK ? pipe_finish(p, err) : rc;
+    return rc == ZUH_OK ? zuh_body_pipe_finish(p, err) : rc;
 }
 
 static zuh_code body_read_framed(zuh_stream *s, const zuh_framing *fr, zuh_body_pipe *p,

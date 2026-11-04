@@ -1,0 +1,139 @@
+#!/bin/sh
+# Refresh the vendored nghttp2 lib/ (design §48, §65; decisions D-89, D-96).
+#
+#   tools/update-nghttp2 [version]        e.g. tools/update-nghttp2 1.72.0
+#
+# zuhttp vendors nghttp2's lib/ only: the HTTP/2 framing, stream state machine,
+# HPACK and flow control, transport-agnostic through nghttp2_session_mem_recv2()
+# and nghttp2_session_mem_send2(). The applications, the Python bindings and the
+# build system are not copied.
+#
+# The §48 patches are applied HERE and nowhere else, so a security update is
+# this script plus tools/vendor/record, the same day. Each patch is checked by
+# count: if upstream moves or adds a site, the script fails instead of
+# vendoring an unpatched tree, and the last block compiles the result and
+# refuses any object that references a symbol R CMD check rejects.
+set -eu
+VER=${1:-1.71.0}
+DEST=src/vendor/nghttp2
+URL="https://github.com/nghttp2/nghttp2/releases/download/v$VER/nghttp2-$VER.tar.gz"
+
+[ -d src/vendor ] || { echo "run from the package root" >&2; exit 1; }
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+echo "fetching nghttp2 $VER"
+curl -sSL "$URL" -o "$TMP/n.tar.gz"
+tar xzf "$TMP/n.tar.gz" -C "$TMP"
+SRC="$TMP/nghttp2-$VER/lib"
+[ -f "$SRC/nghttp2_session.c" ] || { echo "unexpected tarball layout" >&2; exit 1; }
+
+rm -rf "$DEST"
+mkdir -p "$DEST/nghttp2"
+cp "$SRC"/*.c "$SRC"/*.h "$DEST/"
+cp "$SRC/includes/nghttp2/nghttp2.h" "$DEST/nghttp2/"
+cp "$TMP/nghttp2-$VER/COPYING" "$DEST/LICENSE"
+# R installs only inst/, so this is the copy an installed package carries
+# (#52). tools/check-vendor-licenses fails CI if the two ever differ.
+cp "$DEST/LICENSE" inst/licenses/nghttp2-LICENSE
+
+# --- patch 5: nghttp2ver.h, generated from its template ----------------------
+# Upstream's configure writes it. The release tarball ships a generated copy,
+# which must agree with what the template gives, or the version macros are not
+# the version vendored.
+NUM=$(echo "$VER" | awk -F. '{ printf "0x%02x%02x%02x", $1, $2, $3 }')
+sed -e "s/@PACKAGE_VERSION@/$VER/" -e "s/@PACKAGE_VERSION_NUM@/$NUM/" \
+    "$SRC/includes/nghttp2/nghttp2ver.h.in" > "$DEST/nghttp2/nghttp2ver.h"
+if ! cmp -s "$DEST/nghttp2/nghttp2ver.h" "$SRC/includes/nghttp2/nghttp2ver.h"; then
+    echo "generated nghttp2ver.h differs from the tarball's copy" >&2
+    diff "$DEST/nghttp2/nghttp2ver.h" "$SRC/includes/nghttp2/nghttp2ver.h" >&2 || true
+    exit 1
+fi
+
+# --- patch 2: abort() becomes an error return --------------------------------
+# Every site follows assert(0) on a switch arm that cannot be reached, so with
+# NDEBUG (patch 1) only the abort() is left, and R CMD check rejects compiled
+# code that can terminate R. Each site returns what its function's callers
+# already handle as failure: SFPARSE_ERR_PARSE from the structured-field
+# parser, NGHTTP2_ERR_CALLBACK_FAILURE from the session's int functions, 0 from
+# the two settings getters, and an empty result from the void base64 decoder.
+# The enclosing function's return type is read from its definition line, which
+# nghttp2's clang-format style puts at column 0.
+patch_aborts() {   # patch_aborts <file> <int-return> -> prints the count
+    awk -v intret="$2" '
+        /^[a-z][a-z0-9_ ]*[ *]+[a-z0-9_]+\(/ {
+            if ($0 ~ /^(static )?void /) ret = "void";
+            else if ($0 ~ /^(static )?uint32_t /) ret = "u32";
+            else ret = "int";
+        }
+        /^ *abort\(\);/ {
+            ind = $0; sub(/abort.*/, "", ind); n++;
+            if (ret == "void") print ind "dest->len = 0; return; /* zuhttp: was abort() (design 48) */";
+            else if (ret == "u32") print ind "return 0; /* zuhttp: was abort() (design 48) */";
+            else print ind "return " intret "; /* zuhttp: was abort() (design 48) */";
+            next;
+        }
+        { print }
+        END { print n > "/dev/stderr" }
+    ' "$1" > "$1.new" 2> "$1.count"
+    mv "$1.new" "$1"
+    cat "$1.count"; rm -f "$1.count"
+}
+n1=$(patch_aborts "$DEST/sfparse.c" SFPARSE_ERR_PARSE)
+n2=$(patch_aborts "$DEST/nghttp2_session.c" NGHTTP2_ERR_CALLBACK_FAILURE)
+if [ "$n1" != 10 ] || [ "$n2" != 3 ]; then
+    echo "abort() sites: sfparse.c $n1 (expected 10), nghttp2_session.c $n2 (expected 3)" >&2
+    echo "upstream moved or added one; read each before changing the counts" >&2
+    exit 1
+fi
+# The one void site is sfparse_base64decode(), whose output is `dest`. Check
+# that the replacement landed there, since `dest->len` means nothing elsewhere.
+if [ "$(grep -c 'dest->len = 0; return; /\* zuhttp' "$DEST/sfparse.c")" != 1 ] ||
+   ! awk '/^void sfparse_base64decode/ { f = 1 } f && /dest->len = 0; return; \/\* zuhttp/ { ok = 1 } /^}/ { f = 0 } END { exit !ok }' "$DEST/sfparse.c"; then
+    echo "the void abort() site is not in sfparse_base64decode()" >&2
+    exit 1
+fi
+
+# --- patch 3: the map debugging printer --------------------------------------
+# nghttp2_map_print_distance() writes to stderr and is guarded by !WIN32 only,
+# not by DEBUGBUILD. Nothing calls it; the guard is tightened so it is not
+# compiled at all.
+if [ "$(grep -c '^#ifndef WIN32$' "$DEST/nghttp2_map.c")" != 1 ]; then
+    echo "nghttp2_map.c: expected one '#ifndef WIN32' guard" >&2
+    exit 1
+fi
+sed 's|^#ifndef WIN32$|#if !defined(WIN32) \&\& defined(DEBUGBUILD) /* zuhttp: design 48 */|' \
+    "$DEST/nghttp2_map.c" > "$DEST/nghttp2_map.c.new"
+mv "$DEST/nghttp2_map.c.new" "$DEST/nghttp2_map.c"
+
+# Patches 1, 4 and 6 are compile flags, not edits: NDEBUG, NGHTTP2_STATICLIB,
+# BUILDING_NGHTTP2 and the HAVE_* macros in src/Makevars{,.win}.in, with
+# HAVE_CONFIG_H left undefined. VENDOR lists all six.
+
+sed -e "s|^Version:.*|Version:    nghttp2-$VER (release tarball, lib/ only)|" \
+    -e "s|^Retrieved:.*|Retrieved:  $(date -u +%Y-%m-%d)|" \
+    tools/nghttp2-VENDOR.in > "$DEST/VENDOR"
+
+# --- the symbols R CMD check rejects -----------------------------------------
+echo "compiling the patched tree"
+mkdir -p "$TMP/obj"
+for f in "$DEST"/*.c; do
+    ${CC:-cc} -std=gnu99 -O1 -w -DNDEBUG -DNGHTTP2_STATICLIB -DBUILDING_NGHTTP2 \
+        -DHAVE_ARPA_INET_H -DHAVE_NETINET_IN_H -DHAVE_CLOCK_GETTIME \
+        -DHAVE_DECL_CLOCK_MONOTONIC=1 -I"$DEST" \
+        -c "$f" -o "$TMP/obj/$(basename "$f" .c).o"
+done
+BAD=$(nm -u "$TMP"/obj/*.o 2>/dev/null \
+      | awk '{ print $NF }' | sed 's/^_//' \
+      | grep -E '^(abort|exit|_exit|printf|fprintf|vfprintf|puts|putchar|stderr|stdout|__stderrp|__stdoutp|rand|srand|__assert.*)$' \
+      | sort -u || true)
+if [ -n "$BAD" ]; then
+    echo "the patched tree still references symbols R CMD check rejects:" >&2
+    echo "$BAD" >&2
+    exit 1
+fi
+
+tools/vendor/record
+echo "done. Now update the ref in tools/vendor/manifest.tsv, then run:"
+echo "  make -C ctest strict && make -C ctest asan && make -C fuzz replay-run"

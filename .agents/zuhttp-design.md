@@ -140,14 +140,15 @@ accepted when that work package's PR merges.
 | D-86 | **Only §34.1 classes reach R.** The stream signals `ZUH_ERR_CLOSED` and `ZUH_ERR_WOULDBLOCK` have no class and arrive as `zu_io_error`. On OpenSSL a TCP close without `close_notify` is end of stream while reading, as on Schannel and Network.framework (a truncated length-framed or chunked body is still caught by the framing), and a handshake failure during the handshake | Accepted 2026-10-30 (#99) | 18.1, 34.1 | — |
 | D-87 | `zu_redact_headers()` and `zu_redact_params()` **keep their names**: they register names to redact, as their titles say, and an alias with a configuring verb would grow the §53 export surface for no new behaviour | Accepted 2026-10-30 (#112) | 42.1, 53 | — |
 | D-88 | **JSON is `zujson`'s, in Imports; XML and HTML are `zuxml`'s and `zuhtml`'s, in Suggests.** `zujson` was written for zuhttp (raw bytes in and out, a documented type mapping, vendored parser, no R dependencies), so JSON works with nothing else installed and `zu_set_json_backend()` still replaces it. `zu_resp_xml()` and `zu_resp_html()` join 0.1.0. Supersedes D-25; amends D-54's "consumes no sibling" and §1's "no hard R dependencies" | Accepted 2026-10-30 | 1, 5.1, 31.7, 53 | — |
-| D-89 | **HTTP/2 through vendored nghttp2 `lib/`**, in 0.1.0 (D-96; this row first placed it after 1.0) (1.71.0, MIT; 23,133 raw lines of `.c`, 20,281 code lines by `tools/check-code-lines`' method, measured 2026-11-03). Supersedes §60's "not implemented" text: its four conditions are met by gRPC for Spark Connect (RFC 0069, RFC 0070). nghttp2 is vendored under §48, so it counts against §51.3's total-C row and never the project-owned row; HTTP/2 is written in project C under no circumstance (Appendix A.9) | Proposed (maintainer, 2026-11-03) | 60, 65, 48, 51.3 | W20 |
-| D-90 | **ALPN offers `h2` then `http/1.1` on every TLS connection by default**; `zuh_tls_config.alpn` becomes a list, and the negotiated protocol is reported by `zuh_tls_info`, `zu_resp_connection()` and `zu_info()`. Cleartext HTTP/2 (h2c) is prior knowledge only, on an explicit client option, and zuhttp never sends an `Upgrade: h2c` | Proposed | 65.1, 13.3, 15, 26.1 | W20 |
+| D-89 | **HTTP/2 through vendored nghttp2 `lib/`**, in 0.1.0 (D-96; this row first placed it after 1.0) (1.71.0, MIT; 23,133 raw lines of `.c`, 20,281 code lines by `tools/check-code-lines`' method, measured 2026-11-03). Supersedes §60's "not implemented" text: its four conditions are met by gRPC for Spark Connect (RFC 0069, RFC 0070). nghttp2 is vendored under §48, so it counts against §51.3's total-C row and never the project-owned row; HTTP/2 is written in project C under no circumstance (Appendix A.9) | Accepted (maintainer 2026-11-03; built in W20, 2026-11-04) | 60, 65, 48, 51.3 | W20 |
+| D-90 | **ALPN offers `h2` then `http/1.1` on every TLS connection by default**; `zuh_tls_config.alpn` is a comma-separated list, and the negotiated protocol is reported by `zuh_tls_info`, `zu_resp_connection()` and `zu_info()`. Cleartext HTTP/2 (h2c) is prior knowledge only, on an explicit client option, and zuhttp never sends an `Upgrade: h2c` | Accepted (built in W20, 2026-11-04) | 65.1, 13.3, 15, 26.1 | W20 |
 | D-91 | **Response trailers are exposed** by `zu_resp_trailers(res, name = NULL)`, with `zu_resp_header()`'s semantics (D-16) and §40's limits, for HTTP/2 and chunked alike. Revises §18.2's "discarded". A Trailers-Only HTTP/2 response is headers with an empty body, never an error | Proposed | 65.3, 18.2, 40 | W21 |
 | D-92 | **A pull-based response stream, `zu_resp_read(res, n)`, is the one exception to §31.8**: `zu_perform(stream = TRUE)` returns after the headers, and the caller reads the body in bounded pieces, with `max_body` still enforced and the HTTP/2 window replenished as the caller reads. Mutually exclusive with `path` and `callback` (D-53) | Proposed | 65.4, 31.8, 27.1 | W21 |
 | D-93 | **`zu_resp_abort(res)` is the explicit cancellation**, from 0.1.0 (D-96): `RST_STREAM(CANCEL)` on that stream with the connection kept poolable over HTTP/2, a closed connection over HTTP/1.1 (§26.3). A callback returning `FALSE` (§27.2) has the same meaning. Revises D-67's "not before 1.0" to "in 0.1.0" for this one token | Proposed | 65.5, 25.5, 27.2 | W21 |
 | D-94 | **Keepalive PING** on idle HTTP/2 connections, `zu_pool(keepalive_time, keepalive_timeout)`, replaces the §26.2 readability probe for them: an idle h2 connection with no PING ACK inside `keepalive_timeout` is evicted | Proposed | 65.6, 26.2 | W21 |
 | D-95 | **A streaming request body** (a function yielding raw vectors), after W21, for client-streaming gRPC. Revises §28's "not planned"; amends D-78 and §17.4 for this body alone, which is sent chunked over HTTP/1.1. Not rewindable (§28.2), so never retried or replayed across a 307/308 | Proposed | 65.7, 28, 17.4 | W22 |
 | D-96 | **HTTP/2 ships in 0.1.0, the first CRAN submission**, not in 1.1.0 after 1.0 as D-89 first placed it. `zugrpc` and `zuspark` would otherwise wait on four more zuhttp releases at CRAN's six-week floor and on the 1.0 gate's external review; nothing in M1–M3 is a prerequisite of W20–W22, which touch the engine, pool and response object that exist now. Extends D-82's M0 list with W20, W21 and W22, and the 1.0 security review (W19) covers nghttp2 and the driver. D-89 to D-95 keep their content and only their timing changes. Cost accepted: the first submission carries a vendored library of about 20k code lines, and R-19's fallback (HTTP/2 off on a flavour whose symbol scan fails) must hold before submitting, not after | Accepted (maintainer, 2026-11-04) | 60, 65, 57 | W20, W21, W22 |
+| D-97 | **The project-owned C budget is 10,000 code lines**, raised from 8,000; the abort threshold stays at 12,000. HTTP/2 (D-96) brought the 8,000 into 0.1.0 with W20 at 7,989 and W21, W22 and M1 still to add: about 500 lines for the HTTP/2 accessors, keepalive and the streaming body (W20 cost about 200 around a 450-line driver), and the §51.3 estimate of 900 for W7–W14, so about 9,400. 10,000 holds that with a margin; raising it to 12,000 would remove the warning R-4 exists to give. The budget is a trigger to cut, not a target to fill | Accepted (maintainer, 2026-11-04) | 51.3, 61, B (R-4) | W20 |
 
 ---
 
@@ -411,13 +412,23 @@ logic contains no `#ifdef _WIN32`.
 src/init.c                    R glue; the only file including R headers
 src/zuh_{engine,request,response,framing,headers,body,sink,inflate}.c
 src/zuh_{uri,redirect,proxy,pool,fork,net,time,trace,redact,error,alloc,buffer}.c
-src/zuh_stream.{c,h}, zuh_mock_stream.c
+src/zuh_stream.{c,h}
+src/zuh_h2.{c,h}              the HTTP/2 driver (§65.2)
 src/zuh_tls.c                 backend-neutral policy (defaults, D-56 check)
 src/zuh_tls_{openssl,nw,schannel}.c           one per backend
 src/vendor/{picohttpparser,uriparser}/         D-10, D-11
-src/vendor/nghttp2/                            D-89 (W20); src/zuh_h2.c drives it (§65.2)
+src/vendor/nghttp2/                            D-89; src/zuh_h2.c drives it (§65.2)
 inst/COPYRIGHTS, inst/licenses/                §49.2
 ctest/  fuzz/  tools/                          not in the tarball
+ctest/zuh_mock_stream.{c,h}                    the §50.1 mock stream, test-only
+```
+
+The mock stream lived in `src/` until W20 and was compiled into every
+installed package though only ctest and the fuzz harnesses use it; it moved
+to `ctest/` when the HTTP/2 driver brought project-owned C to the §51.3
+budget (2026-11-04).
+
+```text
 ```
 
 The C core compiles without R headers; that is what makes `ctest/` and
@@ -544,10 +555,10 @@ The HTTP layer never knows whether a stream is TCP, TLS, a tunnel or a mock
 (§9). `zuh_tls_connect()` wraps an inner stream; on failure the inner stream is
 left to the caller, so a failed handshake never double-frees a socket.
 
-After W20, `zuh_tls_config.alpn` is a list of protocols in preference order
-(`h2`, `http/1.1` by default, D-90) rather than one string, and the engine
-reads the negotiated protocol from `zuh_tls_info` to choose between the
-HTTP/1.1 path and the §65.2 session. The HTTP layer still never sees the
+`zuh_tls_config.alpn` is a comma-separated list of protocols in preference
+order (`h2,http/1.1` by default, D-90), and the engine reads the negotiated
+protocol from `zuh_tls_info.alpn` to choose between the HTTP/1.1 path and
+the §65.2 session. The HTTP layer still never sees the
 TLS object; it sees a stream and a protocol name.
 
 #### 13.4 Windows / Schannel
@@ -714,12 +725,19 @@ and trust backend (§35.2); `zuh_tls_backend_name()`, `zuh_tls_available()` and
 `zuh_tls_backend_caps()` describe the build. Backends normalise their retry
 states to would-block, closed and fatal before anything above them sees one.
 
-**Status of the ALPN fields:** Planned (W20). `zuh_tls_config.alpn` becomes
-`const char *const *alpn; size_t n_alpn`, and `zuh_tls_info` gains
-`alpn[16]`, the protocol the server selected or an empty string when none
-was. A backend that cannot offer ALPN MUST say so in its capability mask
-(`alpn`, D-56) so that an `http2 = "required"` request is refused before any
-I/O rather than silently served over HTTP/1.1.
+**Status of the ALPN fields:** Built (W20). `zuh_tls_config.alpn` is a
+comma-separated preference list (`"h2,http/1.1"`), which the engine sets from
+the client's http2 mode; `zuh_tls_alpn_wire()` turns it into RFC 7301's wire
+form for OpenSSL and Schannel, and Network.framework takes the names one by
+one. `zuh_tls_info.alpn[16]` is the protocol the server selected, or `""` when
+none was. A string rather than the array this section first planned, because
+the pool key (§26.1) already compares `alpn` as a string.
+
+Every backend reports `ZUH_TLS_CAP_ALPN` in its capability mask. It is a
+transport capability, not a `zu_tls()` setting, so `zu_info()$tls_capabilities`
+does not list it; `zu_info()$http` reports `"HTTP/2"`. With no backend lacking
+it, an `http2 = "required"` request that does not end on `h2` fails as §65.1
+says, before a byte of the request, rather than by a capability refusal.
 
 ### 16. Native System Configuration
 
@@ -1743,18 +1761,24 @@ layout and runs in CI.
 |---|---|---|---|---|
 | picohttpparser | `f4d94b4` | MIT | 0.8k raw | none |
 | uriparser | 0.9.8, eight files | BSD-3-Clause | 7.0k raw, 3.9k code | allocations routed through `zuh_alloc` (§8.2) |
-| nghttp2 `lib/` (W20, D-89) | 1.71.0 (2026-11-02) | MIT | 23,133 raw `.c` incl. the 4,980-line generated Huffman table; 26 `.c` + 26 `.h`; `nghttp2.h` 6,899 lines; 20,281 code (2026-11-03) | listed below |
+| nghttp2 `lib/` (D-89, vendored in W20) | 1.71.0 (2026-11-02) | MIT | 23,133 raw `.c` incl. the 4,980-line generated Huffman table; 26 `.c` + 26 `.h`; `nghttp2.h` 6,899 lines; 20,281 code (2026-11-03) | listed below |
 
 **nghttp2 patches**, each recorded in its `VENDOR` and re-applied by
 `tools/update-nghttp2`:
 
 1. `NDEBUG` defined, so the 127 `assert()` calls compile out.
-2. The three `abort()` calls after `assert(0)` on unreachable `switch` arms
-   in `nghttp2_session.c` return `NGHTTP2_ERR_CALLBACK_FAILURE` instead
-   (`R CMD check` rejects a compiled call that can terminate R).
-3. The `fprintf(stderr, …)` debugging function in `nghttp2_map.c`, guarded by
-   `WIN32` only and not by `DEBUGBUILD`, is removed; `nghttp2_debug.c`'s
-   `vfprintf(stderr)` is already under `DEBUGBUILD`, which stays undefined.
+2. The thirteen `abort()` calls after `assert(0)` on unreachable `switch`
+   arms return an error instead (`R CMD check` rejects a compiled call that
+   can terminate R): ten in `sfparse.c` return `SFPARSE_ERR_PARSE` (the void
+   `sfparse_base64decode()` empties its output), and three in
+   `nghttp2_session.c` return `NGHTTP2_ERR_CALLBACK_FAILURE` or, from the two
+   `uint32_t` settings getters, 0. The count was three when this list was
+   written from `nghttp2_session.c` alone; the vendoring script found the
+   other ten (2026-11-04) and now fails if the count changes.
+3. `nghttp2_map_print_distance()` in `nghttp2_map.c`, which writes to
+   stderr and was guarded by `!WIN32` only, is compiled only under
+   `DEBUGBUILD`; `nghttp2_debug.c`'s `vfprintf(stderr)` is already under
+   `DEBUGBUILD`, which stays undefined.
 4. `NGHTTP2_STATICLIB` defined, so `NGHTTP2_EXTERN` is empty and
    `$(C_VISIBILITY)` hides every nghttp2 symbol (D-66, R-3); `BUILDING_NGHTTP2`
    defined as the upstream builds do.
@@ -1768,7 +1792,11 @@ layout and runs in CI.
 
 `lib/` links nothing and makes no system call beyond `htonl()`/`ntohl()` and
 the clock read of its `RST_STREAM` rate limiter; there are no `#pragma`
-lines, no `printf`, `puts`, `exit()` or `rand()`. `sfparse.{c,h}` (MIT,
+lines, no `printf`, `puts`, `exit()` or `rand()`. `tools/update-nghttp2`
+compiles the patched tree and fails if any object references `abort`,
+`exit`, the `printf` family, `stderr`, `stdout`, `rand` or an assert handler;
+the vendor workflow re-runs it from upstream's tarball and requires the
+committed tree byte for byte. `sfparse.{c,h}` (MIT,
 1,958 lines) ship inside `lib/` and count above.
 
 ### 49. Licensing
@@ -1864,23 +1892,28 @@ platform.
 | 100 MB streaming throughput vs `curl` | ≤ 1.2× | > 1.5× | — |
 | peak RSS, 100 MB stream | < 16 MB over baseline | any full-body allocation | 0 KiB (2026-09-08) |
 | allocations per simple request | < 50 | > 200 | — |
-| project-owned C, code lines | ≤ 8,000 | > 12,000 | **6,379** (2026-09-25) |
-| total C incl. vendored | ≤ 25,000 | > 40,000 | ~11k code |
-| source tarball | ≤ 2 MB | > 5 MB | 261 KB |
+| project-owned C, code lines | ≤ 10,000 (D-97; 8,000 until 2026-11-04) | > 12,000 | **7,989** (2026-11-04, W20) |
+| total C incl. vendored | ≤ 25,000 | > 40,000 | **32,791** (2026-11-04, W20; nghttp2 20,281) — exceeded |
+| source tarball | ≤ 2 MB | > 5 MB | 504 KB (2026-11-04, W20) |
 | cold compile, one core | ≤ 90 s | > 180 s | **11 s** (2026-10-29, macOS, Intel i5-8500B, `MAKEFLAGS=-j1`) |
 
 Project-owned C is at 80% of its target with W7, W8, W9, W10 and W14 still to
 add (estimated +900 lines). R-4 is now a live risk, not a hypothetical one.
 
-nghttp2 (D-89, W20) is vendored and counts in the "total C incl. vendored"
-row only, never in the project-owned row; the project-owned part of HTTP/2 is
-the session driver and the three accessors (§65.2–§65.5), estimated at 600
-to 900 lines, inside the 8,000 budget. Measured 2026-11-03 with the
-`tools/check-code-lines` method: nghttp2 `lib/` is 20,281 code lines, which
-takes the total-C row to about 31k code lines, over its 25,000 target and
-under its 40,000 abort threshold. The target was set for a client with two
-small parsers; W20 restates the row from the measured build, and until then
-the row reads as exceeded, not as met.
+nghttp2 (D-89) is vendored and counts in the "total C incl. vendored" row
+only, never in the project-owned row. Measured on the W20 build with the
+`tools/check-code-lines` method (cloc, code lines): nghttp2 `lib/` is 20,281,
+and the total is 32,791, over the 25,000 target and under the 40,000 abort
+threshold. The target was set for a client with two small parsers; the row
+reads as exceeded, not as met, and the target is not raised to hide it.
+
+The project-owned part of HTTP/2 after W20 is `src/zuh_h2.c` (about 450 code
+lines) and the engine, TLS and R-glue changes around it. It took project-owned
+C from 7,961 to 8,161; moving the test-only mock stream out of `src/` (§11)
+brought it back to 7,989, eleven lines under the 8,000 budget of the time.
+W21 and W22 could not fit in eleven lines, so the budget is 10,000 from
+2026-11-04 (D-97), sized to the work still planned rather than to what was
+left.
 
 ### 52. Compatibility Targets
 
@@ -1964,8 +1997,8 @@ satellite, D-54).
 
 ### 60. HTTP/2 Policy
 
-**Status:** Planned (W20–W22) — decided 2026-11-03 (D-89); the
-specification is §65.
+**Status:** W20 built (negotiation, session model, 2026-11-04); W21–W22
+planned — decided 2026-11-03 (D-89); the specification is §65.
 
 HTTP/2 ships in 0.1.0, the first CRAN release (D-96; D-89 first placed it
 after 1.0, as the 1.1.0 minor), by vendoring nghttp2's
@@ -1998,7 +2031,7 @@ stack zuhttp uses exposes to it, and no consumer asks for it.
 | 4 | Ctrl-C cancels stalled requests | ≤ 200 ms every phase, three front-ends | unmeasured (W11); DNS excluded until W14 |
 | 5 | Competitive keep-alive latency | ≤ 1.5× `curl` | unmeasured (W18) |
 | 6 | Streaming without full-body allocation | < 16 MB peak over baseline | **met** (0 KiB) |
-| 7 | Auditable size | ≤ 8,000 project-owned code lines | met today (6,379); at risk (R-4) |
+| 7 | Auditable size | ≤ 10,000 project-owned code lines (D-97) | met (7,989, 2026-11-04, after W20) |
 | 8 | Fuzzing clean | 24 h per target, 0 reports | 15 min soaks only (W17) |
 | 9 | Actionable errors | catalogue review | W19 |
 | 10 | HTTP-focused | §4 review per release | met; HTTP/2 (§65) is HTTP, so the criterion is unchanged by D-89 |
@@ -2076,8 +2109,9 @@ remaining estimate sits.
 
 ### 65. HTTP/2
 
-**Status:** Planned (W20–W22) — D-89 to D-95, decided 2026-11-03; nothing
-below is built, and every number not marked measured is unmeasured.
+**Status:** §65.1, §65.2 and the W20 half of §65.8 Built (W20, 2026-11-04);
+§65.3–§65.7 Planned (W21, W22) — D-89 to D-95, decided 2026-11-03. Every
+number not marked measured is unmeasured.
 
 HTTP/2 ships in 0.1.0 (D-96; roadmap M0, W20–W22). It exists so that
 `zugrpc` can be a gRPC client in R on zuhttp's request API and `zuspark` a
@@ -2092,7 +2126,7 @@ D-93 and accepted with those rows.
 
 #### 65.1 Negotiation
 
-**Status:** Planned (W20), D-90.
+**Status:** Built (W20, 2026-11-04), D-90.
 
 Over TLS, ALPN offers `h2` then `http/1.1` on every connection by default.
 `zuh_tls_config.alpn` is a list (§15); the engine reads the selected protocol
@@ -2107,8 +2141,8 @@ never share a connection.
 | Network.framework | `sec_protocol_options_add_tls_application_protocol()` | `sec_protocol_metadata_get_negotiated_protocol()` |
 | Schannel | `SEC_APPLICATION_PROTOCOLS` in the first `InitializeSecurityContext` buffer | `QueryContextAttributes(SECPKG_ATTR_APPLICATION_PROTOCOL)` |
 
-Each backend reports `alpn` in its capability mask (D-56); a backend that
-cannot offer it refuses `http2 = "required"` before I/O.
+Each backend reports `ZUH_TLS_CAP_ALPN` in its capability mask (§15); all
+three offer ALPN.
 
 The client option is `zu_client(http2 = c("auto", "required", "off"))`,
 merged by the §31.9 rules. `"auto"` is the default described above.
@@ -2125,13 +2159,14 @@ upgrade path was dropped by RFC 9113 and no consumer needs it. With
 hop through an HTTP proxy is HTTP/1.1 absolute-form (§20.3), and HTTPS
 through CONNECT negotiates ALPN inside the tunnel.
 
-The negotiated protocol is reported as `zu_resp_connection()$http_version`
-(`"2"` or `"1.1"`, §35.2), and `zu_info()$http` lists the protocols the
-build speaks.
+The negotiated protocol is reported as `zu_resp_connection()$http_version`,
+`"HTTP/2"` or `"HTTP/1.1"` (§35.2): the form it already had for HTTP/1.x, so
+an existing caller comparing against `"HTTP/1.1"` is unaffected. `zu_info()$http`
+lists the protocols the build speaks, `c("HTTP/1.1", "HTTP/2")`.
 
 #### 65.2 Session model
 
-**Status:** Planned (W20), D-89.
+**Status:** Built (W20, 2026-11-04), D-89.
 
 One `nghttp2_session` per connection, owned by the pooled connection and
 freed with it, inside the §9 stream contract: the driver, `src/zuh_h2.c`,
@@ -2161,7 +2196,13 @@ HTTP/1.1. Three HTTP/2 rules apply at the driver:
   `Keep-Alive`, `Proxy-Connection`, `Transfer-Encoding`, `Upgrade`, and
   `Host`, whose value becomes `:authority`. `te` is sent only with the value
   `trailers` (RFC 9113 §8.2.2); any other value raises `zu_http_parse_error`
-  before connecting, as §17.1 does for CR and LF.
+  before a byte of the request is written. Not before connecting: under
+  `"auto"` the protocol is known only once ALPN has answered.
+- Response field names reach R as they arrive, which over HTTP/2 is always
+  lowercase (RFC 9113 §8.2.1); `zu_resp_header()` matches case-insensitively
+  (D-16), so only code reading `names(zu_resp_headers())` exactly sees the
+  difference. They are not re-cased: no canonical capitalisation exists, and
+  inventing one would make HTTP/1.1 and HTTP/2 disagree differently.
 - The response body is the DATA frames of the stream, ended by `END_STREAM`;
   there is no chunked coding and no close-delimited body. A `content-length`
   that disagrees with the bytes received is `zu_http_parse_error` (RFC 9113
@@ -2175,8 +2216,22 @@ HTTP/1.1. Three HTTP/2 rules apply at the driver:
 Settings sent: `SETTINGS_ENABLE_PUSH = 0` (a pushed stream is refused and
 reset), `SETTINGS_MAX_HEADER_LIST_SIZE = max_header_bytes`, and
 `SETTINGS_MAX_CONCURRENT_STREAMS = 1`. The initial receive window is
-unmeasured; W21 sets it from the §65.4 measurement. nghttp2's own limits on
-the HPACK dynamic table and on `RST_STREAM` rate are kept at their defaults.
+nghttp2's default, 65,535 bytes, with WINDOW_UPDATE sent as DATA is fed to
+the body pipe; W21 sets it from the §65.4 measurement and moves the window
+to the caller's pace. nghttp2's own limits on the HPACK dynamic table and on
+`RST_STREAM` rate are kept at their defaults. The header limit is enforced
+by the driver on each block, counted as HPACK counts (name, value and 32
+bytes per field), so it does not rely on the server honouring the setting.
+
+The HTTP/2 connection is itself a `zuh_stream`, a wrapper that owns the
+transport and the session, so the §26 pool stores, evicts and frees it
+unchanged; its `read` and `write` are absent, since bytes on it only make
+sense as frames. Its §26.2 probe differs from HTTP/1.1's: an idle h2
+connection is readable whenever the server sends SETTINGS ACK, WINDOW_UPDATE
+or PING, so the probe feeds what arrived to the session, answers it, and
+reports the connection stale only on EOF, GOAWAY, a protocol error, or
+exhausted stream ids. nghttp2 allocates through `zuh_alloc` (§8.2), so §43's
+allocation-balance oracle and the allocation-failure tests cover it.
 
 #### 65.3 Trailers
 
@@ -2275,7 +2330,7 @@ while the response streams — is W22's exit criterion, not an assumption.
 
 #### 65.8 Conformance
 
-**Status:** Planned (W20, W21).
+**Status:** W20's half Built (2026-11-04); the interop server is W21's.
 
 h2spec (MIT, v2.6.0) tests servers, not clients, so it is not zuhttp's
 conformance suite; it is noted here so no one reaches for it. The
@@ -2286,9 +2341,14 @@ server whose HTTP/2 is grpc-go's. Every other leg replays recorded frames
 through the `zuh_stream` mock (§50.1), which is also fuzz target twelve: the
 session fed hostile frames through the D-72 seam, with termination,
 `max_body`, `max_header_bytes` and allocation balance as oracles (§43). The
-W20 end-to-end check is one GET and one POST over `h2` against a local
-nghttp2-capable server (`nghttpd` from the same tarball, or the interop
-server) on the Ubuntu leg.
+W20 end-to-end check is one GET and one POST over h2c and over `h2` with TLS
+against a local server on the Ubuntu leg: `tools/h2-test-server.py`, an ASGI
+echo app on hypercorn, whose HTTP/2 is the Python `h2` package's. Not
+`nghttpd`, as first planned: a server built on the same nghttp2 would agree
+with the client's mistakes, and an independent implementation does not. The
+offline suite (`ctest/test_h2.c`) drives the whole engine against an
+in-process nghttp2 server through the D-72 seam, and every leg checks `h2`
+against a public host (`httpbingo.org`).
 
 #### 65.9 Consumers
 
@@ -2338,7 +2398,7 @@ R-14 is unused.
 | R-15 | Apple removes Secure Transport | Low | High | **retired by W13**, which removes it (D-63) | — |
 | R-18 | Proxied HTTPS on macOS 11–13 has no route after W13 | Medium | Low | a clear `zu_proxy_error`; the README says so | a user who cannot upgrade → the `zucrypt` engine (§13.2) |
 | R-3 | Rtools lacks `SCH_CREDENTIALS` | Certain | Medium | D-64's ABI job | ABI unprovable → TLS 1.2 on Windows, documented |
-| R-4 | Size budget blown | **Medium, rising** | High | measure per PR (W1); W7–W14 sized before starting | > 8,000 owned code lines → cut before adding; > 12,000 → revise §1 publicly |
+| R-4 | Size budget blown | **Medium, rising** | High | measure per PR (W1); W7–W14 sized before starting | > 10,000 owned code lines (D-97; 8,000 until 2026-11-04) → cut before adding; > 12,000 → revise §1 publicly |
 | R-5 | Security defect in own TLS glue, framing or DER walker | Medium | Very high | fuzzing (§43), sanitizers, review (§45) | verification bypass post-release → external audit before the next release |
 | R-6 | Bus factor | High | High | second maintainer, or README statement | none at 1.0 → label 1.0 experimental |
 | R-7 | Architecture slower than `curl` | Medium | Medium | W18 early | > 2× on keep-alive p50 → premise fails |

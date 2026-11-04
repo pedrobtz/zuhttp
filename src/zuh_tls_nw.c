@@ -365,6 +365,7 @@ typedef struct {
     void             *tick_ctx;
     int               tick_ms;
     zuh_tls_info      info;
+    char              alpn_offer[64];   /* §65.1, comma-separated */
     char              peer_ip[64];
 } nw_impl;
 
@@ -618,7 +619,7 @@ const char *zuh_tls_backend_name(void) { return "network-framework"; }
  * revocation through SecTrust in the verify block (F-13). */
 unsigned zuh_tls_backend_caps(void) {
     return ZUH_TLS_CAP_TLS13 | ZUH_TLS_CAP_CA_FILE | ZUH_TLS_CAP_CA_EXTRA
-         | ZUH_TLS_CAP_REVOCATION | ZUH_TLS_CAP_DIALS;
+         | ZUH_TLS_CAP_REVOCATION | ZUH_TLS_CAP_DIALS | ZUH_TLS_CAP_ALPN;
 }
 
 /* The engine dials HTTPS on this backend (ZUH_TLS_CAP_DIALS) and never asks
@@ -670,6 +671,10 @@ static void record_info(nw_impl *m) {
             name = zuh_tls_cipher_name(
                 (unsigned)sec_protocol_metadata_get_negotiated_tls_ciphersuite(sm));
             if (name) snprintf(m->info.cipher, sizeof m->info.cipher, "%s", name);
+            {
+                const char *ap = sec_protocol_metadata_get_negotiated_protocol(sm);
+                if (ap) snprintf(m->info.alpn, sizeof m->info.alpn, "%s", ap);
+            }
             sec_release(sm);
         }
         nw_release(md);
@@ -913,6 +918,9 @@ zuh_code zuh_tls_dial(zuh_stream **out, const char *host, uint16_t port,
     m->tick     = opts ? opts->tick : NULL;
     m->tick_ctx = opts ? opts->tick_ctx : NULL;
     m->tick_ms  = opts && opts->tick_ms > 0 ? opts->tick_ms : 100;
+    /* Copied, since the configure block below reads it and `cfg` is the
+     * caller's. */
+    snprintf(m->alpn_offer, sizeof m->alpn_offer, "%s", cfg->alpn ? cfg->alpn : "");
     s->vt   = &k_nw_vt;
     s->impl = m;
 
@@ -927,7 +935,21 @@ zuh_code zuh_tls_dial(zuh_stream **out, const char *host, uint16_t port,
             sec_protocol_options_t so = nw_tls_copy_sec_protocol_options(tls);
             sec_protocol_options_set_min_tls_protocol_version(so,
                 min13 ? tls_protocol_version_TLSv13 : tls_protocol_version_TLSv12);
-            sec_protocol_options_add_tls_application_protocol(so, "http/1.1");
+            /* §65.1: the offer, one name per call, in preference order. */
+            {
+                const char *p = m->alpn_offer;
+                while (*p) {
+                    char one[32];
+                    size_t len = strcspn(p, ",");
+                    if (len > 0 && len < sizeof one) {
+                        memcpy(one, p, len);
+                        one[len] = '\0';
+                        sec_protocol_options_add_tls_application_protocol(so, one);
+                    }
+                    p += len;
+                    if (*p == ',') p++;
+                }
+            }
             /* §13.1: the engine is Apple's, the trust decision is ours. On
              * the connection's own queue, so it is ordered with every other
              * completion and runs before the cancelled state. */

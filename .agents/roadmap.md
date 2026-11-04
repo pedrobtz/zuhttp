@@ -169,7 +169,7 @@ feature and not a defect.
 - [ ] `zu_info()$tls_capabilities` is all five on macOS; `pins, ca_file,
       ca_extra, revocation` on Windows; all five on OpenSSL when `crl_file` is
       set.
-- [ ] Project-owned C ≤ 8,000 code lines (§51.3), measured by W1's job.
+- [ ] Project-owned C ≤ 10,000 code lines (§51.3, D-97), measured by W1's job.
 - [ ] NEWS lists every user-visible change.
 
 ### M2 — v0.3.0: parity, measured
@@ -223,7 +223,7 @@ in front of both consumers.
 - [ ] `zugrpc`'s Stage 4 live test (grpc-go interop server in Docker)
       passes against this branch of zuhttp, on the Ubuntu legs.
 - [ ] Every §65 subsection reads Built; D-89 to D-95 read Accepted.
-- [ ] Project-owned C ≤ 8,000 code lines with the HTTP/2 driver in, by W1's
+- [ ] Project-owned C ≤ 10,000 code lines (D-97) with the HTTP/2 driver in, by W1's
       job; the §51.3 total-C row restated from the measured build.
 - [ ] Every HTTP/1.1 test passes unchanged: HTTP/2 off is HTTP/1.1 as
       shipped.
@@ -597,7 +597,7 @@ cancellably (F-16).
 
 ### W20 — nghttp2 vendored, ALPN and h2c
 
-**Status:** not started. **Milestone:** M0 (was M4; D-96). **Closes:** #129.
+**Status:** in review (#134, 2026-11-04). **Milestone:** M0 (was M4; D-96). **Closes:** #129.
 **Implements:** D-89, D-90, §48, §60, §65.1, §65.2, §65.8 (fuzz target
 twelve). **Estimate:** 5 days, medium — the vendoring is mechanical, ALPN
 on three backends is three small changes, and the unknown is `R CMD check`'s
@@ -620,17 +620,20 @@ and ALPN on every backend.
       leg of the full profile, including the compiled-code scan for
       `abort`, `exit`, `printf` and `stderr`; `test-abi.R` still finds only
       `R_init_zuhttp` exported, nghttp2 symbols included.
-- [ ] `tools/vendor/verify` covers nghttp2; editing one vendored byte fails
+- [x] `tools/vendor/verify` covers nghttp2; editing one vendored byte fails
       CI; `tools/update-nghttp2` re-applies every §48 patch from a clean
-      tarball and produces the committed tree byte for byte.
-- [ ] `inst/COPYRIGHTS`, `inst/licenses/` and `LICENSE.note` carry nghttp2's
-      MIT text, equal to `src/vendor/nghttp2/COPYING` by
-      `tools/check-vendor-licenses` (#52).
+      tarball and produces the committed tree byte for byte — the vendor
+      workflow's `nghttp2-reproducible` job re-vendors and diffs.
+- [x] `inst/COPYRIGHTS`, `inst/licenses/` and `LICENSE.note` carry nghttp2's
+      MIT text, equal to `src/vendor/nghttp2/LICENSE` (upstream's `COPYING`)
+      by `tools/check-vendor-licenses` (#52); `Authors@R` names the
+      copyright holders.
 - [ ] `zuh_tls_config.alpn` is a list on all three backends; a TLS
       connection to a public `h2` host negotiates `h2`, and
-      `zu_resp_connection()$http_version` reads `"2"`; `http2 = "off"`
+      `zu_resp_connection()$http_version` reads `"HTTP/2"`; `http2 = "off"`
       negotiates `http/1.1` on the same host; `alpn` is in every backend's
-      capability mask.
+      capability mask. *macOS and OpenSSL verified locally; Windows by the
+      S8 job's R3 step.*
 - [ ] `zu_client(http2 = "required")` on an `http://` URL sends the
       connection preface with no `Upgrade`; one GET and one POST over h2c,
       and the same two over `h2` with TLS, against a local nghttp2-capable
@@ -638,14 +641,40 @@ and ALPN on every backend.
       return the bytes sent.
 - [ ] `http2 = "required"` against an HTTP/1.1-only server raises
       `zu_connect_error` before any request byte is sent.
-- [ ] Every HTTP/1.1 test, `ctest` and fuzz corpus passes unchanged.
-- [ ] Fuzz target twelve: the session fed hostile frames through the D-72
+- [x] Every HTTP/1.1 test, `ctest` and fuzz corpus passes unchanged, but
+      for two network tests that assumed example.com answers HTTP/1.1, which
+      D-90's default no longer makes true: one asserted the version (it now
+      pins `http2 = "off"`), one a header named `Content-Type` (over HTTP/2
+      it is `content-type`; it now compares case-insensitively, §65.2).
+- [x] Fuzz target twelve: the session fed hostile frames through the D-72
       seam, built both ways (§43), with its corpus seeded from recorded
-      frames; 15 minutes clean under ASan and UBSan.
-- [ ] `tools/check-code-lines` still passes; the §51.3 total-C row restated
-      with the measured number, in the same PR.
-- [ ] Design §13.3, §15, §48 and §65.1–§65.2 updated to Built in the same
+      frames; 15 minutes clean under ASan and UBSan — the dispatched soak
+      [run 41857539578](https://github.com/pedrobtz/zuhttp/actions/runs/41857539578),
+      2026-11-04, every target clean.
+- [x] `tools/check-code-lines` still passes (7,989 of 8,000 then, 10,000 since D-97, after moving
+      the test-only mock stream to `ctest/`); the §51.3 total-C row restated
+      with the measured number (32,791), in the same PR.
+- [x] Design §13.3, §15, §48 and §65.1–§65.2 updated to Built in the same
       PR; D-89 and D-90 marked Accepted.
+
+**Deviations (2026-11-04).**
+- The local server is `tools/h2-test-server.py` (hypercorn, whose HTTP/2 is
+  the Python `h2` package's) rather than `nghttpd`: a server built on the
+  same nghttp2 would share the client's mistakes. The offline suite adds an
+  in-process nghttp2 server through the D-72 seam (`ctest/test_h2.c`).
+- `http_version` reads `"HTTP/2"`, not `"2"`: the field already said
+  `"HTTP/1.1"`, and a second spelling convention would break callers
+  comparing against it. Design §65.1 now says so.
+- The ALPN capability bit is in every backend's mask but not in
+  `zu_info()$tls_capabilities`, which lists `zu_tls()` settings;
+  `zu_info()$http` reports HTTP/2.
+- The 15-minute soak of target twelve ran through `fuzz.yaml`'s
+  `workflow_dispatch` (`soak_seconds = 900`), clean; the per-push smoke
+  runs it for 60 s. libFuzzer is not in Apple's clang, so it was not run
+  locally; the replay of its 19 seeds is clean under ASan and UBSan.
+- R-4: project-owned C was eleven lines under the 8,000 budget after W20,
+  and W21 could not fit; the maintainer raised the budget to 10,000 (D-97,
+  2026-11-04).
 
 ### W21 — Trailers, pull stream, cancel, keepalive
 
@@ -1061,3 +1090,21 @@ changed the plan or the design.
   W21's `zugrpc` Stage 4 criterion moves to M0's gate (and #40), since
   `zugrpc` Stage 4 is built on W21 and cannot precede it; W21 proves the
   same path with zuhttp's own API against the grpc-go interop server.
+- **2026-11-04 — W20 built: what vendoring nghttp2 found.** The design's
+  patch list counted three `abort()` sites; there are thirteen, ten of them
+  in `sfparse.c`, which ships inside `lib/`. `tools/update-nghttp2` now
+  patches each by its function's return type, fails if the count changes,
+  and compiles the result to refuse any object referencing a symbol
+  `R CMD check` rejects; that scan was shown to fire on the unpatched
+  `sfparse.c`. Three other findings: `fuzz/seed-corpus.py` deleted the
+  hand-curated `corpus/engine` on every reseed (it removed all of
+  `corpus/`); project-owned C was already 7,961 lines on `main`, so the
+  driver pushed it to 8,161 and the test-only mock stream left `src/` to
+  bring it back to 7,989; and two macOS jobs on #133 were cancelled twice
+  after fifteen minutes without a runner, a queue limit rather than a
+  failure, while every other macOS job ran.
+- **2026-11-04 — decision: the project-owned C budget is 10,000 (D-97).**
+  W20 left 7,989 of 8,000; W21, W22 and M1 are estimated at about 1,400 more.
+  The maintainer chose to raise the budget rather than cut further. The
+  abort threshold stays at 12,000, and `tools/check-code-lines` fails above
+  10,000.

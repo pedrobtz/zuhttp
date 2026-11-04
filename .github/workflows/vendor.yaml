@@ -38,3 +38,25 @@ jobs:
         src/vendor/uriparser/UriMemory.h
         src/vendor/uriparser/UriParseBase.h
         src/vendor/uriparser/uriparser/
+        src/vendor/nghttp2/*.c
+        src/vendor/nghttp2/*.h
+        src/vendor/nghttp2/nghttp2/
+
+  # §48, W20: tools/update-nghttp2 rebuilds the committed tree from upstream's
+  # release tarball, patches included, byte for byte. VENDOR's Retrieved date
+  # is the one line that legitimately differs, so it is restored before the
+  # comparison; everything else, the patched sources and the licence copy
+  # included, must come out identical.
+  nghttp2-reproducible:
+    runs-on: ubuntu-latest
+    name: nghttp2 rebuilt from upstream matches the tree
+    steps:
+      - uses: actions/checkout@v6
+      - name: Re-vendor and compare
+        timeout-minutes: 10
+        run: |
+          tools/update-nghttp2 "$(awk -F'\t' '$1 == "nghttp2" { sub(/^v/, "", $3); print $3 }' tools/vendor/manifest.tsv)"
+          git checkout -- src/vendor/nghttp2/VENDOR
+          tools/vendor/record
+          git status --short
+          git diff --exit-code

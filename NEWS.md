@@ -2,13 +2,23 @@
 
 First release.
 
-A minimal HTTP/1.1 client that uses the platform's own TLS stack and trust
+A minimal HTTP/1.1 and HTTP/2 client that uses the platform's own TLS stack and trust
 store — Schannel, Network.framework with `SecTrust`, or system OpenSSL — and
 bundles neither cryptography nor a CA bundle. One R dependency, its sibling
 `zujson`, for JSON.
 
 ## What is in it
 
+* HTTP/2 (RFC 9113) through a vendored copy of nghttp2's `lib/` (MIT):
+  every HTTPS connection offers `h2` by ALPN and uses it when the server
+  chooses it, and a pooled HTTP/2 connection carries the next request on a
+  new stream. `zu_client(http2 = "required")` refuses a connection that is
+  not HTTP/2 before sending anything, and on an `http://` URL speaks
+  cleartext HTTP/2 (h2c) by prior knowledge; `http2 = "off"` keeps to
+  HTTP/1.1. `zu_resp_connection()$http_version` reports `"HTTP/2"`, and
+  `zu_info()$http` lists both protocols. Over HTTP/2 every response header
+  name is lowercase, as the protocol requires; `zu_resp_header()` matches
+  names case-insensitively either way.
 * One-shot verbs (`zu_get()`, `zu_post()`, `zu_put()`, `zu_patch()`,
   `zu_delete()`, `zu_head()`) and a composable request pipeline
   (`zu_request()` → `zu_perform()`), which are the same implementation rather

@@ -32,6 +32,7 @@ void suite_redact(void);
 void suite_body(void);
 void suite_trace(void);
 void suite_engine_mock(void);
+void suite_h2(void);
 extern int zuh_test_clock_stuck;
 
 #ifndef _WIN32
@@ -87,6 +88,7 @@ int main(void) {
     ZUH_SUITE(suite_body);
     ZUH_SUITE(suite_trace);
     ZUH_SUITE(suite_engine_mock);
+    ZUH_SUITE(suite_h2);
 
     zuh_alloc_stats_get(&st);
     printf("\n%d checks, %d failures\n", zuh_test_checks, zuh_test_fails);

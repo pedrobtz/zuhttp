@@ -63,6 +63,7 @@ int zuh_pool_key_copy(zuh_pool_key *dst, const zuh_pool_key *src) {
     dst->verify_hostname = src->verify_hostname;
     dst->revocation      = src->revocation;
     dst->min_version     = src->min_version;
+    dst->http2           = src->http2;
     COPY_STR(scheme); COPY_STR(host); COPY_STR(proxy); COPY_STR(alpn);
     COPY_STR(ca_file); COPY_STR(ca_extra_file); COPY_STR(ca_data_id);
     COPY_STR(pins); COPY_STR(client_cert);
@@ -81,6 +82,7 @@ int zuh_pool_key_eq(const zuh_pool_key *a, const zuh_pool_key *b) {
         && a->verify_hostname == b->verify_hostname
         && a->revocation      == b->revocation
         && a->min_version     == b->min_version
+        && a->http2           == b->http2
         && str_eq_ci(a->scheme, b->scheme)
         && str_eq_ci(a->host,   b->host)
         && str_eq(a->proxy,         b->proxy)

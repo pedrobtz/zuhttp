@@ -43,6 +43,11 @@ typedef struct {
     int      revocation;
     int      min_version;
     char    *alpn;
+    /* §65.1: the http2 mode. ALPN already separates the TLS cases; for
+     * http:// it is the only thing that does, since prior-knowledge h2c and
+     * HTTP/1.1 to one origin are different connections that the scheme,
+     * host and port cannot tell apart. */
+    int      http2;
     char    *ca_file;
     char    *ca_extra_file;
     char    *ca_data_id;      /* stable id for inline CA bytes, or NULL */

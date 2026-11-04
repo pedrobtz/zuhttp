@@ -8,7 +8,8 @@
 test_that("zu_info() reports the build, not what R believes about it", {
   i <- zu_info()
   expect_s3_class(i, "zu_info")
-  expect_identical(i$http, "HTTP/1.1")
+  # §65.1: HTTP/2 is compiled into every build (nghttp2 is vendored).
+  expect_identical(i$http, c("HTTP/1.1", "HTTP/2"))
   expect_identical(i$tls_backend, zu_tls_backend())
   expect_true(
     i$tls_backend %in% c("openssl", "schannel", "network-framework", "none")
@@ -249,7 +250,9 @@ test_that("retries and redirects are counted, not guessed", {
 test_that("connection metadata is real over a live connection", {
   skip_unless_online()
 
-  api <- zu_client()
+  # http2 = "off" pins the protocol: example.com negotiates h2 by ALPN, which
+  # the default offers since D-90; test-http2.R covers that side.
+  api <- zu_client(http2 = "off")
   r <- zu_get("https://example.com", client = api)
   cn <- zu_resp_connection(r)
 

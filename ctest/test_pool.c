@@ -93,6 +93,8 @@ void suite_pool(void) {
     DIFFERS(b.revocation = 1);
     ZUH_CASE("a different ALPN does not share");
     DIFFERS(b.alpn = (char *)zuh_alloc(9); strcpy(b.alpn, "http/1.1"));
+    ZUH_CASE("a different http2 mode does not share (§65.1: h2c vs HTTP/1.1)");
+    DIFFERS(b.http2 = 1);
 #undef DIFFERS
 
     /* The comparator is only half of §26.1. zuh_engine_pool_key() decides
@@ -134,7 +136,10 @@ void suite_pool(void) {
         KEY_DIFFERS(t1.ca_extra_file = "/tmp/extra.pem", NULL);
         KEY_DIFFERS(t1.min_version = 13, NULL);
         KEY_DIFFERS(t1.revocation = 1, NULL);
-        KEY_DIFFERS(t1.alpn = "h2", NULL);          /* the default is http/1.1 */
+        /* §65.1: the offer follows the http2 mode, not zu_tls(), so the
+         * mode is what must reach the key. */
+        KEY_DIFFERS(o1.http2 = ZUH_H2_OFF, NULL);
+        KEY_DIFFERS(o1.http2 = ZUH_H2_REQUIRED, NULL);
         KEY_DIFFERS((t1.pins = pins_ab, t1.n_pins = 2), NULL);
         ZUH_CHECK_EQ_INT(zuh_proxy_parse(&px, "http://u:p@proxy.test:3128", &pe), ZUH_OK);
         ZUH_CHECK_EQ_INT(zuh_proxy_parse(&px2, "http://u:q@proxy.test:3128", &pe), ZUH_OK);

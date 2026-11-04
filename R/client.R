@@ -43,7 +43,9 @@ zu_defaults <- function() {
     proxy = NULL,
     # §14.1's defaults are what zu_tls() itself produces, so "unset" and
     # "default" are the same object rather than two things to keep in step.
-    tls = NULL
+    tls = NULL,
+    # §65.1, D-90: offer HTTP/2 by ALPN and use it when the server picks it.
+    http2 = "auto"
   )
 }
 
@@ -99,6 +101,12 @@ collect_policy <- function(env = parent.frame()) {
 #'   fresh connection for every request.
 #' @param retry A [zu_retry()] policy. The default retries nothing.
 #' @param tls Certificate trust settings from [zu_tls()].
+#' @param http2 HTTP/2 use: `"auto"` (the default) offers it to every HTTPS
+#'   server and uses it when the server chooses it, and HTTP/1.1 otherwise;
+#'   `"required"` fails with `zu_connect_error` before sending anything when
+#'   the connection is not HTTP/2, and on an `http://` URL speaks cleartext
+#'   HTTP/2 (h2c) directly, without an `Upgrade`; `"off"` uses HTTP/1.1 only.
+#'   [zu_resp_connection()] reports which version a response came over.
 #' @param proxy Proxy URL, e.g. `"http://proxy:3128"`. Leave unset to honour
 #'   the environment (§20.1); pass `FALSE` to force a direct connection.
 #'   **Not `NULL`** — under the §31.9 merge rules `NULL` means "reset to the
@@ -149,7 +157,8 @@ zu_client <- function(
   middleware = NULL,
   hooks = NULL,
   proxy = NULL,
-  tls = NULL
+  tls = NULL,
+  http2 = NULL
 ) {
   structure(
     list(
@@ -166,6 +175,7 @@ zu_client <- function(
       retry = retry,
       proxy = proxy,
       tls = tls,
+      http2 = http2,
       transport = transport,
       pool = pool,
       # §31.13: NOT policy. Middleware and hooks are user-supplied behaviour

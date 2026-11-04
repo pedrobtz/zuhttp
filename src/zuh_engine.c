@@ -178,10 +178,6 @@ int zuh_engine_pool_key(zuh_pool_key *k, const zuh_uri *u, const zuh_get_opts *o
             k->ca_extra_file = dup_str(o->tls->ca_extra_file);
             if (!k->ca_extra_file) { zuh_pool_key_free(k); return 0; }
         }
-        if (o->tls->alpn) {
-            k->alpn = dup_str(o->tls->alpn);
-            if (!k->alpn) { zuh_pool_key_free(k); return 0; }
-        }
         if (o->tls->n_pins > 0) {
             /* Joined in the order given. Two clients that list the same pins
              * differently are treated as different, which costs a connection
@@ -202,6 +198,15 @@ int zuh_engine_pool_key(zuh_pool_key *k, const zuh_uri *u, const zuh_get_opts *o
             zuh_buf_free(&b);
             if (!k->pins) { zuh_pool_key_free(k); return 0; }
         }
+    }
+    /* §65.1: the ALPN a TLS connection offered is the http2 mode's list,
+     * which tls_cfg_for() sets whatever zu_tls() said, so the key records
+     * that list; and the mode itself, which is all that separates h2c from
+     * HTTP/1.1 on an http:// origin. */
+    k->http2 = (int)o->http2;
+    if (u->is_https) {
+        k->alpn = dup_str(zuh_h2_alpn_for(o->http2));
+        if (!k->alpn) { zuh_pool_key_free(k); return 0; }
     }
     /* §26.1 requires proxy identity INCLUDING credentials, so that two
      * clients with different proxy credentials cannot share a tunnel. The
@@ -349,6 +354,8 @@ static void tls_cfg_for(zuh_tls_config *cfg, const zuh_get_opts *o) {
     cfg->verify_peer     = o->verify;
     cfg->verify_hostname = o->verify;
     if (o->ca_file) { cfg->ca_file = o->ca_file; cfg->source = ZUH_TRUST_FILE; }
+    /* §65.1, D-90: the offer follows zu_client(http2 = ). */
+    cfg->alpn = zuh_h2_alpn_for(o->http2);
 }
 
 /* D-71: a backend that dials opens HTTPS itself -- name resolution, TCP, the
@@ -407,14 +414,17 @@ static zuh_code open_stream(zuh_stream **out, const zuh_uri *u,
         zuh_pool_key_free(&key);
         if (reused) {
             char ip[64];
-            if (u->is_https) record_tls_info(reused, res);
+            /* An HTTP/2 connection keeps its TLS and its address on the
+             * transport it wraps (§65.2). */
+            zuh_stream *t = zuh_h2_transport(reused);
+            if (u->is_https) record_tls_info(t, res);
             res->reused_connection = 1;   /* §35.2 */
             /* §35.2 describes the connection this response arrived on, which
              * a reuse is as much as a fresh dial: the pool key includes the
              * proxy (§26.1), so how it was opened is still how it runs. */
             res->proxy_used = via_proxy;
-            if (zuh_tls_peer_ip(reused, ip, sizeof ip) ||
-                zuh_net_peer_ip(reused, ip, sizeof ip)) {
+            if (zuh_tls_peer_ip(t, ip, sizeof ip) ||
+                zuh_net_peer_ip(t, ip, sizeof ip)) {
                 zuh_free(res->remote_ip);
                 res->remote_ip = dup_str(ip);
             }
@@ -625,6 +635,55 @@ static zuh_code check_caller_headers(const zuh_req_spec *req, zuh_error *err) {
 
 /* The hop loop. `trail` is §19.4's record of every (method, URL) requested
  * so far; zuh_engine_perform() owns it, so the many exits below need not. */
+/* §65.1: which protocol this hop speaks, decided once the connection is
+ * open. A pooled HTTP/2 connection already is one; a TLS connection is
+ * HTTP/2 when ALPN chose "h2"; http:// is h2c only when the client requires
+ * HTTP/2 and the connection is direct. REQUIRED refuses anything else here,
+ * before a byte of the request is written, and closes the connection. On
+ * success `*s` may have been replaced by the HTTP/2 wrapper that owns it. */
+static zuh_code choose_protocol(zuh_stream **s, const zuh_uri *u,
+                                const zuh_get_opts *o, const zuh_proxy *px,
+                                int *use_h2, zuh_error *err) {
+    zuh_tls_info ti;
+    zuh_stream *h2 = NULL;
+    zuh_code rc;
+    int want;
+
+    *use_h2 = 0;
+    if (zuh_h2_is(*s)) { *use_h2 = 1; return ZUH_OK; }
+    if (u->is_https)
+        want = zuh_tls_get_info(*s, &ti) && zuh_h2_alpn_is_h2(ti.alpn);
+    else
+        want = o->http2 == ZUH_H2_REQUIRED && !(px && px->in_use);
+    if (!want) {
+        if (o->http2 != ZUH_H2_REQUIRED) return ZUH_OK;
+        if (u->is_https)
+            zuh_error_set(err, ZUH_ERR_CONNECT, ZUH_PHASE_CONNECT,
+                          "HTTP/2 is required, but %.200s did not negotiate it", u->host);
+        else
+            zuh_error_set(err, ZUH_ERR_CONNECT, ZUH_PHASE_CONNECT,
+                          "HTTP/2 is required, but cleartext HTTP/2 to %.200s "
+                          "cannot go through an HTTP proxy", u->host);
+        zuh_stream_close(*s); zuh_stream_free(*s); *s = NULL;
+        return ZUH_ERR_CONNECT;
+    }
+    rc = zuh_h2_wrap(&h2, *s, ZUH_MAX_HEADER_BYTES, err);
+    if (rc != ZUH_OK) { zuh_stream_close(*s); zuh_stream_free(*s); *s = NULL; return rc; }
+    *s = h2;
+    *use_h2 = 1;
+    return ZUH_OK;
+}
+
+/* §26.3 for an HTTP/2 exchange. The §18.1 framing rules do not apply
+ * (§65.2): the stream ended or it did not, and the session knows whether the
+ * connection can carry another one. */
+static zuh_reuse h2_reuse(zuh_code rc, zuh_stream *s) {
+    if (rc == ZUH_ERR_TIMEOUT || rc == ZUH_ERR_CANCELLED || rc == ZUH_ERR_INTERRUPTED)
+        return ZUH_NOREUSE_CANCELLED;
+    if (rc != ZUH_OK || !zuh_h2_reusable(s)) return ZUH_NOREUSE_BODY_INCOMPLETE;
+    return ZUH_REUSE_OK;
+}
+
 static zuh_code perform_hops(zuh_result *out, const char *url,
                              const zuh_req_spec *req, const zuh_get_opts *o,
                              zuh_redirect_trail *trail, zuh_error *err) {
@@ -708,6 +767,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
         size_t consumed = 0;
         size_t sent_bytes = 0;
         int may_follow = 0;
+        int use_h2 = 0;
         uint64_t surplus = 0;
         char hosthdr[300];
 
@@ -727,6 +787,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
         if (rc != ZUH_OK) { zuh_proxy_free(&px); zuh_uri_free(&cur); zuh_result_free(out); return rc; }
 
         rc = open_stream(&s, &cur, o, &px, total, out, err);
+        if (rc == ZUH_OK) rc = choose_protocol(&s, &cur, o, &px, &use_h2, err);
         if (rc != ZUH_OK) {
             zuh_proxy_free(&px); zuh_uri_free(&cur); zuh_result_free(out);
             return rc;
@@ -843,70 +904,118 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
                 return rc;
             }
         }
-        if (!zuh_buf_init(&wire, 512, 64 * 1024)) {
-            if (have_absform) zuh_buf_free(&absform);
-            zuh_request_free(&rq); zuh_stream_free(s);
-            zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
-            return ZUH_ERR_NOMEM;
-        }
-        rc = zuh_request_add_defaults(&rq, o->user_agent);
-        if (rc == ZUH_OK) rc = zuh_request_write(&rq, &wire);
-        /* The 64 KiB cap is on the header block (§17.1), so running into it
-         * is the caller's headers being too large, not memory running out. */
-        if (rc == ZUH_ERR_NOMEM && zuh_buf_hit_limit(&wire)) {
-            zuh_error_set(err, ZUH_ERR_OVERFLOW, ZUH_PHASE_NONE,
-                         "request headers exceed the 64 KiB limit");
-            rc = ZUH_ERR_OVERFLOW;
-        } else if (rc != ZUH_OK && !err->code) {
-            zuh_error_set(err, rc, ZUH_PHASE_NONE, "could not build the request");
-        }
-        /* A body that fits beside the headers goes in the same write: one
-         * write means one TCP segment for a small request. A larger one is
-         * written after them, under the same deadline. It used to be appended
-         * regardless, so the header cap limited every upload to 64 KiB. */
-        sent_bytes = wire.len + body_len;
-        if (rc == ZUH_OK && body_len > 0 && body_len <= wire.max - wire.len &&
-            !zuh_buf_append(&wire, body, body_len)) {
-            zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_NONE, "out of memory");
-            rc = ZUH_ERR_NOMEM;
-        } else if (rc == ZUH_OK && body_len > 0 && body_len > wire.max - wire.len) {
-            if (!zuh_stream_write_all(s, wire.data, wire.len, total, err))
+        if (use_h2) {
+            /* §65.2: the same request as an HTTP/2 header block. The §17.2
+             * defaults are added as for HTTP/1.1, so a request reads the same
+             * either way; the driver drops what HTTP/2 forbids (Host becomes
+             * :authority). It is sent below, with the wait for the response,
+             * by zuh_h2_begin(). */
+            rc = zuh_request_add_defaults(&rq, o->user_agent);
+            if (rc == ZUH_OK && body_len > 0) {
+                char cl[32];
+                snprintf(cl, sizeof cl, "%lu", (unsigned long)body_len);
+                rc = zuh_headers_add_str(&rq.headers, "Content-Length", cl);
+            }
+            if (rc != ZUH_OK) {
+                if (!err->code)
+                    zuh_error_set(err, rc, ZUH_PHASE_NONE, "could not build the request");
+                zuh_request_free(&rq); zuh_stream_free(s);
+                zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
+                return rc;
+            }
+        } else {
+            if (!zuh_buf_init(&wire, 512, 64 * 1024)) {
+                if (have_absform) zuh_buf_free(&absform);
+                zuh_request_free(&rq); zuh_stream_free(s);
+                zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
+                return ZUH_ERR_NOMEM;
+            }
+            rc = zuh_request_add_defaults(&rq, o->user_agent);
+            if (rc == ZUH_OK) rc = zuh_request_write(&rq, &wire);
+            /* The 64 KiB cap is on the header block (§17.1), so running into it
+             * is the caller's headers being too large, not memory running out. */
+            if (rc == ZUH_ERR_NOMEM && zuh_buf_hit_limit(&wire)) {
+                zuh_error_set(err, ZUH_ERR_OVERFLOW, ZUH_PHASE_NONE,
+                             "request headers exceed the 64 KiB limit");
+                rc = ZUH_ERR_OVERFLOW;
+            } else if (rc != ZUH_OK && !err->code) {
+                zuh_error_set(err, rc, ZUH_PHASE_NONE, "could not build the request");
+            }
+            /* A body that fits beside the headers goes in the same write: one
+             * write means one TCP segment for a small request. A larger one is
+             * written after them, under the same deadline. It used to be appended
+             * regardless, so the header cap limited every upload to 64 KiB. */
+            sent_bytes = wire.len + body_len;
+            if (rc == ZUH_OK && body_len > 0 && body_len <= wire.max - wire.len &&
+                !zuh_buf_append(&wire, body, body_len)) {
+                zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_NONE, "out of memory");
+                rc = ZUH_ERR_NOMEM;
+            } else if (rc == ZUH_OK && body_len > 0 && body_len > wire.max - wire.len) {
+                if (!zuh_stream_write_all(s, wire.data, wire.len, total, err))
+                    rc = err->code ? err->code : ZUH_ERR_IO;
+                else
+                    wire.len = 0;
+                if (rc == ZUH_OK && !zuh_stream_write_all(s, body, body_len, total, err))
+                    rc = err->code ? err->code : ZUH_ERR_IO;
+            }
+            if (rc == ZUH_OK && wire.len &&
+                !zuh_stream_write_all(s, wire.data, wire.len, total, err))
                 rc = err->code ? err->code : ZUH_ERR_IO;
-            else
-                wire.len = 0;
-            if (rc == ZUH_OK && !zuh_stream_write_all(s, body, body_len, total, err))
-                rc = err->code ? err->code : ZUH_ERR_IO;
-        }
-        if (rc == ZUH_OK && wire.len &&
-            !zuh_stream_write_all(s, wire.data, wire.len, total, err))
-            rc = err->code ? err->code : ZUH_ERR_IO;
-        if (rc == ZUH_OK) {
-            out->timings.request_write = (long)(zuh_now_ms() - t_start);
-            zuh_trace_add(o->trace, ZUH_EV_REQUEST_SENT, method, (uint64_t)sent_bytes);
-        }
-        zuh_buf_free(&wire);
-        if (have_absform) { zuh_buf_free(&absform); have_absform = 0; }
-        zuh_request_free(&rq);
-        if (rc != ZUH_OK) {
-            zuh_stream_free(s); zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
-            return rc;
+            if (rc == ZUH_OK) {
+                out->timings.request_write = (long)(zuh_now_ms() - t_start);
+                zuh_trace_add(o->trace, ZUH_EV_REQUEST_SENT, method, (uint64_t)sent_bytes);
+            }
+            zuh_buf_free(&wire);
+            if (have_absform) { zuh_buf_free(&absform); have_absform = 0; }
+            zuh_request_free(&rq);
+            if (rc != ZUH_OK) {
+                zuh_stream_free(s); zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
+                return rc;
+            }
         }
 
         /* --- receive --- */
         zuh_response_init(&resp);
         if (!zuh_buf_init(&raw, 4096, ZUH_MAX_HEADER_BYTES + ZUH_READ_CHUNK)) {
+            if (use_h2) zuh_request_free(&rq);
             zuh_response_free(&resp); zuh_stream_free(s);
             zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
             return ZUH_ERR_NOMEM;
         }
-        rc = read_headers(s, &raw, &resp, &consumed, total, err);
-        /* §18: skip 1xx and parse the real response behind it. */
-        while (rc == ZUH_OK && zuh_response_is_informational(&resp)) {
-            zuh_buf_consume(&raw, consumed);
-            zuh_response_free(&resp);
-            zuh_response_init(&resp);
-            consumed = 0;
+        if (use_h2) {
+            zuh_h2_request hr;
+            int bodiless = 0;
+            hr.method    = method;
+            hr.scheme    = cur.is_https ? "https" : "http";
+            hr.authority = hosthdr;
+            hr.path      = cur.path_query;
+            hr.headers   = &rq.headers;
+            hr.body      = body_len ? body : NULL;
+            hr.body_len  = body_len;
+            rc = zuh_h2_begin(s, &hr, &resp.status, &resp.headers, &bodiless, total, err);
+            zuh_request_free(&rq);
+            if (rc == ZUH_OK) {
+                /* Written and answered in one call, so the write is timed to
+                 * the response headers: an upper bound, not the write alone. */
+                out->timings.request_write = (long)(zuh_now_ms() - t_start);
+                zuh_trace_add(o->trace, ZUH_EV_REQUEST_SENT, method, (uint64_t)body_len);
+                /* END_STREAM frames an HTTP/2 body (§65.2), so §18.1 is not
+                 * consulted. FRAME_NONE marks the bodiless responses, which
+                 * are never decoded, exactly as for HTTP/1.1. */
+                resp.framing.kind = (bodiless || is_head || resp.status == 204 ||
+                                     resp.status == 304) ? ZUH_FRAME_NONE
+                                                         : ZUH_FRAME_UNTIL_CLOSE;
+            }
+        } else {
             rc = read_headers(s, &raw, &resp, &consumed, total, err);
+            /* §18: skip 1xx and parse the real response behind it. */
+            while (rc == ZUH_OK && zuh_response_is_informational(&resp)) {
+                zuh_buf_consume(&raw, consumed);
+                zuh_response_free(&resp);
+                zuh_response_init(&resp);
+                consumed = 0;
+                rc = read_headers(s, &raw, &resp, &consumed, total, err);
+            }
         }
         if (rc == ZUH_OK) {
             /* §35.1's ttfb. Measured at the end of the header block rather
@@ -921,7 +1030,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
                              (uint64_t)resp.headers.n);
             }
         }
-        if (rc == ZUH_OK) rc = zuh_response_decide_framing(&resp, is_head, err);
+        if (rc == ZUH_OK && !use_h2) rc = zuh_response_decide_framing(&resp, is_head, err);
         if (rc == ZUH_OK) {
             /* §19.5: "Redirect response bodies must never reach the caller's
              * sink." A 3xx we are going to follow is drained into a capped
@@ -959,7 +1068,9 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
                                    o->no_decode || may_follow ||
                                    resp.framing.kind == ZUH_FRAME_NONE,
                                    cap, err);
-            if (rc == ZUH_OK)
+            if (rc == ZUH_OK && use_h2)
+                rc = zuh_h2_body(s, &pipe, total, err);
+            else if (rc == ZUH_OK)
                 rc = zuh_body_read(s, &fr, &pipe,
                                (const char *)raw.data + consumed, raw.len - consumed,
                                cap, total, err);
@@ -978,8 +1089,9 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
          * response headers that justify it are still in scope — not inside
          * the pool, which cannot see them. */
         {
-            zuh_reuse reason = zuh_reuse_decide(rc, &fr, &resp.headers,
-                                              resp.minor_version);
+            zuh_reuse reason = use_h2 ? h2_reuse(rc, s)
+                                      : zuh_reuse_decide(rc, &fr, &resp.headers,
+                                                         resp.minor_version);
             /* §19.5: a redirect body that cannot be drained — over the
              * ZUH_MAX_REDIRECT_BODY budget, or cut short — costs the
              * connection, not the request. The headers are complete and the
@@ -1018,7 +1130,8 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
         }
 
         out->status = resp.status;
-        out->http_version = resp.minor_version;
+        out->http_version = use_h2 ? 0 : resp.minor_version;
+        out->http_major   = use_h2 ? 2 : 1;
         zuh_headers_free(&out->headers);
         out->headers = resp.headers;          /* ownership moves */
         zuh_headers_init(&resp.headers);

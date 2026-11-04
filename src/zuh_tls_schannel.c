@@ -36,6 +36,26 @@
 #include <string.h>
 #include <stdio.h>
 
+/* §65.1 ALPN (Windows 8.1 and later). The SDK's names, defined here when an
+ * older mingw-w64 lacks them; the values are the SDK's. The result is read
+ * into a struct of our own with the SDK's layout (SecPkgContext_
+ * ApplicationProtocol), so the code does not depend on which headers declare
+ * it. */
+#ifndef SECBUFFER_APPLICATION_PROTOCOLS
+#define SECBUFFER_APPLICATION_PROTOCOLS 18
+#endif
+#ifndef SECPKG_ATTR_APPLICATION_PROTOCOL
+#define SECPKG_ATTR_APPLICATION_PROTOCOL 35
+#endif
+#define ZUH_SCH_ALPN_EXT     2   /* SecApplicationProtocolNegotiationExt_ALPN */
+#define ZUH_SCH_ALPN_SUCCESS 1   /* SecApplicationProtocolNegotiationStatus_Success */
+typedef struct {
+    unsigned long status;        /* SEC_APPLICATION_PROTOCOL_NEGOTIATION_STATUS */
+    unsigned long ext;           /* SEC_APPLICATION_PROTOCOL_NEGOTIATION_EXT */
+    unsigned char id_size;
+    unsigned char id[255];
+} zuh_sch_alpn_result;
+
 /* Declared in wininet.h, which mingw-w64's wincrypt/schannel headers do not
  * pull in — and including wininet.h here would drag in a large unrelated
  * surface for one flag.
@@ -63,6 +83,7 @@ typedef struct {
     zuh_buffer   dec;               /* plaintext decrypted but not yet returned */
     char        protocol[16];
     char        cipher[64];
+    char        alpn[16];           /* §65.1: what ALPN selected, or "" */
     int         closed;
     /* The peer's close_notify has been decrypted. Kept apart from reporting
      * it, because the same DecryptMessage pass may have produced the
@@ -201,10 +222,15 @@ static void keep_trailing(sch_impl *t, size_t extra) {
     t->enc.len = extra;
 }
 
-static zuh_code do_handshake(sch_impl *t, const char *hostname,
+static zuh_code do_handshake(sch_impl *t, const char *hostname, const char *alpn,
                             zuh_deadline d, zuh_error *err) {
-    SecBuffer  outb[1], inb[2];
-    SecBufferDesc outd, ind;
+    SecBuffer  outb[1], inb[2], alpnb[1];
+    SecBufferDesc outd, ind, alpnd;
+    /* §65.1: SEC_APPLICATION_PROTOCOLS, laid out by hand as curl does: the
+     * extension's length, the ALPN extension id, the list's length, then the
+     * list in its RFC 7301 wire form. */
+    unsigned char alpn_buf[128];
+    unsigned long alpn_len = 0;
     DWORD req = ISC_REQ_SEQUENCE_DETECT | ISC_REQ_REPLAY_DETECT
               | ISC_REQ_CONFIDENTIALITY | ISC_RET_EXTENDED_ERROR
               | ISC_REQ_ALLOCATE_MEMORY | ISC_REQ_STREAM
@@ -226,8 +252,31 @@ static zuh_code do_handshake(sch_impl *t, const char *hostname,
         outd.pBuffers = outb;
 
         if (first) {
+            if (alpn && *alpn) {
+                unsigned char wire[64];
+                size_t wl = zuh_tls_alpn_wire(alpn, wire, sizeof wire);
+                unsigned long ext_len, ext_id = ZUH_SCH_ALPN_EXT;
+                unsigned short list_len = (unsigned short)wl;
+                size_t off = sizeof ext_len;
+                if (wl == 0) {
+                    zuh_error_set(err, ZUH_ERR_TLS, ZUH_PHASE_TLS, "cannot set the ALPN list");
+                    return ZUH_ERR_TLS;
+                }
+                memcpy(alpn_buf + off, &ext_id, sizeof ext_id);     off += sizeof ext_id;
+                memcpy(alpn_buf + off, &list_len, sizeof list_len); off += sizeof list_len;
+                memcpy(alpn_buf + off, wire, wl);                   off += wl;
+                ext_len = (unsigned long)(off - sizeof ext_len);
+                memcpy(alpn_buf, &ext_len, sizeof ext_len);
+                alpn_len = (unsigned long)off;
+                alpnb[0].pvBuffer   = alpn_buf;
+                alpnb[0].cbBuffer   = alpn_len;
+                alpnb[0].BufferType = SECBUFFER_APPLICATION_PROTOCOLS;
+                alpnd.ulVersion = SECBUFFER_VERSION;
+                alpnd.cBuffers  = 1;
+                alpnd.pBuffers  = alpnb;
+            }
             ss = InitializeSecurityContextA(&t->cred, NULL, (SEC_CHAR *)hostname,
-                                            req, 0, 0, NULL, 0,
+                                            req, 0, 0, alpn_len ? &alpnd : NULL, 0,
                                             &t->ctx, &outd, &attrs, NULL);
             first = 0;
             /* Claim the handle only if Schannel actually produced one. On a
@@ -497,7 +546,7 @@ const char *zuh_tls_backend_name(void) { return "schannel"; }
  * #5). TLS 1.3 needs SCH_CREDENTIALS (R-3, #17). All four are refused by
  * zuh_tls_config_check() before the handshake (D-56). */
 unsigned zuh_tls_backend_caps(void) {
-    return ZUH_TLS_CAP_REVOCATION;
+    return ZUH_TLS_CAP_REVOCATION | ZUH_TLS_CAP_ALPN;
 }
 
 zuh_code zuh_tls_connect(zuh_stream **out, zuh_stream *inner, const char *hostname,
@@ -549,7 +598,7 @@ zuh_code zuh_tls_connect(zuh_stream **out, zuh_stream *inner, const char *hostna
     }
     t->have_cred = 1;
 
-    rc = do_handshake(t, hostname, deadline, err);
+    rc = do_handshake(t, hostname, cfg->alpn, deadline, err);
     if (rc != ZUH_OK) goto fail;
 
     rc = verify_peer(t, hostname, cfg, err);
@@ -578,6 +627,17 @@ zuh_code zuh_tls_connect(zuh_stream **out, zuh_stream *inner, const char *hostna
         }
     }
 
+    {
+        zuh_sch_alpn_result ar;
+        memset(&ar, 0, sizeof ar);
+        if (QueryContextAttributes(&t->ctx, SECPKG_ATTR_APPLICATION_PROTOCOL, &ar) == SEC_E_OK
+            && ar.status == ZUH_SCH_ALPN_SUCCESS && ar.ext == ZUH_SCH_ALPN_EXT
+            && ar.id_size > 0 && ar.id_size < sizeof t->alpn) {
+            memcpy(t->alpn, ar.id, ar.id_size);
+            t->alpn[ar.id_size] = '\0';
+        }
+    }
+
     s->vt = &k_sch_vt;
     s->impl = t;
     *out = s;
@@ -602,10 +662,11 @@ void zuh_tls_stream_free(zuh_stream *s) { sch_destroy(s); }
 
 int zuh_tls_get_info(const zuh_stream *s, zuh_tls_info *out) {
     const sch_impl *t;
-    if (!s || !s->impl || !out) return 0;
+    if (!s || s->vt != &k_sch_vt || !s->impl || !out) return 0;
     t = (const sch_impl *)s->impl;
     memset(out, 0, sizeof *out);
     snprintf(out->protocol, sizeof out->protocol, "%s", t->protocol);
+    snprintf(out->alpn, sizeof out->alpn, "%s", t->alpn);
     snprintf(out->cipher, sizeof out->cipher, "%s", t->cipher);
     snprintf(out->trust_backend, sizeof out->trust_backend, "wincertstore");
     return 1;
