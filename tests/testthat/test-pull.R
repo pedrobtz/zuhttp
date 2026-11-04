@@ -133,3 +133,45 @@ test_that("a client with keepalive set builds its pool", {
   api <- zu_client(pool = zu_pool(keepalive_time = 1, keepalive_timeout = 1))
   expect_true(pool_valid(client_pool(api)))
 })
+
+# --- §65.7 zu_body_stream(), offline ------------------------------------------
+
+test_that("zu_body_stream() marks the body unrewindable and replaces any other", {
+  f <- pattern_body(10, 4)
+  req <- zu_body_stream(
+    zu_body_raw(zu_request("POST", "https://x.test/"), "old"),
+    f
+  )
+  expect_null(req$body)
+  expect_identical(req$body_stream, f)
+  expect_false(zu_body_rewindable(req))
+  expect_output(print(req), "streamed by a function")
+  # A later in-memory body replaces the stream, and is rewindable again.
+  req2 <- zu_body_raw(req, "new")
+  expect_null(req2$body_stream)
+  expect_true(zu_body_rewindable(req2))
+  expect_error(zu_body_stream(req, "not a function"), "must be a function")
+})
+
+test_that("a mock transport sees a streamed body collected whole", {
+  seen <- NULL
+  api <- zu_client(
+    transport = zu_mock_transport(function(req) {
+      seen <<- req$body
+      zu_response(200L)
+    })
+  )
+  zu_perform(
+    zu_body_stream(zu_request("POST", "https://x.test/"), pattern_body(10, 4)),
+    client = api
+  )
+  expect_identical(seen, as.raw(0:9))
+  bad <- function() "not raw"
+  expect_error(
+    zu_perform(
+      zu_body_stream(zu_request("POST", "https://x.test/"), bad),
+      client = api
+    ),
+    "raw vector"
+  )
+})

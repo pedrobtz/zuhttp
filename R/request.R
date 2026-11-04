@@ -212,6 +212,15 @@ zu_headers <- function(req, ...) {
 #' `application/x-www-form-urlencoded`. `zu_body_raw()` sends bytes as given.
 #' `zu_body_file()` sends a file's contents.
 #'
+#' `zu_body_stream()` sends a body produced a piece at a time, for one that is
+#' large or not known in advance (§28, §65.7). Over HTTP/2 each piece goes out
+#' as the server's flow-control window allows, so with [zu_perform()]'s
+#' `stream = TRUE` the response can be read while the body is still being
+#' sent (full duplex, as gRPC's bidirectional calls need). Over HTTP/1.1 it is
+#' sent chunked. Such a body cannot be sent twice: a retry, or a 307 or 308
+#' redirect, raises `zu_body_not_replayable` instead (§28.2), and an error
+#' raised inside `f` stops the request, closes its connection, and is
+#' re-raised unchanged.
 #' The implied content type is only a default: a header set on the request or
 #' the client always wins (§31.2).
 #'
@@ -223,14 +232,25 @@ zu_headers <- function(req, ...) {
 #'   `{"a":1}` rather than `{"a":[1]}`, which is what R users nearly always
 #'   mean.
 #' @param type Content type to declare.
-#' @param file A file path. The file is read into memory (§28 covers streaming
-#'   request bodies). Named `file` as in [zu_post()]: `path` is always where a
-#'   *response* goes (D-45).
+#' @param file A file path. The file is read into memory; for a body too
+#'   large for that, see `zu_body_stream()`. Named `file` as in [zu_post()]:
+#'   `path` is always where a *response* goes (D-45).
+#' @param f For `zu_body_stream()`, a function of no arguments that returns
+#'   the next piece of the body as a raw vector each time it is called, and
+#'   `NULL` at the end.
 #' @return A `zu_request`.
 #' @name zu_body
 #' @examples
 #' req <- zu_request("POST", "https://example.com/upload")
 #' zu_body_raw(req, charToRaw("hello"))
+#'
+#' # Three pieces, then the end.
+#' pieces <- list(charToRaw("a"), charToRaw("b"), charToRaw("c"))
+#' i <- 0
+#' zu_body_stream(req, function() {
+#'   i <<- i + 1
+#'   if (i <= length(pieces)) pieces[[i]]
+#' })
 NULL
 
 #' @rdname zu_body
@@ -286,7 +306,26 @@ zu_body_file <- function(req, file, type = "application/octet-stream") {
   set_body(req, readBin(file, "raw", n = n), "file", type)
 }
 
+#' @rdname zu_body
+#' @export
+zu_body_stream <- function(req, f, type = "application/octet-stream") {
+  req <- check_req(req)
+  if (!is.function(f)) {
+    stop(
+      "`f` must be a function returning raw vectors, then NULL",
+      call. = FALSE
+    )
+  }
+  req <- set_body(req, NULL, "stream", type)
+  req$body_stream <- f
+  # §28.2: what f has produced is gone once sent.
+  req$body_rewindable <- FALSE
+  req
+}
+
 set_body <- function(req, bytes, kind, type) {
+  req$body_stream <- NULL
+  req$body_rewindable <- NULL
   req$body <- bytes
   req$body_kind <- kind
   req$content_type <- type
@@ -368,6 +407,8 @@ print.zu_request <- function(x, ...) {
   }
   if (!is.null(x$body)) {
     cat("Body: ", x$body_kind, ", ", length(x$body), " bytes\n", sep = "")
+  } else if (!is.null(x$body_stream)) {
+    cat("Body: streamed by a function, length unknown\n")
   }
   # A resolved request (one that has been through zu_perform) knows every
   # policy value, not just the ones the caller named; show those instead.

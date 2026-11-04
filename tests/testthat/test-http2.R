@@ -478,3 +478,177 @@ test_that("§65.8: a server-streaming gRPC call, pulled with zu_resp_read()", {
   ))
   expect_identical(zu_resp_trailers(r, "grpc-status"), "0")
 })
+
+# --- W22: a streamed request body (§65.7) -------------------------------------
+
+test_that("§65.7: a streamed body arrives whole and in order, over h2c, TLS and HTTP/1.1", {
+  skip_unless_h2_server()
+  base <- Sys.getenv("ZU_H2_TEST_SERVER")
+  tls <- Sys.getenv("ZU_H2_TEST_TLS")
+  ca <- Sys.getenv("ZU_H2_TEST_CA")
+  check <- function(url, client, version) {
+    req <- zu_body_stream(zu_request("POST", url), pattern_body(5e6, 65536))
+    j <- zu_resp_json(zu_perform(req, client = client))
+    expect_equal(j$bytes, 5e6)
+    expect_true(j$ordered)
+    expect_identical(j$http_version, version)
+  }
+  check(
+    paste0(base, "/check"),
+    zu_client(http2 = "required", proxy = FALSE),
+    "2"
+  )
+  # HTTP/1.1: the one request zuhttp sends chunked (D-95).
+  check(paste0(base, "/check"), zu_client(proxy = FALSE), "1.1")
+  if (nzchar(tls) && nzchar(ca) && tls_supports("ca_file")) {
+    check(
+      paste0(tls, "/check"),
+      zu_client(tls = zu_tls(ca_file = ca), proxy = FALSE),
+      "2"
+    )
+  }
+})
+
+test_that("§65.7: an error inside the body function is re-raised, and the connection is not kept", {
+  skip_unless_h2_server()
+  base <- Sys.getenv("ZU_H2_TEST_SERVER")
+  api <- zu_client(http2 = "required", proxy = FALSE)
+  zu_get(paste0(base, "/get"), client = api) # one pooled connection
+  i <- 0L
+  f <- function() {
+    i <<- i + 1L
+    if (i == 3L) {
+      stop("the generator gave up")
+    }
+    as.raw(rep(1, 10000))
+  }
+  e <- tryCatch(
+    zu_perform(
+      zu_body_stream(zu_request("POST", paste0(base, "/check")), f),
+      client = api
+    ),
+    error = function(e) e
+  )
+  expect_false(inherits(e, "zu_error")) # the user's own condition, unchanged
+  expect_match(conditionMessage(e), "the generator gave up")
+  # D-47: that connection was closed, so the next request opens another.
+  misses <- zu_pool_stats(api)[["misses"]]
+  zu_get(paste0(base, "/get"), client = api)
+  expect_identical(zu_pool_stats(api)[["misses"]], misses + 1L)
+})
+
+test_that("§28.2: a retry with a streamed body is refused before the first attempt", {
+  api <- zu_client(retry = zu_retry(attempts = 3), proxy = FALSE)
+  req <- zu_body_stream(
+    # PUT, which is idempotent and so would be retried; a POST never is.
+    zu_request("PUT", "http://127.0.0.1:9/x"),
+    pattern_body(10, 10)
+  )
+  expect_error(zu_perform(req, client = api), class = "zu_body_not_replayable")
+})
+
+test_that("§65.7: a 100 MB body from a 1 MB generator stays under 16 MB of RSS", {
+  skip_unless_h2_server()
+  skip_on_cran()
+  skip_under_gctorture()
+  if (!file.exists("/proc/self/status")) {
+    skip("needs Linux's VmHWM")
+  }
+  if (identical(Sys.getenv("R_COVR"), "true")) {
+    skip("under covr")
+  }
+  hwm <- function() {
+    l <- grep("^VmHWM:", readLines("/proc/self/status"), value = TRUE)
+    as.numeric(gsub("[^0-9]", "", l)) * 1024
+  }
+  base <- Sys.getenv("ZU_H2_TEST_SERVER")
+  api <- zu_client(http2 = "required", proxy = FALSE, timeout = 120)
+  url <- paste0(base, "/check")
+  zu_perform(
+    zu_body_stream(zu_request("POST", url), pattern_body(4e6, 1e6)),
+    client = api
+  )
+  invisible(gc())
+  base_hwm <- hwm()
+  # Each piece is a new raw vector; collecting now and then measures what
+  # the client holds rather than the caller's dead pieces (as for W21).
+  inner <- pattern_body(100e6, 1e6)
+  k <- 0L
+  f <- function() {
+    k <<- k + 1L
+    if (k %% 16L == 0L) {
+      invisible(gc())
+    }
+    inner()
+  }
+  j <- zu_resp_json(zu_perform(
+    zu_body_stream(zu_request("POST", url), f),
+    client = api
+  ))
+  expect_equal(j$bytes, 100e6)
+  expect_true(j$ordered)
+  delta <- hwm() - base_hwm
+  cat(sprintf(
+    "\n  100 MB uploaded; peak RSS grew by %.1f MB\n",
+    delta / 1024^2
+  ))
+  expect_lt(delta, 16 * 1024^2)
+})
+
+test_that("§65.7: full duplex: the response is read while the body is still being sent", {
+  skip_unless_grpc_server()
+  # FullDuplexCall answers each request message as it arrives. 200 requests
+  # each carry a 32 KiB payload, 6.4 MB in all, well past the server's
+  # window, so the body cannot all go out before replies have to be read:
+  # it goes out as zu_resp_read() pumps the connection.
+  varint <- function(n) {
+    out <- raw()
+    repeat {
+      b <- n %% 128
+      n <- n %/% 128
+      out <- c(out, as.raw(if (n > 0) b + 128 else b))
+      if (n == 0) break
+    }
+    out
+  }
+  ld <- function(field, bytes) {
+    c(as.raw(field * 8 + 2), varint(length(bytes)), bytes)
+  }
+  one <- function() {
+    # StreamingOutputCallRequest { response_parameters: [{size: 1000}],
+    #   payload: Payload { body: 32 KiB } }
+    msg <- c(
+      ld(2, as.raw(c(0x08, 0xe8, 0x07))),
+      ld(3, ld(2, as.raw(rep(7, 32768))))
+    )
+    grpc_frame(msg)
+  }
+  sent <- 0L
+  f <- function() {
+    if (sent == 200L) {
+      return(NULL)
+    }
+    sent <<- sent + 1L
+    one()
+  }
+  r <- zu_perform(
+    zu_body_stream(
+      zu_request("POST", "/grpc.testing.TestService/FullDuplexCall"),
+      f
+    ),
+    client = grpc_client(),
+    stream = TRUE
+  )
+  expect_lt(sent, 200L) # the body is not finished when the headers are in
+  got <- raw()
+  repeat {
+    b <- zu_resp_read(r, 65536)
+    if (!length(b)) {
+      break
+    }
+    got <- c(got, b)
+  }
+  expect_identical(sent, 200L)
+  expect_length(grpc_messages(got), 200L)
+  expect_identical(zu_resp_trailers(r, "grpc-status"), "0")
+})

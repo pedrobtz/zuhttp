@@ -430,8 +430,17 @@ test_that("attempt_timeout reaches the engine: a stalled server is retried, not 
   # A socket that listens and never accepts: the kernel completes the
   # handshake, the request is sent, and no response ever comes. Without the
   # per-attempt bound the first attempt waits out the whole 20 s budget.
-  port <- sample(20000:59000, 1L)
-  srv <- serverSocket(port)
+  # A random port can be taken; try a few rather than fail the run on a
+  # collision (ubsan leg, #135).
+  srv <- NULL
+  for (try in 1:10) {
+    port <- sample(20000:59000, 1L)
+    srv <- tryCatch(serverSocket(port), error = function(e) NULL)
+    if (!is.null(srv)) break
+  }
+  if (is.null(srv)) {
+    skip("no free port")
+  }
   on.exit(close(srv), add = TRUE)
   cli <- zu_client(
     pool = NULL,
