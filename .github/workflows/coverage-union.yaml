@@ -56,6 +56,13 @@ jobs:
       # network.yaml starts them. The pulled body's R entry points in init.c
       # and the driver's live paths are reachable only against a server, so
       # without these the own-C figure undercounts what the suite exercises.
+      # Go builds the gRPC interop server below. The Ubuntu image has it;
+      # the macOS image does not (#135's first macOS run).
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache: false
+
       - name: Start the HTTP/2 and gRPC test servers
         timeout-minutes: 8
         run: |
