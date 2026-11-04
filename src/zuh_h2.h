@@ -77,6 +77,9 @@ typedef struct {
     const zuh_headers *headers;
     const void        *body;
     size_t             body_len;
+    /* §65.7: when set, the body comes from here instead, a piece at a time,
+     * as the peer's window allows. Borrowed until the stream ends. */
+    const zuh_body_source *source;
 } zuh_h2_request;
 
 /* Open a stream, send the request, and read until the final response's

@@ -58,6 +58,13 @@ typedef struct {
 
     const unsigned char *body;
     size_t       body_len, body_off;
+
+    /* §65.7: a streamed request body, borrowed for the open stream only. */
+    zuh_body_source src;
+    const unsigned char *src_data;
+    size_t       src_len, src_off;
+    int          src_end, src_failed;
+    zuh_error    src_err;
 } h2_impl;
 
 static const zuh_stream_vtable h2_vt;
@@ -182,6 +189,9 @@ static int on_close(nghttp2_session *s, int32_t sid, uint32_t code, void *ud) {
     if (sid != h->sid) return 0;
     h->closed = 1;
     h->close_code = code;
+    /* The body source is borrowed for the stream's life only: a pooled
+     * connection must not keep a pointer to it. */
+    memset(&h->src, 0, sizeof h->src);
     return 0;
 }
 
@@ -191,6 +201,27 @@ static nghttp2_ssize body_source(nghttp2_session *s, int32_t sid, uint8_t *buf,
     h2_impl *h = (h2_impl *)ud;
     size_t left = h->body_len - h->body_off;
     (void)s; (void)sid; (void)src;
+    if (h->src.next) {
+        /* §65.7: pieces from the caller's function, each sent as one or
+         * more DATA frames under the peer's window; END_STREAM after the
+         * empty piece that ends it. nghttp2 calls this as the window opens,
+         * so the body goes out interleaved with whatever is being read. */
+        while (h->src_off == h->src_len && !h->src_end) {
+            const void *d = NULL;
+            size_t l = 0;
+            if (h->src.next(h->src.ctx, &d, &l, &h->src_err) != ZUH_OK) {
+                h->src_failed = 1;
+                return NGHTTP2_ERR_CALLBACK_FAILURE;
+            }
+            if (l == 0) h->src_end = 1;
+            else { h->src_data = (const unsigned char *)d; h->src_len = l; h->src_off = 0; }
+        }
+        if (n > h->src_len - h->src_off) n = h->src_len - h->src_off;
+        if (n) memcpy(buf, h->src_data + h->src_off, n);
+        h->src_off += n;
+        if (h->src_end && h->src_off == h->src_len) *flags |= NGHTTP2_DATA_FLAG_EOF;
+        return (nghttp2_ssize)n;
+    }
     if (n > left) n = left;
     if (n) memcpy(buf, h->body + h->body_off, n);
     h->body_off += n;
@@ -212,6 +243,16 @@ static zuh_code flush(h2_impl *h, zuh_deadline dl, zuh_error *err) {
     for (;;) {
         const uint8_t *p = NULL;
         nghttp2_ssize n = nghttp2_session_mem_send2(h->sess, &p);
+        if (n < 0 && h->src_failed) {
+            /* The body function failed: its error, not nghttp2's word for
+             * it. The session is over, so the connection is never pooled
+             * (D-47, §65.7). */
+            h->failed = 1;
+            *err = h->src_err;
+            if (!err->code) zuh_error_set(err, ZUH_ERR_IO, ZUH_PHASE_WRITE,
+                                         "the request body function failed");
+            return err->code;
+        }
         if (n < 0)
             return fail(h, err, n == NGHTTP2_ERR_NOMEM ? ZUH_ERR_NOMEM : ZUH_ERR_IO,
                         ZUH_PHASE_WRITE, nghttp2_strerror((int)n), (int)n);
@@ -383,11 +424,16 @@ zuh_code zuh_h2_begin(zuh_stream *conn, const zuh_h2_request *rq,
     h->body = (const unsigned char *)rq->body;
     h->body_len = rq->body ? rq->body_len : 0;
     h->body_off = 0;
+    memset(&h->src, 0, sizeof h->src);
+    if (rq->source && rq->source->next) h->src = *rq->source;
+    h->src_data = NULL; h->src_len = h->src_off = 0;
+    h->src_end = h->src_failed = 0;
+    zuh_error_clear(&h->src_err);
 
     prd.source.ptr = NULL;
     prd.read_callback = body_source;
     sid = nghttp2_submit_request2(h->sess, NULL, nv, nv_n,
-                                  h->body_len ? &prd : NULL, NULL);
+                                  (h->body_len || h->src.next) ? &prd : NULL, NULL);
     if (sid < 0) {
         rc = fail(h, err, sid == NGHTTP2_ERR_NOMEM ? ZUH_ERR_NOMEM : ZUH_ERR_IO,
                   ZUH_PHASE_WRITE, nghttp2_strerror(sid), sid);
@@ -490,6 +536,7 @@ void zuh_h2_cancel(zuh_stream *conn, zuh_deadline dl) {
     h = (h2_impl *)conn->impl;
     if (h->closed || h->sid == 0 || h->failed) return;
     zuh_error_clear(&tmp);
+    memset(&h->src, 0, sizeof h->src);
     if (h->data.len) {
         (void)nghttp2_session_consume_connection(h->sess, h->data.len);
         zuh_buf_reset(&h->data);

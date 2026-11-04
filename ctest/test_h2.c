@@ -21,6 +21,7 @@
 
 void suite_h2(void);
 static void cases_w21(void);
+static void cases_w22(void);
 
 /* --- what the server does -------------------------------------------------- */
 
@@ -54,6 +55,8 @@ typedef struct {
     char fields[2048];           /* "name: value\n", in order */
     unsigned char body[4096];
     size_t body_len;
+    size_t body_total;           /* request DATA bytes, all of them */
+    unsigned long body_sum;      /* a position-weighted checksum, for order */
     int32_t last_sid;
     size_t body_off;             /* response DATA sent so far */
     uint32_t rst_code;           /* RST_STREAM the client sent, if any */
@@ -118,6 +121,8 @@ static int s_on_begin_headers(nghttp2_session *s, const nghttp2_frame *f, void *
         v->method[0] = v->path[0] = v->authority[0] = v->scheme[0] = '\0';
         v->fields[0] = '\0';
         v->body_len = 0;
+        v->body_total = 0;
+        v->body_sum = 0;
     }
     return 0;
 }
@@ -126,6 +131,12 @@ static int s_on_data(nghttp2_session *s, uint8_t flags, int32_t sid,
                      const uint8_t *data, size_t len, void *ud) {
     srv *v = (srv *)ud;
     (void)s; (void)flags; (void)sid;
+    {
+        size_t k;
+        for (k = 0; k < len; k++)
+            v->body_sum += (unsigned long)data[k] * (unsigned long)((v->body_total + k) % 251 + 1);
+        v->body_total += len;
+    }
     if (v->body_len + len <= sizeof v->body) {
         memcpy(v->body + v->body_len, data, len);
         v->body_len += len;
@@ -738,6 +749,7 @@ void suite_h2(void) {
     cases_failures();
     cases_alloc();
     cases_w21();
+    cases_w22();
 }
 
 
@@ -1069,6 +1081,123 @@ static void cases_w21(void) {
             ZUH_CHECK(zuh_headers_get(&r.trailers, "grpc-message") != NULL);
             zuh_result_free(&r);
         }
+        dialer_free(&dd);
+    }
+}
+
+
+/* --- W22: a streamed request body (§65.7) ---------------------------------- */
+
+typedef struct {
+    int pieces, piece_len, fail_at, sent, released, calls;
+    unsigned char buf[4000];
+    unsigned long expect_sum;
+    size_t expect_total;
+} gen_ctx;
+
+static zuh_code gen_next(void *ctx, const void **data, size_t *len, zuh_error *err) {
+    gen_ctx *g = (gen_ctx *)ctx;
+    int k;
+    g->calls++;
+    if (g->fail_at && g->sent == g->fail_at) {
+        zuh_error_set(err, ZUH_ERR_CANCELLED, ZUH_PHASE_WRITE, "the generator failed");
+        return ZUH_ERR_CANCELLED;
+    }
+    if (g->sent == g->pieces) { *len = 0; return ZUH_OK; }
+    for (k = 0; k < g->piece_len; k++) g->buf[k] = (unsigned char)((g->sent * 7 + k) & 0xff);
+    *data = g->buf;
+    *len = (size_t)g->piece_len;
+    g->sent++;
+    return ZUH_OK;
+}
+static void gen_release(void *ctx) { ((gen_ctx *)ctx)->released++; }
+
+static void gen_expect(gen_ctx *g) {
+    int p, k;
+    size_t pos = 0;
+    g->expect_sum = 0;
+    for (p = 0; p < g->pieces; p++)
+        for (k = 0; k < g->piece_len; k++, pos++)
+            g->expect_sum += (unsigned long)((p * 7 + k) & 0xff) * (unsigned long)(pos % 251 + 1);
+    g->expect_total = pos;
+}
+
+static void cases_w22(void) {
+    srv_dialer dd;
+    zuh_get_opts o;
+    zuh_result r;
+    zuh_error e;
+    zuh_code rc;
+    zuh_req_spec spec;
+
+    ZUH_CASE("§65.7: a streamed body reaches the server whole and in order, with no length");
+    {
+        gen_ctx g; srv_cfg c;
+        memset(&g, 0, sizeof g); memset(&c, 0, sizeof c);
+        g.pieces = 60; g.piece_len = 3000;          /* 180 KB: past the 64 KiB window */
+        gen_expect(&g);
+        memset(&spec, 0, sizeof spec);
+        spec.method = "POST";
+        spec.source.next = gen_next; spec.source.release = gen_release; spec.source.ctx = &g;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/up", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        ZUH_CHECK_EQ_INT(dd.conns[0].body_total, g.expect_total);
+        ZUH_CHECK(dd.conns[0].body_sum == g.expect_sum);
+        ZUH_CHECK(!has(dd.conns[0].fields, "content-length"));
+        ZUH_CHECK_EQ_INT(g.released, 1);
+        dialer_free(&dd);
+    }
+
+    ZUH_CASE("§65.7, D-47: a failing body function stops the request and the connection is not pooled");
+    {
+        gen_ctx g; srv_cfg c; zuh_pool *pool;
+        memset(&g, 0, sizeof g); memset(&c, 0, sizeof c);
+        g.pieces = 10; g.piece_len = 1000; g.fail_at = 3;
+        c.body = "ok"; c.body_len = 2;
+        memset(&spec, 0, sizeof spec);
+        spec.method = "POST";
+        spec.source.next = gen_next; spec.source.release = gen_release; spec.source.ctx = &g;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd);
+        pool = zuh_pool_new(NULL); o.pool = pool;
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/up", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_ERR_CANCELLED);
+        ZUH_CHECK(has(e.message, "generator"));
+        ZUH_CHECK_EQ_INT(g.released, 1);
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/next", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) { ZUH_CHECK_EQ_INT(r.reused_connection, 0); zuh_result_free(&r); }
+        ZUH_CHECK_EQ_INT(dd.dials, 2);
+        zuh_pool_free(pool);
+        dialer_free(&dd);
+    }
+
+    ZUH_CASE("§65.7: with stream_body, the pulled body inherits the source and releases it once");
+    {
+        gen_ctx g; srv_cfg c; zuh_buffer got;
+        memset(&g, 0, sizeof g); memset(&c, 0, sizeof c);
+        g.pieces = 3; g.piece_len = 100;
+        c.body = "echo"; c.body_len = 4;
+        memset(&spec, 0, sizeof spec);
+        spec.method = "POST";
+        spec.source.next = gen_next; spec.source.release = gen_release; spec.source.ctx = &g;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); o.stream_body = 1;
+        zuh_buf_init(&got, 0, (size_t)-1);
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/up", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            ZUH_CHECK_EQ_INT(g.released, 0);        /* still the pulled body's */
+            ZUH_CHECK(zuh_open_body_source_ctx(r.open) == &g);
+            while (zuh_open_body_read(r.open, &got, 100, &e) == ZUH_OK && !zuh_open_body_done(r.open)) { }
+            ZUH_CHECK_EQ_INT(got.len, 4);
+            zuh_result_free(&r);
+        }
+        ZUH_CHECK_EQ_INT(g.released, 1);
+        zuh_buf_free(&got);
         dialer_free(&dd);
     }
 }

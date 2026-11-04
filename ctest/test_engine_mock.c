@@ -188,6 +188,23 @@ static size_t framed(char *out, size_t cap, int how, const char *coding,
     return h + n;
 }
 
+/* §65.7: a request-body source over a NULL-terminated list of strings. */
+static const char **h1_gen_pieces;
+static zuh_code h1_gen_next(void *ctx, const void **data, size_t *len, zuh_error *err) {
+    struct { int i, released; } *g = ctx;
+    const char *p = h1_gen_pieces[g->i];
+    (void)err;
+    if (!p) { *len = 0; return ZUH_OK; }
+    g->i++;
+    *data = p;
+    *len = strlen(p);
+    return ZUH_OK;
+}
+static void h1_gen_release(void *ctx) {
+    struct { int i, released; } *g = ctx;
+    g->released++;
+}
+
 void suite_engine_mock(void) {
     zuh_get_opts o;
     zuh_result r;
@@ -228,6 +245,74 @@ void suite_engine_mock(void) {
             ZUH_CHECK(v && strcmp(v, "0") == 0);
             zuh_result_free(&r);
         }
+        dialer_free(&d);
+    }
+
+    ZUH_CASE("§65.7, D-95: a streamed body over HTTP/1.1 is chunked and terminated");
+    {
+        static const char *pieces[] = { "ab", "cde", NULL };
+        struct { int i, released; } g = { 0, 0 };
+        zuh_req_spec spec;
+        conn_script s[] = {{ "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok", 0, 0, 0, NULL }};
+        memset(&spec, 0, sizeof spec);
+        spec.method = "POST";
+        spec.source.next = h1_gen_next; spec.source.release = h1_gen_release;
+        spec.source.ctx = &g;
+        h1_gen_pieces = pieces;
+        dialer_init(&d, s, 1); opts_for(&o, &d);
+        rc = zuh_engine_perform(&r, "http://example.test/up", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        ZUH_CHECK(has(sent(&d, 0), "Transfer-Encoding: chunked\r\n"));
+        ZUH_CHECK(!has(sent(&d, 0), "Content-Length"));
+        ZUH_CHECK(has(sent(&d, 0), "\r\n\r\n2\r\nab\r\n3\r\ncde\r\n0\r\n\r\n"));
+        ZUH_CHECK_EQ_INT(g.released, 1);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        dialer_free(&d);
+    }
+
+    ZUH_CASE("§28.2, §65.7: a 307 that would resend a streamed body is zu_body_not_replayable");
+    {
+        static const char *pieces[] = { "x", NULL };
+        struct { int i, released; } g = { 0, 0 };
+        zuh_req_spec spec;
+        conn_script s[] = {
+            { "HTTP/1.1 307 Temporary Redirect\r\nLocation: /b\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", 0, 0, 0, NULL },
+            { "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", 0, 0, 0, NULL },
+        };
+        memset(&spec, 0, sizeof spec);
+        spec.method = "POST";
+        spec.source.next = h1_gen_next; spec.source.release = h1_gen_release;
+        spec.source.ctx = &g;
+        h1_gen_pieces = pieces;
+        dialer_init(&d, s, 2); opts_for(&o, &d);
+        rc = zuh_engine_perform(&r, "http://example.test/a", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_ERR_BODY_NOT_REPLAYABLE);
+        ZUH_CHECK_EQ_INT(d.next, 1);                 /* the second hop never dialled */
+        ZUH_CHECK_EQ_INT(g.released, 1);
+        dialer_free(&d);
+    }
+
+    ZUH_CASE("§19.1, §65.7: a 303 drops a streamed body and follows with a GET");
+    {
+        static const char *pieces[] = { "x", NULL };
+        struct { int i, released; } g = { 0, 0 };
+        zuh_req_spec spec;
+        conn_script s[] = {
+            { "HTTP/1.1 303 See Other\r\nLocation: /b\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", 0, 0, 0, NULL },
+            { "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", 0, 0, 0, NULL },
+        };
+        memset(&spec, 0, sizeof spec);
+        spec.method = "POST";
+        spec.source.next = h1_gen_next; spec.source.release = h1_gen_release;
+        spec.source.ctx = &g;
+        h1_gen_pieces = pieces;
+        dialer_init(&d, s, 2); opts_for(&o, &d);
+        rc = zuh_engine_perform(&r, "http://example.test/a", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        ZUH_CHECK(has(sent(&d, 1), "GET /b HTTP/1.1\r\n"));
+        ZUH_CHECK(!has(sent(&d, 1), "chunked"));
+        ZUH_CHECK_EQ_INT(g.released, 1);
+        if (rc == ZUH_OK) zuh_result_free(&r);
         dialer_free(&d);
     }
 
