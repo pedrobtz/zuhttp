@@ -1,9 +1,9 @@
 # zuhttp Roadmap
 
-**Edition:** 2 — from v0.1.0 to 1.0, written 2026-09-25; M4 (1.1.0, HTTP/2) added 2026-11-03
+**Edition:** 2 — from v0.1.0 to 1.0, written 2026-09-25; M4 (1.1.0, HTTP/2) added 2026-11-03 and folded into M0 2026-11-04 (D-96)
 **Companion:** [zuhttp-design.md](zuhttp-design.md), edition 2 — every work package cites the sections and decisions it implements
 **History:** [history/roadmap-v1.md](history/roadmap-v1.md) — edition 1 verbatim: stages S0–S21 and U1–U6, how each landed, the 2026-09-22 review and the amends merged with it
-**Status:** M0 ready to submit (2026-10-30) — 0.1.0 is the first CRAN submission (D-82); nothing is tagged until CRAN accepts
+**Status:** M0 reopened 2026-11-04 for HTTP/2 (W20–W22, D-96); the 0.1.0 submission (#40) waits on them. 0.1.0 is the first CRAN submission (D-82); nothing is tagged until CRAN accepts
 
 ---
 
@@ -69,19 +69,18 @@ Edition 2 therefore starts with the machinery that makes "done" checkable.
 
 ```mermaid
 graph LR
-  M0["M0 · v0.1.0<br/>first CRAN submission"] --> M1["M1 · v0.2.0<br/>complete the core"]
+  M0["M0 · v0.1.0<br/>first CRAN submission, with HTTP/2"] --> M1["M1 · v0.2.0<br/>complete the core"]
   M1 --> M2["M2 · v0.3.0<br/>parity, measured"]
   M2 --> M3["M3 · v1.0<br/>reviewed, measured"]
-  M3 --> M4["M4 · v1.1.0<br/>HTTP/2 for gRPC"]
 ```
 
 | Milestone | Version | Theme | Work packages | Gate |
 |---|---|---|---|---|
-| M0 | 0.1.0 | on CRAN | W1, W2, W3, W6, W13, W16 | accepted on CRAN; then, and only then, tagged |
+| M0 | 0.1.0 | on CRAN, with HTTP/2 | W1, W2, W3, W6, W13, W16, W20, W21, W22 | `zugrpc`'s Stage 4 live test passes against zuhttp; accepted on CRAN; then, and only then, tagged |
 | M1 | 0.2.0 | the design's promises, tested | W4, W7–W12 | every `zu_tls()` setting works on every backend except TLS 1.3 on Windows; phase timeouts |
 | M2 | 0.3.0 | parity, measured | W14, W15, W18 | §61.4 and §61.5 measured; TLS 1.3 on Windows or scope cut 1 taken |
 | M3 | 1.0 | others may depend on it | W17, W19 | all 14 §61 criteria; external review; `SECURITY.md` |
-| M4 | 1.1.0 | HTTP/2 for gRPC | W20, W21, W22 | `zugrpc`'s Stage 4 live test passes against zuhttp; every §65 subsection Built; project-owned C still ≤ 8,000 |
+| M4 | — | folded into M0 (D-96) | — | — |
 
 D-55 holds from the first CRAN acceptance on: 0.x.y patch releases carry
 fixes only; features wait for the next minor. Before it, 0.1.0 is unreleased
@@ -93,7 +92,7 @@ submission.
 
 ### M0 — v0.1.0: first CRAN submission
 
-**Status:** ready to submit, on `main` at `0706937`. Tracker: #21; the submission itself is #40.
+**Status:** reopened 2026-11-04 — HTTP/2 (W20–W22) joins 0.1.0 (D-96). Was ready to submit on `main` at `0706937`. Tracker: #21; the submission itself is #40, which waits on W22.
 
 0.1.0 is submitted with what shipped, plus the work that either blocks a
 submission or is far cheaper before one (D-82). Everything else follows on
@@ -195,13 +194,16 @@ fails is then found on CRAN rather than before. W14 and W15 in parallel.
 
 ### M4 — v1.1.0: HTTP/2 for gRPC
 
-**Status:** not started. Blocked on M3. Tracker: #128.
+**Status:** folded into M0 on 2026-11-04 (D-96). W20–W22 are M0 work
+packages, its exit criteria below are M0's, and its tracker #128 is closed in
+favour of #21. The heading stays so that links to it resolve (rule 3).
 
-The first minor after 1.0 adds HTTP/2 through vendored nghttp2 (design §60,
-§65, D-89 to D-95), so that `zugrpc` (RFC 0069 in `pedrobtz/packages`) can
-be a pure-R gRPC client on zuhttp's request API and `zuspark` (RFC 0070) a
-Spark Connect client on it. D-55 holds: 1.0.x carries fixes only, and HTTP/2
-is 1.1.0.
+HTTP/2 through vendored nghttp2 (design §60, §65, D-89 to D-95), so that
+`zugrpc` (RFC 0069 in `pedrobtz/packages`) can be a pure-R gRPC client on
+zuhttp's request API and `zuspark` (RFC 0070) a Spark Connect client on it.
+It ships in 0.1.0 rather than 1.1.0 (D-96): nothing in M1–M3 is a
+prerequisite, and waiting would put four zuhttp releases and the 1.0 review
+in front of both consumers.
 
 **Order, and why.**
 
@@ -215,7 +217,7 @@ is 1.1.0.
 3. **W22 last.** Client streaming has one consumer call (`AddArtifacts`)
    and waits until `zugrpc` is on the air with the first two.
 
-**Exit criteria**
+**Exit criteria** — part of M0's since 2026-11-04.
 
 - [ ] W20, W21 and W22 closed.
 - [ ] `zugrpc`'s Stage 4 live test (grpc-go interop server in Docker)
@@ -595,11 +597,15 @@ cancellably (F-16).
 
 ### W20 — nghttp2 vendored, ALPN and h2c
 
-**Status:** not started. **Milestone:** M4. **Closes:** #129.
+**Status:** not started. **Milestone:** M0 (was M4; D-96). **Closes:** #129.
 **Implements:** D-89, D-90, §48, §60, §65.1, §65.2, §65.8 (fuzz target
 twelve). **Estimate:** 5 days, medium — the vendoring is mechanical, ALPN
 on three backends is three small changes, and the unknown is `R CMD check`'s
-symbol scan on CRAN's flavours. **Depends on:** M3.
+symbol scan on CRAN's flavours. **Depends on:** nothing open; built on
+`main` as M0 left it. **CI:** quick on the pull request, like every work
+package; the full-profile criteria below are read from the run on `main`
+after the merge, before W21's pull request opens. W22 closes M0 and takes
+`full-ci`.
 
 Vendor nghttp2 1.71.0 `lib/` under `src/vendor/nghttp2/` with the six §48
 patches, `tools/update-nghttp2`, a `VENDOR` file and the checksum manifest;
@@ -643,7 +649,7 @@ and ALPN on every backend.
 
 ### W21 — Trailers, pull stream, cancel, keepalive
 
-**Status:** not started. **Milestone:** M4. **Closes:** #130.
+**Status:** not started. **Milestone:** M0 (was M4; D-96). **Closes:** #130.
 **Implements:** D-91, D-92, D-93, D-94, §18.2, §25.5, §26.2, §31.8,
 §65.3–§65.6, §65.8 (the interop server). **Estimate:** 6 days, medium-low —
 four features
@@ -674,8 +680,13 @@ four land together before `zugrpc` Stage 4 can run.
 - [ ] Keepalive: with `keepalive_time = 1, keepalive_timeout = 1` an idle h2
       connection to a server that stops answering PING is evicted and the
       next request opens a new one; a server that answers keeps it.
-- [ ] `zugrpc`'s Stage 4 live test passes against this branch on the Ubuntu
-      legs (grpc-go interop server in Docker behind `ZU_H2_TEST_SERVER`).
+- [ ] The grpc-go interop server (Docker, behind `ZU_H2_TEST_SERVER`)
+      answers a unary and a server-streaming call made with zuhttp's own
+      request API on the Ubuntu legs: status read from the trailers, the
+      stream pulled with `zu_resp_read()`.
+      *Moved 2026-11-04 (D-96):* `zugrpc`'s Stage 4 live test was this
+      criterion, but that stage is built on W21 itself, so it gates M0 and
+      #40 instead of W21.
 - [ ] The §65.2 receive window set from measurement and written into the
       design.
 - [ ] Three new exports in §53 (66 total); NEWS entry; D-91 to D-94 marked
@@ -683,7 +694,7 @@ four land together before `zugrpc` Stage 4 can run.
 
 ### W22 — Streaming request body
 
-**Status:** not started. **Milestone:** M4. **Closes:** #131.
+**Status:** not started. **Milestone:** M0 (was M4; D-96). **Closes:** #131.
 **Implements:** D-95, §28, §65.7. **Estimate:** 3 days, medium — the h2
 side is nghttp2's data provider; the HTTP/1.1 side is the first chunked
 request body zuhttp sends. **Depends on:** W21.
@@ -1036,3 +1047,17 @@ changed the plan or the design.
   it; and a streaming request body over HTTP/1.1 is a chunked request,
   which D-78 forbade, so D-95 amends D-78 for that body alone. Nothing is
   built; the roadmap gains M4 and W20–W22, blocked on M3.
+- **2026-11-04 — decision: HTTP/2 in 0.1.0 (D-96).** The maintainer
+  answered decision S1 of `zuspark.md` in `pedrobtz/packages` by folding M4
+  into M0: W20, W21 and W22 are built before the first CRAN submission,
+  which waits on them, instead of after 1.0 as 1.1.0. The arithmetic that
+  drove it: five zuhttp releases at CRAN's six-week floor plus the 1.0
+  gate's undated external review put `zuspark` nine months or more behind
+  zuhttp 0.1.0. D-89 to D-95 keep their content; D-89 and D-93 lose their
+  "after 1.0", and §4, §28, §60, §65 and R-19 follow. M4's heading stays,
+  retired by its status line; its exit criteria are now M0's. The CI tier is
+  unchanged: W20 and W21 merge on the quick profile and their full-profile
+  criteria are read on `main` after merge; W22 closes M0 and runs `full-ci`.
+  W21's `zugrpc` Stage 4 criterion moves to M0's gate (and #40), since
+  `zugrpc` Stage 4 is built on W21 and cannot precede it; W21 proves the
+  same path with zuhttp's own API against the grpc-go interop server.
