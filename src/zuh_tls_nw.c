@@ -36,6 +36,8 @@
 #include "zuh_fork.h"
 #include "zuh_trace.h"
 
+#include <dlfcn.h>
+#include <stdlib.h>
 #include <Network/Network.h>
 #include <Security/Security.h>
 #include <dispatch/dispatch.h>
@@ -653,6 +655,32 @@ int zuh_tls_peer_ip(const zuh_stream *s, char *buf, size_t n) {
 
 /* --- dialling ------------------------------------------------------------- */
 
+/* §65.1: the protocol ALPN chose. The getter is deprecated from macOS 15.5,
+ * and its replacement, which returns a copy to free, exists only from 15.5:
+ * naming either one in the source warns on one side of that line, and
+ * R CMD check counts the warning (found on the full profile, 2026-11-04).
+ * Both are looked up at run time instead, the new one first, so one binary
+ * is right on every macOS this backend supports, with no #pragma (§13.2). */
+typedef const char *(*alpn_getter)(sec_protocol_metadata_t);
+
+static void read_alpn(sec_protocol_metadata_t sm, char *out, size_t n) {
+    static alpn_getter copy_fn, get_fn;
+    static int looked;
+    const char *p;
+    if (!looked) {
+        *(void **)&copy_fn = dlsym(RTLD_DEFAULT, "sec_protocol_metadata_copy_negotiated_protocol");
+        *(void **)&get_fn  = dlsym(RTLD_DEFAULT, "sec_protocol_metadata_get_negotiated_protocol");
+        looked = 1;
+    }
+    if (copy_fn) {
+        p = copy_fn(sm);
+        if (p) { snprintf(out, n, "%s", p); free((void *)(uintptr_t)p); }
+    } else if (get_fn) {
+        p = get_fn(sm);
+        if (p) snprintf(out, n, "%s", p);
+    }
+}
+
 /* §35.2: protocol and cipher from the negotiated session. */
 static void record_info(nw_impl *m) {
     nw_protocol_definition_t def = nw_protocol_copy_tls_definition();
@@ -671,10 +699,7 @@ static void record_info(nw_impl *m) {
             name = zuh_tls_cipher_name(
                 (unsigned)sec_protocol_metadata_get_negotiated_tls_ciphersuite(sm));
             if (name) snprintf(m->info.cipher, sizeof m->info.cipher, "%s", name);
-            {
-                const char *ap = sec_protocol_metadata_get_negotiated_protocol(sm);
-                if (ap) snprintf(m->info.alpn, sizeof m->info.alpn, "%s", ap);
-            }
+            read_alpn(sm, m->info.alpn, sizeof m->info.alpn);
             sec_release(sm);
         }
         nw_release(md);

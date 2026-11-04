@@ -65,13 +65,20 @@ typedef struct {
     size_t   surplus;       /* bytes after the final chunk and trailers, once
                              * decoding is complete: data the server sent
                              * beyond this response (§26.3) */
+    /* §18.2, D-91: the trailer section, collected after the last chunk and
+     * parsed as a header block bounded by §40's limits on its own. */
+    int        in_trailer;
+    zuh_buffer tbuf;
+    zuh_headers trailers;
 } zuh_chunked;
 
 zuh_code zuh_chunked_init(zuh_chunked *c, uint64_t max_chunk, uint64_t max_total);
 void    zuh_chunked_free(zuh_chunked *c);
 
 /* Decode in place. On entry *len is the byte count in buf; on return it is the
- * number of DECODED bytes at the front of buf.
+ * number of DECODED bytes at the front of buf. Trailer fields, when the
+ * message ends with any, are in c->trailers once this returns ZUH_OK; a
+ * trailer section over §40's limits or malformed is ZUH_ERR_PARSE.
  *
  *   ZUH_OK              the final chunk was seen; decoding is complete
  *   ZUH_ERR_WOULDBLOCK  more input needed

@@ -22,6 +22,7 @@ zuh_code zuh_body_pipe_init(zuh_body_pipe *p, zuh_sink *sink, zuh_headers *h,
     memset(p, 0, sizeof *p);
     p->sink = sink;
     p->max_body = max_body;
+    zuh_headers_init(&p->trailers);
 
     kind = no_decode ? ZUH_ENC_IDENTITY
                      : zuh_encoding_parse(zuh_headers_get(h, "Content-Encoding"));
@@ -47,6 +48,7 @@ zuh_code zuh_body_pipe_init(zuh_body_pipe *p, zuh_sink *sink, zuh_headers *h,
 }
 
 void zuh_body_pipe_free(zuh_body_pipe *p) {
+    zuh_headers_free(&p->trailers);
     if (!p->inflating) return;
     zuh_inflate_free(&p->inflate);
     zuh_buf_free(&p->staging);
@@ -107,121 +109,159 @@ zuh_code zuh_body_pipe_finish(zuh_body_pipe *p, zuh_error *err) {
         ? zuh_sink_write(p->sink, p->staging.data, p->staging.len, err) : ZUH_OK;
 }
 
-static zuh_code body_read_framed(zuh_stream *s, const zuh_framing *fr, zuh_body_pipe *p,
-                                const char *seed, size_t seed_len,
-                                uint64_t max_body, zuh_deadline dl, zuh_error *err);
+/* --- the reader: one framing, stepped one read at a time ---------------
+ *
+ * §65.4 needs a body that is read when the caller asks rather than all at
+ * once, so the framing loop that used to live here is a state machine whose
+ * step does one read's worth of work. zuh_body_read() is the loop over it;
+ * zuh_resp_read() takes one step at a time. Either way the same framing code
+ * runs, so a pulled body cannot be framed differently from a buffered one. */
+
+zuh_code zuh_body_reader_init(zuh_body_reader *r, const zuh_framing *fr,
+                              const char *seed, size_t seed_len,
+                              uint64_t max_body, zuh_error *err) {
+    memset(r, 0, sizeof *r);
+    r->fr = *fr;
+    r->work = (char *)zuh_alloc(ZUH_READ_CHUNK);
+    if (!r->work || !zuh_buf_init(&r->seed, seed_len ? seed_len : 1, (size_t)-1) ||
+        (seed_len && !zuh_buf_append(&r->seed, seed, seed_len))) {
+        zuh_body_reader_free(r);
+        zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_READ, "out of memory");
+        return ZUH_ERR_NOMEM;
+    }
+    if (fr->kind == ZUH_FRAME_CHUNKED) {
+        zuh_code rc = zuh_chunked_init(&r->dec, 0, max_body);
+        if (rc != ZUH_OK) {
+            zuh_body_reader_free(r);
+            zuh_error_set(err, rc, ZUH_PHASE_READ, "out of memory");
+            return rc;
+        }
+        r->chunked = 1;
+    }
+    return ZUH_OK;
+}
+
+void zuh_body_reader_free(zuh_body_reader *r) {
+    if (r->chunked) zuh_chunked_free(&r->dec);
+    r->chunked = 0;
+    zuh_free(r->work);
+    r->work = NULL;
+    zuh_buf_free(&r->seed);
+}
+
+/* The next run of wire bytes: what arrived with the headers first, then the
+ * stream. 0 is end of stream. */
+static zuh_ssize next_bytes(zuh_body_reader *r, zuh_stream *s, zuh_deadline dl,
+                            zuh_error *err) {
+    if (r->seed.len) {
+        size_t n = r->seed.len < ZUH_READ_CHUNK ? r->seed.len : ZUH_READ_CHUNK;
+        memcpy(r->work, r->seed.data, n);
+        zuh_buf_consume(&r->seed, n);
+        return (zuh_ssize)n;
+    }
+    return zuh_stream_read(s, r->work, ZUH_READ_CHUNK, dl, err);
+}
+
+static zuh_code step_framed(zuh_body_reader *r, zuh_stream *s, zuh_body_pipe *p,
+                            zuh_deadline dl, zuh_error *err) {
+    const zuh_framing *fr = &r->fr;
+    zuh_ssize n;
+    size_t take;
+
+    if (fr->kind == ZUH_FRAME_NONE) {
+        /* HEAD, 204, 304: no body, so anything already read is surplus. */
+        p->surplus += (uint64_t)r->seed.len;
+        zuh_buf_reset(&r->seed);
+        r->done = 1;
+        return ZUH_OK;
+    }
+    if (fr->kind == ZUH_FRAME_LENGTH && p->raw_seen >= fr->length) {
+        p->surplus += (uint64_t)r->seed.len;
+        zuh_buf_reset(&r->seed);
+        r->done = 1;
+        return ZUH_OK;
+    }
+
+    n = next_bytes(r, s, dl, err);
+    if (n < 0) return err->code;
+    if (n == 0) {
+        if (fr->kind == ZUH_FRAME_UNTIL_CLOSE) { r->done = 1; return ZUH_OK; }
+        if (fr->kind == ZUH_FRAME_CHUNKED) {
+            zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_READ,
+                         "connection closed inside a chunked body");
+            return ZUH_ERR_PARSE;
+        }
+        zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_READ,
+                     "connection closed with %lu of %lu body bytes read",
+                     (unsigned long)p->raw_seen, (unsigned long)fr->length);
+        return ZUH_ERR_PARSE;
+    }
+
+    if (fr->kind == ZUH_FRAME_CHUNKED) {
+        size_t len = (size_t)n;
+        zuh_code rc, w;
+        /* WIRE bytes, before de-chunking: `len` comes back as the decoded
+         * length, so counting that would report the body and call it the
+         * wire. The difference is the chunk framing, which is exactly what
+         * someone comparing the two numbers wants to see. */
+        p->raw_seen += (uint64_t)n;
+        rc = zuh_chunked_decode(&r->dec, r->work, &len, err);
+        if (len) {
+            w = zuh_body_pipe_feed(p, r->work, len, err);
+            if (w != ZUH_OK) return w;
+        }
+        if (rc == ZUH_ERR_WOULDBLOCK) return ZUH_OK;
+        if (rc != ZUH_OK) return rc;
+        /* The last chunk and its trailers are in, and with them the end of
+         * the message: whatever followed it, in this read or still held from
+         * the headers, belongs to no response we asked for. */
+        p->surplus += (uint64_t)r->dec.surplus + (uint64_t)r->seed.len;
+        zuh_buf_reset(&r->seed);
+        zuh_headers_free(&p->trailers);
+        p->trailers = r->dec.trailers;           /* ownership moves */
+        zuh_headers_init(&r->dec.trailers);
+        r->done = 1;
+        return ZUH_OK;
+    }
+
+    /* LENGTH and UNTIL_CLOSE differ only in when they stop. Anything past
+     * Content-Length is the next response on this connection, not this body;
+     * trimming here rather than truncating a buffer afterwards is what lets
+     * the body go straight to a sink. No cap check here: zuh_body_pipe_feed()
+     * refuses before writing, so §27.1's rule that the cap covers every sink
+     * holds where every sink's bytes pass. */
+    take = (size_t)n;
+    if (fr->kind == ZUH_FRAME_LENGTH && p->raw_seen + take > fr->length)
+        take = (size_t)(fr->length - p->raw_seen);
+    p->surplus += (uint64_t)((size_t)n - take);
+    {
+        zuh_code w = zuh_body_pipe_feed(p, r->work, take, err);
+        if (w != ZUH_OK) return w;
+    }
+    p->raw_seen += take;
+    if (fr->kind == ZUH_FRAME_LENGTH && p->raw_seen >= fr->length) {
+        p->surplus += (uint64_t)r->seed.len;
+        zuh_buf_reset(&r->seed);
+        r->done = 1;
+    }
+    return ZUH_OK;
+}
+
+zuh_code zuh_body_reader_step(zuh_body_reader *r, zuh_stream *s, zuh_body_pipe *p,
+                              zuh_deadline dl, zuh_error *err) {
+    zuh_code rc;
+    if (r->done) return ZUH_OK;
+    rc = step_framed(r, s, p, dl, err);
+    if (rc == ZUH_OK && r->done) rc = zuh_body_pipe_finish(p, err);
+    return rc;
+}
 
 zuh_code zuh_body_read(zuh_stream *s, const zuh_framing *fr, zuh_body_pipe *p,
                          const char *seed, size_t seed_len,
                          uint64_t max_body, zuh_deadline dl, zuh_error *err) {
-    zuh_code rc = body_read_framed(s, fr, p, seed, seed_len, max_body, dl, err);
-    return rc == ZUH_OK ? zuh_body_pipe_finish(p, err) : rc;
-}
-
-static zuh_code body_read_framed(zuh_stream *s, const zuh_framing *fr, zuh_body_pipe *p,
-                                const char *seed, size_t seed_len,
-                                uint64_t max_body, zuh_deadline dl, zuh_error *err) {
-    if (fr->kind == ZUH_FRAME_NONE) {
-        /* HEAD, 204, 304: no body, so anything already read is surplus. */
-        p->surplus += (uint64_t)seed_len;
-        return ZUH_OK;
-    }
-
-    if (fr->kind == ZUH_FRAME_CHUNKED) {
-        zuh_chunked dec;
-        char *work;
-        zuh_code rc = zuh_chunked_init(&dec, 0, max_body);
-        if (rc != ZUH_OK) return rc;
-
-        work = (char *)zuh_alloc(ZUH_READ_CHUNK);
-        if (!work) { zuh_chunked_free(&dec); return ZUH_ERR_NOMEM; }
-
-        if (seed_len) {
-            size_t len = seed_len;
-            memcpy(work, seed, seed_len);
-            /* WIRE bytes, before de-chunking: `len` comes back as the decoded
-             * length, so counting that would report the body and call it the
-             * wire. The difference is the chunk framing, which is exactly what
-             * someone comparing the two numbers wants to see. */
-            p->raw_seen += seed_len;
-            rc = zuh_chunked_decode(&dec, work, &len, err);
-            if (len) {
-                zuh_code w = zuh_body_pipe_feed(p, work, len, err);
-                if (w != ZUH_OK) rc = w;
-            }
-        } else {
-            rc = ZUH_ERR_WOULDBLOCK;
-        }
-        while (rc == ZUH_ERR_WOULDBLOCK) {
-            size_t len;
-            zuh_ssize n = zuh_stream_read(s, work, ZUH_READ_CHUNK, dl, err);
-            if (n < 0) { rc = err->code; break; }
-            if (n == 0) {
-                zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_READ,
-                             "connection closed inside a chunked body");
-                rc = ZUH_ERR_PARSE;
-                break;
-            }
-            len = (size_t)n;
-            p->raw_seen += (uint64_t)n;
-            rc = zuh_chunked_decode(&dec, work, &len, err);
-            if (len) {
-                zuh_code w = zuh_body_pipe_feed(p, work, len, err);
-                if (w != ZUH_OK) { rc = w; break; }
-            }
-        }
-        if (rc == ZUH_OK) p->surplus += (uint64_t)dec.surplus;
-        zuh_free(work);
-        zuh_chunked_free(&dec);
-        return rc == ZUH_OK ? ZUH_OK : rc;
-    }
-
-    /* LENGTH and UNTIL_CLOSE differ only in when they stop. */
-    if (seed_len) {
-        size_t take = seed_len;
-        /* Anything past Content-Length is the next response on this
-         * connection, not this body. Trimming here rather than truncating a
-         * buffer afterwards is what lets the body go straight to a sink. */
-        if (fr->kind == ZUH_FRAME_LENGTH && take > fr->length)
-            take = (size_t)fr->length;
-        p->surplus += (uint64_t)(seed_len - take);
-        {
-            zuh_code w = zuh_body_pipe_feed(p, seed, take, err);
-            if (w != ZUH_OK) return w;
-        }
-        p->raw_seen += take;
-    }
-    for (;;) {
-        char chunk[ZUH_READ_CHUNK];
-        zuh_ssize n;
-        size_t take;
-
-        if (fr->kind == ZUH_FRAME_LENGTH && p->raw_seen >= fr->length) break;
-        /* No cap check here any more. It used to live at exactly this point,
-         * AFTER a chunk had already reached the sink, which made max_body
-         * something noticed rather than a bound enforced. zuh_body_pipe_feed()
-         * refuses before writing, so reaching this line means the cap still
-         * holds. §27.1's rule that the cap covers every sink, file included,
-         * is satisfied there — where every sink's bytes pass.
-         */
-        n = zuh_stream_read(s, chunk, sizeof chunk, dl, err);
-        if (n < 0) return err->code;
-        if (n == 0) {
-            if (fr->kind == ZUH_FRAME_UNTIL_CLOSE) break;
-            zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_READ,
-                         "connection closed with %lu of %lu body bytes read",
-                         (unsigned long)p->raw_seen, (unsigned long)fr->length);
-            return ZUH_ERR_PARSE;
-        }
-        take = (size_t)n;
-        if (fr->kind == ZUH_FRAME_LENGTH && p->raw_seen + take > fr->length)
-            take = (size_t)(fr->length - p->raw_seen);
-        p->surplus += (uint64_t)((size_t)n - take);
-        {
-            zuh_code w = zuh_body_pipe_feed(p, chunk, take, err);
-            if (w != ZUH_OK) return w;
-        }
-        p->raw_seen += take;
-    }
-    return ZUH_OK;
+    zuh_body_reader r;
+    zuh_code rc = zuh_body_reader_init(&r, fr, seed, seed_len, max_body, err);
+    while (rc == ZUH_OK && !r.done) rc = zuh_body_reader_step(&r, s, p, dl, err);
+    zuh_body_reader_free(&r);
+    return rc;
 }

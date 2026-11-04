@@ -37,6 +37,15 @@ typedef enum {
     ZUH_H2_OFF
 } zuh_h2_mode;
 
+/* §65.2, §65.4: the receive window, for each stream and for the connection.
+ * Granted back as the caller takes bytes, so it is how far a server can run
+ * ahead of a caller that has stopped reading — and, divided by the round
+ * trip, the most a stream can carry per second. 4 MiB from measurement
+ * (2026-11-04, design §65.2): within 5% of the loopback ceiling, and four
+ * times what 1 MiB allows at a WAN round trip. The bytes wait in the
+ * server and the kernel, not in this process, which reads only on demand. */
+#define ZUH_H2_WINDOW (4 * 1024 * 1024)
+
 /* The ALPN preference list a mode offers, comma-separated (§15). */
 const char *zuh_h2_alpn_for(zuh_h2_mode m);
 
@@ -87,6 +96,25 @@ zuh_code zuh_h2_begin(zuh_stream *conn, const zuh_h2_request *rq,
  * enforces max_body and decoding exactly as for HTTP/1.1 (§21, §40). */
 zuh_code zuh_h2_body(zuh_stream *conn, zuh_body_pipe *pipe,
                      zuh_deadline dl, zuh_error *err);
+
+/* One step of zuh_h2_body(), for a body the caller pulls (§65.4): at most
+ * one read from the transport, then what arrived goes to the pipe and that
+ * much window is granted back. `*done` is set, and the trailers are moved to
+ * pipe->trailers, once the stream has ended and the pipe is finished. */
+zuh_code zuh_h2_body_step(zuh_stream *conn, zuh_body_pipe *pipe, int *done,
+                          zuh_deadline dl, zuh_error *err);
+
+/* §65.5: RST_STREAM(CANCEL) on the open stream; the connection stays
+ * reusable (zuh_h2_reusable()) unless sending the reset failed. */
+void zuh_h2_cancel(zuh_stream *conn, zuh_deadline dl);
+
+/* §65.6: PING the peer and wait up to `timeout_ms` for the ACK. 1 when it
+ * answered, 0 when it did not or the connection is unusable. */
+int  zuh_h2_ping(zuh_stream *conn, long timeout_ms);
+
+/* Milliseconds since the last bytes in either direction; -1 when `conn` is
+ * not an HTTP/2 connection. */
+long zuh_h2_idle_ms(zuh_stream *conn);
 
 /* §26.3 for HTTP/2: may another request be sent on this connection? No once
  * the last stream ended in anything but a clean close, the peer sent GOAWAY,

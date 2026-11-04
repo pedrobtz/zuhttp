@@ -109,8 +109,16 @@ zuh_code zuh_chunked_init(zuh_chunked *c, uint64_t max_chunk, uint64_t max_total
     memset(c, 0, sizeof *c);
     d = (struct phr_chunked_decoder *)zuh_calloc(1, sizeof *d);
     if (!d) return ZUH_ERR_NOMEM;
-    d->consume_trailer = 1;    /* §18.2: parse trailers, then discard them */
+    /* §18.2, D-91: the decoder stops after the last chunk, and the trailer
+     * section is parsed here, as a header block of its own. */
+    d->consume_trailer = 0;
     c->state = d;
+    zuh_headers_init(&c->trailers);
+    if (!zuh_buf_init(&c->tbuf, 0, ZUH_DEFAULT_MAX_HEADER_BYTES)) {
+        zuh_free(d);
+        c->state = NULL;
+        return ZUH_ERR_NOMEM;
+    }
     c->max_chunk = max_chunk;
     c->max_total = max_total;
     return ZUH_OK;
@@ -120,6 +128,50 @@ void zuh_chunked_free(zuh_chunked *c) {
     if (!c) return;
     zuh_free(c->state);
     c->state = NULL;
+    zuh_buf_free(&c->tbuf);
+    zuh_headers_free(&c->trailers);
+}
+
+/* The trailer section so far: complete, malformed, or still arriving. */
+static zuh_code trailer_parse(zuh_chunked *c, zuh_error *err) {
+    struct phr_header h[ZUH_DEFAULT_MAX_HEADER_COUNT];
+    size_t n = ZUH_DEFAULT_MAX_HEADER_COUNT, i;
+    int rc;
+    /* Nothing after the last chunk yet: the buffer has not been allocated,
+     * and picohttpparser does pointer arithmetic on what it is given (UBSan,
+     * fuzz_engine, 2026-11-04). */
+    if (c->tbuf.len == 0) return ZUH_ERR_WOULDBLOCK;
+    rc = phr_parse_headers((const char *)c->tbuf.data, c->tbuf.len, h, &n, 0);
+    if (rc == -2) {
+        if (zuh_buf_hit_limit(&c->tbuf) || c->tbuf.len >= ZUH_DEFAULT_MAX_HEADER_BYTES) {
+            zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_READ,
+                          "chunked trailer section exceeds the header size limit");
+            return ZUH_ERR_PARSE;
+        }
+        return ZUH_ERR_WOULDBLOCK;
+    }
+    if (rc < 0) {
+        zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_READ, "malformed chunked trailer section");
+        return ZUH_ERR_PARSE;
+    }
+    for (i = 0; i < n; i++) {
+        zuh_code a;
+        /* obs-fold continuation lines come back nameless; §18.3 refuses them
+         * in headers, and trailers are no different. */
+        if (!h[i].name) {
+            zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_READ, "obsolete line folding in a trailer");
+            return ZUH_ERR_PARSE;
+        }
+        a = zuh_headers_add(&c->trailers, h[i].name, h[i].name_len, h[i].value, h[i].value_len);
+        if (a == ZUH_ERR_NOMEM) return a;
+        if (a != ZUH_OK) {
+            zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_READ,
+                          "chunked trailer field is invalid or over a limit");
+            return ZUH_ERR_PARSE;
+        }
+    }
+    c->surplus = c->tbuf.len - (size_t)rc;
+    return ZUH_OK;
 }
 
 zuh_code zuh_chunked_decode(zuh_chunked *c, char *buf, size_t *len, zuh_error *err) {
@@ -130,6 +182,19 @@ zuh_code zuh_chunked_decode(zuh_chunked *c, char *buf, size_t *len, zuh_error *e
     if (!c || !c->state || !buf || !len) return ZUH_ERR_PARSE;
     d = (struct phr_chunked_decoder *)c->state;
     n = *len;
+    if (c->in_trailer) {
+        /* Past the last chunk: everything is trailer section or surplus. */
+        *len = 0;
+        if (n && !zuh_buf_append(&c->tbuf, buf, n)) {
+            if (zuh_buf_hit_limit(&c->tbuf)) {
+                zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_READ,
+                              "chunked trailer section exceeds the header size limit");
+                return ZUH_ERR_PARSE;
+            }
+            return ZUH_ERR_NOMEM;
+        }
+        return trailer_parse(c, err);
+    }
 
     rc = phr_decode_chunked(d, buf, &n);
 
@@ -166,10 +231,18 @@ zuh_code zuh_chunked_decode(zuh_chunked *c, char *buf, size_t *len, zuh_error *e
     }
 
     if (rc >= 0) {                      /* final chunk seen */
-        /* consume_trailer is set, so rc counts only what follows the whole
-         * message — never part of this body. */
-        c->surplus = (size_t)rc;
-        return ZUH_OK;
+        /* consume_trailer is off, so the rc bytes after the decoded data
+         * are the trailer section and whatever follows the message. */
+        c->in_trailer = 1;
+        if (rc > 0 && !zuh_buf_append(&c->tbuf, buf + n, (size_t)rc)) {
+            if (zuh_buf_hit_limit(&c->tbuf)) {
+                zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_READ,
+                              "chunked trailer section exceeds the header size limit");
+                return ZUH_ERR_PARSE;
+            }
+            return ZUH_ERR_NOMEM;
+        }
+        return trailer_parse(c, err);
     }
     return ZUH_ERR_WOULDBLOCK;           /* rc == -2: need more input */
 }

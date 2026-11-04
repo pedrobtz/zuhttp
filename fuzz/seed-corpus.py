@@ -247,6 +247,12 @@ def main():
     w("h2/redirect", opt + pre + fr(HEADERS, END_HEADERS | END_STREAM, 1,
       b"\x08\x03302" + lit(b"location", b"http://origin.test/next")) + ok3 +
       b"\x00ZU\x00" + pre + ok1)
+    w("h2/pulled-and-aborted", bytes([0x82]) + pre + ok1 +
+      fr(HEADERS, END_HEADERS, 3, b"\x88") + fr(DATA, 0, 3, b"y" * 2000) +
+      fr(DATA, END_STREAM, 3, b"z" * 2000))
+    w("h2/pulled-trailers", bytes([0x82]) + pre + fr(HEADERS, END_HEADERS, 1, b"\x88") +
+      fr(DATA, 0, 1, b"a" * 1000) +
+      fr(HEADERS, END_HEADERS | END_STREAM, 1, lit(b"grpc-status", b"0")))
     w("h2/two-connections", bytes([0x12]) + pre + ok1 + b"\x00ZU\x00" + pre + ok1)
 
     with open(os.path.join("corpus", "README"), "w") as f:

@@ -131,7 +131,31 @@ typedef struct {
      * any request byte is sent, and on http:// speaks h2c by prior
      * knowledge. OFF offers http/1.1 alone. */
     zuh_h2_mode http2;
+
+    /* §65.4, D-92: return once the final response's headers are in, with the
+     * body unread in zuh_result.open, for the caller to pull. Redirects are
+     * followed first; a body bound for `sink` is never streamed. */
+    int         stream_body;
 } zuh_get_opts;
+
+/* §65.4: a response body the caller reads in pieces. It owns the connection
+ * until the body ends, is aborted or is freed, and then hands it back to the
+ * pool it came from (when that is safe, §26.3) or closes it. */
+typedef struct zuh_open_body zuh_open_body;
+
+/* Up to `n` decoded bytes appended to `out`; 0 bytes appended means the end
+ * of the body, after which the trailers are complete. Each call is bounded by
+ * the request's timeout afresh and by the §25.1 tick. An error ends the body
+ * and closes the connection. */
+zuh_code zuh_open_body_read(zuh_open_body *b, zuh_buffer *out, size_t n,
+                            zuh_error *err);
+/* §65.5: stop reading. Over HTTP/2 the stream is reset and the connection
+ * pooled; over HTTP/1.1 it is closed. A no-op on an ended or aborted body. */
+void zuh_open_body_abort(zuh_open_body *b);
+int  zuh_open_body_done(const zuh_open_body *b);   /* all read, failed or aborted */
+const zuh_headers *zuh_open_body_trailers(const zuh_open_body *b);
+/* Aborts first if the body is still open. */
+void zuh_open_body_free(zuh_open_body *b);
 
 void zuh_get_opts_init(zuh_get_opts *o);
 
@@ -155,6 +179,13 @@ typedef struct {
     char      *trust_backend;    /* "sectrust", "schannel", "openssl" */
     int        http_version;     /* 0 or 1, for HTTP/1.x; 0 for HTTP/2 */
     int        http_major;       /* 1, or 2 when the response came over h2 */
+    /* §65.3, D-91: the trailer fields, HTTP/2 or chunked. Empty when there
+     * were none, and for a streamed body until it ends (then see `open`). */
+    zuh_headers trailers;
+    /* §65.4: the unread body, when zuh_get_opts.stream_body was set. The
+     * caller owns it once the result is returned; zuh_result_free() frees
+     * it only if the caller left it here. */
+    zuh_open_body *open;
     int        proxy_used;
     int        reused_connection;
 

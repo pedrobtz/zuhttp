@@ -111,12 +111,29 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     o.no_decode = (sel & 0x20) != 0;
     o.http2 = ZUH_H2_REQUIRED;
 
+    /* Option bit 0x80: the body is pulled (§65.4) in small pieces, and the
+     * second request's is aborted halfway (§65.5), so the reset and the
+     * reuse after it are fuzzed too. */
+    o.stream_body = (sel & 0x80) != 0;
+
     for (k = 0; k < 2; k++) {
         zuh_result_init(&r);
         zuh_error_clear(&e);
         if (zuh_engine_perform(&r, "http://origin.test/start", &spec, &o, &e) == ZUH_OK) {
             size_t j, bytes = 0;
             const char *nm, *v;
+            if (r.open) {
+                zuh_buffer got;
+                int reads = 0;
+                if (zuh_buf_init(&got, 0, (size_t)-1)) {
+                    while (!zuh_open_body_done(r.open) &&
+                           zuh_open_body_read(r.open, &got, 333, &e) == ZUH_OK) {
+                        if (k == 1 && ++reads == 3) zuh_open_body_abort(r.open);
+                    }
+                    if (got.len > MAX_BODY) abort();
+                    zuh_buf_free(&got);
+                }
+            }
             if (r.body.len > MAX_BODY) abort();
             for (j = 0; zuh_headers_at(&r.headers, j, &nm, &v); j++)
                 bytes += strlen(nm) + strlen(v) + 32;

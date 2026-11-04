@@ -20,6 +20,7 @@
 #include <zlib.h>
 
 void suite_h2(void);
+static void cases_w21(void);
 
 /* --- what the server does -------------------------------------------------- */
 
@@ -33,6 +34,7 @@ typedef struct {
     int         goaway_after;    /* GOAWAY once the response is out */
     int         eof_mid_body;    /* stop the connection half-way through DATA */
     const char *trailer_name, *trailer_value;
+    int         stall_after_first; /* stop reading once a response is out */
     /* Hostile mode: no server session at all; these bytes are the "server". */
     const unsigned char *raw;
     size_t      raw_len;
@@ -54,6 +56,8 @@ typedef struct {
     size_t body_len;
     int32_t last_sid;
     size_t body_off;             /* response DATA sent so far */
+    uint32_t rst_code;           /* RST_STREAM the client sent, if any */
+    int rst_seen;
 } srv;
 
 typedef struct {
@@ -189,6 +193,10 @@ static void respond(srv *v, int32_t sid) {
 static int s_on_frame_recv(nghttp2_session *s, const nghttp2_frame *f, void *ud) {
     srv *v = (srv *)ud;
     (void)s;
+    if (f->hd.type == NGHTTP2_RST_STREAM) {
+        v->rst_seen = 1;
+        v->rst_code = f->rst_stream.error_code;
+    }
     if ((f->hd.type == NGHTTP2_HEADERS || f->hd.type == NGHTTP2_DATA) &&
         (f->hd.flags & NGHTTP2_FLAG_END_STREAM))
         respond(v, f->hd.stream_id);
@@ -217,6 +225,7 @@ static zuh_ssize lb_read(zuh_stream *st, void *b, size_t n, zuh_deadline d, zuh_
 static zuh_ssize lb_write(zuh_stream *st, const void *b, size_t n, zuh_deadline d, zuh_error *e) {
     srv *v = (srv *)st->impl;
     (void)d; (void)e;
+    if (v->srv && v->cfg->stall_after_first && v->requests >= 1) return (zuh_ssize)n;
     if (v->srv) {
         nghttp2_session_mem_recv2(v->srv, (const uint8_t *)b, n);
         srv_drain(v);
@@ -728,4 +737,324 @@ void suite_h2(void) {
     cases_pool();
     cases_failures();
     cases_alloc();
+    cases_w21();
+}
+
+
+/* --- W21: trailers, the pulled body, cancellation, keepalive ------------- */
+
+static zuh_code stop_write(zuh_sink *sk, const unsigned char *d, size_t n, zuh_error *e) {
+    (void)d; (void)e;
+    sk->written += n;
+    sk->stopped = 1;
+    return ZUH_ERR_CANCELLED;
+}
+
+static void spin_ms(long ms) {
+    zuh_millis t0 = zuh_now_ms();
+    while (zuh_now_ms() - t0 < ms) { }
+}
+
+static void cases_w21(void) {
+    static char big[12 * 1024 * 1024];
+    srv_dialer dd;
+    zuh_get_opts o;
+    zuh_result r;
+    zuh_error e;
+    zuh_code rc;
+    zuh_pool *pool;
+    size_t i;
+    for (i = 0; i < sizeof big; i++) big[i] = (char)('A' + (i * 13) % 26);
+
+    ZUH_CASE("§65.3: trailers arrive in the result, apart from the headers");
+    {
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.body = "x"; c.body_len = 1;
+        c.trailer_name = "grpc-status"; c.trailer_value = "0";
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            const char *v = zuh_headers_get(&r.trailers, "Grpc-Status");
+            ZUH_CHECK(v && strcmp(v, "0") == 0);
+            ZUH_CHECK(zuh_headers_get(&r.headers, "grpc-status") == NULL);
+            zuh_result_free(&r);
+        }
+        dialer_free(&dd);
+    }
+
+    ZUH_CASE("§65.3: a Trailers-Only response is headers, an empty body, no error");
+    {
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.hname[0] = "grpc-status"; c.hvalue[0] = "5";
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            ZUH_CHECK(zuh_headers_get(&r.headers, "grpc-status") != NULL);
+            ZUH_CHECK_EQ_INT(r.body.len, 0);
+            ZUH_CHECK_EQ_INT(zuh_headers_total(&r.trailers), 0);
+            zuh_result_free(&r);
+        }
+        dialer_free(&dd);
+    }
+
+    ZUH_CASE("§65.4: a pulled body arrives whole, in the caller's pieces, then the trailers");
+    {
+        zuh_buffer got;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.body = big; c.body_len = 300000;
+        c.trailer_name = "grpc-status"; c.trailer_value = "0";
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); o.stream_body = 1;
+        pool = zuh_pool_new(NULL); o.pool = pool;
+        zuh_buf_init(&got, 0, (size_t)-1);
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/s", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            int reads = 0;
+            ZUH_CHECK(r.open != NULL);
+            ZUH_CHECK_EQ_INT(r.body.len, 0);
+            for (;;) {
+                size_t before = got.len;
+                rc = zuh_open_body_read(r.open, &got, 7000, &e);
+                if (rc != ZUH_OK || got.len == before) break;
+                ZUH_CHECK(got.len - before <= 7000);
+                reads++;
+            }
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            ZUH_CHECK(reads > 40);
+            ZUH_CHECK_EQ_INT(got.len, 300000);
+            ZUH_CHECK(got.len == 300000 && memcmp(got.data, big, 300000) == 0);
+            ZUH_CHECK(zuh_open_body_done(r.open));
+            {
+                const char *v = zuh_headers_get(zuh_open_body_trailers(r.open), "grpc-status");
+                ZUH_CHECK(v && strcmp(v, "0") == 0);
+            }
+            zuh_result_free(&r);
+        }
+        ZUH_CASE("§65.4: an ended pulled body gives its connection back to the pool");
+        zuh_error_clear(&e);
+        o.stream_body = 0;
+        rc = zuh_engine_perform(&r, "http://example.test/again", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) { ZUH_CHECK_EQ_INT(r.reused_connection, 1); zuh_result_free(&r); }
+        ZUH_CHECK_EQ_INT(dd.dials, 1);
+        zuh_buf_free(&got);
+        zuh_pool_free(pool);
+        dialer_free(&dd);
+    }
+
+    ZUH_CASE("§65.4: an unread stream stops the server after one window");
+    {
+        zuh_buffer got;
+        size_t sent_before;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.body = big; c.body_len = sizeof big;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); o.stream_body = 1;
+        zuh_buf_init(&got, 0, (size_t)-1);
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/s", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            sent_before = dd.conns[0].body_off;
+            /* The window is ZUH_H2_WINDOW; nothing beyond it was produced. */
+            ZUH_CHECK(sent_before <= (size_t)ZUH_H2_WINDOW);
+            ZUH_CHECK(sent_before < sizeof big);
+            ZUH_CASE("§65.4: reading grants the window back, and the server goes on");
+            while (got.len < (size_t)ZUH_H2_WINDOW + 2u * 1024u * 1024u &&
+                   zuh_open_body_read(r.open, &got, 65536, &e) == ZUH_OK) { }
+            ZUH_CHECK(dd.conns[0].body_off > sent_before);
+            ZUH_CHECK(memcmp(got.data, big, got.len) == 0);
+            zuh_result_free(&r);
+        }
+        zuh_buf_free(&got);
+        dialer_free(&dd);
+    }
+
+    ZUH_CASE("§40 under §65.4: max_body holds across a pulled body");
+    {
+        zuh_buffer got;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.body = big; c.body_len = 100000;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); o.stream_body = 1; o.max_body = 50000;
+        zuh_buf_init(&got, 0, (size_t)-1);
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/s", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            while ((rc = zuh_open_body_read(r.open, &got, 4096, &e)) == ZUH_OK &&
+                   !zuh_open_body_done(r.open)) { }
+            ZUH_CHECK_EQ_INT(rc, ZUH_ERR_BODY_LIMIT);
+            ZUH_CHECK(got.len <= 50000);
+            zuh_result_free(&r);
+        }
+        zuh_buf_free(&got);
+        dialer_free(&dd);
+    }
+
+    ZUH_CASE("§65.5: abort over HTTP/2 sends RST_STREAM(CANCEL) and keeps the connection");
+    {
+        zuh_buffer got;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.body = big; c.body_len = sizeof big;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); o.stream_body = 1;
+        pool = zuh_pool_new(NULL); o.pool = pool;
+        zuh_buf_init(&got, 0, (size_t)-1);
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/s", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            ZUH_CHECK_EQ_INT(zuh_open_body_read(r.open, &got, 1000, &e), ZUH_OK);
+            zuh_open_body_abort(r.open);
+            ZUH_CHECK(dd.conns[0].rst_seen);
+            ZUH_CHECK_EQ_INT(dd.conns[0].rst_code, NGHTTP2_CANCEL);
+            ZUH_CASE("§65.5: reading an aborted body is zu_cancelled_error; a second abort is a no-op");
+            zuh_open_body_abort(r.open);
+            ZUH_CHECK_EQ_INT(zuh_open_body_read(r.open, &got, 1000, &e), ZUH_ERR_CANCELLED);
+            zuh_result_free(&r);
+        }
+        ZUH_CASE("§65.5: the next request reuses the connection the abort kept");
+        {
+            srv_cfg c2; memset(&c2, 0, sizeof c2);
+            c2.body = "after"; c2.body_len = 5;
+            dd.cfg = &c2; dd.conns[0].cfg = &c2;
+            o.stream_body = 0;
+            zuh_error_clear(&e);
+            rc = zuh_engine_perform(&r, "http://example.test/next", NULL, &o, &e);
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            if (rc == ZUH_OK) {
+                ZUH_CHECK_EQ_INT(r.reused_connection, 1);
+                ZUH_CHECK_EQ_INT(r.body.len, 5);
+                zuh_result_free(&r);
+            }
+            ZUH_CHECK_EQ_INT(dd.dials, 1);
+            dd.conns[0].cfg = &c;
+        }
+        zuh_buf_free(&got);
+        zuh_pool_free(pool);
+        dialer_free(&dd);
+    }
+
+    ZUH_CASE("§65.5: a sink that asks to stop resets the stream and keeps the connection");
+    {
+        zuh_sink stop;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.body = big; c.body_len = 200000;
+        memset(&stop, 0, sizeof stop);
+        stop.write = stop_write;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd);
+        pool = zuh_pool_new(NULL); o.pool = pool; o.sink = &stop;
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/s", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        ZUH_CHECK(dd.conns[0].rst_seen);
+        ZUH_CHECK_EQ_INT(dd.conns[0].rst_code, NGHTTP2_CANCEL);
+        o.sink = NULL;
+        {
+            srv_cfg c2; memset(&c2, 0, sizeof c2);
+            c2.body = "ok"; c2.body_len = 2;
+            dd.cfg = &c2; dd.conns[0].cfg = &c2;
+            zuh_error_clear(&e);
+            rc = zuh_engine_perform(&r, "http://example.test/next", NULL, &o, &e);
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            if (rc == ZUH_OK) { ZUH_CHECK_EQ_INT(r.reused_connection, 1); zuh_result_free(&r); }
+            ZUH_CHECK_EQ_INT(dd.dials, 1);
+            dd.conns[0].cfg = &c;
+        }
+        zuh_pool_free(pool);
+        dialer_free(&dd);
+    }
+
+    ZUH_CASE("§65.6: a pooled h2 connection that answers PING is kept");
+    {
+        zuh_pool_config pc;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.body = "k"; c.body_len = 1;
+        zuh_pool_config_init(&pc); pc.keepalive_time_ms = 1; pc.keepalive_timeout_ms = 200;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd);
+        pool = zuh_pool_new(&pc); o.pool = pool;
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/1", NULL, &o, &e);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        spin_ms(5);
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/2", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) { ZUH_CHECK_EQ_INT(r.reused_connection, 1); zuh_result_free(&r); }
+        ZUH_CHECK_EQ_INT(dd.dials, 1);
+        zuh_pool_free(pool);
+        dialer_free(&dd);
+    }
+
+    ZUH_CASE("§65.6: one that stops answering PING is evicted, and the next request reconnects");
+    {
+        zuh_pool_config pc;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.body = "k"; c.body_len = 1; c.stall_after_first = 1;
+        zuh_pool_config_init(&pc); pc.keepalive_time_ms = 1; pc.keepalive_timeout_ms = 50;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd);
+        pool = zuh_pool_new(&pc); o.pool = pool;
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/1", NULL, &o, &e);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        spin_ms(5);
+        /* The stalled server is the first connection; the second is new and
+         * answers, because stall_after_first counts its own requests. */
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/2", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) { ZUH_CHECK_EQ_INT(r.reused_connection, 0); zuh_result_free(&r); }
+        ZUH_CHECK_EQ_INT(dd.dials, 2);
+        zuh_pool_free(pool);
+        dialer_free(&dd);
+    }
+
+    ZUH_CASE("§65.4 over HTTP/1.1: a pulled body, and abort closes the connection");
+    {
+        static const char resp[] =
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+            "5\r\nhello\r\n6\r\n world\r\n0\r\nX-Checksum: abc\r\n\r\n";
+        zuh_buffer got;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.raw = (const unsigned char *)resp; c.raw_len = sizeof resp - 1;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); o.http2 = ZUH_H2_AUTO; o.stream_body = 1;
+        zuh_buf_init(&got, 0, (size_t)-1);
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            while (zuh_open_body_read(r.open, &got, 3, &e) == ZUH_OK && !zuh_open_body_done(r.open)) { }
+            ZUH_CHECK_EQ_INT(got.len, 11);
+            ZUH_CHECK_MEM(got.data, "hello world", 11);
+            ZUH_CASE("§18.2, D-91: chunked trailers reach the caller");
+            {
+                const char *v = zuh_headers_get(zuh_open_body_trailers(r.open), "x-checksum");
+                ZUH_CHECK(v && strcmp(v, "abc") == 0);
+            }
+            zuh_result_free(&r);
+        }
+        zuh_buf_free(&got);
+        dialer_free(&dd);
+    }
+
+    ZUH_CASE("§18.2, D-91: chunked trailers reach a buffered result too");
+    {
+        static const char resp[] =
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+            "2\r\nhi\r\n0\r\nGrpc-Status: 0\r\nGrpc-Message: ok\r\n\r\n";
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.raw = (const unsigned char *)resp; c.raw_len = sizeof resp - 1;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); o.http2 = ZUH_H2_AUTO;
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            ZUH_CHECK_EQ_INT(zuh_headers_total(&r.trailers), 2);
+            ZUH_CHECK(zuh_headers_get(&r.trailers, "grpc-message") != NULL);
+            zuh_result_free(&r);
+        }
+        dialer_free(&dd);
+    }
 }
