@@ -678,7 +678,7 @@ and ALPN on every backend.
 
 ### W21 — Trailers, pull stream, cancel, keepalive
 
-**Status:** in review (2026-11-04). **Milestone:** M0 (was M4; D-96). **Closes:** #130.
+**Status:** in review (#135, 2026-11-04). **Milestone:** M0 (was M4; D-96). **Closes:** #130.
 **Implements:** D-91, D-92, D-93, D-94, §18.2, §25.5, §26.2, §31.8,
 §65.3–§65.6, §65.8 (the interop server). **Estimate:** 6 days, medium-low —
 four features
