@@ -678,7 +678,7 @@ and ALPN on every backend.
 
 ### W21 — Trailers, pull stream, cancel, keepalive
 
-**Status:** not started. **Milestone:** M0 (was M4; D-96). **Closes:** #130.
+**Status:** in review (2026-11-04). **Milestone:** M0 (was M4; D-96). **Closes:** #130.
 **Implements:** D-91, D-92, D-93, D-94, §18.2, §25.5, §26.2, §31.8,
 §65.3–§65.6, §65.8 (the interop server). **Estimate:** 6 days, medium-low —
 four features
@@ -690,36 +690,58 @@ four land together before `zugrpc` Stage 4 can run.
 
 **Exit criteria**
 
-- [ ] `zu_resp_trailers()` returns the trailing block over h2 and over
+- [x] `zu_resp_trailers()` returns the trailing block over h2 and over
       chunked HTTP/1.1 with D-16's semantics; a trailer block over §40's
       limits is `zu_http_parse_error`; a Trailers-Only response is a
       response with headers, an empty body and no error.
-- [ ] `te: trailers` reaches the wire unchanged on both protocols, asserted
-      on the bytes.
+- [x] `te: trailers` reaches the wire unchanged on both protocols, asserted
+      on the bytes (`test_engine_mock.c`, `test_h2.c`).
 - [ ] `zu_perform(stream = TRUE)` plus `zu_resp_read()`: a 1 GiB streamed
       response is read in 1 MiB pieces with peak RSS under 16 MB over
       baseline (§51.3's streaming row, re-measured); an unread stream stops
       the server after one window, shown by the server's own byte count
       staying put; `max_body` fires across the stream; an interrupt inside
       `zu_resp_read()` returns within 200 ms and leaves no descriptor open.
-- [ ] `zu_resp_abort()` over h2 sends `RST_STREAM(CANCEL)` (asserted on the
-      interop server's log) and the next request reuses the connection
+- [x] `zu_resp_abort()` over h2 sends `RST_STREAM(CANCEL)` (asserted on the
+      server's side in `test_h2.c`, not the interop server's log) and the next request reuses the connection
       (`zu_pool_stats()`); over HTTP/1.1 the connection is closed; a callback
       returning `FALSE` does the same on both.
-- [ ] Keepalive: with `keepalive_time = 1, keepalive_timeout = 1` an idle h2
+- [x] Keepalive: with `keepalive_time = 1, keepalive_timeout = 1` an idle h2
       connection to a server that stops answering PING is evicted and the
       next request opens a new one; a server that answers keeps it.
-- [ ] The grpc-go interop server (Docker, behind `ZU_H2_TEST_SERVER`)
+- [x] The grpc-go interop server (Docker, behind `ZU_H2_TEST_SERVER`)
       answers a unary and a server-streaming call made with zuhttp's own
       request API on the Ubuntu legs: status read from the trailers, the
       stream pulled with `zu_resp_read()`.
       *Moved 2026-11-04 (D-96):* `zugrpc`'s Stage 4 live test was this
       criterion, but that stage is built on W21 itself, so it gates M0 and
       #40 instead of W21.
-- [ ] The §65.2 receive window set from measurement and written into the
-      design.
-- [ ] Three new exports in §53 (66 total); NEWS entry; D-91 to D-94 marked
+- [x] The §65.2 receive window set from measurement and written into the
+      design: 4 MiB.
+- [x] Three new exports in §53 (66 total); NEWS entry; D-91 to D-94 marked
       Accepted; design §18.2, §25.5, §31.8 and §65.3–§65.6 Built.
+
+The streaming criterion stays unticked until the Ubuntu leg runs the 1 GiB
+test: peak RSS is read from Linux's `VmHWM`, so it does not run on macOS.
+Everything else in it passed locally (2026-11-04).
+
+**Deviations (2026-11-04).**
+- The interop server is built with `go install` at grpc-go v1.67.1 and run
+  behind `ZU_GRPC_TEST_SERVER`, not in Docker behind `ZU_H2_TEST_SERVER`:
+  no image to maintain, the same pinned tag, and `ZU_H2_TEST_SERVER`
+  already names W20's hypercorn server. Its requests are encoded by hand in
+  the test.
+- `RST_STREAM(CANCEL)` is asserted where it arrives, in the in-process
+  server of `test_h2.c`; the interop server does not log resets. Reuse after
+  the abort is asserted live with `zu_pool_stats()`.
+- The window is 4 MiB, not the 64 KiB-to-1 MiB range the design implied;
+  §65.2 has the measurement and the reasoning.
+- `max_body` applies to a pulled body as to any other (§65.4), so a long
+  stream raises it; each `zu_resp_read()` is bounded by `timeout` afresh.
+- Over HTTP/2 the pull pace, not nghttp2's manual window option, is what
+  bounds an unread server: with automatic window updates the test still
+  passed, and with a window larger than the body it failed, which is the
+  mechanism shown to fail (rule 6).
 
 ### W22 — Streaming request body
 
@@ -1108,3 +1130,15 @@ changed the plan or the design.
   The maintainer chose to raise the budget rather than cut further. The
   abort threshold stays at 12,000, and `tools/check-code-lines` fails above
   10,000.
+- **2026-11-04 — W20's full profile on `main` (`a6b1635`).** One real
+  finding: macOS SDKs from 15.5 deprecate
+  `sec_protocol_metadata_get_negotiated_protocol`, whose replacement exists
+  only from 15.5, and `R CMD check` counts the warning. W21 looks both up
+  with `dlsym`, so nothing deprecated is named at compile time. Ubuntu's
+  R-CMD-check and gctorture failed downloading `pak`, and macOS coverage on
+  an RDS read, before any of the package ran; they were re-run.
+- **2026-11-04 — W21: a NULL pointer to picohttpparser.** UBSan in the fuzz
+  replay caught `phr_parse_headers()` given an unallocated buffer when the
+  last chunk arrived with nothing after it yet; the trailer parser now waits
+  for bytes first. The HTTP/2 receive window was measured (design §65.2)
+  and set to 4 MiB.

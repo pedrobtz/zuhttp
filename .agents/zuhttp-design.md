@@ -142,10 +142,10 @@ accepted when that work package's PR merges.
 | D-88 | **JSON is `zujson`'s, in Imports; XML and HTML are `zuxml`'s and `zuhtml`'s, in Suggests.** `zujson` was written for zuhttp (raw bytes in and out, a documented type mapping, vendored parser, no R dependencies), so JSON works with nothing else installed and `zu_set_json_backend()` still replaces it. `zu_resp_xml()` and `zu_resp_html()` join 0.1.0. Supersedes D-25; amends D-54's "consumes no sibling" and §1's "no hard R dependencies" | Accepted 2026-10-30 | 1, 5.1, 31.7, 53 | — |
 | D-89 | **HTTP/2 through vendored nghttp2 `lib/`**, in 0.1.0 (D-96; this row first placed it after 1.0) (1.71.0, MIT; 23,133 raw lines of `.c`, 20,281 code lines by `tools/check-code-lines`' method, measured 2026-11-03). Supersedes §60's "not implemented" text: its four conditions are met by gRPC for Spark Connect (RFC 0069, RFC 0070). nghttp2 is vendored under §48, so it counts against §51.3's total-C row and never the project-owned row; HTTP/2 is written in project C under no circumstance (Appendix A.9) | Accepted (maintainer 2026-11-03; built in W20, 2026-11-04) | 60, 65, 48, 51.3 | W20 |
 | D-90 | **ALPN offers `h2` then `http/1.1` on every TLS connection by default**; `zuh_tls_config.alpn` is a comma-separated list, and the negotiated protocol is reported by `zuh_tls_info`, `zu_resp_connection()` and `zu_info()`. Cleartext HTTP/2 (h2c) is prior knowledge only, on an explicit client option, and zuhttp never sends an `Upgrade: h2c` | Accepted (built in W20, 2026-11-04) | 65.1, 13.3, 15, 26.1 | W20 |
-| D-91 | **Response trailers are exposed** by `zu_resp_trailers(res, name = NULL)`, with `zu_resp_header()`'s semantics (D-16) and §40's limits, for HTTP/2 and chunked alike. Revises §18.2's "discarded". A Trailers-Only HTTP/2 response is headers with an empty body, never an error | Proposed | 65.3, 18.2, 40 | W21 |
-| D-92 | **A pull-based response stream, `zu_resp_read(res, n)`, is the one exception to §31.8**: `zu_perform(stream = TRUE)` returns after the headers, and the caller reads the body in bounded pieces, with `max_body` still enforced and the HTTP/2 window replenished as the caller reads. Mutually exclusive with `path` and `callback` (D-53) | Proposed | 65.4, 31.8, 27.1 | W21 |
-| D-93 | **`zu_resp_abort(res)` is the explicit cancellation**, from 0.1.0 (D-96): `RST_STREAM(CANCEL)` on that stream with the connection kept poolable over HTTP/2, a closed connection over HTTP/1.1 (§26.3). A callback returning `FALSE` (§27.2) has the same meaning. Revises D-67's "not before 1.0" to "in 0.1.0" for this one token | Proposed | 65.5, 25.5, 27.2 | W21 |
-| D-94 | **Keepalive PING** on idle HTTP/2 connections, `zu_pool(keepalive_time, keepalive_timeout)`, replaces the §26.2 readability probe for them: an idle h2 connection with no PING ACK inside `keepalive_timeout` is evicted | Proposed | 65.6, 26.2 | W21 |
+| D-91 | **Response trailers are exposed** by `zu_resp_trailers(res, name = NULL)`, with `zu_resp_header()`'s semantics (D-16) and §40's limits, for HTTP/2 and chunked alike. Revises §18.2's "discarded". A Trailers-Only HTTP/2 response is headers with an empty body, never an error | Accepted (built in W21, 2026-11-04) | 65.3, 18.2, 40 | W21 |
+| D-92 | **A pull-based response stream, `zu_resp_read(res, n)`, is the one exception to §31.8**: `zu_perform(stream = TRUE)` returns after the headers, and the caller reads the body in bounded pieces, with `max_body` still enforced and the HTTP/2 window replenished as the caller reads. Mutually exclusive with `path` and `callback` (D-53) | Accepted (built in W21, 2026-11-04) | 65.4, 31.8, 27.1 | W21 |
+| D-93 | **`zu_resp_abort(res)` is the explicit cancellation**, from 0.1.0 (D-96): `RST_STREAM(CANCEL)` on that stream with the connection kept poolable over HTTP/2, a closed connection over HTTP/1.1 (§26.3). A callback returning `FALSE` (§27.2) has the same meaning. Revises D-67's "not before 1.0" to "in 0.1.0" for this one token | Accepted (built in W21, 2026-11-04) | 65.5, 25.5, 27.2 | W21 |
+| D-94 | **Keepalive PING** on idle HTTP/2 connections, `zu_pool(keepalive_time, keepalive_timeout)`, replaces the §26.2 readability probe for them: an idle h2 connection with no PING ACK inside `keepalive_timeout` is evicted | Accepted (built in W21, 2026-11-04) | 65.6, 26.2 | W21 |
 | D-95 | **A streaming request body** (a function yielding raw vectors), after W21, for client-streaming gRPC. Revises §28's "not planned"; amends D-78 and §17.4 for this body alone, which is sent chunked over HTTP/1.1. Not rewindable (§28.2), so never retried or replayed across a 307/308 | Proposed | 65.7, 28, 17.4 | W22 |
 | D-96 | **HTTP/2 ships in 0.1.0, the first CRAN submission**, not in 1.1.0 after 1.0 as D-89 first placed it. `zugrpc` and `zuspark` would otherwise wait on four more zuhttp releases at CRAN's six-week floor and on the 1.0 gate's external review; nothing in M1–M3 is a prerequisite of W20–W22, which touch the engine, pool and response object that exist now. Extends D-82's M0 list with W20, W21 and W22, and the 1.0 security review (W19) covers nghttp2 and the driver. D-89 to D-95 keep their content and only their timing changes. Cost accepted: the first submission carries a vendored library of about 20k code lines, and R-19's fallback (HTTP/2 off on a flavour whose symbol scan fails) must hold before submitting, not after | Accepted (maintainer, 2026-11-04) | 60, 65, 57 | W20, W21, W22 |
 | D-97 | **The project-owned C budget is 10,000 code lines**, raised from 8,000; the abort threshold stays at 12,000. HTTP/2 (D-96) brought the 8,000 into 0.1.0 with W20 at 7,989 and W21, W22 and M1 still to add: about 500 lines for the HTTP/2 accessors, keepalive and the streaming body (W20 cost about 200 around a 450-line driver), and the §51.3 estimate of 900 for W7–W14, so about 9,400. 10,000 holds that with a margin; raising it to 12,000 would remove the warning R-4 exists to give. The budget is a trigger to cut, not a target to fill | Accepted (maintainer, 2026-11-04) | 51.3, 61, B (R-4) | W20 |
@@ -822,12 +822,13 @@ pooled (§26.3).
 
 #### 18.2 Chunked trailers
 
-**Status:** Partial until W21 — parsed, counted against the header limits,
-and discarded.
+**Status:** Built (W21, 2026-11-04).
 
-Trailers are never merged into the response headers. After W21 they are kept
-and exposed by `zu_resp_trailers()` (D-91, §65.3), for chunked HTTP/1.1 and
-HTTP/2 alike, under the same §40 limits that bound the header block.
+Trailers are never merged into the response headers. They are kept and
+exposed by `zu_resp_trailers()` (D-91, §65.3), for chunked HTTP/1.1 and
+HTTP/2 alike, under the same §40 limits that bound the header block: the
+chunked decoder stops after the last chunk, and the trailer section is
+parsed as a header block of its own.
 
 #### 18.3 Duplicate response headers
 
@@ -1088,10 +1089,10 @@ W14 (D-30 → D-59).** The limitation is in user-facing help.
 
 #### 25.5 Explicit cancellation
 
-**Status:** Planned (W21).
+**Status:** Built (W21, 2026-11-04).
 
 `zu_resp_abort(res)` is the explicit cancellation of an open streaming
-response (D-93, §65.5): not before 1.0 (D-67), after it. It runs at the
+response (D-93, §65.5), from 0.1.0 (D-96). It runs at the
 §25.1 checkpoint and over HTTP/2 resets one stream rather than closing the
 connection.
 
@@ -1350,9 +1351,10 @@ the format, from one helper shared by all three.
 #### 31.8 Response body lifecycle
 
 Bodies are fully consumed into memory, a file, or a callback before
-`zu_perform()` returns. The one planned exception is the pull-based stream
-of §65.4 (D-92, W21), which the caller asks for explicitly; a response
-obtained any other way is still complete when it is returned.
+`zu_perform()` returns. The one exception is the pull-based stream of §65.4
+(D-92), which the caller asks for explicitly with `zu_perform(stream =
+TRUE)`; a response obtained any other way is still complete when it is
+returned.
 
 #### 31.9 Client/request configuration merge rules (D-35)
 
@@ -1927,7 +1929,9 @@ version R supports; HTTPS through a proxy needs macOS 14 (D-63).
 
 **Status:** Built (W3).
 
-Only the R API is stable. 0.1.0 exports 63 functions: D-65's 61, trimmed from 75
+Only the R API is stable. 0.1.0 exports 66 functions: the 63 below, and
+since W21 `zu_resp_read()`, `zu_resp_abort()` and `zu_resp_trailers()`
+(§65.3–§65.5). The 63 are D-65's 61, trimmed from 75
 by exactly these 14 removals: the six `zu_client_*` verb wrappers are removed;
 `zu_transport_perform`, `zu_native_transport`, `zu_error_codes`,
 `zu_code_retryable`, `zu_is_secret_header`, `zu_is_secret_param`,
@@ -2120,9 +2124,8 @@ caller who never asks for it: a request to a server that does not negotiate
 `h2` is served over HTTP/1.1 exactly as before, by the same engine, and
 every HTTP/1.1 test keeps passing unchanged.
 
-Three accessors join the §53 surface when W21 merges: `zu_resp_trailers()`,
-`zu_resp_read()` and `zu_resp_abort()`. Their names are Proposed in D-91 to
-D-93 and accepted with those rows.
+Three accessors joined the §53 surface with W21: `zu_resp_trailers()`,
+`zu_resp_read()` and `zu_resp_abort()` (D-91 to D-93).
 
 #### 65.1 Negotiation
 
@@ -2215,10 +2218,16 @@ HTTP/1.1. Three HTTP/2 rules apply at the driver:
 
 Settings sent: `SETTINGS_ENABLE_PUSH = 0` (a pushed stream is refused and
 reset), `SETTINGS_MAX_HEADER_LIST_SIZE = max_header_bytes`, and
-`SETTINGS_MAX_CONCURRENT_STREAMS = 1`. The initial receive window is
-nghttp2's default, 65,535 bytes, with WINDOW_UPDATE sent as DATA is fed to
-the body pipe; W21 sets it from the §65.4 measurement and moves the window
-to the caller's pace. nghttp2's own limits on the HPACK dynamic table and on
+`SETTINGS_MAX_CONCURRENT_STREAMS = 1`, and `SETTINGS_INITIAL_WINDOW_SIZE`
+with the connection window both at 4 MiB (`ZUH_H2_WINDOW`), granted back
+only as bytes leave the driver for the body pipe (§65.4). Measured on
+2026-11-04 over loopback h2c, 256 MiB pulled in 1 MiB pieces, median of
+three: 64 KiB 71 MB/s, 256 KiB 205 MB/s, 1 MiB 250 MB/s, 4 MiB 263 MB/s.
+Loopback hides the round trip, and a window divided by it is the most a
+stream carries: at 50 ms, 1 MiB is about 20 MB/s and 4 MiB about 80 MB/s.
+The window costs this process no memory, since bytes are received only when
+the caller reads; it bounds how far an unread server runs ahead, which is
+the cost 4 MiB was weighed against. nghttp2's own limits on the HPACK dynamic table and on
 `RST_STREAM` rate are kept at their defaults. The header limit is enforced
 by the driver on each block, counted as HPACK counts (name, value and 32
 bytes per field), so it does not rely on the server honouring the setting.
@@ -2235,7 +2244,7 @@ allocation-balance oracle and the allocation-failure tests cover it.
 
 #### 65.3 Trailers
 
-**Status:** Planned (W21), D-91.
+**Status:** Built (W21, 2026-11-04), D-91.
 
 `zu_resp_trailers(res, name = NULL)` returns the trailing header block: all
 of it as a named character vector when `name` is `NULL`, and one name with
@@ -2258,7 +2267,7 @@ asserts the bytes, since nothing in the engine strips it today.
 
 #### 65.4 Pull-based response stream
 
-**Status:** Planned (W21), D-92.
+**Status:** Built (W21, 2026-11-04), D-92.
 
 `zu_perform(req, stream = TRUE)` returns once the response headers have
 arrived, with the body unread, and the response is an open stream.
@@ -2273,9 +2282,17 @@ Flow control is the caller's pace: the driver grants window
 (`nghttp2_session_consume()`) only for bytes the caller has taken, so an
 unread stream stops the server after one window, which is what a gRPC
 iterator relies on for back pressure. `max_body` is enforced across the
-whole stream, not per read. Every wait inside `zu_resp_read()` is a §25.1
-wait: interruptible at the checkpoint, bounded by the request's `read` and
-`total` timeouts (§24), and an interrupt finishes the stream as an abort.
+whole stream, not per read, so a long stream needs `max_body` raised
+(`Inf` for none). Every wait inside `zu_resp_read()` is a §25.1 wait:
+interruptible at the checkpoint, and bounded by the request's `timeout`
+afresh on each call, since one `total` budget across a stream the caller
+reads at its own pace would end it for being read slowly; the phase
+timeouts of §24 take over when W4 and W7 build them. An interrupt ends the
+body and closes its connection.
+
+A response that a transport did not stream — a mock, a cassette — keeps
+its whole body, and `zu_resp_read()` serves it in the same pieces, so code
+written against the pull API is testable without a network.
 
 `stream = TRUE` is mutually exclusive with `path` and `callback` (D-53): a
 response has one sink. Retries (§33) and redirects (§19) complete before the
@@ -2285,7 +2302,7 @@ retried attempt. The same accessor works over HTTP/1.1, reading from the
 
 #### 65.5 Cancellation
 
-**Status:** Planned (W21), D-93.
+**Status:** Built (W21, 2026-11-04), D-93.
 
 `zu_resp_abort(res)` ends an open streaming response. Over HTTP/2 it sends
 `RST_STREAM(CANCEL)` on that stream, drains nothing, and leaves the
@@ -2302,7 +2319,7 @@ never pooled (§25.3), under both protocols.
 
 #### 65.6 Keepalive
 
-**Status:** Planned (W21), D-94.
+**Status:** Built (W21, 2026-11-04), D-94.
 
 `zu_pool(keepalive_time = NULL, keepalive_timeout = NULL)`, in seconds. On
 an idle HTTP/2 connection the pool sends a PING once `keepalive_time` has
