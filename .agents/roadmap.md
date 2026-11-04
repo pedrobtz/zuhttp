@@ -221,13 +221,17 @@ in front of both consumers.
 
 - [ ] W20, W21 and W22 closed.
 - [ ] `zugrpc`'s Stage 4 live test (grpc-go interop server in Docker)
-      passes against this branch of zuhttp, on the Ubuntu legs.
-- [ ] Every §65 subsection reads Built; D-89 to D-95 read Accepted.
-- [ ] Project-owned C ≤ 10,000 code lines (D-97) with the HTTP/2 driver in, by W1's
-      job; the §51.3 total-C row restated from the measured build.
-- [ ] Every HTTP/1.1 test passes unchanged: HTTP/2 off is HTTP/1.1 as
-      shipped.
-- [ ] NEWS lists every user-visible change.
+      passes against this branch of zuhttp, on the Ubuntu legs. *Open:
+      zugrpc has Stages 0–1; zuhttp's own calls to the same server pass in
+      test-http2.R (unary, Trailers-Only, server streaming, full duplex).
+      This gates #40, not W22.*
+- [x] Every §65 subsection reads Built; D-89 to D-95 read Accepted.
+- [x] Project-owned C ≤ 10,000 code lines (D-97) with the HTTP/2 driver in, by W1's
+      job (8,669 after W22); the §51.3 total-C row restated from the measured build.
+- [x] Every HTTP/1.1 test passes unchanged: HTTP/2 off is HTTP/1.1 as
+      shipped — but for two network tests that assumed example.com answers
+      HTTP/1.1, recorded under W20.
+- [x] NEWS lists every user-visible change.
 
 ---
 
@@ -628,12 +632,12 @@ and ALPN on every backend.
       MIT text, equal to `src/vendor/nghttp2/LICENSE` (upstream's `COPYING`)
       by `tools/check-vendor-licenses` (#52); `Authors@R` names the
       copyright holders.
-- [ ] `zuh_tls_config.alpn` is a list on all three backends; a TLS
+- [x] `zuh_tls_config.alpn` is a list on all three backends; a TLS
       connection to a public `h2` host negotiates `h2`, and
       `zu_resp_connection()$http_version` reads `"HTTP/2"`; `http2 = "off"`
       negotiates `http/1.1` on the same host; `alpn` is in every backend's
-      capability mask. *macOS and OpenSSL verified locally; Windows by the
-      S8 job's R3 step.*
+      capability mask. *macOS and OpenSSL in test-http2.R on their CI legs;
+      Windows by the S8 job's R3 step, green on #134 and #135.*
 - [ ] `zu_client(http2 = "required")` on an `http://` URL sends the
       connection preface with no `Upgrade`; one GET and one POST over h2c,
       and the same two over `h2` with TLS, against a local nghttp2-capable
@@ -750,7 +754,7 @@ Everything else in it passed locally (2026-11-04).
 
 ### W22 — Streaming request body
 
-**Status:** not started. **Milestone:** M0 (was M4; D-96). **Closes:** #131.
+**Status:** in review (2026-11-04). **Milestone:** M0 (was M4; D-96). **Closes:** #131.
 **Implements:** D-95, §28, §65.7. **Estimate:** 3 days, medium — the h2
 side is nghttp2's data provider; the HTTP/1.1 side is the first chunked
 request body zuhttp sends. **Depends on:** W21.
@@ -764,14 +768,25 @@ RFC 0069 §7.2 item 7, for client-streaming gRPC (`AddArtifacts`).
       `NULL`; over HTTP/1.1 the body is chunked and terminated; the server
       receives the bytes in order, 100 MB through a 1 MB generator with
       peak RSS under 16 MB over baseline.
-- [ ] A retry or a 307/308 with a streaming body raises
+- [x] A retry or a 307/308 with a streaming body raises
       `zu_body_not_replayable` before any attempt is repeated.
-- [ ] An error raised inside `f` unwinds under D-47's rules and the
+- [x] An error raised inside `f` unwinds under D-47's rules and the
       connection is closed, never pooled.
-- [ ] Half-close works: a response that starts streaming while the request
+- [x] Half-close works: a response that starts streaming while the request
       body is still being sent is read by `zu_resp_read()` without deadlock,
       against the interop server's `FullDuplexCall`.
-- [ ] D-95 marked Accepted; §28 and §65.7 Built; NEWS entry.
+- [x] D-95 marked Accepted; §28 and §65.7 Built; NEWS entry.
+
+The first criterion is checked locally — in order and whole over h2c, h2
+with TLS and chunked HTTP/1.1 — except its RSS half, which needs Linux's
+`VmHWM` and runs on the Ubuntu leg of the pull request.
+
+**Notes (2026-11-04).** The engine owns the body source and releases it
+once; under full duplex the pulled body inherits it, and every
+`zu_resp_read()` sends what the window allows before it reads. A mock or
+cassette collects the pieces into an ordinary body. The order check is the
+local server's `/check`, which reads the body without keeping it and
+verifies byte k is k mod 251.
 
 ---
 
