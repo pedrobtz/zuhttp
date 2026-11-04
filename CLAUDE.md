@@ -12,7 +12,7 @@ Both live in [`.agents/`](.agents/) and are excluded from the R package build:
 
 | File | What it is | When to read it |
 |---|---|---|
-| [`.agents/zuhttp-design.md`](.agents/zuhttp-design.md) | The design, edition 2: a normative specification in 65 numbered sections, each with a status line; a Decision Register (D-1…D-96); a risk register. | Before changing behaviour. Cite the section, e.g. §31.9. |
+| [`.agents/zuhttp-design.md`](.agents/zuhttp-design.md) | The design, edition 2: a normative specification in 65 numbered sections, each with a status line; a Decision Register (D-1…D-97); a risk register. | Before changing behaviour. Cite the section, e.g. §31.9. |
 | [`.agents/roadmap.md`](.agents/roadmap.md) | The plan, edition 2: milestones M0–M3 (0.1.0 on CRAN with HTTP/2 → 0.2.0 → 0.3.0 → 1.0; M4 folded into M0, D-96), work packages W1–W22 with exit criteria, and an append-only findings log. | Before starting work, to see which work package owns it. |
 | [`.agents/history/`](.agents/history/) | Edition 1 of both, verbatim: every spike measurement and how each stage landed. | When you need the *why* behind a decision, or a measurement. |
 

@@ -6,12 +6,12 @@
 # owned" is src/ minus src/vendor/. The measurement of record (6,379 on
 # 2026-09-25, design §51.3) was taken the same way.
 #
-#   > 8,000   fail: cut before adding (R-4's trigger)
+#   > 10,000  fail: cut before adding (R-4's trigger; 8,000 until D-97)
 #   > 12,000  the abort threshold; §1 is revised publicly
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
-LIMIT=${1:-8000}
+LIMIT=${1:-10000}
 
 command -v cloc >/dev/null 2>&1 || { echo "cloc is not installed" >&2; exit 2; }
 lines=$(cloc --quiet --csv --include-lang='C,C/C++ Header' --exclude-dir=vendor src \

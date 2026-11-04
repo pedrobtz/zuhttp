@@ -169,7 +169,7 @@ feature and not a defect.
 - [ ] `zu_info()$tls_capabilities` is all five on macOS; `pins, ca_file,
       ca_extra, revocation` on Windows; all five on OpenSSL when `crl_file` is
       set.
-- [ ] Project-owned C ≤ 8,000 code lines (§51.3), measured by W1's job.
+- [ ] Project-owned C ≤ 10,000 code lines (§51.3, D-97), measured by W1's job.
 - [ ] NEWS lists every user-visible change.
 
 ### M2 — v0.3.0: parity, measured
@@ -223,7 +223,7 @@ in front of both consumers.
 - [ ] `zugrpc`'s Stage 4 live test (grpc-go interop server in Docker)
       passes against this branch of zuhttp, on the Ubuntu legs.
 - [ ] Every §65 subsection reads Built; D-89 to D-95 read Accepted.
-- [ ] Project-owned C ≤ 8,000 code lines with the HTTP/2 driver in, by W1's
+- [ ] Project-owned C ≤ 10,000 code lines (D-97) with the HTTP/2 driver in, by W1's
       job; the §51.3 total-C row restated from the measured build.
 - [ ] Every HTTP/1.1 test passes unchanged: HTTP/2 off is HTTP/1.1 as
       shipped.
@@ -670,8 +670,9 @@ and ALPN on every backend.
   `workflow_dispatch` (`soak_seconds = 900`); the per-push smoke runs it
   for 60 s. libFuzzer is not in Apple's clang, so it was not run locally;
   the replay of its 19 seeds is clean under ASan and UBSan.
-- R-4: project-owned C is eleven lines under budget after W20. W21 cannot
-  fit; the budget decision is due before W21's pull request.
+- R-4: project-owned C was eleven lines under the 8,000 budget after W20,
+  and W21 could not fit; the maintainer raised the budget to 10,000 (D-97,
+  2026-11-04).
 
 ### W21 — Trailers, pull stream, cancel, keepalive
 
@@ -1100,3 +1101,8 @@ changed the plan or the design.
   bring it back to 7,989; and two macOS jobs on #133 were cancelled twice
   after fifteen minutes without a runner, a queue limit rather than a
   failure, while every other macOS job ran.
+- **2026-11-04 — decision: the project-owned C budget is 10,000 (D-97).**
+  W20 left 7,989 of 8,000; W21, W22 and M1 are estimated at about 1,400 more.
+  The maintainer chose to raise the budget rather than cut further. The
+  abort threshold stays at 12,000, and `tools/check-code-lines` fails above
+  10,000.

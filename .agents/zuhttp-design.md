@@ -148,6 +148,7 @@ accepted when that work package's PR merges.
 | D-94 | **Keepalive PING** on idle HTTP/2 connections, `zu_pool(keepalive_time, keepalive_timeout)`, replaces the §26.2 readability probe for them: an idle h2 connection with no PING ACK inside `keepalive_timeout` is evicted | Proposed | 65.6, 26.2 | W21 |
 | D-95 | **A streaming request body** (a function yielding raw vectors), after W21, for client-streaming gRPC. Revises §28's "not planned"; amends D-78 and §17.4 for this body alone, which is sent chunked over HTTP/1.1. Not rewindable (§28.2), so never retried or replayed across a 307/308 | Proposed | 65.7, 28, 17.4 | W22 |
 | D-96 | **HTTP/2 ships in 0.1.0, the first CRAN submission**, not in 1.1.0 after 1.0 as D-89 first placed it. `zugrpc` and `zuspark` would otherwise wait on four more zuhttp releases at CRAN's six-week floor and on the 1.0 gate's external review; nothing in M1–M3 is a prerequisite of W20–W22, which touch the engine, pool and response object that exist now. Extends D-82's M0 list with W20, W21 and W22, and the 1.0 security review (W19) covers nghttp2 and the driver. D-89 to D-95 keep their content and only their timing changes. Cost accepted: the first submission carries a vendored library of about 20k code lines, and R-19's fallback (HTTP/2 off on a flavour whose symbol scan fails) must hold before submitting, not after | Accepted (maintainer, 2026-11-04) | 60, 65, 57 | W20, W21, W22 |
+| D-97 | **The project-owned C budget is 10,000 code lines**, raised from 8,000; the abort threshold stays at 12,000. HTTP/2 (D-96) brought the 8,000 into 0.1.0 with W20 at 7,989 and W21, W22 and M1 still to add: about 500 lines for the HTTP/2 accessors, keepalive and the streaming body (W20 cost about 200 around a 450-line driver), and the §51.3 estimate of 900 for W7–W14, so about 9,400. 10,000 holds that with a margin; raising it to 12,000 would remove the warning R-4 exists to give. The budget is a trigger to cut, not a target to fill | Accepted (maintainer, 2026-11-04) | 51.3, 61, B (R-4) | W20 |
 
 ---
 
@@ -1891,7 +1892,7 @@ platform.
 | 100 MB streaming throughput vs `curl` | ≤ 1.2× | > 1.5× | — |
 | peak RSS, 100 MB stream | < 16 MB over baseline | any full-body allocation | 0 KiB (2026-09-08) |
 | allocations per simple request | < 50 | > 200 | — |
-| project-owned C, code lines | ≤ 8,000 | > 12,000 | **7,989** (2026-11-04, W20) |
+| project-owned C, code lines | ≤ 10,000 (D-97; 8,000 until 2026-11-04) | > 12,000 | **7,989** (2026-11-04, W20) |
 | total C incl. vendored | ≤ 25,000 | > 40,000 | **32,791** (2026-11-04, W20; nghttp2 20,281) — exceeded |
 | source tarball | ≤ 2 MB | > 5 MB | 504 KB (2026-11-04, W20) |
 | cold compile, one core | ≤ 90 s | > 180 s | **11 s** (2026-10-29, macOS, Intel i5-8500B, `MAKEFLAGS=-j1`) |
@@ -1909,10 +1910,10 @@ reads as exceeded, not as met, and the target is not raised to hide it.
 The project-owned part of HTTP/2 after W20 is `src/zuh_h2.c` (about 450 code
 lines) and the engine, TLS and R-glue changes around it. It took project-owned
 C from 7,961 to 8,161; moving the test-only mock stream out of `src/` (§11)
-brought it back to 7,989, eleven lines under the budget. W21 and W22 add the
-three accessors, keepalive and the streaming request body, which cannot fit
-in eleven lines: R-4 now needs a decision before W21, either further cuts or
-a recorded change to the budget.
+brought it back to 7,989, eleven lines under the 8,000 budget of the time.
+W21 and W22 could not fit in eleven lines, so the budget is 10,000 from
+2026-11-04 (D-97), sized to the work still planned rather than to what was
+left.
 
 ### 52. Compatibility Targets
 
@@ -2030,7 +2031,7 @@ stack zuhttp uses exposes to it, and no consumer asks for it.
 | 4 | Ctrl-C cancels stalled requests | ≤ 200 ms every phase, three front-ends | unmeasured (W11); DNS excluded until W14 |
 | 5 | Competitive keep-alive latency | ≤ 1.5× `curl` | unmeasured (W18) |
 | 6 | Streaming without full-body allocation | < 16 MB peak over baseline | **met** (0 KiB) |
-| 7 | Auditable size | ≤ 8,000 project-owned code lines | met (7,989, 2026-11-04, after W20); at risk (R-4), W21 cannot fit |
+| 7 | Auditable size | ≤ 10,000 project-owned code lines (D-97) | met (7,989, 2026-11-04, after W20) |
 | 8 | Fuzzing clean | 24 h per target, 0 reports | 15 min soaks only (W17) |
 | 9 | Actionable errors | catalogue review | W19 |
 | 10 | HTTP-focused | §4 review per release | met; HTTP/2 (§65) is HTTP, so the criterion is unchanged by D-89 |
@@ -2397,7 +2398,7 @@ R-14 is unused.
 | R-15 | Apple removes Secure Transport | Low | High | **retired by W13**, which removes it (D-63) | — |
 | R-18 | Proxied HTTPS on macOS 11–13 has no route after W13 | Medium | Low | a clear `zu_proxy_error`; the README says so | a user who cannot upgrade → the `zucrypt` engine (§13.2) |
 | R-3 | Rtools lacks `SCH_CREDENTIALS` | Certain | Medium | D-64's ABI job | ABI unprovable → TLS 1.2 on Windows, documented |
-| R-4 | Size budget blown | **Medium, rising** | High | measure per PR (W1); W7–W14 sized before starting | > 8,000 owned code lines → cut before adding; > 12,000 → revise §1 publicly |
+| R-4 | Size budget blown | **Medium, rising** | High | measure per PR (W1); W7–W14 sized before starting | > 10,000 owned code lines (D-97; 8,000 until 2026-11-04) → cut before adding; > 12,000 → revise §1 publicly |
 | R-5 | Security defect in own TLS glue, framing or DER walker | Medium | Very high | fuzzing (§43), sanitizers, review (§45) | verification bypass post-release → external audit before the next release |
 | R-6 | Bus factor | High | High | second maintainer, or README statement | none at 1.0 → label 1.0 experimental |
 | R-7 | Architecture slower than `curl` | Medium | Medium | W18 early | > 2× on keep-alive p50 → premise fails |
