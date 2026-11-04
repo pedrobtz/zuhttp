@@ -9,7 +9,7 @@ and §31.9.
 ## Usage
 
 ``` r
-zu_perform(req, client = zu_default_client())
+zu_perform(req, client = zu_default_client(), stream = FALSE)
 ```
 
 ## Arguments
@@ -23,12 +23,29 @@ zu_perform(req, client = zu_default_client())
 
   A `zu_client`. Always named, never positional (§31.3).
 
+- stream:
+
+  Return as soon as the response headers have arrived, with the body
+  unread, and read it with
+  [`zu_resp_read()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_read.md)
+  (§65.4). Redirects and retries are complete by then. The connection
+  stays with the response until the body is read to its end or
+  [`zu_resp_abort()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_read.md)
+  is called; a response dropped half-read is aborted when it is
+  garbage-collected. Not with
+  [`zu_req_path()`](https://pedrobtz.github.io/zuhttp/reference/zu_req_path.md)
+  or
+  [`zu_req_callback()`](https://pedrobtz.github.io/zuhttp/reference/zu_req_callback.md):
+  a body has one destination. `max_body` still bounds the whole body, so
+  a long stream needs it raised (`Inf` for no limit).
+
 ## Value
 
 A `zu_response`. By default a 4xx or 5xx status raises a condition
 instead; see
 [`zu_resp_check()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_check.md)
-and `check = FALSE`.
+and `check = FALSE`. With `stream = TRUE` the body is not read and the
+condition is raised after aborting it.
 
 ## Examples
 

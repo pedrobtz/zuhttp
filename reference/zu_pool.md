@@ -9,7 +9,13 @@ is slightly too eager to reuse corrupts responses.
 ## Usage
 
 ``` r
-zu_pool(max_idle = 16L, max_per_host = 4L, idle_timeout = 30)
+zu_pool(
+  max_idle = 16L,
+  max_per_host = 4L,
+  idle_timeout = 30,
+  keepalive_time = NULL,
+  keepalive_timeout = NULL
+)
 ```
 
 ## Arguments
@@ -25,6 +31,15 @@ zu_pool(max_idle = 16L, max_per_host = 4L, idle_timeout = 30)
 - idle_timeout:
 
   Seconds an unused connection may sit in the pool.
+
+- keepalive_time, keepalive_timeout:
+
+  HTTP/2 keepalive, in seconds (§65.6). An idle HTTP/2 connection silent
+  for `keepalive_time` is sent a PING before it is reused, and discarded
+  unless the answer arrives within `keepalive_timeout` (default 20); the
+  request then opens a new one. This finds a server or middlebox that
+  dropped the connection without saying so. `NULL`, the default, sends
+  no PING. HTTP/1.1 connections are unaffected.
 
 ## Value
 

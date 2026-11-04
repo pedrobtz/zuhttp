@@ -22,6 +22,20 @@ dependency, its sibling `zujson`, for JSON.
   every response header name is lowercase, as the protocol requires;
   [`zu_resp_header()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp.md)
   matches names case-insensitively either way.
+- Streamed response bodies: `zu_perform(stream = TRUE)` returns once the
+  headers are in, and
+  [`zu_resp_read()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_read.md)
+  returns the body a piece at a time. Over HTTP/2 the server may run
+  only one flow-control window (4 MiB) ahead of the reader.
+  [`zu_resp_abort()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_read.md)
+  stops reading; over HTTP/2 it resets the stream and keeps the
+  connection.
+  [`zu_resp_trailers()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_read.md)
+  returns trailer fields, HTTP/2 or chunked HTTP/1.1, where gRPC carries
+  its status. A callback returning `FALSE` over HTTP/2 now resets the
+  stream rather than closing the connection.
+  `zu_pool(keepalive_time, keepalive_timeout)` PINGs an idle HTTP/2
+  connection before reusing it and drops it if no answer comes.
 - One-shot verbs
   ([`zu_get()`](https://pedrobtz.github.io/zuhttp/reference/zu_methods.md),
   [`zu_post()`](https://pedrobtz.github.io/zuhttp/reference/zu_methods.md),
