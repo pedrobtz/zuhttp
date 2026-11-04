@@ -6,6 +6,7 @@
   [`zu_body_form()`](https://pedrobtz.github.io/zuhttp/reference/zu_body.md)
   [`zu_body_raw()`](https://pedrobtz.github.io/zuhttp/reference/zu_body.md)
   [`zu_body_file()`](https://pedrobtz.github.io/zuhttp/reference/zu_body.md)
+  [`zu_body_stream()`](https://pedrobtz.github.io/zuhttp/reference/zu_body.md)
   : Set the request body
 - [`zu_body_rewindable()`](https://pedrobtz.github.io/zuhttp/reference/zu_body_rewindable.md)
   : Whether a request's body can be replayed

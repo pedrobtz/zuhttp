@@ -36,6 +36,12 @@ dependency, its sibling `zujson`, for JSON.
   stream rather than closing the connection.
   `zu_pool(keepalive_time, keepalive_timeout)` PINGs an idle HTTP/2
   connection before reusing it and drops it if no answer comes.
+- Streamed request bodies: `zu_body_stream(req, f)` sends a body a
+  function produces a piece at a time — chunked over HTTP/1.1, as DATA
+  under the server’s window over HTTP/2. With
+  `zu_perform(stream = TRUE)` the response can be read while the body is
+  still going out, as bidirectional gRPC calls need. A retry or a
+  307/308 that would send it again raises `zu_body_not_replayable`.
 - One-shot verbs
   ([`zu_get()`](https://pedrobtz.github.io/zuhttp/reference/zu_methods.md),
   [`zu_post()`](https://pedrobtz.github.io/zuhttp/reference/zu_methods.md),

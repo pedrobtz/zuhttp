@@ -53,6 +53,8 @@ R CMD INSTALL .
 Rscript -e 'testthat::test_local()'                     # offline
 ZU_TEST_NETWORK=1 Rscript -e 'testthat::test_local()'   # + the network suite
 Rscript -e 'roxygen2::roxygenise()'                     # after touching roxygen blocks
+air format R tests && air format --check .              # before every push that touches R;
+                                                        #   the conventions job fails otherwise
 ./tools/check-vendor-licenses                           # after a re-vendor
 
 # HTTP/2 live tests (test-http2.R): a local server whose HTTP/2 is not nghttp2's
@@ -139,6 +141,12 @@ check depend on example.com and badssl.com.
 - **Credentials never reach an egress.** Redaction happens in the
   formatting layer, so a redacted request stays executable (§42.3). The
   canary tests in `test-redact.R` are the guard.
+- **Test helpers live in `tests/testthat/helper-*.R`**, never at top
+  level in a `test-*.R` file: `tools/ci-run-tests.R` shuffles test
+  order, so a function defined between `test_that()` calls can run after
+  a test that needs it. Run a new test file through
+  `tools/ci-run-tests.R` once before pushing; `test_local()` does not
+  shuffle and will not show it.
 - Comments explain *why*, and cite the design section. The codebase
   assumes a reader who wants the reasoning, not a narration of the code.
 
