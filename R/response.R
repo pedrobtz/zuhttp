@@ -155,13 +155,20 @@ zu_resp_method <- function(resp) resp$method
 #' zu_resp_connection(r)
 zu_resp_connection <- function(resp) {
   v <- resp$http_minor
+  major <- resp$http_major %||% 1L
   list(
     reused_connection = isTRUE(resp$reused_connection),
     remote_ip = resp$remote_ip,
     tls_protocol = resp$tls_version,
     tls_cipher = resp$tls_cipher,
     trust_backend = resp$trust_backend,
-    http_version = if (is.null(v) || is.na(v)) NULL else paste0("HTTP/1.", v),
+    http_version = if (identical(major, 2L)) {
+      "HTTP/2"
+    } else if (is.null(v) || is.na(v)) {
+      NULL
+    } else {
+      paste0("HTTP/1.", v)
+    },
     proxy_used = isTRUE(resp$proxy_used),
     # Filled by the retry layer (§33) and the engine respectively, so a
     # response that went through neither still answers 1 and 0 rather than

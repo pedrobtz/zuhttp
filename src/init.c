@@ -604,7 +604,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
                          SEXP max_redirects, SEXP verify, SEXP max_body,
                          SEXP user_agent, SEXP decode, SEXP pool,
                          SEXP path, SEXP callback, SEXP proxy, SEXP tls,
-                         SEXP trace, SEXP redact) {
+                         SEXP trace, SEXP redact, SEXP http2) {
     zuh_get_opts o;
     tick_ctx tick = { NULL };
     zuh_req_spec spec;
@@ -673,6 +673,12 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
         o.max_body = mb >= 18446744073709551616.0 ? UINT64_MAX : (uint64_t)mb;
     }
     o.no_decode     = Rf_asLogical(decode) != TRUE;
+    /* §65.1. The R layer has refused anything but these three words. */
+    if (Rf_isString(http2) && Rf_length(http2) == 1 && STRING_ELT(http2, 0) != NA_STRING) {
+        const char *m = CHAR(STRING_ELT(http2, 0));
+        o.http2 = strcmp(m, "required") == 0 ? ZUH_H2_REQUIRED
+                : strcmp(m, "off") == 0      ? ZUH_H2_OFF : ZUH_H2_AUTO;
+    }
     if (Rf_isString(user_agent) && Rf_length(user_agent) == 1)
         o.user_agent = Rf_translateCharUTF8(STRING_ELT(user_agent, 0));
     /* §26. NULL, a foreign pointer, or one that did not survive saveRDS() all
@@ -858,8 +864,8 @@ static SEXP build_response(void *data) {
     /* §35.2's connection metadata rides on the response rather than being a
      * second call, because it describes the connection THIS response came
      * over — asking again later would answer about a different one. */
-    out = PROTECT(Rf_allocVector(VECSXP, 14));
-    nms = PROTECT(Rf_allocVector(STRSXP, 14));
+    out = PROTECT(Rf_allocVector(VECSXP, 15));
+    nms = PROTECT(Rf_allocVector(STRSXP, 15));
     SET_VECTOR_ELT(out, 0, Rf_ScalarInteger(r.status));
     SET_STRING_ELT(nms, 0, Rf_mkChar("status"));
     SET_VECTOR_ELT(out, 1, headers_to_r(&r.headers));
@@ -888,6 +894,8 @@ static SEXP build_response(void *data) {
     SET_STRING_ELT(nms, 12, Rf_mkChar("timings_ms"));
     SET_VECTOR_ELT(out, 13, trace_to_r(ctx->t));
     SET_STRING_ELT(nms, 13, Rf_mkChar("trace"));
+    SET_VECTOR_ELT(out, 14, Rf_ScalarInteger(r.http_major));
+    SET_STRING_ELT(nms, 14, Rf_mkChar("http_major"));
     Rf_setAttrib(out, R_NamesSymbol, nms);
 
     UNPROTECT(3);
@@ -1022,7 +1030,15 @@ static SEXP C_zu_build_info(void) {
      * property of the machine, not of this build — reporting "yes" here means
      * "not disabled", which is the honest claim. */
     SET_VECTOR_ELT(out, 6, Rf_ScalarLogical(TRUE));
-    SET_VECTOR_ELT(out, 7, Rf_mkString("HTTP/1.1"));
+    /* §65.1: the protocols this build speaks. HTTP/2 is compiled into
+     * every build (nghttp2 is vendored); over TLS it also needs the
+     * backend's ALPN, which tls_capabilities reports. */
+    {
+        SEXP hv = Rf_allocVector(STRSXP, 2);
+        SET_VECTOR_ELT(out, 7, hv);
+        SET_STRING_ELT(hv, 0, Rf_mkChar("HTTP/1.1"));
+        SET_STRING_ELT(hv, 1, Rf_mkChar("HTTP/2"));
+    }
 
     for (i = 0; i < n; i++) SET_STRING_ELT(names, i, Rf_mkChar(nm[i]));
     Rf_setAttrib(out, R_NamesSymbol, names);
@@ -1044,7 +1060,7 @@ static const R_CallMethodDef call_methods[] = {
     {"C_zu_redact_form",       (DL_FUNC) &C_zu_redact_form,       2},
     {"C_zu_is_secret_header",  (DL_FUNC) &C_zu_is_secret_header,  2},
     {"C_zu_is_secret_param",   (DL_FUNC) &C_zu_is_secret_param,   2},
-    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          18},
+    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          19},
     {"C_zu_pool_new",          (DL_FUNC) &C_zu_pool_new,          3},
     {"C_zu_pool_valid",        (DL_FUNC) &C_zu_pool_valid,        1},
     {"C_zu_pool_stats",        (DL_FUNC) &C_zu_pool_stats,        1},

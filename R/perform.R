@@ -122,7 +122,8 @@ zu_transport_perform.zu_native_transport <- function(transport, req) {
     list(
       zu_redact_opt("zuhttp.redact_params"),
       zu_redact_opt("zuhttp.redact_headers")
-    )
+    ),
+    p$http2 %||% "auto"
   )
   # §27.1: by here the sink has been committed, so the destination is a fact
   # about this response rather than something that was merely asked for. Set
@@ -242,6 +243,14 @@ resolve_request <- function(req, client) {
     if (!is.logical(v) || length(v) != 1L || is.na(v)) {
       stop("`", f, "` must be TRUE or FALSE", call. = FALSE)
     }
+  }
+  # §65.1: one of three words, refused otherwise rather than read as one.
+  if (
+    !is.character(policy$http2) ||
+      length(policy$http2) != 1L ||
+      !policy$http2 %in% c("auto", "required", "off")
+  ) {
+    stop('`http2` must be "auto", "required" or "off"', call. = FALSE)
   }
   if (!isTRUE(policy$verify)) {
     # Not a message that can be switched off: turning verification off is the

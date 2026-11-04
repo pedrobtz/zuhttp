@@ -8,8 +8,15 @@
 # URI_NO_UNICODE / URI_STATIC_BUILD are required by the vendored uriparser
 # subset; see src/vendor/uriparser/VENDOR. src/zuh_uriparser.h sets them too,
 # so our own translation units stay correct even if this line is edited.
-PKG_CPPFLAGS = -I. -Ivendor/picohttpparser -Ivendor/uriparser \
-               -DURI_NO_UNICODE -DURI_STATIC_BUILD @SSL_CFLAGS@
+# nghttp2 (design §48, §65): NGHTTP2_STATICLIB empties NGHTTP2_EXTERN so
+# $(C_VISIBILITY) hides its symbols (D-66); NDEBUG compiles its assert()s out;
+# HAVE_CONFIG_H stays undefined and the HAVE_* macros below replace config.h.
+# src/vendor/nghttp2/VENDOR lists the six patches these complete.
+PKG_CPPFLAGS = -I. -Ivendor/picohttpparser -Ivendor/uriparser -Ivendor/nghttp2 \
+               -DURI_NO_UNICODE -DURI_STATIC_BUILD @SSL_CFLAGS@ \
+               -DNDEBUG -DNGHTTP2_STATICLIB -DBUILDING_NGHTTP2 \
+               -DHAVE_ARPA_INET_H -DHAVE_NETINET_IN_H \
+               -DHAVE_CLOCK_GETTIME -DHAVE_DECL_CLOCK_MONOTONIC=1
 
 # Hidden by default, vendored code included: the shared object exports only
 # R_init_zuhttp, which init.c marks attribute_visible (D-66). R reaches every
@@ -26,7 +33,6 @@ OBJECTS = init.o \
           zuh_error.o \
           zuh_time.o \
           zuh_stream.o \
-          zuh_mock_stream.o \
           zuh_headers.o \
           zuh_request.o \
           zuh_framing.o \
@@ -45,6 +51,7 @@ OBJECTS = init.o \
           zuh_trace.o \
           zuh_proxy.o \
           zuh_redact.o \
+          zuh_h2.o \
           vendor/uriparser/UriParse.o \
           vendor/uriparser/UriParseBase.o \
           vendor/uriparser/UriResolve.o \
@@ -53,4 +60,30 @@ OBJECTS = init.o \
           vendor/uriparser/UriMemory.o \
           vendor/uriparser/UriIp4.o \
           vendor/uriparser/UriIp4Base.o \
-          vendor/picohttpparser/picohttpparser.o
+          vendor/picohttpparser/picohttpparser.o \
+          vendor/nghttp2/nghttp2_alpn.o \
+          vendor/nghttp2/nghttp2_buf.o \
+          vendor/nghttp2/nghttp2_callbacks.o \
+          vendor/nghttp2/nghttp2_debug.o \
+          vendor/nghttp2/nghttp2_extpri.o \
+          vendor/nghttp2/nghttp2_frame.o \
+          vendor/nghttp2/nghttp2_hd.o \
+          vendor/nghttp2/nghttp2_hd_huffman.o \
+          vendor/nghttp2/nghttp2_hd_huffman_data.o \
+          vendor/nghttp2/nghttp2_helper.o \
+          vendor/nghttp2/nghttp2_http.o \
+          vendor/nghttp2/nghttp2_map.o \
+          vendor/nghttp2/nghttp2_mem.o \
+          vendor/nghttp2/nghttp2_option.o \
+          vendor/nghttp2/nghttp2_outbound_item.o \
+          vendor/nghttp2/nghttp2_pq.o \
+          vendor/nghttp2/nghttp2_priority_spec.o \
+          vendor/nghttp2/nghttp2_queue.o \
+          vendor/nghttp2/nghttp2_ratelim.o \
+          vendor/nghttp2/nghttp2_rcbuf.o \
+          vendor/nghttp2/nghttp2_session.o \
+          vendor/nghttp2/nghttp2_stream.o \
+          vendor/nghttp2/nghttp2_submit.o \
+          vendor/nghttp2/nghttp2_time.o \
+          vendor/nghttp2/nghttp2_version.o \
+          vendor/nghttp2/sfparse.o

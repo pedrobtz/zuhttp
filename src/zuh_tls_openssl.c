@@ -34,7 +34,7 @@ int         zuh_tls_available(void)    { return 1; }
  * until §14.5 settles on a source — OCSP stapling is the likely one. */
 unsigned zuh_tls_backend_caps(void) {
     return ZUH_TLS_CAP_PINS | ZUH_TLS_CAP_TLS13 |
-           ZUH_TLS_CAP_CA_FILE | ZUH_TLS_CAP_CA_EXTRA;
+           ZUH_TLS_CAP_CA_FILE | ZUH_TLS_CAP_CA_EXTRA | ZUH_TLS_CAP_ALPN;
 }
 
 typedef struct {
@@ -394,13 +394,14 @@ zuh_code zuh_tls_connect(zuh_stream **out, zuh_stream *inner, const char *hostna
         }
     }
 
+    /* §65.1: offer the list. A list that does not encode is a programming
+     * error upstream, and offering nothing would quietly mean HTTP/1.1. */
     if (cfg->alpn && *cfg->alpn) {
         unsigned char proto[64];
-        size_t len = strlen(cfg->alpn);
-        if (len < sizeof proto - 1) {
-            proto[0] = (unsigned char)len;
-            memcpy(proto + 1, cfg->alpn, len);
-            SSL_set_alpn_protos(t->ssl, proto, (unsigned)(len + 1));
+        size_t len = zuh_tls_alpn_wire(cfg->alpn, proto, sizeof proto);
+        if (len == 0 || SSL_set_alpn_protos(t->ssl, proto, (unsigned)len) != 0) {
+            zuh_error_set(err, ZUH_ERR_TLS, ZUH_PHASE_TLS, "cannot set the ALPN list");
+            goto fail;
         }
     }
 
@@ -472,6 +473,15 @@ zuh_code zuh_tls_connect(zuh_stream **out, zuh_stream *inner, const char *hostna
     snprintf(t->info.cipher, sizeof t->info.cipher, "%s", SSL_get_cipher(t->ssl));
     snprintf(t->info.trust_backend, sizeof t->info.trust_backend, "openssl");
     t->info.reused_session = SSL_session_reused(t->ssl);
+    {
+        const unsigned char *sel = NULL;
+        unsigned sel_len = 0;
+        SSL_get0_alpn_selected(t->ssl, &sel, &sel_len);
+        if (sel && sel_len > 0 && sel_len < sizeof t->info.alpn) {
+            memcpy(t->info.alpn, sel, sel_len);
+            t->info.alpn[sel_len] = '\0';
+        }
+    }
 
     s->vt = &k_tls_vt;
     s->impl = t;
@@ -498,7 +508,9 @@ void zuh_tls_stream_free(zuh_stream *s) { tls_destroy(s); }
 
 int zuh_tls_get_info(const zuh_stream *s, zuh_tls_info *out) {
     const tls_impl *t;
-    if (!s || !s->impl || !out) return 0;
+    /* The type check matters since §65.1: the engine asks this of whatever
+     * stream it holds, and a TCP stream's impl is not a tls_impl. */
+    if (!s || s->vt != &k_tls_vt || !s->impl || !out) return 0;
     t = (const tls_impl *)s->impl;
     *out = t->info;
     return 1;

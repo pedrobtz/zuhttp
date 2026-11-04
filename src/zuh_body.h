@@ -57,6 +57,11 @@ zuh_code zuh_body_pipe_feed(zuh_body_pipe *p, const void *data, size_t n,
 
 /* Read one body from `s` according to the §18.1 framing decision. `seed` is
  * whatever already arrived alongside the headers. */
+/* The end of a body: flush what the decoder holds and check that it ended
+ * where the coding says it ends. zuh_body_read() calls it; the HTTP/2 driver
+ * (§65.2), which feeds the pipe itself, calls it at END_STREAM. */
+zuh_code zuh_body_pipe_finish(zuh_body_pipe *p, zuh_error *err);
+
 zuh_code zuh_body_read(zuh_stream *s, const zuh_framing *fr, zuh_body_pipe *p,
                      const char *seed, size_t seed_len,
                      uint64_t max_body, zuh_deadline dl, zuh_error *err);

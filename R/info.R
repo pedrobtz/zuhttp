@@ -106,7 +106,7 @@ print.zu_info <- function(x, ...) {
     cat(format(label, width = 20), value, "\n", sep = "")
   }
   cat("zuhttp ", x$version, "\n\n", sep = "")
-  f("HTTP:", x$http)
+  f("HTTP:", paste(x$http, collapse = ", "))
   f(
     "TLS backend:",
     if (isTRUE(x$tls_available)) {

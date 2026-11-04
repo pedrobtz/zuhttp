@@ -27,6 +27,8 @@ fuzz/fuzz_headers
 fuzz/fuzz_uri
 fuzz/fuzz_redirect
 fuzz/fuzz_inflate
+fuzz/fuzz_h2
+fuzz/fuzz_engine
 fuzz/replay_*
 !fuzz/replay_main.c
 fuzz/crash-*

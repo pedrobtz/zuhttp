@@ -10,7 +10,7 @@ zu_info()
 A \code{zu_info} list, printed as a report. Fields: \code{version}, \code{http},
 \code{tls_backend}, \code{trust}, \code{tls_available}, \code{revocation_default},
 \code{tls_capabilities} (the \code{\link[=zu_tls]{zu_tls()}} settings this backend honours, from
-\code{"pins"}, \code{"tls13"}, \code{"ca_file"}, \code{"ca_extra"} and \code{"revocation"}; the
+\code{"pins"}, \code{"tls13"}, \code{"ca_file"}, \code{"ca_extra"}, \code{"revocation"} and \code{"alpn"}; the
 others raise \code{zu_tls_unsupported_error}), \code{compression}, \code{ipv6},
 \code{proxy_env} and \code{default_client}.
 }

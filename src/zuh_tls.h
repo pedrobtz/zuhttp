@@ -62,7 +62,10 @@ typedef struct {
     int             revocation;
 
     int             min_version;      /* 12 => TLS 1.2, 13 => TLS 1.3 */
-    const char     *alpn;             /* e.g. "http/1.1"; NULL to omit */
+    /* §15, §65.1: the ALPN protocols to offer, comma-separated in order of
+     * preference ("h2,http/1.1"); NULL or "" offers none. The engine sets it
+     * from the client's http2 mode (D-90). */
+    const char     *alpn;
 } zuh_tls_config;
 
 void zuh_tls_config_init(zuh_tls_config *c);
@@ -74,6 +77,8 @@ typedef struct {
     char cipher[64];
     char trust_backend[24];  /* "openssl", "sectrust", "schannel" (§35.2) */
     int  reused_session;
+    /* §65.1: the protocol ALPN selected, "" when the server chose none. */
+    char alpn[16];
 } zuh_tls_info;
 
 /* Wrap `inner` in TLS. On success the returned stream owns `inner` and closing
@@ -130,6 +135,16 @@ int         zuh_tls_available(void);
  * engine then skips its TCP connect and CONNECT tunnel and calls
  * zuh_tls_dial(). zu_info() maps only the five bits above to names. */
 #define ZUH_TLS_CAP_DIALS      0x20u
+
+/* §65.1, D-90: the backend offers the alpn list and reports the selection.
+ * Without it http2 = "required" is refused before any I/O. */
+#define ZUH_TLS_CAP_ALPN       0x40u
+
+/* `list` ("h2,http/1.1") in ALPN's wire format (RFC 7301 §3.1): each name
+ * prefixed by its one-byte length. Returns the length written, or 0 when the
+ * list is empty, a name is empty or longer than 255 bytes, or it does not fit
+ * `cap`. OpenSSL and Schannel take this form; Network.framework takes names. */
+size_t zuh_tls_alpn_wire(const char *list, unsigned char *out, size_t cap);
 
 unsigned zuh_tls_backend_caps(void);
 

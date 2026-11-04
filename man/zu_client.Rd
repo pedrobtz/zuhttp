@@ -21,7 +21,8 @@ zu_client(
   middleware = NULL,
   hooks = NULL,
   proxy = NULL,
-  tls = NULL
+  tls = NULL,
+  http2 = NULL
 )
 }
 \arguments{
@@ -75,6 +76,13 @@ making this one argument an exception to a rule every other policy
 argument follows.}
 
 \item{tls}{Certificate trust settings from \code{\link[=zu_tls]{zu_tls()}}.}
+
+\item{http2}{HTTP/2 use: \code{"auto"} (the default) offers it to every HTTPS
+server and uses it when the server chooses it, and HTTP/1.1 otherwise;
+\code{"required"} fails with \code{zu_connect_error} before sending anything when
+the connection is not HTTP/2, and on an \verb{http://} URL speaks cleartext
+HTTP/2 (h2c) directly, without an \code{Upgrade}; \code{"off"} uses HTTP/1.1 only.
+\code{\link[=zu_resp_connection]{zu_resp_connection()}} reports which version a response came over.}
 }
 \value{
 A \code{zu_client} object.

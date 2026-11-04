@@ -21,7 +21,8 @@ URIDIR  := $(SRC)/vendor/uriparser
 # "___asan_init not found".
 BUILD   := build$(BUILD_SUFFIX)
 
-INC     := -I$(SRC) -I$(VENDOR) -I$(URIDIR) -I.
+NGDIR   := $(SRC)/vendor/nghttp2
+INC     := -I$(SRC) -I$(VENDOR) -I$(URIDIR) -I$(NGDIR) -I.
 WARN    := -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion \
            -Wstrict-prototypes -Wold-style-definition -Wvla
 BASE    := -std=c99 -O1 -g $(INC)
@@ -37,25 +38,43 @@ CFLAGS  += $(BASE) $(WARN)
 # See src/vendor/uriparser/VENDOR: both flags are required. zuh_uriparser.h sets
 # them too, so our own TUs stay correct even if this line is lost.
 URIFLAGS := -DURI_NO_UNICODE -DURI_STATIC_BUILD
-CFLAGS  += $(URIFLAGS)
+CFLAGS  += $(URIFLAGS) -DNGHTTP2_STATICLIB
 VCFLAGS := $(BASE) $(URIFLAGS) -w
 
+# nghttp2 (design §48, §65): the definitions src/Makevars.in gives it, minus
+# NDEBUG, so its assert()s run in the tests and under the sanitizers. gnu99,
+# not c99: nghttp2_time.c needs clock_gettime(), which glibc hides under
+# strict C99. Compiled warning-free like the other vendored code.
+ifeq ($(OS),Windows_NT)
+NGHAVE  := -DHAVE_WINDOWS_H -DHAVE_GETTICKCOUNT64
+else
+NGHAVE  := -DHAVE_ARPA_INET_H -DHAVE_NETINET_IN_H -DHAVE_CLOCK_GETTIME \
+           -DHAVE_DECL_CLOCK_MONOTONIC=1
+endif
+NGDEFS  := -DNGHTTP2_STATICLIB -DBUILDING_NGHTTP2 $(NGHAVE)
+NGSRC   := $(wildcard $(NGDIR)/*.c)
+NGFLAGS := $(subst -std=c99,-std=gnu99,$(BASE)) $(NGDEFS) -w
+# The network binaries below compile every source in one command, so they
+# take nghttp2 that way, under the same gnu99 flags.
+ENGBASE := $(subst -std=c99,-std=gnu99,$(BASE)) $(NGDEFS)
+
 OWN   := $(SRC)/zuh_alloc.c $(SRC)/zuh_buffer.c $(SRC)/zuh_error.c \
-         $(SRC)/zuh_time.c $(SRC)/zuh_stream.c $(SRC)/zuh_mock_stream.c \
+         $(SRC)/zuh_time.c $(SRC)/zuh_stream.c zuh_mock_stream.c \
          $(SRC)/zuh_headers.c $(SRC)/zuh_request.c $(SRC)/zuh_framing.c \
          $(SRC)/zuh_response.c $(SRC)/zuh_uri.c $(SRC)/zuh_redirect.c \
          $(SRC)/zuh_inflate.c $(SRC)/zuh_net.c \
          $(SRC)/zuh_fork.c $(SRC)/zuh_pool.c $(SRC)/zuh_proxy.c $(SRC)/zuh_redact.c \
          $(SRC)/zuh_sink.c $(SRC)/zuh_body.c $(SRC)/zuh_tls.c $(SRC)/zuh_trace.c \
-         $(SRC)/zuh_engine.c tls_none.c
+         $(SRC)/zuh_engine.c $(SRC)/zuh_h2.c tls_none.c
 TESTS := test_main.c test_alloc.c test_buffer.c test_error.c test_time.c \
          test_stream.c test_headers.c test_request.c test_framing.c \
          test_response.c test_redirect.c test_uri.c \
          test_inflate.c test_net.c test_pool.c test_redact.c \
-         test_proxy.c test_body.c test_trace.c test_engine_mock.c
+         test_proxy.c test_body.c test_trace.c test_engine_mock.c test_h2.c
 URISRC := UriParse.c UriParseBase.c UriResolve.c UriRecompose.c \
           UriCommon.c UriMemory.c UriIp4.c UriIp4Base.c
-VOBJ  := $(BUILD)/picohttpparser.o $(patsubst %.c,$(BUILD)/%.o,$(URISRC))
+VOBJ  := $(BUILD)/picohttpparser.o $(patsubst %.c,$(BUILD)/%.o,$(URISRC)) \
+         $(patsubst $(NGDIR)/%.c,$(BUILD)/ng_%.o,$(NGSRC))
 
 all: run
 
@@ -67,6 +86,9 @@ $(BUILD)/picohttpparser.o: $(VENDOR)/picohttpparser.c | $(BUILD)
 
 $(BUILD)/%.o: $(URIDIR)/%.c | $(BUILD)
 	$(CC) $(VCFLAGS) -c -o $@ $<
+
+$(BUILD)/ng_%.o: $(NGDIR)/%.c | $(BUILD)
+	$(CC) $(NGFLAGS) -c -o $@ $<
 
 zuh_ctest: $(OWN) $(TESTS) $(VOBJ)
 	$(CC) $(CFLAGS) -o $@ $(OWN) $(TESTS) $(VOBJ) -lz $(NETLIBS)
@@ -81,6 +103,7 @@ strict: clean zuh_ctest
 asan: BUILD_SUFFIX := -asan
 asan: CFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
 asan: VCFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
+asan: NGFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
 asan: zuh_ctest_asan
 	./zuh_ctest_asan
 
@@ -122,14 +145,14 @@ ENGSRC := $(SRC)/zuh_alloc.c $(SRC)/zuh_buffer.c $(SRC)/zuh_error.c \
           $(SRC)/zuh_inflate.c $(SRC)/zuh_tls.c $(SRC)/zuh_tls_openssl.c \
           $(SRC)/zuh_engine.c $(SRC)/zuh_fork.c $(SRC)/zuh_pool.c \
           $(SRC)/zuh_sink.c $(SRC)/zuh_body.c $(SRC)/zuh_proxy.c $(SRC)/zuh_trace.c \
-          $(SRC)/zuh_redact.c \
-          $(VENDOR)/picohttpparser.c \
+          $(SRC)/zuh_redact.c $(SRC)/zuh_h2.c \
+          $(VENDOR)/picohttpparser.c $(NGSRC) \
           $(URIDIR)/UriParse.c $(URIDIR)/UriParseBase.c $(URIDIR)/UriResolve.c \
           $(URIDIR)/UriRecompose.c $(URIDIR)/UriCommon.c $(URIDIR)/UriMemory.c \
           $(URIDIR)/UriIp4.c $(URIDIR)/UriIp4Base.c
 
 zuh_engtest: $(ENGSRC) test_engine.c
-	$(CC) $(BASE) $(URIFLAGS) $(OPENSSL_CFLAGS) -o $@ $(ENGSRC) test_engine.c \
+	$(CC) $(ENGBASE) $(URIFLAGS) $(OPENSSL_CFLAGS) -o $@ $(ENGSRC) test_engine.c \
 	      $(OPENSSL_LIBS) -lz $(NETLIBS)
 
 engine: zuh_engtest
@@ -142,7 +165,7 @@ engine: zuh_engtest
 NWSRC := $(subst $(SRC)/zuh_tls_openssl.c,$(SRC)/zuh_tls_nw.c,$(ENGSRC))
 
 zuh_engtest_nw: $(NWSRC) test_engine.c
-	$(CC) $(BASE) $(URIFLAGS) $(NW_FLAGS) -o $@ $(NWSRC) test_engine.c \
+	$(CC) $(ENGBASE) $(URIFLAGS) $(NW_FLAGS) -o $@ $(NWSRC) test_engine.c \
 	      -framework Network -framework Security -framework CoreFoundation -lz $(NETLIBS)
 
 engine-nw: zuh_engtest_nw
@@ -155,7 +178,7 @@ engine-nw: zuh_engtest_nw
 SCHSRC := $(subst $(SRC)/zuh_tls_openssl.c,$(SRC)/zuh_tls_schannel.c,$(ENGSRC))
 
 zuh_engtest_sch: $(SCHSRC) test_engine.c
-	$(CC) $(BASE) $(URIFLAGS) -o $@ $(SCHSRC) test_engine.c \
+	$(CC) $(ENGBASE) $(URIFLAGS) -o $@ $(SCHSRC) test_engine.c \
 	      -lsecur32 -lcrypt32 -lz $(NETLIBS)
 
 engine-sch: zuh_engtest_sch
@@ -165,7 +188,7 @@ engine-sch: zuh_engtest_sch
 # without close_notify, and one that sends close_notify behind the body. Needs
 # python3 and the openssl CLI; no network.
 zuh_tlseof: $(ENGSRC) tls_eof/drive.c
-	$(CC) $(BASE) $(URIFLAGS) $(OPENSSL_CFLAGS) -o $@ $(ENGSRC) tls_eof/drive.c \
+	$(CC) $(ENGBASE) $(URIFLAGS) $(OPENSSL_CFLAGS) -o $@ $(ENGSRC) tls_eof/drive.c \
 	      $(OPENSSL_LIBS) -lz $(NETLIBS)
 
 tls-eof: zuh_tlseof

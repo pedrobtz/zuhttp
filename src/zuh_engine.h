@@ -33,6 +33,7 @@
 #include "zuh_trace.h"
 #include "zuh_redact.h"
 #include "zuh_uri.h"
+#include "zuh_h2.h"
 
 /* A request the engine can perform. Headers are parallel arrays rather than a
  * zuh_headers, so the R layer can pass them without building one — the engine
@@ -123,6 +124,13 @@ typedef struct {
      * un-set field: the caller's extra parameter names are an addition to
      * that list and never a replacement for it. Borrowed, not owned. */
     const zuh_redact_policy *redact;
+
+    /* §65.1, zu_client(http2 = ). AUTO, the zeroed value, offers h2 by ALPN
+     * on every TLS connection and uses it when the server picks it; http://
+     * stays HTTP/1.1. REQUIRED fails a connection that is not HTTP/2 before
+     * any request byte is sent, and on http:// speaks h2c by prior
+     * knowledge. OFF offers http/1.1 alone. */
+    zuh_h2_mode http2;
 } zuh_get_opts;
 
 void zuh_get_opts_init(zuh_get_opts *o);
@@ -145,7 +153,8 @@ typedef struct {
      * would answer a question nobody asked. */
     char      *remote_ip;
     char      *trust_backend;    /* "sectrust", "schannel", "openssl" */
-    int        http_version;     /* 0 or 1, for HTTP/1.x */
+    int        http_version;     /* 0 or 1, for HTTP/1.x; 0 for HTTP/2 */
+    int        http_major;       /* 1, or 2 when the response came over h2 */
     int        proxy_used;
     int        reused_connection;
 

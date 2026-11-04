@@ -8,7 +8,7 @@ import shutil
 import zlib
 
 TARGETS = ("response", "chunked", "headers", "uri", "redirect", "inflate",
-           "proxy", "redact", "body")
+           "proxy", "redact", "body", "h2")
 
 README = """\
 Curated fuzz seeds (design §43, §50.3).
@@ -39,8 +39,11 @@ def w(path, data):
 
 
 def main():
-    shutil.rmtree("corpus", ignore_errors=True)
+    # Only the directories this script writes. corpus/engine is curated by
+    # hand and committed as-is; removing the whole corpus/ here deleted it on
+    # every reseed.
     for t in TARGETS:
+        shutil.rmtree(os.path.join("corpus", t), ignore_errors=True)
         os.makedirs(os.path.join("corpus", t))
 
     # --- response: the §18.1 framing / smuggling alphabet -------------------
@@ -195,6 +198,56 @@ def main():
     w("body/chunked-huge-size", bytes([IDENT_CHUNK]) + b"ffffffffffffffff\r\nx")
     w("body/chunked-trailer", bytes([IDENT_CHUNK]) + b"3\r\nabc\r\n0\r\nX-T: 1\r\n\r\n")
     w("body/chunked-truncated", bytes([IDENT_CHUNK]) + b"5\r\nab")
+
+
+    # --- h2: server frames for target 12 (§65.8) -----------------------------
+    # Hand-built frames (RFC 9113 §4.1) and HPACK (RFC 7541): 0x88 is the
+    # static-table ":status: 200"; a literal is 0x00, name, value, no Huffman.
+    def fr(ftype, flags, sid, payload=b""):
+        return (len(payload).to_bytes(3, "big") + bytes([ftype, flags]) +
+                sid.to_bytes(4, "big") + payload)
+
+    def lit(name, value):
+        return bytes([0, len(name)]) + name + bytes([len(value)]) + value
+
+    DATA, HEADERS, RST, SETTINGS, PING, GOAWAY, WINUP, CONT = 0, 1, 3, 4, 6, 7, 8, 9
+    END_STREAM, END_HEADERS, ACK = 0x1, 0x4, 0x1
+    pre = fr(SETTINGS, 0, 0) + fr(SETTINGS, ACK, 0)
+    ok1 = fr(HEADERS, END_HEADERS, 1, b"\x88") + fr(DATA, END_STREAM, 1, b"hello")
+    ok3 = fr(HEADERS, END_HEADERS, 3, b"\x88") + fr(DATA, END_STREAM, 3, b"again")
+    opt = bytes([0x02])               # whole reads, pooled
+    w("h2/ok", opt + pre + ok1 + ok3)
+    w("h2/ok-1byte-reads", bytes([0x00]) + pre + ok1 + ok3)
+    w("h2/ok-probe-reads", bytes([0x42]) + pre + ok1 + ok3)
+    w("h2/headers-only", opt + pre + fr(HEADERS, END_HEADERS | END_STREAM, 1,
+                                         b"\x88" + lit(b"x-a", b"1")))
+    w("h2/informational-103", opt + pre +
+      fr(HEADERS, END_HEADERS, 1, b"\x08\x03103") + ok1)
+    w("h2/trailers", opt + pre + fr(HEADERS, END_HEADERS, 1, b"\x88") +
+      fr(DATA, 0, 1, b"\x00\x00\x00\x00\x02hi") +
+      fr(HEADERS, END_HEADERS | END_STREAM, 1, lit(b"grpc-status", b"0")))
+    w("h2/continuation", opt + pre + fr(HEADERS, 0, 1, b"\x88") +
+      fr(CONT, END_HEADERS, 1, lit(b"x-b", b"2")) + fr(DATA, END_STREAM, 1, b"c"))
+    w("h2/rst-stream", opt + pre + fr(RST, 0, 1, (2).to_bytes(4, "big")))
+    w("h2/goaway", opt + pre + fr(GOAWAY, 0, 0, (0).to_bytes(4, "big") +
+                                    (1).to_bytes(4, "big")))
+    w("h2/goaway-after-response", opt + pre + ok1 +
+      fr(GOAWAY, 0, 0, (1).to_bytes(4, "big") + (0).to_bytes(4, "big")))
+    w("h2/ping-and-window", opt + pre + fr(PING, 0, 0, b"\x00" * 8) +
+      fr(WINUP, 0, 0, (1000).to_bytes(4, "big")) + ok1 + ok3)
+    w("h2/content-length-mismatch", opt + pre +
+      fr(HEADERS, END_HEADERS, 1, b"\x88" + lit(b"content-length", b"10")) +
+      fr(DATA, END_STREAM, 1, b"short"))
+    w("h2/data-after-end-stream", opt + pre + ok1 + fr(DATA, 0, 1, b"late"))
+    w("h2/not-http2", opt + b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi")
+    w("h2/no-settings-first", opt + ok1)
+    w("h2/huge-frame-length", opt + pre + b"\xff\xff\xff\x00\x00\x00\x00\x00\x01")
+    w("h2/big-header", opt + pre + fr(HEADERS, END_HEADERS | END_STREAM, 1,
+                                       b"\x88" + b"\x00\x03x-z\x7f\x81\x7f" + b"z" * 255))
+    w("h2/redirect", opt + pre + fr(HEADERS, END_HEADERS | END_STREAM, 1,
+      b"\x08\x03302" + lit(b"location", b"http://origin.test/next")) + ok3 +
+      b"\x00ZU\x00" + pre + ok1)
+    w("h2/two-connections", bytes([0x12]) + pre + ok1 + b"\x00ZU\x00" + pre + ok1)
 
     with open(os.path.join("corpus", "README"), "w") as f:
         f.write(README)

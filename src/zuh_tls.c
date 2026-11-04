@@ -117,3 +117,20 @@ const char *zuh_tls_cipher_name(unsigned code) {
         default:     return NULL;
     }
 }
+
+size_t zuh_tls_alpn_wire(const char *list, unsigned char *out, size_t cap) {
+    size_t n = 0;
+    const char *p = list;
+    if (!list || !*list || !out) return 0;
+    while (*p) {
+        const char *comma = strchr(p, ',');
+        size_t len = comma ? (size_t)(comma - p) : strlen(p);
+        if (len == 0 || len > 255 || n + 1 + len > cap) return 0;
+        out[n++] = (unsigned char)len;
+        memcpy(out + n, p, len);
+        n += len;
+        p += len;
+        if (*p == ',') p++;
+    }
+    return n;
+}
