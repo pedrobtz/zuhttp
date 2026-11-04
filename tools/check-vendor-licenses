@@ -1,6 +1,6 @@
 #!/bin/sh
 # The vendored libraries' licence texts live in src/vendor/*/LICENSE, which R
-# does not install. MIT (picohttpparser) and BSD-3-Clause (uriparser) both
+# does not install. MIT (picohttpparser, nghttp2) and BSD-3-Clause (uriparser)
 # require the text to accompany every copy, and a CRAN binary is a copy, so
 # inst/licenses/ carries them too (#52, design §49.2). This fails if a
 # re-vendor updated one copy and not the other; tools/update-* write both.
@@ -8,7 +8,7 @@ set -eu
 cd "$(dirname "$0")/.."
 
 rc=0
-for lib in picohttpparser uriparser; do
+for lib in picohttpparser uriparser nghttp2; do
     if cmp -s "src/vendor/$lib/LICENSE" "inst/licenses/$lib-LICENSE"; then
         echo "ok: inst/licenses/$lib-LICENSE matches src/vendor/$lib/LICENSE"
     else

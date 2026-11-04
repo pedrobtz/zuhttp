@@ -1,0 +1,58 @@
+Component:  nghttp2 (lib/ only)
+Upstream:   https://github.com/nghttp2/nghttp2
+Version:    (written by tools/update-nghttp2)
+Retrieved:  (written by tools/update-nghttp2)
+License:    MIT. Full text: LICENSE
+Copyright:  Tatsuhiro Tsujikawa and the nghttp2 contributors
+Modified:   yes, by tools/update-nghttp2 only; see "Patches" below
+
+Design references: §48 (vendoring policy), §65 (HTTP/2), decisions D-89 and
+D-96.
+
+Update with tools/update-nghttp2. Do not edit these files by hand: the
+patches below are applied by that script, which fails if upstream moves a
+patch site, and a hand edit would be lost on the next update or, worse,
+recorded by tools/vendor/record as if it were upstream.
+
+--------------------------------------------------------------------------
+What is here
+--------------------------------------------------------------------------
+
+Every .c and .h of upstream's lib/, nghttp2/nghttp2.h from lib/includes/,
+and nghttp2/nghttp2ver.h generated from its template. sfparse.{c,h} (MIT,
+the RFC 9651 structured-field parser) ship inside upstream's lib/ and are
+included. The applications in src/, the Python bindings, the build system
+and config.h are not.
+
+zuhttp's driver is src/zuh_h2.c. It moves bytes between a zuh_stream and the
+session with nghttp2_session_mem_recv2() and nghttp2_session_mem_send2();
+nghttp2 never sees a socket.
+
+--------------------------------------------------------------------------
+Patches (design §48)
+--------------------------------------------------------------------------
+
+1. NDEBUG is defined (src/Makevars{,.win}.in), so the assert() calls
+   compile out.
+2. Each of the 13 abort() calls after assert(0) on an unreachable switch arm
+   (10 in sfparse.c, 3 in nghttp2_session.c) returns an error instead:
+   SFPARSE_ERR_PARSE, NGHTTP2_ERR_CALLBACK_FAILURE, 0 from the two uint32_t
+   settings getters, and an empty result from sfparse_base64decode(). R CMD
+   check rejects compiled code that can terminate R. Each site is marked
+   "zuhttp: was abort()".
+3. nghttp2_map_print_distance() in nghttp2_map.c, which writes to stderr and
+   was guarded by !WIN32 alone, is compiled only under DEBUGBUILD, which
+   stays undefined.
+4. NGHTTP2_STATICLIB is defined, so NGHTTP2_EXTERN is empty and
+   $(C_VISIBILITY) hides every nghttp2 symbol (D-66); BUILDING_NGHTTP2 is
+   defined as upstream's own builds do.
+5. nghttp2/nghttp2ver.h is generated from nghttp2ver.h.in by the script,
+   which checks it against the copy in the release tarball.
+6. HAVE_CONFIG_H is left undefined, which skips config.h; src/Makevars.in
+   defines HAVE_ARPA_INET_H, HAVE_NETINET_IN_H, HAVE_CLOCK_GETTIME and
+   HAVE_DECL_CLOCK_MONOTONIC=1, and src/Makevars.win.in HAVE_WINDOWS_H and
+   HAVE_GETTICKCOUNT64.
+
+The script compiles the patched tree and fails if any object references
+abort, exit, printf, fprintf, vfprintf, puts, stderr, stdout, rand or an
+assert handler.

@@ -1,3 +1,4 @@
 source	repo	ref	license	update
 picohttpparser	https://github.com/h2o/picohttpparser	f4d94b48b31e0abae029ebeafcfd9ca0680ede58	MIT	tools/update-picohttpparser
 uriparser	https://github.com/uriparser/uriparser	uriparser-0.9.8	BSD-3-Clause	tools/update-uriparser
+nghttp2	https://github.com/nghttp2/nghttp2	v1.71.0	MIT	tools/update-nghttp2

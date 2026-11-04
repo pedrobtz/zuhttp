@@ -33,3 +33,24 @@ System libraries linked but NOT distributed with this package:
   zlib      (all platforms)       zlib license
   Schannel, CryptoAPI (Windows)   part of the operating system
   Security.framework (macOS)      part of the operating system
+nghttp2 (lib/ only)
+  Files:      src/vendor/nghttp2/
+  Upstream:   https://github.com/nghttp2/nghttp2
+  Version:    nghttp2-1.71.0
+  Copyright:  (c) 2012, 2014, 2015, 2016 Tatsuhiro Tsujikawa
+              (c) 2012, 2014, 2015, 2016 nghttp2 contributors
+              sfparse.c and sfparse.h, inside lib/:
+              (c) 2023 sfparse contributors
+              (c) 2019 nghttp3 contributors
+              (c) 2015 nghttp2 contributors
+  License:    MIT.
+              Full text: licenses/nghttp2-LICENSE in the installed
+              package (inst/licenses/ in the source)
+  Note:       Only upstream's lib/ is bundled: the HTTP/2 framing, HPACK
+              and flow-control library, not the applications or bindings.
+              tools/update-nghttp2 applies six documented changes, none of
+              which alters the protocol: abort() on unreachable switch arms
+              returns an error instead, a stderr debugging printer is
+              compiled only in debug builds, and the rest are build
+              definitions. src/vendor/nghttp2/VENDOR lists them.
+--------------------------------------------------------------------------
