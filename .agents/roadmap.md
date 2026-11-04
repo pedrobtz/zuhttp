@@ -738,6 +738,11 @@ Everything else in it passed locally (2026-11-04).
   §65.2 has the measurement and the reasoning.
 - `max_body` applies to a pulled body as to any other (§65.4), so a long
   stream raises it; each `zu_resp_read()` is bounded by `timeout` afresh.
+- The 1 GiB RSS test collects R's garbage every 64 reads: each piece is a
+  new raw vector, and without collection the dead ones alone added 25.4 MB
+  on Linux (first CI run of #135), while macOS's peak grew 2.9 MB over a
+  4 MiB baseline either way. What the criterion bounds is the client's
+  memory, not the caller's uncollected pieces.
 - Over HTTP/2 the pull pace, not nghttp2's manual window option, is what
   bounds an unread server: with automatic window updates the test still
   passed, and with a window larger than the body it failed, which is the

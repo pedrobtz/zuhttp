@@ -372,6 +372,7 @@ test_that("§51.3, §65.4: 1 GiB streamed in 1 MiB pieces stays under 16 MB of R
     stream = TRUE
   )
   total <- 0
+  i <- 0L
   repeat {
     b <- zu_resp_read(r, 1024^2)
     if (!length(b)) {
@@ -379,6 +380,12 @@ test_that("§51.3, §65.4: 1 GiB streamed in 1 MiB pieces stays under 16 MB of R
     }
     total <- total + length(b)
     rm(b)
+    # Each piece is a new raw vector, and R keeps dead ones until its
+    # collector runs: that is the caller's loop, not zuhttp holding the body,
+    # and on Linux it alone added ~25 MB (2026-11-04). Collecting now and
+    # then measures what the client holds.
+    i <- i + 1L
+    if (i %% 64L == 0L) invisible(gc())
   }
   expect_identical(total, 1024^3)
   delta <- hwm() - base_hwm
