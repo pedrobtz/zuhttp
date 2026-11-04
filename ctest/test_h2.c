@@ -783,6 +783,20 @@ static void cases_w21(void) {
         dialer_free(&dd);
     }
 
+    ZUH_CASE("§65.3, §40: an HTTP/2 trailer block over the limit is zu_http_parse_error");
+    {
+        static char huge[70000];
+        srv_cfg c; memset(&c, 0, sizeof c);
+        memset(huge, 't', sizeof huge - 1);
+        c.body = "x"; c.body_len = 1;
+        c.trailer_name = "x-huge"; c.trailer_value = huge;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_ERR_PARSE);
+        ZUH_CHECK(has(e.message, "trailer"));
+        dialer_free(&dd);
+    }
+
     ZUH_CASE("§65.3: a Trailers-Only response is headers, an empty body, no error");
     {
         srv_cfg c; memset(&c, 0, sizeof c);

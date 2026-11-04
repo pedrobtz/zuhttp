@@ -141,6 +141,100 @@ void suite_response(void) {
         zuh_chunked_free(&c);
     }
 
+    ZUH_CASE("§18.2, D-91: trailer fields are kept, in order, beside the body");
+    {
+        zuh_chunked c; zuh_error e;
+        zuh_error_clear(&e);
+        char buf[] = "3\r\nabc\r\n0\r\nGrpc-Status: 0\r\nGrpc-Message: done\r\n\r\nNEXT";
+        size_t len = sizeof buf - 1;
+        const char *nm, *v;
+        ZUH_CHECK_EQ_INT(zuh_chunked_init(&c, 0, 0), ZUH_OK);
+        ZUH_CHECK_EQ_INT(zuh_chunked_decode(&c, buf, &len, &e), ZUH_OK);
+        ZUH_CHECK_EQ_INT(len, 3);
+        ZUH_CHECK_EQ_INT(zuh_headers_total(&c.trailers), 2);
+        ZUH_CHECK(zuh_headers_at(&c.trailers, 1, &nm, &v) && strcmp(nm, "Grpc-Message") == 0);
+        ZUH_CHECK_EQ_INT(c.surplus, 4);          /* "NEXT" follows the message */
+        zuh_chunked_free(&c);
+    }
+
+    ZUH_CASE("§18.2: a trailer section split across reads is assembled");
+    {
+        zuh_chunked c; zuh_error e;
+        char a[] = "2\r\nhi\r\n0\r\nX-T";
+        char b[] = "railer: 1\r";
+        char d[] = "\n\r\n";
+        size_t len;
+        zuh_chunked_init(&c, 0, 0);
+        len = sizeof a - 1;
+        ZUH_CHECK_EQ_INT(zuh_chunked_decode(&c, a, &len, &e), ZUH_ERR_WOULDBLOCK);
+        ZUH_CHECK_EQ_INT(len, 2);
+        len = sizeof b - 1;
+        ZUH_CHECK_EQ_INT(zuh_chunked_decode(&c, b, &len, &e), ZUH_ERR_WOULDBLOCK);
+        ZUH_CHECK_EQ_INT(len, 0);
+        len = sizeof d - 1;
+        ZUH_CHECK_EQ_INT(zuh_chunked_decode(&c, d, &len, &e), ZUH_OK);
+        ZUH_CHECK(zuh_headers_get(&c.trailers, "x-trailer") != NULL);
+        zuh_chunked_free(&c);
+    }
+
+    ZUH_CASE("§18.2: the last chunk with nothing after it waits for the trailer section");
+    {
+        zuh_chunked c; zuh_error e;
+        char a[] = "0\r\n";
+        char b[] = "\r\n";
+        size_t len;
+        zuh_chunked_init(&c, 0, 0);
+        len = sizeof a - 1;
+        ZUH_CHECK_EQ_INT(zuh_chunked_decode(&c, a, &len, &e), ZUH_ERR_WOULDBLOCK);
+        len = sizeof b - 1;
+        ZUH_CHECK_EQ_INT(zuh_chunked_decode(&c, b, &len, &e), ZUH_OK);
+        ZUH_CHECK_EQ_INT(zuh_headers_total(&c.trailers), 0);
+        zuh_chunked_free(&c);
+    }
+
+    ZUH_CASE("§18.2, §40: a malformed, folded or oversized trailer section is a parse error");
+    {
+        static const char *const bad[] = {
+            "0\r\nNo colon here\r\n\r\n",
+            "0\r\nX-A: 1\r\n continued\r\n\r\n",
+            "0\r\nBad Name: 1\r\n\r\n",
+        };
+        size_t i;
+        for (i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+            zuh_chunked c; zuh_error e;
+            char buf[128];
+            size_t len = strlen(bad[i]);
+            memcpy(buf, bad[i], len);
+            zuh_chunked_init(&c, 0, 0);
+            zuh_error_clear(&e);
+            ZUH_CHECK_EQ_INT(zuh_chunked_decode(&c, buf, &len, &e), ZUH_ERR_PARSE);
+            zuh_chunked_free(&c);
+        }
+        {
+            /* Over §40's header-byte limit, fed in pieces as a server would. */
+            zuh_chunked c; zuh_error e;
+            char head[] = "0\r\nX-Big: ";
+            static char piece[8192];
+            size_t len, fed = 0;
+            zuh_code rc = ZUH_ERR_WOULDBLOCK;
+            memset(piece, 'x', sizeof piece);
+            zuh_chunked_init(&c, 0, 0);
+            len = sizeof head - 1;
+            zuh_chunked_decode(&c, head, &len, &e);
+            while (rc == ZUH_ERR_WOULDBLOCK && fed < 200000) {
+                char tmp[sizeof piece];
+                memcpy(tmp, piece, sizeof piece);
+                len = sizeof tmp;
+                zuh_error_clear(&e);
+                rc = zuh_chunked_decode(&c, tmp, &len, &e);
+                fed += sizeof piece;
+            }
+            ZUH_CHECK_EQ_INT(rc, ZUH_ERR_PARSE);
+            ZUH_CHECK(fed <= ZUH_DEFAULT_MAX_HEADER_BYTES + sizeof piece);
+            zuh_chunked_free(&c);
+        }
+    }
+
     ZUH_CASE("chunked decoding asks for more input when truncated");
     {
         zuh_chunked c; zuh_error e; size_t len; char buf[64];

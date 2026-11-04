@@ -25,7 +25,10 @@ r_hit <- tapply(t$hit, key(t$filename, t$line), any)
 kind <- ifelse(
   grepl("^R/", t$filename),
   "R",
-  ifelse(grepl("^src/(zu_[^/]+|init)\\.c$", t$filename), "own C", "vendored C")
+  # zuh_, not zu_: the C prefix is zuh_ since D-66 (W2). Matching zu_ left
+  # init.c as the only "own C" file for every run from W2 to W21, so the
+  # own-C floor described init.c alone (found 2026-11-04).
+  ifelse(grepl("^src/(zuh_[^/]+|init)\\.c$", t$filename), "own C", "vendored C")
 )
 kinds <- tapply(kind, key(t$filename, t$line), `[`, 1)
 

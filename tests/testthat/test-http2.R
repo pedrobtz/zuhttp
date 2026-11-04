@@ -343,6 +343,11 @@ test_that("§51.3, §65.4: 1 GiB streamed in 1 MiB pieces stays under 16 MB of R
   if (!file.exists("/proc/self/status")) {
     skip("needs Linux's VmHWM")
   }
+  # covr instruments every R expression, so a 65,000-read loop runs for many
+  # minutes, and this test measures memory, not lines.
+  if (identical(Sys.getenv("R_COVR"), "true")) {
+    skip("under covr")
+  }
   hwm <- function() {
     l <- grep("^VmHWM:", readLines("/proc/self/status"), value = TRUE)
     as.numeric(gsub("[^0-9]", "", l)) * 1024

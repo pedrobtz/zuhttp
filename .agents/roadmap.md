@@ -1147,3 +1147,12 @@ changed the plan or the design.
   last chunk arrived with nothing after it yet; the trailer parser now waits
   for bytes first. The HTTP/2 receive window was measured (design §65.2)
   and set to 4 MiB.
+- **2026-11-04 — coverage measured init.c alone since W2.**
+  `tools/coverage/measure.R` classified project C by the pre-D-66 `zu_`
+  prefix, so from W2's rename on, "own C" meant `init.c`, and the own-C
+  floors were set on that one file. W21's new `init.c` entry points dropped
+  it below the floor on #135, which is how it showed. Fixed to `zuh_`; the
+  whole core, measured with the HTTP/2 and gRPC servers that coverage-union
+  now starts, is 92.6% on macOS, so the floors stand as set. New offline
+  tests (`test-pull.R`, the chunked and HTTP/2 trailer limits in ctest)
+  cover the R surface and the trailer error paths.
