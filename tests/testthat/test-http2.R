@@ -147,3 +147,322 @@ test_that("§65.1: h2 over TLS to a local server, GET and POST", {
   r <- zu_get(paste0(base, "/get"), client = off)
   expect_identical(zu_resp_json(r)$http_version, "1.1")
 })
+
+# --- W21: the pulled body, trailers, abort (§65.3-§65.5) ---------------------
+
+test_that("§65.3: trailers from an HTTP/2 server, after a streamed body ends", {
+  skip_unless_h2_server()
+  base <- Sys.getenv("ZU_H2_TEST_SERVER")
+  # A server sends trailers to a client that says it takes them; gRPC
+  # clients always do (§65.3).
+  api <- zu_client(
+    http2 = "required",
+    proxy = FALSE,
+    headers = c(TE = "trailers")
+  )
+  r <- zu_get(paste0(base, "/trailers"), client = api)
+  expect_identical(zu_resp_trailers(r, "grpc-status"), "0")
+  expect_identical(zu_resp_trailers(r, "Grpc-Message"), "ok")
+  expect_length(zu_resp_header(r, "grpc-status"), 0L)
+
+  s <- zu_perform(
+    zu_request("GET", paste0(base, "/trailers")),
+    client = api,
+    stream = TRUE
+  )
+  expect_null(zu_resp_trailers(s)) # not known until the body has ended
+  expect_identical(rawToChar(zu_resp_read(s)), "x")
+  expect_length(zu_resp_read(s), 0L)
+  expect_identical(zu_resp_trailers(s, "grpc-status"), "0")
+})
+
+test_that("§65.4: a streamed body is read in the caller's pieces, then reused", {
+  skip_unless_h2_server()
+  base <- Sys.getenv("ZU_H2_TEST_SERVER")
+  api <- zu_client(http2 = "required", proxy = FALSE)
+  n <- 3e6
+  r <- zu_perform(
+    zu_request("GET", paste0(base, "/bytes?n=", sprintf("%.0f", n))),
+    client = api,
+    stream = TRUE
+  )
+  expect_length(zu_resp_raw(r), 0L)
+  total <- 0
+  pieces <- 0L
+  repeat {
+    b <- zu_resp_read(r, 65536)
+    if (!length(b)) {
+      break
+    }
+    expect_lte(length(b), 65536)
+    if (total == 0) {
+      expect_identical(b[1:4], as.raw(0:3))
+    }
+    total <- total + length(b)
+    pieces <- pieces + 1L
+  }
+  expect_identical(total, n)
+  expect_gt(pieces, 40L)
+  hits <- zu_pool_stats(api)[["hits"]]
+  zu_get(paste0(base, "/get"), client = api)
+  expect_identical(zu_pool_stats(api)[["hits"]], hits + 1L)
+})
+
+test_that("§65.4: an unread stream holds the server at one window", {
+  skip_unless_h2_server()
+  base <- Sys.getenv("ZU_H2_TEST_SERVER")
+  ctl <- zu_client(proxy = FALSE, pool = NULL)
+  sent <- function() {
+    zu_resp_json(zu_get(paste0(base, "/sent"), client = ctl))$sent
+  }
+  zu_get(paste0(base, "/sent?reset=1"), client = ctl)
+  api <- zu_client(http2 = "required", proxy = FALSE, max_body = Inf)
+  r <- zu_perform(
+    zu_request("GET", paste0(base, "/bytes?n=", sprintf("%.0f", 200 * 1024^2))),
+    client = api,
+    stream = TRUE
+  )
+  Sys.sleep(1)
+  a <- sent()
+  Sys.sleep(1)
+  b <- sent()
+  # The server's own count stays put, and well short of the 200 MiB body:
+  # one stream window plus what the transport buffers, not the body.
+  expect_identical(a, b)
+  expect_lt(b, 16 * 1024^2)
+  # Reading lets it go on.
+  for (i in 1:64) {
+    zu_resp_read(r, 1024^2)
+  }
+  Sys.sleep(0.5)
+  expect_gt(sent(), b)
+  zu_resp_abort(r)
+})
+
+test_that("§65.5: abort over HTTP/2 keeps the connection for the next request", {
+  skip_unless_h2_server()
+  base <- Sys.getenv("ZU_H2_TEST_SERVER")
+  api <- zu_client(http2 = "required", proxy = FALSE)
+  r <- zu_perform(
+    zu_request("GET", paste0(base, "/bytes?n=", sprintf("%.0f", 50e6))),
+    client = api,
+    stream = TRUE
+  )
+  expect_gt(length(zu_resp_read(r, 1000)), 0L)
+  zu_resp_abort(r)
+  zu_resp_abort(r) # a no-op
+  expect_error(zu_resp_read(r), class = "zu_cancelled_error")
+  hits <- zu_pool_stats(api)[["hits"]]
+  expect_identical(
+    zu_resp_status(zu_get(paste0(base, "/get"), client = api)),
+    200L
+  )
+  expect_identical(zu_pool_stats(api)[["hits"]], hits + 1L)
+})
+
+test_that("§65.5: a callback returning FALSE over HTTP/2 also keeps the connection", {
+  skip_unless_h2_server()
+  base <- Sys.getenv("ZU_H2_TEST_SERVER")
+  api <- zu_client(http2 = "required", proxy = FALSE)
+  r <- zu_get(
+    paste0(base, "/bytes?n=", sprintf("%.0f", 50e6)),
+    client = api,
+    callback = function(x) FALSE
+  )
+  expect_identical(zu_resp_status(r), 200L)
+  hits <- zu_pool_stats(api)[["hits"]]
+  zu_get(paste0(base, "/get"), client = api)
+  expect_identical(zu_pool_stats(api)[["hits"]], hits + 1L)
+})
+
+test_that("§65.4: max_body holds across a streamed body", {
+  skip_unless_h2_server()
+  base <- Sys.getenv("ZU_H2_TEST_SERVER")
+  api <- zu_client(http2 = "required", proxy = FALSE, max_body = 1e6)
+  r <- zu_perform(
+    zu_request("GET", paste0(base, "/bytes?n=", sprintf("%.0f", 3e6))),
+    client = api,
+    stream = TRUE
+  )
+  got <- 0
+  e <- tryCatch(
+    repeat {
+      b <- zu_resp_read(r, 65536)
+      if (!length(b)) {
+        break
+      }
+      got <- got + length(b)
+    },
+    error = function(e) e
+  )
+  expect_s3_class(e, "zu_body_limit_error")
+  expect_lte(got, 1e6)
+})
+
+test_that("§65.4: an interrupt inside zu_resp_read() returns within the bound", {
+  skip_unless_h2_server()
+  skip_on_cran()
+  skip_on_os("windows")
+  skip_under_gctorture()
+  base <- Sys.getenv("ZU_H2_TEST_SERVER")
+  fds <- function() {
+    if (!dir.exists("/proc/self/fd")) {
+      return(NA_integer_)
+    }
+    length(list.files("/proc/self/fd"))
+  }
+  api <- zu_client(http2 = "required", proxy = FALSE, timeout = 60)
+  r <- zu_perform(
+    zu_request("GET", paste0(base, "/slow")),
+    client = api,
+    stream = TRUE
+  )
+  expect_identical(rawToChar(zu_resp_read(r)), "slow")
+  before <- fds()
+  system(sprintf(
+    "sh -c 'sleep 0.5; kill -INT %d' >/dev/null 2>&1 &",
+    Sys.getpid()
+  ))
+  t0 <- Sys.time()
+  e <- tryCatch(
+    zu_resp_read(r),
+    interrupt = function(e) e,
+    error = function(e) e
+  )
+  elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+  expect_s3_class(e, "zu_interrupted_error")
+  expect_lt(elapsed, 0.5 + 0.2 + 0.3)
+  # The interrupted body closed its connection: one descriptor fewer.
+  if (!is.na(before)) expect_lt(fds(), before)
+})
+
+test_that("§51.3, §65.4: 1 GiB streamed in 1 MiB pieces stays under 16 MB of RSS", {
+  skip_unless_h2_server()
+  skip_on_cran()
+  skip_under_gctorture()
+  if (!file.exists("/proc/self/status")) {
+    skip("needs Linux's VmHWM")
+  }
+  hwm <- function() {
+    l <- grep("^VmHWM:", readLines("/proc/self/status"), value = TRUE)
+    as.numeric(gsub("[^0-9]", "", l)) * 1024
+  }
+  base <- Sys.getenv("ZU_H2_TEST_SERVER")
+  # max_body holds across a stream (§65.4), so a 1 GiB body raises it.
+  api <- zu_client(
+    http2 = "required",
+    proxy = FALSE,
+    timeout = 120,
+    max_body = Inf
+  )
+  # A warm-up so the baseline includes what the first request allocates.
+  r <- zu_perform(
+    zu_request("GET", paste0(base, "/bytes?n=", sprintf("%.0f", 4 * 1024^2))),
+    client = api,
+    stream = TRUE
+  )
+  while (length(zu_resp_read(r, 1024^2))) {
+    NULL
+  }
+  invisible(gc())
+  base_hwm <- hwm()
+  r <- zu_perform(
+    zu_request("GET", paste0(base, "/bytes?n=", sprintf("%.0f", 1024^3))),
+    client = api,
+    stream = TRUE
+  )
+  total <- 0
+  repeat {
+    b <- zu_resp_read(r, 1024^2)
+    if (!length(b)) {
+      break
+    }
+    total <- total + length(b)
+    rm(b)
+  }
+  expect_identical(total, 1024^3)
+  delta <- hwm() - base_hwm
+  cat(sprintf("\n  1 GiB streamed; peak RSS grew by %.1f MB\n", delta / 1024^2))
+  expect_lt(delta, 16 * 1024^2)
+})
+
+# --- §65.8: gRPC against grpc-go's interop server, through zuhttp's own API --
+#
+# What zugrpc will do, by hand: a gRPC message is a 5-byte prefix (a
+# compressed flag and a big-endian length) and protobuf bytes; the status is
+# in the trailers. Requests are encoded here by hand, which keeps the test
+# free of a protobuf dependency and shows exactly what goes on the wire.
+
+test_that("§65.8: a unary gRPC call; the status is in the trailers", {
+  skip_unless_grpc_server()
+  r <- zu_post(
+    "/grpc.testing.TestService/EmptyCall",
+    body = grpc_frame(),
+    client = grpc_client()
+  )
+  expect_identical(zu_resp_status(r), 200L)
+  expect_identical(zu_resp_connection(r)$http_version, "HTTP/2")
+  expect_identical(zu_resp_raw(r), grpc_frame())
+  expect_identical(zu_resp_trailers(r, "grpc-status"), "0")
+})
+
+test_that("§65.8: an unknown method is a Trailers-Only response, not an error", {
+  skip_unless_grpc_server()
+  r <- zu_post(
+    "/grpc.testing.TestService/NoSuchMethod",
+    body = grpc_frame(),
+    client = grpc_client()
+  )
+  expect_identical(zu_resp_status(r), 200L)
+  expect_length(zu_resp_raw(r), 0L)
+  # Trailers-Only: the status arrives in the one header block (§65.3).
+  expect_identical(zu_resp_header(r, "grpc-status"), "12")
+})
+
+test_that("§65.8: a server-streaming gRPC call, pulled with zu_resp_read()", {
+  skip_unless_grpc_server()
+  # StreamingOutputCallRequest { response_parameters: [{size: 1000},
+  # {size: 2000}, {size: 3000}] }: field 2, length 3, then field 1 varint.
+  req <- as.raw(c(
+    0x12,
+    0x03,
+    0x08,
+    0xe8,
+    0x07,
+    0x12,
+    0x03,
+    0x08,
+    0xd0,
+    0x0f,
+    0x12,
+    0x03,
+    0x08,
+    0xb8,
+    0x17
+  ))
+  r <- zu_perform(
+    zu_body_raw(
+      zu_request("POST", "/grpc.testing.TestService/StreamingOutputCall"),
+      grpc_frame(req)
+    ),
+    client = grpc_client(),
+    stream = TRUE
+  )
+  got <- raw()
+  repeat {
+    b <- zu_resp_read(r, 512)
+    if (!length(b)) {
+      break
+    }
+    got <- c(got, b)
+  }
+  msgs <- grpc_messages(got)
+  expect_length(msgs, 3L)
+  # Each reply carries a payload of the requested size, plus a few bytes of
+  # protobuf framing around it.
+  sizes <- vapply(msgs, length, integer(1))
+  expect_true(all(
+    sizes >= c(1000, 2000, 3000) & sizes < c(1000, 2000, 3000) + 16
+  ))
+  expect_identical(zu_resp_trailers(r, "grpc-status"), "0")
+})

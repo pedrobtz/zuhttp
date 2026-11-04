@@ -25,6 +25,13 @@
 #' @param max_idle Maximum idle connections kept across all hosts.
 #' @param max_per_host Maximum idle connections for one scheme/host/port.
 #' @param idle_timeout Seconds an unused connection may sit in the pool.
+#' @param keepalive_time,keepalive_timeout HTTP/2 keepalive, in seconds
+#'   (§65.6). An idle HTTP/2 connection silent for `keepalive_time` is sent a
+#'   PING before it is reused, and discarded unless the answer arrives within
+#'   `keepalive_timeout` (default 20); the request then opens a new one. This
+#'   finds a server or middlebox that dropped the connection without saying
+#'   so. `NULL`, the default, sends no PING. HTTP/1.1 connections are
+#'   unaffected.
 #' @return A `zu_pool_config`, for `zu_client(pool = )`. `zu_client(pool =
 #'   NULL)` disables reuse entirely, which is what one-shot calls want.
 #'
@@ -41,7 +48,13 @@
 #' @examples
 #' api <- zu_client(pool = zu_pool(max_idle = 4, idle_timeout = 10))
 #' zu_pool_stats(api)
-zu_pool <- function(max_idle = 16L, max_per_host = 4L, idle_timeout = 30) {
+zu_pool <- function(
+  max_idle = 16L,
+  max_per_host = 4L,
+  idle_timeout = 30,
+  keepalive_time = NULL,
+  keepalive_timeout = NULL
+) {
   # Finite: as.integer(Inf) is NA, which C read as "the default" — so
   # idle_timeout = Inf, a natural way to say "keep forever", silently meant 30.
   check_count <- function(x, nm) {
@@ -72,13 +85,29 @@ zu_pool <- function(max_idle = 16L, max_per_host = 4L, idle_timeout = 30) {
       call. = FALSE
     )
   }
+  check_secs <- function(x, nm) {
+    if (is.null(x)) {
+      return(0L)
+    }
+    if (!is.numeric(x) || length(x) != 1L || is.na(x) || x < 0.001) {
+      stop(
+        "`",
+        nm,
+        "` must be NULL or a number of seconds, at least 0.001",
+        call. = FALSE
+      )
+    }
+    timeout_ms(x)
+  }
   structure(
     list(
       max_idle = check_count(max_idle, "max_idle"),
       max_per_host = check_count(max_per_host, "max_per_host"),
       # Inf, or anything past what an int of milliseconds holds, is the most
       # the C side can express, as for `timeout` (timeout_ms()).
-      idle_timeout_ms = timeout_ms(idle_timeout)
+      idle_timeout_ms = timeout_ms(idle_timeout),
+      keepalive_time_ms = check_secs(keepalive_time, "keepalive_time"),
+      keepalive_timeout_ms = check_secs(keepalive_timeout, "keepalive_timeout")
     ),
     class = "zu_pool_config"
   )
@@ -140,7 +169,9 @@ client_pool <- function(client) {
     C_zu_pool_new,
     cfg$max_idle,
     cfg$max_per_host,
-    cfg$idle_timeout_ms
+    cfg$idle_timeout_ms,
+    cfg$keepalive_time_ms %||% 0L,
+    cfg$keepalive_timeout_ms %||% 0L
   )
   st$cfg <- cfg
   st$ptr

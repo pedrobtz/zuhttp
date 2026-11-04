@@ -4,7 +4,13 @@
 \alias{zu_pool}
 \title{Connection pool settings}
 \usage{
-zu_pool(max_idle = 16L, max_per_host = 4L, idle_timeout = 30)
+zu_pool(
+  max_idle = 16L,
+  max_per_host = 4L,
+  idle_timeout = 30,
+  keepalive_time = NULL,
+  keepalive_timeout = NULL
+)
 }
 \arguments{
 \item{max_idle}{Maximum idle connections kept across all hosts.}
@@ -12,6 +18,14 @@ zu_pool(max_idle = 16L, max_per_host = 4L, idle_timeout = 30)
 \item{max_per_host}{Maximum idle connections for one scheme/host/port.}
 
 \item{idle_timeout}{Seconds an unused connection may sit in the pool.}
+
+\item{keepalive_time, keepalive_timeout}{HTTP/2 keepalive, in seconds
+(§65.6). An idle HTTP/2 connection silent for \code{keepalive_time} is sent a
+PING before it is reused, and discarded unless the answer arrives within
+\code{keepalive_timeout} (default 20); the request then opens a new one. This
+finds a server or middlebox that dropped the connection without saying
+so. \code{NULL}, the default, sends no PING. HTTP/1.1 connections are
+unaffected.}
 }
 \value{
 A \code{zu_pool_config}, for \code{zu_client(pool = )}. \code{zu_client(pool = NULL)} disables reuse entirely, which is what one-shot calls want.

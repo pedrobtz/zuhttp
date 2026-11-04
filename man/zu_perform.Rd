@@ -4,16 +4,26 @@
 \alias{zu_perform}
 \title{Perform a request}
 \usage{
-zu_perform(req, client = zu_default_client())
+zu_perform(req, client = zu_default_client(), stream = FALSE)
 }
 \arguments{
 \item{req}{A \code{zu_request} from \code{\link[=zu_request]{zu_request()}}.}
 
 \item{client}{A \code{zu_client}. Always named, never positional (§31.3).}
+
+\item{stream}{Return as soon as the response headers have arrived, with
+the body unread, and read it with \code{\link[=zu_resp_read]{zu_resp_read()}} (§65.4). Redirects and
+retries are complete by then. The connection stays with the response
+until the body is read to its end or \code{\link[=zu_resp_abort]{zu_resp_abort()}} is called; a
+response dropped half-read is aborted when it is garbage-collected. Not
+with \code{\link[=zu_req_path]{zu_req_path()}} or \code{\link[=zu_req_callback]{zu_req_callback()}}: a body has one destination.
+\code{max_body} still bounds the whole body, so a long stream needs it raised
+(\code{Inf} for no limit).}
 }
 \value{
 A \code{zu_response}. By default a 4xx or 5xx status raises a condition
-instead; see \code{\link[=zu_resp_check]{zu_resp_check()}} and \code{check = FALSE}.
+instead; see \code{\link[=zu_resp_check]{zu_resp_check()}} and \code{check = FALSE}. With \code{stream = TRUE}
+the body is not read and the condition is raised after aborting it.
 }
 \description{
 The boundary between building a request and touching the network
