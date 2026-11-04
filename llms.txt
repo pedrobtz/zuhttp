@@ -1,9 +1,9 @@
 # zuhttp
 
-A minimal HTTP/1.1 client for R that uses **each platform’s own TLS
-stack and trust store** — Schannel on Windows, Network.framework with
-`SecTrust` on macOS, system OpenSSL elsewhere — rather than bundling
-cryptography or a CA bundle. One R dependency, its sibling
+A minimal HTTP/1.1 and HTTP/2 client for R that uses **each platform’s
+own TLS stack and trust store** — Schannel on Windows, Network.framework
+with `SecTrust` on macOS, system OpenSSL elsewhere — rather than
+bundling cryptography or a CA bundle. One R dependency, its sibling
 [zujson](https://github.com/pedrobtz/zujson), for JSON.
 
 Install the released version from CRAN:

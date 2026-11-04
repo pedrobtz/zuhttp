@@ -72,7 +72,8 @@ It is never the first argument of a request function — see below.</p>
 <span>  middleware <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  hooks <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  proxy <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  tls <span class="op">=</span> <span class="cn">NULL</span></span>
+<span>  tls <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  http2 <span class="op">=</span> <span class="cn">NULL</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -164,6 +165,15 @@ argument follows.</p></dd>
 <dt id="arg-tls">tls<a class="anchor" aria-label="anchor" href="#arg-tls"></a></dt>
 <dd><p>Certificate trust settings from <code><a href="zu_tls.html">zu_tls()</a></code>.</p></dd>
 
+
+<dt id="arg-http-">http2<a class="anchor" aria-label="anchor" href="#arg-http-"></a></dt>
+<dd><p>HTTP/2 use: <code>"auto"</code> (the default) offers it to every HTTPS
+server and uses it when the server chooses it, and HTTP/1.1 otherwise;
+<code>"required"</code> fails with <code>zu_connect_error</code> before sending anything when
+the connection is not HTTP/2, and on an <code>http://</code> URL speaks cleartext
+HTTP/2 (h2c) directly, without an <code>Upgrade</code>; <code>"off"</code> uses HTTP/1.1 only.
+<code><a href="zu_resp_connection.html">zu_resp_connection()</a></code> reports which version a response came over.</p></dd>
+
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
@@ -208,6 +218,7 @@ misplaced argument into a confusing error instead of a clear one (§31.3).</p>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   check: TRUE  (default)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   decode: TRUE  (default)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   retry: off (1 attempt)  (default)</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   http2: auto  (default)</span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

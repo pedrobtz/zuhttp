@@ -32,4 +32,5 @@ zu_default_client()
 #>   check: TRUE  (default)
 #>   decode: TRUE  (default)
 #>   retry: off (1 attempt)  (default)
+#>   http2: auto  (default)
 ```

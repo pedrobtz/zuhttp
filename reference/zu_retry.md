@@ -100,4 +100,5 @@ zu_client(retry = zu_retry(attempts = 5, max_delay = 10))
 #>   check: TRUE  (default)
 #>   decode: TRUE  (default)
 #>   retry: 5 attempts, exponential backoff, honours Retry-After
+#>   http2: auto  (default)
 ```

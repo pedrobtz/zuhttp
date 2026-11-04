@@ -44,7 +44,7 @@
 
 <div id="zuhttp" class="section level1">
 
-<p>A minimal HTTP/1.1 client for R that uses <strong>each platform’s own TLS stack and trust store</strong> — Schannel on Windows, Network.framework + SecTrust on macOS, system OpenSSL elsewhere — rather than bundling cryptography or a CA bundle. One hard R dependency, the sibling <code>zujson</code> (D-88); <code>zuxml</code> and <code>zuhtml</code> are Suggests.</p>
+<p>A minimal HTTP/1.1 and HTTP/2 client for R that uses <strong>each platform’s own TLS stack and trust store</strong> — Schannel on Windows, Network.framework + SecTrust on macOS, system OpenSSL elsewhere — rather than bundling cryptography or a CA bundle. One hard R dependency, the sibling <code>zujson</code> (D-88); <code>zuxml</code> and <code>zuhtml</code> are Suggests.</p>
 <div class="section level2">
 <h2 id="the-two-documents-that-govern-this-repo">The two documents that govern this repo<a class="anchor" aria-label="anchor" href="#the-two-documents-that-govern-this-repo"></a></h2>
 <p>Both live in <a href=".agents/"><code>.agents/</code></a> and are excluded from the R package build:</p>
@@ -52,7 +52,7 @@
 <th>What it is</th>
 <th>When to read it</th>
 </tr></thead><tbody><tr><td><a href=".agents/zuhttp-design.html"><code>.agents/zuhttp-design.md</code></a></td>
-<td>The design, edition 2: a normative specification in 65 numbered sections, each with a status line; a Decision Register (D-1…D-96); a risk register.</td>
+<td>The design, edition 2: a normative specification in 65 numbered sections, each with a status line; a Decision Register (D-1…D-97); a risk register.</td>
 <td>Before changing behaviour. Cite the section, e.g. §31.9.</td>
 </tr><tr><td><a href=".agents/roadmap.html"><code>.agents/roadmap.md</code></a></td>
 <td>The plan, edition 2: milestones M0–M3 (0.1.0 on CRAN with HTTP/2 → 0.2.0 → 0.3.0 → 1.0; M4 folded into M0, D-96), work packages W1–W22 with exit criteria, and an append-only findings log.</td>
@@ -65,35 +65,42 @@
 </div>
 <div class="section level2">
 <h2 id="commands">Commands<a class="anchor" aria-label="anchor" href="#commands"></a></h2>
-<div class="sourceCode" id="cb1"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="co"># C core — no R, no network, no TLS. 1903 checks against mock streams,</span></span>
-<span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a><span class="co"># including the whole engine through the dial seam (test_engine_mock.c).</span></span>
-<span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest strict          <span class="co"># warnings-as-errors; the one to run by default</span></span>
-<span id="cb1-4"><a href="#cb1-4" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest asan            <span class="co"># ASan + UBSan</span></span>
-<span id="cb1-5"><a href="#cb1-5" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest engine-nw       <span class="co"># live engine over macOS Network.framework (network)</span></span>
-<span id="cb1-6"><a href="#cb1-6" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest engine          <span class="co"># same, over OpenSSL</span></span>
-<span id="cb1-7"><a href="#cb1-7" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest tls             <span class="co"># OpenSSL backend only (network)</span></span>
-<span id="cb1-8"><a href="#cb1-8" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest tls-eof         <span class="co"># OpenSSL vs a loopback TLS server that closes badly</span></span>
-<span id="cb1-9"><a href="#cb1-9" tabindex="-1"></a>                              <span class="co">#   (needs python3 and the openssl CLI; D-86)</span></span>
-<span id="cb1-10"><a href="#cb1-10" tabindex="-1"></a></span>
-<span id="cb1-11"><a href="#cb1-11" tabindex="-1"></a><span class="co"># Fuzzing — 10 targets (engine is the whole request path), each built two ways</span></span>
-<span id="cb1-12"><a href="#cb1-12" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> fuzz replay-run       <span class="co"># corpus replay, needs no clang; a regression suite</span></span>
-<span id="cb1-13"><a href="#cb1-13" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> fuzz replay-asan      <span class="co"># the same corpus under ASan + UBSan</span></span>
-<span id="cb1-14"><a href="#cb1-14" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> fuzz fuzz-run         <span class="co"># libFuzzer, needs clang</span></span>
-<span id="cb1-15"><a href="#cb1-15" tabindex="-1"></a></span>
-<span id="cb1-16"><a href="#cb1-16" tabindex="-1"></a><span class="co"># R</span></span>
-<span id="cb1-17"><a href="#cb1-17" tabindex="-1"></a><span class="ex">R</span> CMD INSTALL .</span>
-<span id="cb1-18"><a href="#cb1-18" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'testthat::test_local()'</span>                     <span class="co"># offline</span></span>
-<span id="cb1-19"><a href="#cb1-19" tabindex="-1"></a><span class="va">ZU_TEST_NETWORK</span><span class="op">=</span>1 <span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'testthat::test_local()'</span>   <span class="co"># + the network suite</span></span>
-<span id="cb1-20"><a href="#cb1-20" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'roxygen2::roxygenise()'</span>                     <span class="co"># after touching roxygen blocks</span></span>
-<span id="cb1-21"><a href="#cb1-21" tabindex="-1"></a><span class="ex">./tools/check-vendor-licenses</span>                           <span class="co"># after a re-vendor</span></span>
-<span id="cb1-22"><a href="#cb1-22" tabindex="-1"></a></span>
-<span id="cb1-23"><a href="#cb1-23" tabindex="-1"></a><span class="co"># What CI actually runs for the R suite — reproduce THIS before claiming green,</span></span>
-<span id="cb1-24"><a href="#cb1-24" tabindex="-1"></a><span class="co"># because it differs from R CMD check in ways that have bitten before.</span></span>
-<span id="cb1-25"><a href="#cb1-25" tabindex="-1"></a><span class="ex">Rscript</span> tools/ci-run-tests.R</span></code></pre></div>
+<div class="sourceCode" id="cb1"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="co"># C core — no R, no network, no TLS. 1993 checks against mock streams,</span></span>
+<span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a><span class="co"># including the whole engine through the dial seam (test_engine_mock.c) and</span></span>
+<span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a><span class="co"># over HTTP/2 against an in-process nghttp2 server (test_h2.c).</span></span>
+<span id="cb1-4"><a href="#cb1-4" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest strict          <span class="co"># warnings-as-errors; the one to run by default</span></span>
+<span id="cb1-5"><a href="#cb1-5" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest asan            <span class="co"># ASan + UBSan</span></span>
+<span id="cb1-6"><a href="#cb1-6" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest engine-nw       <span class="co"># live engine over macOS Network.framework (network)</span></span>
+<span id="cb1-7"><a href="#cb1-7" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest engine          <span class="co"># same, over OpenSSL</span></span>
+<span id="cb1-8"><a href="#cb1-8" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest tls             <span class="co"># OpenSSL backend only (network)</span></span>
+<span id="cb1-9"><a href="#cb1-9" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest tls-eof         <span class="co"># OpenSSL vs a loopback TLS server that closes badly</span></span>
+<span id="cb1-10"><a href="#cb1-10" tabindex="-1"></a>                              <span class="co">#   (needs python3 and the openssl CLI; D-86)</span></span>
+<span id="cb1-11"><a href="#cb1-11" tabindex="-1"></a></span>
+<span id="cb1-12"><a href="#cb1-12" tabindex="-1"></a><span class="co"># Fuzzing — 11 targets (engine and h2 are the whole request path), each built two ways</span></span>
+<span id="cb1-13"><a href="#cb1-13" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> fuzz replay-run       <span class="co"># corpus replay, needs no clang; a regression suite</span></span>
+<span id="cb1-14"><a href="#cb1-14" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> fuzz replay-asan      <span class="co"># the same corpus under ASan + UBSan</span></span>
+<span id="cb1-15"><a href="#cb1-15" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> fuzz fuzz-run         <span class="co"># libFuzzer, needs clang</span></span>
+<span id="cb1-16"><a href="#cb1-16" tabindex="-1"></a></span>
+<span id="cb1-17"><a href="#cb1-17" tabindex="-1"></a><span class="co"># R</span></span>
+<span id="cb1-18"><a href="#cb1-18" tabindex="-1"></a><span class="ex">R</span> CMD INSTALL .</span>
+<span id="cb1-19"><a href="#cb1-19" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'testthat::test_local()'</span>                     <span class="co"># offline</span></span>
+<span id="cb1-20"><a href="#cb1-20" tabindex="-1"></a><span class="va">ZU_TEST_NETWORK</span><span class="op">=</span>1 <span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'testthat::test_local()'</span>   <span class="co"># + the network suite</span></span>
+<span id="cb1-21"><a href="#cb1-21" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'roxygen2::roxygenise()'</span>                     <span class="co"># after touching roxygen blocks</span></span>
+<span id="cb1-22"><a href="#cb1-22" tabindex="-1"></a><span class="ex">./tools/check-vendor-licenses</span>                           <span class="co"># after a re-vendor</span></span>
+<span id="cb1-23"><a href="#cb1-23" tabindex="-1"></a></span>
+<span id="cb1-24"><a href="#cb1-24" tabindex="-1"></a><span class="co"># HTTP/2 live tests (test-http2.R): a local server whose HTTP/2 is not nghttp2's</span></span>
+<span id="cb1-25"><a href="#cb1-25" tabindex="-1"></a><span class="ex">tools/h2-test-cert.sh</span> /tmp/h2 <span class="kw">&amp;&amp;</span> <span class="ex">python3</span> tools/h2-test-server.py 18080 18443 /tmp/h2/cert.pem /tmp/h2/key.pem <span class="kw">&amp;</span></span>
+<span id="cb1-26"><a href="#cb1-26" tabindex="-1"></a><span class="va">ZU_H2_TEST_SERVER</span><span class="op">=</span>http://127.0.0.1:18080 <span class="va">ZU_H2_TEST_TLS</span><span class="op">=</span>https://localhost:18443 <span class="dt">\</span></span>
+<span id="cb1-27"><a href="#cb1-27" tabindex="-1"></a>  <span class="va">ZU_H2_TEST_CA</span><span class="op">=</span>/tmp/h2/ca.pem <span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'testthat::test_local(filter = "http2")'</span></span>
+<span id="cb1-28"><a href="#cb1-28" tabindex="-1"></a></span>
+<span id="cb1-29"><a href="#cb1-29" tabindex="-1"></a><span class="co"># What CI actually runs for the R suite — reproduce THIS before claiming green,</span></span>
+<span id="cb1-30"><a href="#cb1-30" tabindex="-1"></a><span class="co"># because it differs from R CMD check in ways that have bitten before.</span></span>
+<span id="cb1-31"><a href="#cb1-31" tabindex="-1"></a><span class="ex">Rscript</span> tools/ci-run-tests.R</span></code></pre></div>
 <p><strong>Every pull request runs CI</strong> (W1). R-CMD-check, native-checks and the r-actions jobs run a quick profile on a pull request and the full one on <code>main</code>. Work-package pull requests merge on the quick profile; the <code>full-ci</code> label, which runs the full profile on a pull request, goes only on the pull request that closes a milestone (the maintainer’s rule, 2026-10-29). Every merge still runs the full profile on <code>main</code>: read it before opening the next pull request, and fix what it finds there.</p>
 <div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="ex">tools/vendor/verify</span>            <span class="co"># src/vendor/ is byte-for-byte what was recorded</span></span>
 <span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a><span class="ex">tools/vendor/record</span>            <span class="co"># after tools/update-*, never after a hand edit</span></span>
-<span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a><span class="ex">tools/check-code-lines</span>         <span class="co"># project-owned C against the §51.3 budget</span></span></code></pre></div>
+<span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a><span class="ex">tools/update-nghttp2</span> 1.71.0    <span class="co"># re-vendor nghttp2 with the §48 patches</span></span>
+<span id="cb2-4"><a href="#cb2-4" tabindex="-1"></a><span class="ex">tools/check-code-lines</span>         <span class="co"># project-owned C against the §51.3 budget</span></span></code></pre></div>
 <p>Network tests are gated on <code>ZU_TEST_NETWORK=1</code>, not on <code>NOT_CRAN</code> — <code>rcmdcheck</code> sets <code>NOT_CRAN</code>, so gating on it alone would make every check depend on example.com and badssl.com.</p>
 </div>
 <div class="section level2">
@@ -101,12 +108,15 @@
 <pre><code>src/            the C core; only init.c includes R headers
   zuh_stream.h   the vtable that decouples the HTTP engine from the network
   zuh_engine.c   the composed request path: URI → TCP → TLS → framing → body
+  zuh_h2.c       HTTP/2: an nghttp2 session behind the stream contract (§65)
   zu_tls_*.c    one file per backend, selected by ./configure
-  vendor/       picohttpparser (D-10) and a subset of uriparser (D-11)
+  vendor/       picohttpparser (D-10), a subset of uriparser (D-11), nghttp2 lib/ (D-89)
 R/              the public API; see .agents/zuhttp-design.md §31
 ctest/          C tests. zuh_ctest is offline; the engine/tls binaries are not.
+                zuh_mock_stream.{c,h} live here: test-only, not in the package.
 fuzz/           libFuzzer harnesses + a portable replay driver, and the corpus
-tools/          update-uriparser, update-picohttpparser, check-feature-macros,
+tools/          update-uriparser, update-picohttpparser, update-nghttp2,
+                h2-test-server.py, h2-test-cert.sh, check-feature-macros,
                 check-objects-sync, check-vendor-licenses, check-code-lines,
                 ci-fork-guard.R, ci-masking.R, ci-run-tests.R, vendor/
 .github/        R-CMD-check and native-checks (pedrobtz/r-actions), c-core, fuzz,

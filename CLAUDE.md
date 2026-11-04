@@ -1,10 +1,10 @@
 # zuhttp
 
-A minimal HTTP/1.1 client for R that uses **each platform’s own TLS
-stack and trust store** — Schannel on Windows, Network.framework +
-SecTrust on macOS, system OpenSSL elsewhere — rather than bundling
-cryptography or a CA bundle. One hard R dependency, the sibling `zujson`
-(D-88); `zuxml` and `zuhtml` are Suggests.
+A minimal HTTP/1.1 and HTTP/2 client for R that uses **each platform’s
+own TLS stack and trust store** — Schannel on Windows,
+Network.framework + SecTrust on macOS, system OpenSSL elsewhere — rather
+than bundling cryptography or a CA bundle. One hard R dependency, the
+sibling `zujson` (D-88); `zuxml` and `zuhtml` are Suggests.
 
 ## The two documents that govern this repo
 
@@ -13,7 +13,7 @@ and are excluded from the R package build:
 
 | File | What it is | When to read it |
 |----|----|----|
-| [`.agents/zuhttp-design.md`](https://pedrobtz.github.io/zuhttp/.agents/zuhttp-design.md) | The design, edition 2: a normative specification in 65 numbered sections, each with a status line; a Decision Register (D-1…D-96); a risk register. | Before changing behaviour. Cite the section, e.g. §31.9. |
+| [`.agents/zuhttp-design.md`](https://pedrobtz.github.io/zuhttp/.agents/zuhttp-design.md) | The design, edition 2: a normative specification in 65 numbered sections, each with a status line; a Decision Register (D-1…D-97); a risk register. | Before changing behaviour. Cite the section, e.g. §31.9. |
 | [`.agents/roadmap.md`](https://pedrobtz.github.io/zuhttp/.agents/roadmap.md) | The plan, edition 2: milestones M0–M3 (0.1.0 on CRAN with HTTP/2 → 0.2.0 → 0.3.0 → 1.0; M4 folded into M0, D-96), work packages W1–W22 with exit criteria, and an append-only findings log. | Before starting work, to see which work package owns it. |
 | [`.agents/history/`](https://pedrobtz.github.io/zuhttp/.agents/history/) | Edition 1 of both, verbatim: every spike measurement and how each stage landed. | When you need the *why* behind a decision, or a measurement. |
 
@@ -32,8 +32,9 @@ the present tense, and put dated findings in the roadmap’s findings log.
 ## Commands
 
 ``` sh
-# C core — no R, no network, no TLS. 1903 checks against mock streams,
-# including the whole engine through the dial seam (test_engine_mock.c).
+# C core — no R, no network, no TLS. 1993 checks against mock streams,
+# including the whole engine through the dial seam (test_engine_mock.c) and
+# over HTTP/2 against an in-process nghttp2 server (test_h2.c).
 make -C ctest strict          # warnings-as-errors; the one to run by default
 make -C ctest asan            # ASan + UBSan
 make -C ctest engine-nw       # live engine over macOS Network.framework (network)
@@ -42,7 +43,7 @@ make -C ctest tls             # OpenSSL backend only (network)
 make -C ctest tls-eof         # OpenSSL vs a loopback TLS server that closes badly
                               #   (needs python3 and the openssl CLI; D-86)
 
-# Fuzzing — 10 targets (engine is the whole request path), each built two ways
+# Fuzzing — 11 targets (engine and h2 are the whole request path), each built two ways
 make -C fuzz replay-run       # corpus replay, needs no clang; a regression suite
 make -C fuzz replay-asan      # the same corpus under ASan + UBSan
 make -C fuzz fuzz-run         # libFuzzer, needs clang
@@ -53,6 +54,11 @@ Rscript -e 'testthat::test_local()'                     # offline
 ZU_TEST_NETWORK=1 Rscript -e 'testthat::test_local()'   # + the network suite
 Rscript -e 'roxygen2::roxygenise()'                     # after touching roxygen blocks
 ./tools/check-vendor-licenses                           # after a re-vendor
+
+# HTTP/2 live tests (test-http2.R): a local server whose HTTP/2 is not nghttp2's
+tools/h2-test-cert.sh /tmp/h2 && python3 tools/h2-test-server.py 18080 18443 /tmp/h2/cert.pem /tmp/h2/key.pem &
+ZU_H2_TEST_SERVER=http://127.0.0.1:18080 ZU_H2_TEST_TLS=https://localhost:18443 \
+  ZU_H2_TEST_CA=/tmp/h2/ca.pem Rscript -e 'testthat::test_local(filter = "http2")'
 
 # What CI actually runs for the R suite — reproduce THIS before claiming green,
 # because it differs from R CMD check in ways that have bitten before.
@@ -70,6 +76,7 @@ before opening the next pull request, and fix what it finds there.
 ``` sh
 tools/vendor/verify            # src/vendor/ is byte-for-byte what was recorded
 tools/vendor/record            # after tools/update-*, never after a hand edit
+tools/update-nghttp2 1.71.0    # re-vendor nghttp2 with the §48 patches
 tools/check-code-lines         # project-owned C against the §51.3 budget
 ```
 
@@ -82,12 +89,15 @@ check depend on example.com and badssl.com.
     src/            the C core; only init.c includes R headers
       zuh_stream.h   the vtable that decouples the HTTP engine from the network
       zuh_engine.c   the composed request path: URI → TCP → TLS → framing → body
+      zuh_h2.c       HTTP/2: an nghttp2 session behind the stream contract (§65)
       zu_tls_*.c    one file per backend, selected by ./configure
-      vendor/       picohttpparser (D-10) and a subset of uriparser (D-11)
+      vendor/       picohttpparser (D-10), a subset of uriparser (D-11), nghttp2 lib/ (D-89)
     R/              the public API; see .agents/zuhttp-design.md §31
     ctest/          C tests. zuh_ctest is offline; the engine/tls binaries are not.
+                    zuh_mock_stream.{c,h} live here: test-only, not in the package.
     fuzz/           libFuzzer harnesses + a portable replay driver, and the corpus
-    tools/          update-uriparser, update-picohttpparser, check-feature-macros,
+    tools/          update-uriparser, update-picohttpparser, update-nghttp2,
+                    h2-test-server.py, h2-test-cert.sh, check-feature-macros,
                     check-objects-sync, check-vendor-licenses, check-code-lines,
                     ci-fork-guard.R, ci-masking.R, ci-run-tests.R, vendor/
     .github/        R-CMD-check and native-checks (pedrobtz/r-actions), c-core, fuzz,

@@ -34,7 +34,7 @@ genuinely ask when a certificate works in a browser and not here.
 zu_info()
 #> zuhttp 0.1.0
 #> 
-#> HTTP:               HTTP/1.1
+#> HTTP:               HTTP/1.1, HTTP/2
 #> TLS backend:        openssl
 #> Trust:              OpenSSL system defaults
 #> Revocation:         off by default

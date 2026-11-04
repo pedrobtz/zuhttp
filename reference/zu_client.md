@@ -24,7 +24,8 @@ zu_client(
   middleware = NULL,
   hooks = NULL,
   proxy = NULL,
-  tls = NULL
+  tls = NULL,
+  http2 = NULL
 )
 ```
 
@@ -123,6 +124,17 @@ zu_client(
   Certificate trust settings from
   [`zu_tls()`](https://pedrobtz.github.io/zuhttp/reference/zu_tls.md).
 
+- http2:
+
+  HTTP/2 use: `"auto"` (the default) offers it to every HTTPS server and
+  uses it when the server chooses it, and HTTP/1.1 otherwise;
+  `"required"` fails with `zu_connect_error` before sending anything
+  when the connection is not HTTP/2, and on an `http://` URL speaks
+  cleartext HTTP/2 (h2c) directly, without an `Upgrade`; `"off"` uses
+  HTTP/1.1 only.
+  [`zu_resp_connection()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_connection.md)
+  reports which version a response came over.
+
 ## Value
 
 A `zu_client` object.
@@ -166,4 +178,5 @@ api
 #>   check: TRUE  (default)
 #>   decode: TRUE  (default)
 #>   retry: off (1 attempt)  (default)
+#>   http2: auto  (default)
 ```

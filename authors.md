@@ -22,6 +22,18 @@
 - **Sebastian Pipping**. Copyright holder.  
   uriparser, see inst/COPYRIGHTS
 
+- **Tatsuhiro Tsujikawa**. Copyright holder.  
+  nghttp2, see inst/COPYRIGHTS
+
+- **nghttp2 contributors**. Copyright holder.  
+  nghttp2, see inst/COPYRIGHTS
+
+- **sfparse contributors**. Copyright holder.  
+  sfparse within nghttp2, see inst/COPYRIGHTS
+
+- **nghttp3 contributors**. Copyright holder.  
+  sfparse within nghttp2, see inst/COPYRIGHTS
+
 ## Citation
 
 Source:
