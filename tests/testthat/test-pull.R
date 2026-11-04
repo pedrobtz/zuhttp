@@ -3,22 +3,6 @@
 # is here needs no network: argument checking, and the mock path, where a
 # response the transport did not stream is served from its stored body.
 
-mock_client <- function(
-  body = charToRaw("hello world"),
-  trailers = NULL,
-  status = 200L
-) {
-  zu_client(
-    transport = zu_mock_transport(function(req) {
-      r <- zu_response(status, body = body)
-      if (!is.null(trailers)) {
-        r$trailers <- trailers
-      }
-      r
-    })
-  )
-}
-
 test_that("a mock response requested with stream = TRUE is read in pieces", {
   r <- zu_perform(
     zu_request("GET", "https://x.test/"),

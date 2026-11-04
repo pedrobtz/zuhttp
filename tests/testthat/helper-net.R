@@ -179,3 +179,21 @@ grpc_client <- function() {
     headers = c(`Content-Type` = "application/grpc", TE = "trailers")
   )
 }
+
+# test-pull.R: a client whose transport answers with a stored body (and
+# trailers), for the pulled-body R surface offline.
+mock_client <- function(
+  body = charToRaw("hello world"),
+  trailers = NULL,
+  status = 200L
+) {
+  zu_client(
+    transport = zu_mock_transport(function(req) {
+      r <- zu_response(status, body = body)
+      if (!is.null(trailers)) {
+        r$trailers <- trailers
+      }
+      r
+    })
+  )
+}
