@@ -597,7 +597,7 @@ cancellably (F-16).
 
 ### W20 — nghttp2 vendored, ALPN and h2c
 
-**Status:** in review (pull request open, 2026-11-04). **Milestone:** M0 (was M4; D-96). **Closes:** #129.
+**Status:** in review (#134, 2026-11-04). **Milestone:** M0 (was M4; D-96). **Closes:** #129.
 **Implements:** D-89, D-90, §48, §60, §65.1, §65.2, §65.8 (fuzz target
 twelve). **Estimate:** 5 days, medium — the vendoring is mechanical, ALPN
 on three backends is three small changes, and the unknown is `R CMD check`'s
