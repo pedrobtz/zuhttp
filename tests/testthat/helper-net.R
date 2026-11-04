@@ -127,3 +127,20 @@ skip_unless_forked_https_is_testable <- function() {
   testthat::skip_if_not_installed("parallel")
   if (!zu_have_network()) testthat::skip("no network")
 }
+
+# §65 (test-http2.R). Here rather than in that file: tools/ci-run-tests.R
+# shuffles test order, so a top-level definition between test_that() calls
+# can run after a test that needs it.
+# httpbingo.org speaks h2 and echoes the request, so one host answers "which
+# protocol?" and "did the body arrive?" for all three TLS stacks.
+# (nghttp2.org/httpbin was the first choice and answered 502 on 2026-11-04.)
+
+h2_host <- "https://httpbingo.org"
+
+# tools/h2-test-server.py, whose HTTP/2 is not nghttp2's; network.yaml starts
+# it on Ubuntu and sets these variables (§65.8).
+skip_unless_h2_server <- function() {
+  if (!nzchar(Sys.getenv("ZU_H2_TEST_SERVER"))) {
+    skip("set ZU_H2_TEST_SERVER to a tools/h2-test-server.py h2c URL")
+  }
+}

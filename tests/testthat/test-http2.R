@@ -43,11 +43,6 @@ test_that("zu_resp_connection() says HTTP/2 for an h2 response, HTTP/1.x otherwi
 
 # --- a public HTTP/2 host, on every backend -----------------------------------
 #
-# httpbingo.org speaks h2 and echoes the request, so one host answers "which
-# protocol?" and "did the body arrive?" for all three TLS stacks.
-# (nghttp2.org/httpbin was the first choice and answered 502 on 2026-11-04.)
-
-h2_host <- "https://httpbingo.org"
 
 test_that("§65.1: TLS negotiates h2 by ALPN by default, and the response says so", {
   skip_unless_online()
@@ -105,12 +100,6 @@ test_that("§65.1: http2 = \"required\" refuses a server that only speaks HTTP/1
 })
 
 # --- a local server whose HTTP/2 is not nghttp2's ------------------------------
-
-skip_unless_h2_server <- function() {
-  if (!nzchar(Sys.getenv("ZU_H2_TEST_SERVER"))) {
-    skip("set ZU_H2_TEST_SERVER to a tools/h2-test-server.py h2c URL")
-  }
-}
 
 test_that("§65.1: h2c by prior knowledge: a GET and a POST over cleartext HTTP/2", {
   skip_unless_h2_server()
