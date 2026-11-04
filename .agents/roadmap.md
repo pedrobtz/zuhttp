@@ -646,10 +646,12 @@ and ALPN on every backend.
       D-90's default no longer makes true: one asserted the version (it now
       pins `http2 = "off"`), one a header named `Content-Type` (over HTTP/2
       it is `content-type`; it now compares case-insensitively, §65.2).
-- [ ] Fuzz target twelve: the session fed hostile frames through the D-72
+- [x] Fuzz target twelve: the session fed hostile frames through the D-72
       seam, built both ways (§43), with its corpus seeded from recorded
-      frames; 15 minutes clean under ASan and UBSan.
-- [x] `tools/check-code-lines` still passes (7,989 of 8,000, after moving
+      frames; 15 minutes clean under ASan and UBSan — the dispatched soak
+      [run 41857539578](https://github.com/pedrobtz/zuhttp/actions/runs/41857539578),
+      2026-11-04, every target clean.
+- [x] `tools/check-code-lines` still passes (7,989 of 8,000 then, 10,000 since D-97, after moving
       the test-only mock stream to `ctest/`); the §51.3 total-C row restated
       with the measured number (32,791), in the same PR.
 - [x] Design §13.3, §15, §48 and §65.1–§65.2 updated to Built in the same
@@ -666,10 +668,10 @@ and ALPN on every backend.
 - The ALPN capability bit is in every backend's mask but not in
   `zu_info()$tls_capabilities`, which lists `zu_tls()` settings;
   `zu_info()$http` reports HTTP/2.
-- The 15-minute soak of target twelve runs through `fuzz.yaml`'s
-  `workflow_dispatch` (`soak_seconds = 900`); the per-push smoke runs it
-  for 60 s. libFuzzer is not in Apple's clang, so it was not run locally;
-  the replay of its 19 seeds is clean under ASan and UBSan.
+- The 15-minute soak of target twelve ran through `fuzz.yaml`'s
+  `workflow_dispatch` (`soak_seconds = 900`), clean; the per-push smoke
+  runs it for 60 s. libFuzzer is not in Apple's clang, so it was not run
+  locally; the replay of its 19 seeds is clean under ASan and UBSan.
 - R-4: project-owned C was eleven lines under the 8,000 budget after W20,
   and W21 could not fit; the maintainer raised the budget to 10,000 (D-97,
   2026-11-04).
