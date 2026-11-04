@@ -601,7 +601,7 @@ cancellably (F-16).
 
 ### W20 — nghttp2 vendored, ALPN and h2c
 
-**Status:** in review (#134, 2026-11-04). **Milestone:** M0 (was M4; D-96). **Closes:** #129.
+**Status:** done (#134, merged 2026-11-04). **Milestone:** M0 (was M4; D-96). **Closes:** #129.
 **Implements:** D-89, D-90, §48, §60, §65.1, §65.2, §65.8 (fuzz target
 twelve). **Estimate:** 5 days, medium — the vendoring is mechanical, ALPN
 on three backends is three small changes, and the unknown is `R CMD check`'s
@@ -682,7 +682,7 @@ and ALPN on every backend.
 
 ### W21 — Trailers, pull stream, cancel, keepalive
 
-**Status:** in review (#135, 2026-11-04). **Milestone:** M0 (was M4; D-96). **Closes:** #130.
+**Status:** done (#135, merged 2026-11-04). **Milestone:** M0 (was M4; D-96). **Closes:** #130.
 **Implements:** D-91, D-92, D-93, D-94, §18.2, §25.5, §26.2, §31.8,
 §65.3–§65.6, §65.8 (the interop server). **Estimate:** 6 days, medium-low —
 four features
@@ -754,7 +754,7 @@ Everything else in it passed locally (2026-11-04).
 
 ### W22 — Streaming request body
 
-**Status:** in review (2026-11-04). **Milestone:** M0 (was M4; D-96). **Closes:** #131.
+**Status:** in review (#136, 2026-11-04). **Milestone:** M0 (was M4; D-96). **Closes:** #131.
 **Implements:** D-95, §28, §65.7. **Estimate:** 3 days, medium — the h2
 side is nghttp2's data provider; the HTTP/1.1 side is the first chunked
 request body zuhttp sends. **Depends on:** W21.
