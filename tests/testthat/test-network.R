@@ -38,7 +38,11 @@ test_that("headers are addressable and keep duplicates (§18.3)", {
   h <- zu_resp_headers(r)
   expect_true(is.character(h))
   expect_true(!is.null(names(h)))
-  expect_true("Content-Type" %in% names(h))
+  # Names keep the server's spelling, which over HTTP/2 is lowercase
+  # (§65.2); example.com answers h2 by default since D-90. Addressability is
+  # zu_resp_header()'s case-insensitive lookup, not the spelling.
+  expect_true("content-type" %in% tolower(names(h)))
+  expect_true(length(zu_resp_header(r, "Content-Type")) == 1L)
 })
 
 test_that("one redirect is followed and the final URL is reported", {

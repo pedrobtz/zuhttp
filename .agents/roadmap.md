@@ -642,8 +642,10 @@ and ALPN on every backend.
 - [ ] `http2 = "required"` against an HTTP/1.1-only server raises
       `zu_connect_error` before any request byte is sent.
 - [x] Every HTTP/1.1 test, `ctest` and fuzz corpus passes unchanged, but
-      for one network test that asserted example.com answers HTTP/1.1, which
-      D-90's default no longer makes true; it pins `http2 = "off"`.
+      for two network tests that assumed example.com answers HTTP/1.1, which
+      D-90's default no longer makes true: one asserted the version (it now
+      pins `http2 = "off"`), one a header named `Content-Type` (over HTTP/2
+      it is `content-type`; it now compares case-insensitively, §65.2).
 - [ ] Fuzz target twelve: the session fed hostile frames through the D-72
       seam, built both ways (§43), with its corpus seeded from recorded
       frames; 15 minutes clean under ASan and UBSan.

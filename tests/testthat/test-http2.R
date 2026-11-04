@@ -96,7 +96,9 @@ test_that("§65.1: http2 = \"required\" refuses a server that only speaks HTTP/1
     error = function(e) e
   )
   if (inherits(e, "zu_response")) {
-    skip("badssl.com now negotiates h2; the refusal needs an HTTP/1.1-only host")
+    skip(
+      "badssl.com now negotiates h2; the refusal needs an HTTP/1.1-only host"
+    )
   }
   expect_s3_class(e, "zu_connect_error")
   expect_match(conditionMessage(e), "HTTP/2 is required")
@@ -141,7 +143,9 @@ test_that("§65.1: h2 over TLS to a local server, GET and POST", {
   skip_unless_h2_server()
   base <- Sys.getenv("ZU_H2_TEST_TLS")
   ca <- Sys.getenv("ZU_H2_TEST_CA")
-  if (!nzchar(base) || !nzchar(ca)) skip("ZU_H2_TEST_TLS and ZU_H2_TEST_CA unset")
+  if (!nzchar(base) || !nzchar(ca)) {
+    skip("ZU_H2_TEST_TLS and ZU_H2_TEST_CA unset")
+  }
   skip_unless_tls_supports("ca_file")
   api <- zu_client(tls = zu_tls(ca_file = ca), proxy = FALSE)
   r <- zu_get(paste0(base, "/get"), client = api)

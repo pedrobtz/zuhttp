@@ -2197,6 +2197,11 @@ HTTP/1.1. Three HTTP/2 rules apply at the driver:
   `trailers` (RFC 9113 §8.2.2); any other value raises `zu_http_parse_error`
   before a byte of the request is written. Not before connecting: under
   `"auto"` the protocol is known only once ALPN has answered.
+- Response field names reach R as they arrive, which over HTTP/2 is always
+  lowercase (RFC 9113 §8.2.1); `zu_resp_header()` matches case-insensitively
+  (D-16), so only code reading `names(zu_resp_headers())` exactly sees the
+  difference. They are not re-cased: no canonical capitalisation exists, and
+  inventing one would make HTTP/1.1 and HTTP/2 disagree differently.
 - The response body is the DATA frames of the stream, ended by `END_STREAM`;
   there is no chunked coding and no close-delimited body. A `content-length`
   that disagrees with the bytes received is `zu_http_parse_error` (RFC 9113
