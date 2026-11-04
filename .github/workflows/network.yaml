@@ -315,6 +315,21 @@ jobs:
             echo "ZU_H2_TEST_CA=$RUNNER_TEMP/h2/ca.pem"
           } >> "$GITHUB_ENV"
 
+      # §65.8, W21: grpc-go's interop server, built at a pinned tag, for
+      # test-http2.R's gRPC calls made with zuhttp's own request API. Go is
+      # on the Ubuntu image; `go install` rather than Docker, which the
+      # design first named, because it needs no image and pins the same tag.
+      - name: Start the gRPC interop server
+        if: runner.os == 'Linux'
+        timeout-minutes: 8
+        run: |
+          go install google.golang.org/grpc/interop/server@v1.67.1
+          nohup "$(go env GOPATH)/bin/server" --port 10000 --use_tls=false \
+            > "$RUNNER_TEMP/grpc-server.log" 2>&1 &
+          for i in $(seq 1 30); do nc -z 127.0.0.1 10000 && break; sleep 1; done
+          nc -z 127.0.0.1 10000 || { cat "$RUNNER_TEMP/grpc-server.log"; exit 1; }
+          echo "ZU_GRPC_TEST_SERVER=http://127.0.0.1:10000" >> "$GITHUB_ENV"
+
       - name: Install and run the slice
         timeout-minutes: 10
         env:

@@ -98,6 +98,11 @@ typedef struct {
     size_t max_per_host;    /* per (scheme, host, port) */
     long   idle_timeout_ms;
     int    stale_probe_ms;  /* liveness probe budget; 0 = non-blocking poll */
+    /* §65.6, D-94: an idle HTTP/2 connection idle this long is PINGed on
+     * acquisition and discarded unless the ACK arrives inside
+     * keepalive_timeout_ms. 0 turns it off, the default. */
+    long   keepalive_time_ms;
+    long   keepalive_timeout_ms;
 } zuh_pool_config;
 
 /* "Initial defaults are conservative" (§26.2): 16 / 4 / 30s. */

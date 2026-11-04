@@ -108,6 +108,108 @@ zu_resp_ok <- function(resp) resp$status >= 200L && resp$status < 400L
 #' @export
 zu_resp_headers <- function(resp) resp$headers
 
+#' Read a streamed response body, its trailers, or stop reading
+#'
+#' A response from [zu_perform()] with `stream = TRUE` arrives with its body
+#' unread (§65.4). `zu_resp_read()` returns the next piece of it: up to `n`
+#' decoded bytes, waiting for at least one, and a raw vector of length 0 at
+#' the end. Over HTTP/2 the server is allowed to send only as far ahead as the
+#' caller reads, so a body nobody reads holds the server at one flow-control
+#' window. `max_body` is enforced across the whole body, and every wait is
+#' bounded by the request's `timeout` afresh and interruptible with Ctrl-C.
+#'
+#' `zu_resp_abort()` stops reading (§65.5). Over HTTP/2 it resets the stream
+#' (`RST_STREAM(CANCEL)`) and keeps the connection for the next request; over
+#' HTTP/1.1 it closes the connection. A second call, or a call on a body read
+#' to its end, does nothing. A later `zu_resp_read()` raises
+#' `zu_cancelled_error`.
+#'
+#' `zu_resp_trailers()` returns the header fields sent after the body: HTTP/2
+#' trailers, or a chunked HTTP/1.1 body's trailer section (§65.3, D-91). gRPC
+#' carries its status there. Matching is case-insensitive as in
+#' [zu_resp_header()]. For a streamed response they are known once
+#' `zu_resp_read()` has returned the end of the body; before that,
+#' `zu_resp_trailers()` returns `NULL`.
+#'
+#' A response that was not streamed reads from its stored body, in pieces of
+#' `n`, so code written against `zu_resp_read()` runs against
+#' [zu_mock_transport()] and cassettes unchanged.
+#'
+#' @param resp A `zu_response`.
+#' @param n Maximum bytes to return.
+#' @param name A field name, or `NULL` for all of them.
+#' @return `zu_resp_read()` a raw vector; `zu_resp_abort()` `resp`,
+#'   invisibly; `zu_resp_trailers()` a named character vector (`name = NULL`)
+#'   or a character vector, length 0 when the field is absent, or `NULL` while
+#'   a streamed body is unread.
+#' @export
+#' @examples
+#' fake <- zu_mock_transport(function(req) zu_response(200L, body = charToRaw("hello")))
+#' r <- zu_perform(zu_request("GET", "https://example.com/"),
+#'                 client = zu_client(transport = fake), stream = TRUE)
+#' zu_resp_read(r, 3)
+#' zu_resp_read(r, 3)
+#' zu_resp_read(r, 3)
+zu_resp_read <- function(resp, n = 65536) {
+  if (!is.numeric(n) || length(n) != 1L || is.na(n) || n < 1) {
+    stop("`n` must be a number of bytes, at least 1", call. = FALSE)
+  }
+  if (!is.null(resp$stream)) {
+    return(.Call(C_zu_stream_read, resp$stream, as.numeric(n), resp$url))
+  }
+  # Not streamed by the transport (a mock, a cassette): serve the body
+  # already held, in the same pieces, from a cursor in the response.
+  st <- resp$read_state
+  if (!is.environment(st)) {
+    stop(
+      "this response was not requested with `stream = TRUE`; ",
+      "use zu_resp_raw() for its body",
+      call. = FALSE
+    )
+  }
+  if (isTRUE(st$aborted)) {
+    zu_stop(
+      "zu_cancelled_error",
+      "the response body was aborted",
+      url = resp$url
+    )
+  }
+  body <- resp$body %||% raw()
+  from <- st$pos + 1
+  to <- min(length(body), st$pos + n)
+  if (from > to) {
+    return(raw())
+  }
+  st$pos <- to
+  body[from:to]
+}
+
+#' @rdname zu_resp_read
+#' @export
+zu_resp_abort <- function(resp) {
+  if (!is.null(resp$stream)) {
+    .Call(C_zu_stream_abort, resp$stream)
+  } else if (is.environment(resp$read_state)) {
+    st <- resp$read_state
+    if (st$pos < length(resp$body %||% raw())) st$aborted <- TRUE
+  }
+  invisible(resp)
+}
+
+#' @rdname zu_resp_read
+#' @export
+zu_resp_trailers <- function(resp, name = NULL) {
+  h <- if (!is.null(resp$stream)) {
+    .Call(C_zu_stream_trailers, resp$stream)
+  } else {
+    resp$trailers %||% structure(character(), names = character())
+  }
+  if (is.null(h) || is.null(name)) {
+    return(h)
+  }
+  unname(h[tolower(names(h)) == tolower(name)])
+}
+
 #' @rdname zu_resp
 #' @export
 zu_resp_header <- function(resp, name) {

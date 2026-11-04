@@ -1,4 +1,5 @@
 #include "zuh_pool.h"
+#include "zuh_h2.h"
 #include "zuh_alloc.h"
 #include "zuh_headers.h"   /* zuh_ascii_casecmp, and §26.3 reads Connection */
 #include <string.h>
@@ -231,6 +232,17 @@ static int entry_unusable(zuh_pool *p, pool_entry *e, zuh_millis now) {
         return 1;
     }
     if (zuh_stream_readable(e->stream, p->cfg.stale_probe_ms) == 1) {
+        p->stats.discarded_stale++;
+        return 1;
+    }
+    /* §65.6: the probe above answers "did the peer leave?" for a closed
+     * socket; it cannot see a peer that is silently gone. A PING can, at the
+     * cost of a round trip, so only after keepalive_time of silence. The wait
+     * is on this request's clock: zuhttp has no loop of its own (§30). */
+    if (p->cfg.keepalive_time_ms > 0 && zuh_h2_is(e->stream) &&
+        zuh_h2_idle_ms(e->stream) >= p->cfg.keepalive_time_ms &&
+        !zuh_h2_ping(e->stream, p->cfg.keepalive_timeout_ms > 0
+                                ? p->cfg.keepalive_timeout_ms : 20000)) {
         p->stats.discarded_stale++;
         return 1;
     }

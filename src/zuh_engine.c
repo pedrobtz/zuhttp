@@ -39,12 +39,15 @@ void zuh_result_init(zuh_result *r) {
     if (!r) return;
     memset(r, 0, sizeof *r);
     zuh_headers_init(&r->headers);
+    zuh_headers_init(&r->trailers);
     zuh_timings_init(&r->timings);
 }
 
 void zuh_result_free(zuh_result *r) {
     if (!r) return;
     zuh_headers_free(&r->headers);
+    zuh_headers_free(&r->trailers);
+    zuh_open_body_free(r->open);
     zuh_buf_free(&r->body);
     zuh_free(r->final_url);
     zuh_free(r->tls_version);
@@ -684,6 +687,148 @@ static zuh_reuse h2_reuse(zuh_code rc, zuh_stream *s) {
     return ZUH_REUSE_OK;
 }
 
+/* --- §65.4 a body the caller pulls ------------------------------------- */
+
+struct zuh_open_body {
+    zuh_stream     *s;
+    int             h2;
+    zuh_pool       *pool;          /* NULL: close at the end */
+    zuh_pool_key    key;
+    int             have_key;
+    zuh_reuse       reuse_if_ended; /* §26.3, decided from the headers */
+    zuh_body_reader rd;            /* HTTP/1.1 framing */
+    zuh_body_pipe   pipe;
+    zuh_sink        sink;          /* into `staged` */
+    zuh_buffer      staged;        /* decoded, not yet handed out */
+    size_t          staged_off;
+    long            timeout_ms;
+    int             ended, aborted, failed;
+};
+
+/* Give the connection back, or close it, exactly once. */
+static void open_body_release(zuh_open_body *b, zuh_reuse r) {
+    if (!b->s) return;
+    if (b->pool && b->have_key) zuh_pool_release(b->pool, &b->key, b->s, r);
+    else { zuh_stream_close(b->s); zuh_stream_free(b->s); }
+    b->s = NULL;
+}
+
+static zuh_code open_body_new(zuh_open_body **out, zuh_stream *s, int h2,
+                              const zuh_framing *fr, const char *seed, size_t seed_len,
+                              zuh_headers *h, int minor, uint64_t cap, int no_decode,
+                              const zuh_get_opts *o, const zuh_uri *u,
+                              const zuh_proxy *px, zuh_error *err) {
+    zuh_open_body *b = (zuh_open_body *)zuh_calloc(1, sizeof *b);
+    zuh_code rc;
+    if (!b || !zuh_buf_init(&b->staged, 0, (size_t)-1)) {
+        zuh_free(b);
+        zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_READ, "out of memory");
+        return ZUH_ERR_NOMEM;
+    }
+    zuh_sink_memory_init(&b->sink, &b->staged);
+    rc = zuh_body_pipe_init(&b->pipe, &b->sink, h, no_decode, cap, err);
+    if (rc == ZUH_OK && !h2) {
+        rc = zuh_body_reader_init(&b->rd, fr, seed, seed_len, cap, err);
+        if (rc != ZUH_OK) zuh_body_pipe_free(&b->pipe);
+    }
+    if (rc != ZUH_OK) { zuh_buf_free(&b->staged); zuh_free(b); return rc; }
+    b->h2 = h2;
+    b->timeout_ms = o->timeout_ms > 0 ? o->timeout_ms : ZUH_DEFAULT_TIMEOUT_MS;
+    b->reuse_if_ended = h2 ? ZUH_REUSE_OK : zuh_reuse_decide(ZUH_OK, fr, h, minor);
+    /* The key is built now, while the hop's options are in scope; the pool
+     * outlives any one request (§26.5), and the R layer keeps it alive for
+     * as long as this body is (init.c). */
+    if (o->pool && zuh_engine_pool_key(&b->key, u, o, px)) {
+        b->pool = o->pool;
+        b->have_key = 1;
+    }
+    b->s = s;
+    *out = b;
+    return ZUH_OK;
+}
+
+zuh_code zuh_open_body_read(zuh_open_body *b, zuh_buffer *out, size_t n,
+                            zuh_error *err) {
+    zuh_deadline dl;
+    if (!b || b->failed) {
+        zuh_error_set(err, ZUH_ERR_IO, ZUH_PHASE_READ, "the response body failed earlier");
+        return ZUH_ERR_IO;
+    }
+    if (b->aborted) {
+        zuh_error_set(err, ZUH_ERR_CANCELLED, ZUH_PHASE_READ, "the response body was aborted");
+        return ZUH_ERR_CANCELLED;
+    }
+    dl = zuh_deadline_in(b->timeout_ms);
+    while (b->staged.len == b->staged_off && !b->ended) {
+        zuh_code rc;
+        b->staged.len = 0;
+        b->staged_off = 0;
+        if (b->h2) {
+            int done = 0;
+            rc = zuh_h2_body_step(b->s, &b->pipe, &done, dl, err);
+            if (rc == ZUH_OK) b->ended = done;
+        } else {
+            rc = zuh_body_reader_step(&b->rd, b->s, &b->pipe, dl, err);
+            if (rc == ZUH_OK) b->ended = b->rd.done;
+        }
+        if (rc != ZUH_OK) {
+            b->failed = 1;
+            open_body_release(b, rc == ZUH_ERR_CANCELLED || rc == ZUH_ERR_TIMEOUT
+                                     ? ZUH_NOREUSE_CANCELLED : ZUH_NOREUSE_BODY_INCOMPLETE);
+            return rc;
+        }
+        if (b->ended) {
+            zuh_reuse r = b->h2 ? (zuh_h2_reusable(b->s) ? ZUH_REUSE_OK
+                                                       : ZUH_NOREUSE_BODY_INCOMPLETE)
+                                : b->reuse_if_ended;
+            if (r == ZUH_REUSE_OK && b->pipe.surplus > 0) r = ZUH_NOREUSE_FRAMING;
+            open_body_release(b, r);
+        }
+    }
+    {
+        size_t avail = b->staged.len - b->staged_off;
+        if (n > avail) n = avail;
+        if (n && !zuh_buf_append(out, b->staged.data + b->staged_off, n)) {
+            zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_READ, "out of memory");
+            return ZUH_ERR_NOMEM;
+        }
+        b->staged_off += n;
+    }
+    return ZUH_OK;
+}
+
+void zuh_open_body_abort(zuh_open_body *b) {
+    if (!b || b->ended || b->aborted || b->failed) return;
+    b->aborted = 1;
+    if (b->h2 && b->s) {
+        zuh_h2_cancel(b->s, zuh_deadline_in(1000));
+        open_body_release(b, zuh_h2_reusable(b->s) ? ZUH_REUSE_OK : ZUH_NOREUSE_CANCELLED);
+    } else {
+        open_body_release(b, ZUH_NOREUSE_CANCELLED);
+    }
+}
+
+int zuh_open_body_done(const zuh_open_body *b) {
+    /* Ended means the wire is done; done means the caller has had it all. */
+    return !b || b->aborted || b->failed ||
+           (b->ended && b->staged_off == b->staged.len);
+}
+
+const zuh_headers *zuh_open_body_trailers(const zuh_open_body *b) {
+    return b ? &b->pipe.trailers : NULL;
+}
+
+void zuh_open_body_free(zuh_open_body *b) {
+    if (!b) return;
+    zuh_open_body_abort(b);
+    open_body_release(b, ZUH_NOREUSE_CANCELLED);
+    if (!b->h2) zuh_body_reader_free(&b->rd);
+    zuh_body_pipe_free(&b->pipe);
+    zuh_buf_free(&b->staged);
+    if (b->have_key) zuh_pool_key_free(&b->key);
+    zuh_free(b);
+}
+
 static zuh_code perform_hops(zuh_result *out, const char *url,
                              const zuh_req_spec *req, const zuh_get_opts *o,
                              zuh_redirect_trail *trail, zuh_error *err) {
@@ -768,6 +913,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
         size_t sent_bytes = 0;
         int may_follow = 0;
         int use_h2 = 0;
+        int streamed = 0;
         uint64_t surplus = 0;
         char hosthdr[300];
 
@@ -1064,25 +1210,44 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
              * both headers from the rest. And a redirect about to be
              * followed: its body is thrown away, so decoding it could only
              * turn an irrelevant body into a failed request. */
-            rc = zuh_body_pipe_init(&pipe, hop_sink, &resp.headers,
+            if (o->stream_body && !may_follow && !o->sink) {
+                /* §65.4: the connection and the unread body go to the
+                 * caller; nothing below reads or releases it. */
+                rc = open_body_new(&out->open, s, use_h2, &fr,
+                                   (const char *)raw.data + consumed, raw.len - consumed,
+                                   &resp.headers, resp.minor_version, cap,
+                                   o->no_decode || resp.framing.kind == ZUH_FRAME_NONE,
+                                   o, &cur, &px, err);
+                if (rc == ZUH_OK) { s = NULL; streamed = 1; }
+            }
+            if (!streamed && rc == ZUH_OK)
+                rc = zuh_body_pipe_init(&pipe, hop_sink, &resp.headers,
                                    o->no_decode || may_follow ||
                                    resp.framing.kind == ZUH_FRAME_NONE,
                                    cap, err);
-            if (rc == ZUH_OK && use_h2)
+            if (streamed)
+                ;
+            else if (rc == ZUH_OK && use_h2)
                 rc = zuh_h2_body(s, &pipe, total, err);
             else if (rc == ZUH_OK)
                 rc = zuh_body_read(s, &fr, &pipe,
                                (const char *)raw.data + consumed, raw.len - consumed,
                                cap, total, err);
-            if (!may_follow) {
+            if (!may_follow && !streamed) {
+                /* §65.3: the trailers belong to the caller's response. */
+                zuh_headers_free(&out->trailers);
+                out->trailers = pipe.trailers;      /* ownership moves */
+                zuh_headers_init(&pipe.trailers);
                 out->timings.response_read = (long)(zuh_now_ms() - t_start);
                 out->timings.body_bytes_wire    = pipe.raw_seen;
                 out->timings.body_bytes_decoded = hop_sink ? hop_sink->written : 0;
                 zuh_trace_add(o->trace, ZUH_EV_BODY_CHUNK, "body",
                              hop_sink ? hop_sink->written : 0);
             }
-            surplus = pipe.surplus;
-            zuh_body_pipe_free(&pipe);
+            if (!streamed) {
+                surplus = pipe.surplus;
+                zuh_body_pipe_free(&pipe);
+            }
         }
         zuh_buf_free(&raw);
         /* §26.3. The decision is made HERE, while the framing and the
@@ -1112,6 +1277,12 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
             if (rc == ZUH_ERR_CANCELLED && hop_sink && hop_sink->stopped) {
                 rc = ZUH_OK;
                 reason = ZUH_NOREUSE_CANCELLED;
+                /* §65.5: over HTTP/2 the stream is reset and the connection
+                 * kept, which is what a stopped callback means there. */
+                if (use_h2) {
+                    zuh_h2_cancel(s, total);
+                    reason = h2_reuse(ZUH_OK, s);
+                }
             }
             /* The server sent bytes past this response's framing. They were
              * dropped, not delivered, but the connection is now out of step:

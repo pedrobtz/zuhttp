@@ -35,6 +35,9 @@ typedef struct {
      * to be the answer to the next request. */
     uint64_t   surplus;
     uint64_t   max_body;    /* §40; checked BEFORE the sink sees a byte */
+    /* §65.3, D-91: the trailer fields, from a chunked body's trailer section
+     * or an HTTP/2 stream's trailing HEADERS. Empty when there were none. */
+    zuh_headers trailers;
 } zuh_body_pipe;
 
 /* §21.4, D-69: decoded output may be at most this many times the compressed
@@ -61,6 +64,27 @@ zuh_code zuh_body_pipe_feed(zuh_body_pipe *p, const void *data, size_t n,
  * where the coding says it ends. zuh_body_read() calls it; the HTTP/2 driver
  * (§65.2), which feeds the pipe itself, calls it at END_STREAM. */
 zuh_code zuh_body_pipe_finish(zuh_body_pipe *p, zuh_error *err);
+
+/* One response body under one framing, read a step at a time (§65.4).
+ * zuh_body_read() loops over the steps; a pulled body takes them one by one.
+ * `seed` is copied, so the caller's buffer need not outlive the reader. */
+typedef struct {
+    zuh_framing fr;
+    zuh_chunked dec;
+    int         chunked;
+    zuh_buffer  seed;       /* bytes that arrived with the headers */
+    char       *work;       /* one read */
+    int         done;       /* the body ended and the pipe was finished */
+} zuh_body_reader;
+
+zuh_code zuh_body_reader_init(zuh_body_reader *r, const zuh_framing *fr,
+                              const char *seed, size_t seed_len,
+                              uint64_t max_body, zuh_error *err);
+/* One read's worth: feeds the pipe, sets r->done (after finishing the pipe)
+ * when the framing says the body is over. */
+zuh_code zuh_body_reader_step(zuh_body_reader *r, zuh_stream *s, zuh_body_pipe *p,
+                              zuh_deadline dl, zuh_error *err);
+void     zuh_body_reader_free(zuh_body_reader *r);
 
 zuh_code zuh_body_read(zuh_stream *s, const zuh_framing *fr, zuh_body_pipe *p,
                      const char *seed, size_t seed_len,

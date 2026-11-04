@@ -2,6 +2,7 @@
 #include "zuh_h2.h"
 #include "zuh_alloc.h"
 #include "zuh_buffer.h"
+#include "zuh_time.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -48,6 +49,9 @@ typedef struct {
     int          peer_reset;
     int          goaway;
     int          failed;        /* the session is unusable from here on */
+    int          cancelled;     /* we reset the stream (§65.5): not a failure */
+    int          ping_acked;    /* a PING ACK arrived (§65.6) */
+    zuh_millis   last_frame;    /* last bytes in either direction (§65.6) */
     zuh_code     cb_code;       /* raised inside a callback */
     char         cb_msg[160];
     zuh_buffer   data;
@@ -134,6 +138,10 @@ static int on_frame_recv(nghttp2_session *s, const nghttp2_frame *f, void *ud) {
     h2_impl *h = (h2_impl *)ud;
     (void)s;
     if (f->hd.type == NGHTTP2_GOAWAY) { h->goaway = 1; return 0; }
+    if (f->hd.type == NGHTTP2_PING && (f->hd.flags & NGHTTP2_FLAG_ACK)) {
+        h->ping_acked = 1;
+        return 0;
+    }
     if (f->hd.stream_id != h->sid || h->sid == 0) return 0;
     switch (f->hd.type) {
     case NGHTTP2_RST_STREAM:
@@ -212,6 +220,7 @@ static zuh_code flush(h2_impl *h, zuh_deadline dl, zuh_error *err) {
             h->failed = 1;
             return err->code ? err->code : ZUH_ERR_IO;
         }
+        h->last_frame = zuh_now_ms();
     }
 }
 
@@ -242,6 +251,7 @@ static zuh_code pump(h2_impl *h, zuh_deadline dl, zuh_error *err) {
     if (n == 0)
         return fail(h, err, ZUH_ERR_IO, ZUH_PHASE_READ,
                     "the server closed the HTTP/2 connection before the response ended", 0);
+    h->last_frame = zuh_now_ms();
     used = nghttp2_session_mem_recv2(h->sess, buf, (size_t)n);
     if (used < 0) {
         if (h->cb_code != ZUH_OK)
@@ -365,7 +375,7 @@ zuh_code zuh_h2_begin(zuh_stream *conn, const zuh_h2_request *rq,
     h->status = 0;
     h->in_trailers = 0;
     h->headers_done = h->ended_on_headers = 0;
-    h->closed = 0; h->close_code = 0; h->peer_reset = 0;
+    h->closed = 0; h->close_code = 0; h->peer_reset = 0; h->cancelled = 0;
     h->cb_code = ZUH_OK; h->cb_msg[0] = '\0';
     zuh_headers_free(&h->trailers);
     zuh_headers_init(&h->trailers);
@@ -411,43 +421,118 @@ out:
     return rc;
 }
 
-zuh_code zuh_h2_body(zuh_stream *conn, zuh_body_pipe *pipe,
-                     zuh_deadline dl, zuh_error *err) {
+/* Hand DATA that arrived to the pipe, and grant that much window back: the
+ * window moves at the pace bytes leave the driver, which is the caller's
+ * pace when the body is pulled (§65.4). */
+static zuh_code deliver(h2_impl *h, zuh_body_pipe *pipe, zuh_error *err) {
+    zuh_code rc;
+    size_t n = h->data.len;
+    if (n == 0) return ZUH_OK;
+    pipe->raw_seen += (uint64_t)n;
+    /* Granted before the pipe sees the bytes, so a body the pipe refuses
+     * still returns its share of the connection window. */
+    if (h->closed || nghttp2_session_consume(h->sess, h->sid, n) != 0)
+        (void)nghttp2_session_consume_connection(h->sess, n);
+    rc = zuh_body_pipe_feed(pipe, h->data.data, n, err);
+    zuh_buf_reset(&h->data);
+    /* A body the pipe refuses (max_body, a decoding error, a sink that asked
+     * to stop) leaves the stream open: zuh_h2_cancel() resets it and keeps
+     * the connection, and without that zuh_h2_reusable() says no. */
+    return rc;
+}
+
+zuh_code zuh_h2_body_step(zuh_stream *conn, zuh_body_pipe *pipe, int *done,
+                          zuh_deadline dl, zuh_error *err) {
     h2_impl *h;
-    zuh_code rc = ZUH_OK;
+    zuh_code rc;
+    *done = 0;
     if (!zuh_h2_is(conn)) return ZUH_ERR_IO;
     h = (h2_impl *)conn->impl;
-    for (;;) {
-        if (h->data.len) {
-            pipe->raw_seen += (uint64_t)h->data.len;
-            rc = zuh_body_pipe_feed(pipe, h->data.data, h->data.len, err);
-            zuh_buf_reset(&h->data);
-            /* A body refused by the pipe (max_body, a decoding error) is a
-             * stream left open mid-flight: the connection is not reused.
-             * W21's zu_resp_abort() resets the stream and keeps it. */
-            if (rc != ZUH_OK) { h->failed = 1; return rc; }
-        }
-        if (h->closed) break;
+    if (!h->data.len && !h->closed) {
         rc = pump(h, dl, err);
         if (rc != ZUH_OK) return rc;
     }
+    rc = deliver(h, pipe, err);
+    if (rc != ZUH_OK) return rc;
+    if (!h->closed || h->data.len) return ZUH_OK;
     rc = stream_outcome(h, err);
     if (rc == ZUH_OK) rc = zuh_body_pipe_finish(pipe, err);
+    if (rc != ZUH_OK) return rc;
+    zuh_headers_free(&pipe->trailers);
+    pipe->trailers = h->trailers;               /* ownership moves */
+    zuh_headers_init(&h->trailers);
+    *done = 1;
     /* WINDOW_UPDATE and SETTINGS ACK frames the last read produced go out
      * now rather than with the next request, which may be a while. */
-    if (rc == ZUH_OK) {
+    {
         zuh_error tmp;
         zuh_error_clear(&tmp);
         (void)flush(h, dl, &tmp);
     }
+    return ZUH_OK;
+}
+
+zuh_code zuh_h2_body(zuh_stream *conn, zuh_body_pipe *pipe,
+                     zuh_deadline dl, zuh_error *err) {
+    int done = 0;
+    zuh_code rc = ZUH_OK;
+    while (rc == ZUH_OK && !done) rc = zuh_h2_body_step(conn, pipe, &done, dl, err);
     return rc;
+}
+
+/* §65.5: end the open stream and keep the connection. DATA already in
+ * flight for it is discarded by nghttp2 when it arrives, and its connection
+ * window is returned, so the next stream starts with the whole window. */
+void zuh_h2_cancel(zuh_stream *conn, zuh_deadline dl) {
+    h2_impl *h;
+    zuh_error tmp;
+    if (!zuh_h2_is(conn)) return;
+    h = (h2_impl *)conn->impl;
+    if (h->closed || h->sid == 0 || h->failed) return;
+    zuh_error_clear(&tmp);
+    if (h->data.len) {
+        (void)nghttp2_session_consume_connection(h->sess, h->data.len);
+        zuh_buf_reset(&h->data);
+    }
+    if (nghttp2_submit_rst_stream(h->sess, NGHTTP2_FLAG_NONE, h->sid, NGHTTP2_CANCEL) != 0 ||
+        flush(h, dl, &tmp) != ZUH_OK) {
+        h->failed = 1;
+        return;
+    }
+    h->cancelled = 1;
+}
+
+/* §65.6: is the peer still there? Sends a PING and waits up to `timeout_ms`
+ * for its ACK, feeding whatever else arrives to the session. */
+int zuh_h2_ping(zuh_stream *conn, long timeout_ms) {
+    h2_impl *h;
+    zuh_error e;
+    zuh_deadline dl = zuh_deadline_in(timeout_ms);
+    if (!zuh_h2_is(conn)) return 0;
+    h = (h2_impl *)conn->impl;
+    if (h->failed || h->goaway) return 0;
+    zuh_error_clear(&e);
+    h->ping_acked = 0;
+    if (nghttp2_submit_ping(h->sess, NGHTTP2_FLAG_NONE, NULL) != 0) return 0;
+    while (!h->ping_acked) {
+        if (pump(h, dl, &e) != ZUH_OK || h->goaway) return 0;
+    }
+    return 1;
+}
+
+long zuh_h2_idle_ms(zuh_stream *conn) {
+    if (!zuh_h2_is(conn)) return -1;
+    return (long)(zuh_now_ms() - ((h2_impl *)conn->impl)->last_frame);
 }
 
 int zuh_h2_reusable(zuh_stream *conn) {
     h2_impl *h;
     if (!zuh_h2_is(conn)) return 0;
     h = (h2_impl *)conn->impl;
-    return !h->failed && !h->goaway && h->closed && h->close_code == NGHTTP2_NO_ERROR &&
+    /* A stream we reset ourselves (§65.5) closes with CANCEL, and that is
+     * the one error code after which the connection is still clean. */
+    return !h->failed && !h->goaway &&
+           (h->cancelled || (h->closed && h->close_code == NGHTTP2_NO_ERROR)) &&
            nghttp2_session_check_request_allowed(h->sess);
 }
 
@@ -501,7 +586,8 @@ zuh_code zuh_h2_wrap(zuh_stream **out, zuh_stream *inner,
                      size_t max_header_bytes, zuh_error *err) {
     nghttp2_session_callbacks *cbs = NULL;
     nghttp2_mem mem;
-    nghttp2_settings_entry iv[3];
+    nghttp2_settings_entry iv[4];
+    nghttp2_option *opt = NULL;
     zuh_stream *s;
     h2_impl *h;
     int rv;
@@ -527,7 +613,14 @@ zuh_code zuh_h2_wrap(zuh_stream **out, zuh_stream *inner,
         nghttp2_session_callbacks_set_on_frame_recv_callback(cbs, on_frame_recv);
         nghttp2_session_callbacks_set_on_data_chunk_recv_callback(cbs, on_data);
         nghttp2_session_callbacks_set_on_stream_close_callback(cbs, on_close);
-        rv = nghttp2_session_client_new3(&h->sess, cbs, h, NULL, &mem);
+        if (nghttp2_option_new(&opt) == 0) {
+            /* §65.4: window is granted as the caller takes bytes. */
+            nghttp2_option_set_no_auto_window_update(opt, 1);
+            rv = nghttp2_session_client_new3(&h->sess, cbs, h, opt, &mem);
+            nghttp2_option_del(opt);
+        } else {
+            rv = NGHTTP2_ERR_NOMEM;
+        }
         nghttp2_session_callbacks_del(cbs);
     }
     if (rv == 0) {
@@ -536,7 +629,13 @@ zuh_code zuh_h2_wrap(zuh_stream **out, zuh_stream *inner,
         iv[1].settings_id = NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS; iv[1].value = 1;
         iv[2].settings_id = NGHTTP2_SETTINGS_MAX_HEADER_LIST_SIZE;
         iv[2].value = (uint32_t)(h->max_header_bytes > UINT32_MAX ? UINT32_MAX : h->max_header_bytes);
-        rv = nghttp2_submit_settings(h->sess, NGHTTP2_FLAG_NONE, iv, 3);
+        iv[3].settings_id = NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE; iv[3].value = ZUH_H2_WINDOW;
+        rv = nghttp2_submit_settings(h->sess, NGHTTP2_FLAG_NONE, iv, 4);
+    }
+    if (rv == 0) {
+        /* The connection window too, or the stream window above is capped
+         * by the connection's default 65,535. */
+        rv = nghttp2_session_set_local_window_size(h->sess, NGHTTP2_FLAG_NONE, 0, ZUH_H2_WINDOW);
     }
     if (rv != 0) {
         if (h->sess) nghttp2_session_del(h->sess);
@@ -549,6 +648,7 @@ zuh_code zuh_h2_wrap(zuh_stream **out, zuh_stream *inner,
         return err->code;
     }
     h->inner = inner;
+    h->last_frame = zuh_now_ms();
     s->vt = &h2_vt;
     s->impl = h;
     *out = s;

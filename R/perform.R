@@ -123,7 +123,8 @@ zu_transport_perform.zu_native_transport <- function(transport, req) {
       zu_redact_opt("zuhttp.redact_params"),
       zu_redact_opt("zuhttp.redact_headers")
     ),
-    p$http2 %||% "auto"
+    p$http2 %||% "auto",
+    isTRUE(req$stream)
   )
   # §27.1: by here the sink has been committed, so the destination is a fact
   # about this response rather than something that was merely asked for. Set
@@ -324,16 +325,37 @@ resolve_request <- function(req, client) {
 #'
 #' @param req A `zu_request` from [zu_request()].
 #' @param client A `zu_client`. Always named, never positional (§31.3).
+#' @param stream Return as soon as the response headers have arrived, with
+#'   the body unread, and read it with [zu_resp_read()] (§65.4). Redirects and
+#'   retries are complete by then. The connection stays with the response
+#'   until the body is read to its end or [zu_resp_abort()] is called; a
+#'   response dropped half-read is aborted when it is garbage-collected. Not
+#'   with [zu_req_path()] or [zu_req_callback()]: a body has one destination.
+#'   `max_body` still bounds the whole body, so a long stream needs it raised
+#'   (`Inf` for no limit).
 #' @return A `zu_response`. By default a 4xx or 5xx status raises a condition
-#'   instead; see [zu_resp_check()] and `check = FALSE`.
+#'   instead; see [zu_resp_check()] and `check = FALSE`. With `stream = TRUE`
+#'   the body is not read and the condition is raised after aborting it.
 #' @export
 #' @examples
 #' fake <- zu_mock_transport(function(req) zu_response(status = 204L))
 #' zu_perform(zu_request("DELETE", "https://example.com/x"),
 #'            client = zu_client(transport = fake))
-zu_perform <- function(req, client = zu_default_client()) {
+zu_perform <- function(req, client = zu_default_client(), stream = FALSE) {
   req <- check_req(req)
   check_client(client)
+  if (!isTRUE(stream) && !isFALSE(stream)) {
+    stop("`stream` must be TRUE or FALSE", call. = FALSE)
+  }
+  # D-53, §65.4: one destination per body.
+  if (stream && (!is.null(req$path) || !is.null(req$callback))) {
+    stop(
+      "`stream = TRUE` cannot be combined with `path` or `callback`: ",
+      "a response body has one destination",
+      call. = FALSE
+    )
+  }
+  req$stream <- stream
   # §27.4. A streaming callback runs arbitrary R code, which may call zu_get()
   # again. Re-entrancy is permitted — but not on the client whose connection
   # is currently being read, which would deadlock on a pool slot or interleave
@@ -380,6 +402,12 @@ zu_perform <- function(req, client = zu_default_client()) {
   # Fields the transport should not have to fill in, and that a mock would
   # otherwise have to fake to keep the accessors honest.
   resp$method <- r$method
+  # §65.4: a transport that did not stream (a mock, a cassette) holds the
+  # whole body; zu_resp_read() serves it in pieces from this cursor.
+  if (isTRUE(r$stream) && is.null(resp$stream)) {
+    resp$read_state <- new.env(parent = emptyenv())
+    resp$read_state$pos <- 0
+  }
   if (is.null(resp$url)) {
     resp$url <- zu_redact_url(r$url)
   }
@@ -399,6 +427,11 @@ zu_perform <- function(req, client = zu_default_client()) {
     list(request = r, response = resp, attempt = resp$attempts %||% 1L)
   )
   if (isTRUE(r$resolved$check)) {
+    # A streamed body nobody will read once the condition is raised: give
+    # the connection back now rather than at the next garbage collection.
+    if (!is.null(resp$stream) && resp$status >= 400L) {
+      zu_resp_abort(resp)
+    }
     zu_resp_check(resp)
   }
   resp
@@ -454,6 +487,10 @@ attempt_with_retries <- function(r, client, hooks, deadline_at) {
     v <- retry_verdict(resp, cnd, policy)
     if (!isTRUE(v$retry)) {
       break
+    }
+    # §65.4: a streamed response that is about to be retried is never read.
+    if (!is.null(resp$stream)) {
+      zu_resp_abort(resp)
     }
 
     delay <- backoff_delay(policy, attempt, v$after)

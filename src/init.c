@@ -161,7 +161,8 @@ static zuh_pool *pool_ptr_get(SEXP ptr) {
     return (zuh_pool *)R_ExternalPtrAddr(ptr);
 }
 
-static SEXP C_zu_pool_new(SEXP max_idle, SEXP max_per_host, SEXP idle_timeout_ms) {
+static SEXP C_zu_pool_new(SEXP max_idle, SEXP max_per_host, SEXP idle_timeout_ms,
+                          SEXP keepalive_time_ms, SEXP keepalive_timeout_ms) {
     zuh_pool_config cfg;
     zuh_pool *p;
     SEXP ptr;
@@ -171,6 +172,11 @@ static SEXP C_zu_pool_new(SEXP max_idle, SEXP max_per_host, SEXP idle_timeout_ms
     if (Rf_asInteger(max_per_host) > 0) cfg.max_per_host    = (size_t)Rf_asInteger(max_per_host);
     if (Rf_asInteger(idle_timeout_ms) > 0)
         cfg.idle_timeout_ms = (long)Rf_asInteger(idle_timeout_ms);
+    /* §65.6: 0, the R layer's NULL, leaves keepalive off. */
+    if (Rf_asInteger(keepalive_time_ms) > 0)
+        cfg.keepalive_time_ms = (long)Rf_asInteger(keepalive_time_ms);
+    if (Rf_asInteger(keepalive_timeout_ms) > 0)
+        cfg.keepalive_timeout_ms = (long)Rf_asInteger(keepalive_timeout_ms);
 
     p = zuh_pool_new(&cfg);
     if (!p) Rf_error("could not allocate a connection pool");
@@ -468,7 +474,28 @@ static void tick_release(tick_ctx *t) {
  * passes one pointer. Bundling them beats a file-scope pointer, which would
  * be wrong the moment a callback issued a nested request (§27.4 permits that
  * on a different client). */
-typedef struct { zuh_result *r; zuh_trace *t; } resp_ctx;
+typedef struct { zuh_result *r; zuh_trace *t; SEXP pool; } resp_ctx;
+
+/* --- §65.4 a body the caller pulls ---------------------------------------
+ *
+ * The open body owns a connection, which belongs to a pool (§26). The pool's
+ * external pointer is kept in this pointer's protected slot, so the pool
+ * cannot be collected, and its finalizer cannot free the connection under
+ * us, while a body still holds one. The finalizer aborts an unfinished body:
+ * over HTTP/2 that writes one RST_STREAM frame, bounded by a second. */
+static SEXP zuh_stream_tag = NULL;
+
+static void stream_finalizer(SEXP ptr) {
+    zuh_open_body *b = (zuh_open_body *)R_ExternalPtrAddr(ptr);
+    if (!b) return;
+    R_ClearExternalPtr(ptr);
+    zuh_open_body_free(b);
+}
+
+static zuh_open_body *stream_ptr_get(SEXP ptr) {
+    if (TYPEOF(ptr) != EXTPTRSXP || R_ExternalPtrTag(ptr) != zuh_stream_tag) return NULL;
+    return (zuh_open_body *)R_ExternalPtrAddr(ptr);
+}
 
 static SEXP build_response(void *data);
 static SEXP timings_to_r(const zuh_timings *t);
@@ -604,7 +631,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
                          SEXP max_redirects, SEXP verify, SEXP max_body,
                          SEXP user_agent, SEXP decode, SEXP pool,
                          SEXP path, SEXP callback, SEXP proxy, SEXP tls,
-                         SEXP trace, SEXP redact, SEXP http2) {
+                         SEXP trace, SEXP redact, SEXP http2, SEXP stream) {
     zuh_get_opts o;
     tick_ctx tick = { NULL };
     zuh_req_spec spec;
@@ -673,6 +700,8 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
         o.max_body = mb >= 18446744073709551616.0 ? UINT64_MAX : (uint64_t)mb;
     }
     o.no_decode     = Rf_asLogical(decode) != TRUE;
+    /* §65.4. The R layer has refused it together with path or callback. */
+    o.stream_body   = Rf_asLogical(stream) == TRUE;
     /* §65.1. The R layer has refused anything but these three words. */
     if (Rf_isString(http2) && Rf_length(http2) == 1 && STRING_ELT(http2, 0) != NA_STRING) {
         const char *m = CHAR(STRING_ELT(http2, 0));
@@ -844,6 +873,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
         resp_ctx ctx;
         ctx.r = &r;
         ctx.t = o.trace;
+        ctx.pool = pool;
         return R_UnwindProtect(build_response, &ctx, free_result_on_unwind, &ctx, NULL);
     }
 }
@@ -864,8 +894,8 @@ static SEXP build_response(void *data) {
     /* §35.2's connection metadata rides on the response rather than being a
      * second call, because it describes the connection THIS response came
      * over — asking again later would answer about a different one. */
-    out = PROTECT(Rf_allocVector(VECSXP, 15));
-    nms = PROTECT(Rf_allocVector(STRSXP, 15));
+    out = PROTECT(Rf_allocVector(VECSXP, 17));
+    nms = PROTECT(Rf_allocVector(STRSXP, 17));
     SET_VECTOR_ELT(out, 0, Rf_ScalarInteger(r.status));
     SET_STRING_ELT(nms, 0, Rf_mkChar("status"));
     SET_VECTOR_ELT(out, 1, headers_to_r(&r.headers));
@@ -896,6 +926,18 @@ static SEXP build_response(void *data) {
     SET_STRING_ELT(nms, 13, Rf_mkChar("trace"));
     SET_VECTOR_ELT(out, 14, Rf_ScalarInteger(r.http_major));
     SET_STRING_ELT(nms, 14, Rf_mkChar("http_major"));
+    SET_VECTOR_ELT(out, 15, headers_to_r(&r.trailers));
+    SET_STRING_ELT(nms, 15, Rf_mkChar("trailers"));
+    SET_STRING_ELT(nms, 16, Rf_mkChar("stream"));
+    if (rp->open) {
+        /* Ownership moves to the pointer before anything else can longjmp:
+         * from here the finalizer frees the body, and the unwind handler,
+         * which frees what is left in `rp`, must not. */
+        SEXP xp = R_MakeExternalPtr(rp->open, zuh_stream_tag, ctx->pool);
+        SET_VECTOR_ELT(out, 16, xp);
+        R_RegisterCFinalizerEx(xp, stream_finalizer, TRUE);
+        rp->open = NULL;
+    }
     Rf_setAttrib(out, R_NamesSymbol, nms);
 
     UNPROTECT(3);
@@ -1046,6 +1088,79 @@ static SEXP C_zu_build_info(void) {
     return out;
 }
 
+/* §65.4: up to n decoded bytes, a raw vector of length 0 at the end. Every
+ * wait is a §25.1 wait: the stream's tick reads g_tick_current, set here as
+ * C_zu_perform sets it, and an interrupt ends the body as an abort would. */
+static SEXP C_zu_stream_read(SEXP ptr, SEXP n, SEXP url) {
+    zuh_open_body *b = stream_ptr_get(ptr);
+    tick_ctx tick = { NULL };
+    zuh_buffer got;
+    zuh_error e;
+    zuh_code rc;
+    double want = Rf_asReal(n);
+    const char *u = (Rf_isString(url) && Rf_length(url) == 1)
+                        ? Rf_translateCharUTF8(STRING_ELT(url, 0)) : NULL;
+    SEXP out;
+    if (!b) Rf_error("this response's body is no longer readable");
+    if (!(want >= 1)) want = 1;
+    if (want > 64.0 * 1024 * 1024) want = 64.0 * 1024 * 1024;
+    if (!zuh_buf_init(&got, 0, (size_t)-1)) Rf_error("out of memory");
+    zuh_error_clear(&e);
+    {
+        tick_ctx *prev = g_tick_current;
+        g_tick_current = &tick;
+        rc = zuh_open_body_read(b, &got, (size_t)want, &e);
+        g_tick_current = prev;
+    }
+    if (rc != ZUH_OK) {
+        zuh_buf_free(&got);
+        if (rc == ZUH_ERR_CANCELLED && tick.caught &&
+            !Rf_inherits(tick.caught, "interrupt")) {
+            SEXP cond = PROTECT(tick.caught);
+            SEXP call;
+            R_ReleaseObject(cond);
+            tick.caught = NULL;
+            call = PROTECT(Rf_lang2(Rf_install("stop"), cond));
+            Rf_eval(call, R_GlobalEnv);
+            UNPROTECT(2);
+            return R_NilValue;
+        }
+        if (rc == ZUH_ERR_CANCELLED && tick.caught) {
+            tick_release(&tick);
+            e.code = ZUH_ERR_INTERRUPTED;
+            snprintf(e.message, sizeof e.message, "request interrupted by the user");
+        }
+        tick_release(&tick);
+        if (e.code == ZUH_OK) {
+            e.code = rc;
+            snprintf(e.message, sizeof e.message, "reading the response body failed (%s)",
+                     zuh_code_class(rc));
+        }
+        raise_zu_error(&e, u);
+        return R_NilValue;
+    }
+    tick_release(&tick);
+    /* The copy into R comes last and is the only allocation that can
+     * longjmp; `got` is freed on both sides of it. */
+    out = Rf_allocVector(RAWSXP, (R_xlen_t)got.len);
+    if (got.len) memcpy(RAW(out), got.data, got.len);
+    zuh_buf_free(&got);
+    return out;
+}
+
+static SEXP C_zu_stream_abort(SEXP ptr) {
+    zuh_open_body *b = stream_ptr_get(ptr);
+    if (b) zuh_open_body_abort(b);
+    return R_NilValue;
+}
+
+/* NULL until the body has been read to its end: trailers come after it. */
+static SEXP C_zu_stream_trailers(SEXP ptr) {
+    zuh_open_body *b = stream_ptr_get(ptr);
+    if (!b || !zuh_open_body_done(b)) return R_NilValue;
+    return headers_to_r(zuh_open_body_trailers(b));
+}
+
 static SEXP C_zu_tls_backend(void) {
     return Rf_mkString(zuh_tls_backend_name());
 }
@@ -1060,8 +1175,11 @@ static const R_CallMethodDef call_methods[] = {
     {"C_zu_redact_form",       (DL_FUNC) &C_zu_redact_form,       2},
     {"C_zu_is_secret_header",  (DL_FUNC) &C_zu_is_secret_header,  2},
     {"C_zu_is_secret_param",   (DL_FUNC) &C_zu_is_secret_param,   2},
-    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          19},
-    {"C_zu_pool_new",          (DL_FUNC) &C_zu_pool_new,          3},
+    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          20},
+    {"C_zu_stream_read",       (DL_FUNC) &C_zu_stream_read,       3},
+    {"C_zu_stream_abort",      (DL_FUNC) &C_zu_stream_abort,      1},
+    {"C_zu_stream_trailers",   (DL_FUNC) &C_zu_stream_trailers,   1},
+    {"C_zu_pool_new",          (DL_FUNC) &C_zu_pool_new,          5},
     {"C_zu_pool_valid",        (DL_FUNC) &C_zu_pool_valid,        1},
     {"C_zu_pool_stats",        (DL_FUNC) &C_zu_pool_stats,        1},
     {"C_zu_pool_clear",        (DL_FUNC) &C_zu_pool_clear,        1},
@@ -1075,6 +1193,7 @@ void attribute_visible R_init_zuhttp(DllInfo *dll) {
     /* Interned once. Pointer identity against this symbol is what tells our
      * external pointers from another package's (§26.5). */
     zuh_pool_tag = Rf_install("zu_pool");
+    zuh_stream_tag = Rf_install("zu_stream");
     g_tick_classes = Rf_allocVector(STRSXP, 2);
     R_PreserveObject(g_tick_classes);
     SET_STRING_ELT(g_tick_classes, 0, Rf_mkChar("interrupt"));

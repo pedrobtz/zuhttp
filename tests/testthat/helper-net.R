@@ -144,3 +144,56 @@ skip_unless_h2_server <- function() {
     skip("set ZU_H2_TEST_SERVER to a tools/h2-test-server.py h2c URL")
   }
 }
+
+# §65.8 (test-http2.R): gRPC by hand against grpc-go's interop server. A
+# message is a 5-byte prefix (a compressed flag and a big-endian length) and
+# protobuf bytes; the status is in the trailers. Here, not in the test file,
+# for the shuffle reason above.
+grpc_frame <- function(msg = raw()) {
+  n <- length(msg)
+  c(as.raw(0), as.raw(bitwAnd(bitwShiftR(n, c(24, 16, 8, 0)), 255L)), msg)
+}
+
+grpc_messages <- function(bytes) {
+  out <- list()
+  i <- 1L
+  while (i + 4L <= length(bytes)) {
+    n <- sum(as.integer(bytes[(i + 1L):(i + 4L)]) * 256^(3:0))
+    out[[length(out) + 1L]] <- bytes[seq_len(n) + i + 4L]
+    i <- i + 5L + n
+  }
+  out
+}
+
+skip_unless_grpc_server <- function() {
+  if (!nzchar(Sys.getenv("ZU_GRPC_TEST_SERVER"))) {
+    skip("set ZU_GRPC_TEST_SERVER to a grpc-go interop server (h2c)")
+  }
+}
+
+grpc_client <- function() {
+  zu_client(
+    base_url = Sys.getenv("ZU_GRPC_TEST_SERVER"),
+    http2 = "required",
+    proxy = FALSE,
+    headers = c(`Content-Type` = "application/grpc", TE = "trailers")
+  )
+}
+
+# test-pull.R: a client whose transport answers with a stored body (and
+# trailers), for the pulled-body R surface offline.
+mock_client <- function(
+  body = charToRaw("hello world"),
+  trailers = NULL,
+  status = 200L
+) {
+  zu_client(
+    transport = zu_mock_transport(function(req) {
+      r <- zu_response(status, body = body)
+      if (!is.null(trailers)) {
+        r$trailers <- trailers
+      }
+      r
+    })
+  )
+}

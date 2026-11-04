@@ -210,6 +210,27 @@ void suite_engine_mock(void) {
         zuh_result_free(&r); dialer_free(&d);
     }
 
+    ZUH_CASE("§65.3: te: trailers reaches the HTTP/1.1 wire unchanged, and chunked trailers come back");
+    {
+        static const char *const hn[] = { "TE" };
+        static const char *const hv[] = { "trailers" };
+        zuh_req_spec spec;
+        conn_script s[] = {{ "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+                             "2\r\nok\r\n0\r\nGrpc-Status: 0\r\n\r\n", 0, 1, 0, NULL }};
+        memset(&spec, 0, sizeof spec);
+        spec.header_names = hn; spec.header_values = hv; spec.n_headers = 1;
+        dialer_init(&d, s, 1); opts_for(&o, &d);
+        rc = zuh_engine_perform(&r, "http://example.test/", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        ZUH_CHECK(has(sent(&d, 0), "\r\nTE: trailers\r\n"));
+        if (rc == ZUH_OK) {
+            const char *v = zuh_headers_get(&r.trailers, "grpc-status");
+            ZUH_CHECK(v && strcmp(v, "0") == 0);
+            zuh_result_free(&r);
+        }
+        dialer_free(&d);
+    }
+
     ZUH_CASE("engine: the same exchange with a server that delivers one byte per read");
     {
         conn_script s[] = {{ "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
