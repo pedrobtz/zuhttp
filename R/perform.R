@@ -77,9 +77,10 @@ zu_mock_transport <- function(handler = NULL, ...) {
 
 #' Perform a request through a transport
 #'
-#' The generic exists so that a package can supply its own transport; S3
-#' dispatch is the extension point. Implementations receive a resolved request
-#' and must return a [zu_response()].
+#' Internal dispatch over the native, mock and cassette transports. The
+#' generic is not exported: §31.12 keeps the transport contract internal until
+#' a second implementation outside this package needs it. Methods receive a
+#' resolved request and return a [zu_response()].
 #'
 #' @param transport A transport object.
 #' @param req A resolved `zu_request`.
@@ -102,7 +103,7 @@ zu_transport_perform.zu_native_transport <- function(transport, req) {
     req$body,
     # §24.3: this attempt's share of the budget when the retry
     # loop set one; the whole merged `timeout` when the transport
-    # is driven directly, as the zu_transport_perform() example is.
+    # is called outside the retry loop.
     timeout_ms(req$attempt_budget %||% p$timeout),
     as.integer(p$redirects),
     isTRUE(p$verify),

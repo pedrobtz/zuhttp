@@ -145,6 +145,9 @@ zuh_stream *zuh_pool_acquire_by(zuh_pool *p, const zuh_pool_key *key, zuh_deadli
 void zuh_pool_release(zuh_pool *p, const zuh_pool_key *key, zuh_stream *s, zuh_reuse r);
 
 void zuh_pool_stats_get(const zuh_pool *p, zuh_pool_stats *out);
+/* The configuration the pool runs with, as zuh_pool_new() copied it: what
+ * the R layer asked for, read back (review #152). */
+void zuh_pool_config_get(const zuh_pool *p, zuh_pool_config *out);
 size_t zuh_pool_idle_count(const zuh_pool *p);
 
 /* Close and drop every idle connection. */

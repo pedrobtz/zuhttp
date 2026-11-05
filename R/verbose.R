@@ -87,7 +87,9 @@ zu_verbose <- function(to = stderr(), body = TRUE) {
         }
       }
       say(
-        "< HTTP ",
+        "< ",
+        http_version_of(r) %||% "HTTP",
+        " ",
         r$status %||% NA,
         if (!is.null(r$tls_version)) paste0(" over ", r$tls_version) else ""
       )

@@ -10,7 +10,8 @@ zu_response(
   body = raw(),
   url = NULL,
   tls_version = NULL,
-  redirects = 0L
+  redirects = 0L,
+  trailers = NULL
 )
 }
 \arguments{
@@ -26,6 +27,10 @@ preserved (§18.3).}
 \item{tls_version}{TLS version string, or \code{NULL} for plain HTTP.}
 
 \item{redirects}{Number of redirects followed.}
+
+\item{trailers}{Named character vector of trailer fields (§65.3), as
+\code{\link[=zu_resp_trailers]{zu_resp_trailers()}} returns them: where gRPC carries its status. \code{NULL},
+the default, means none were sent.}
 }
 \value{
 A \code{zu_response}.
@@ -43,4 +48,5 @@ functions, response accessors and conditions are the stable API.
 
 \examples{
 zu_response(200L, c("Content-Type" = "text/plain"), "hello")
+zu_response(200L, body = raw(), trailers = c("grpc-status" = "0"))
 }

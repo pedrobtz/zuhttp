@@ -7,7 +7,8 @@
 zu_info()
 }
 \value{
-A \code{zu_info} list, printed as a report. Fields: \code{version}, \code{http},
+A \code{zu_info} list, printed as a report. Fields: \code{version}, \code{http}
+(the protocol versions this build speaks, \code{"HTTP/1.1"} and \code{"HTTP/2"}),
 \code{tls_backend}, \code{trust}, \code{tls_available}, \code{revocation_default},
 \code{tls_capabilities} (the \code{\link[=zu_tls]{zu_tls()}} settings this backend honours, from
 \code{"pins"}, \code{"tls13"}, \code{"ca_file"}, \code{"ca_extra"} and \code{"revocation"}; the

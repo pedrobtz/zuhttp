@@ -49,6 +49,10 @@ zu_defaults <- function() {
   )
 }
 
+# `http2` is merged here like every field, which is how a client's value
+# overrides the session default, but it has no request-level spelling: it
+# chooses the connection (the §26.1 pool key, ALPN), not the request, so a
+# per-request value would split one host's connections for no gain (§65.1).
 policy_fields <- function() names(zu_defaults())
 
 # Read the policy arguments the *caller's* frame actually received. missing()
@@ -101,12 +105,6 @@ collect_policy <- function(env = parent.frame()) {
 #'   fresh connection for every request.
 #' @param retry A [zu_retry()] policy. The default retries nothing.
 #' @param tls Certificate trust settings from [zu_tls()].
-#' @param http2 HTTP/2 use: `"auto"` (the default) offers it to every HTTPS
-#'   server and uses it when the server chooses it, and HTTP/1.1 otherwise;
-#'   `"required"` fails with `zu_connect_error` before sending anything when
-#'   the connection is not HTTP/2, and on an `http://` URL speaks cleartext
-#'   HTTP/2 (h2c) directly, without an `Upgrade`; `"off"` uses HTTP/1.1 only.
-#'   [zu_resp_connection()] reports which version a response came over.
 #' @param proxy Proxy URL, e.g. `"http://proxy:3128"`. Leave unset to honour
 #'   the environment (§20.1); pass `FALSE` to force a direct connection.
 #'   **Not `NULL`** — under the §31.9 merge rules `NULL` means "reset to the
@@ -114,6 +112,14 @@ collect_policy <- function(env = parent.frame()) {
 #'   is the only spelling that can mean "definitely do not proxy" without
 #'   making this one argument an exception to a rule every other policy
 #'   argument follows.
+#' @param http2 HTTP/2 use: `"auto"` (the default) offers it to every HTTPS
+#'   server and uses it when the server chooses it, and HTTP/1.1 otherwise;
+#'   `"required"` fails with `zu_connect_error` before sending anything when
+#'   the connection is not HTTP/2, and on an `http://` URL speaks cleartext
+#'   HTTP/2 (h2c) directly, without an `Upgrade`; `"off"` uses HTTP/1.1 only.
+#'   [zu_resp_connection()] reports which version a response came over.
+#'   A client setting only: there is no per-request form, because it chooses
+#'   the connection, not the request.
 #' @param middleware A function of `(req, next_fn)`, or a list of them,
 #'   wrapping request execution (§31.13). The first is outermost.
 #' @param hooks Lifecycle observers from [zu_hooks()].

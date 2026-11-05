@@ -85,3 +85,48 @@ jobs:
     uses: pedrobtz/r-actions/.github/workflows/cran-special.yml@v1
     with:
       profile: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-ci') && 'quick' || 'full' }}
+
+  # The R glue under valgrind on every pull request, quick profile included
+  # (review #164, the maintainer's decision of 2026-11-05). valgrind above
+  # runs the whole suite and only on the full profile; W21's uninitialised
+  # pool configuration in init.c reached main through that gap (#136). This
+  # runs one script through init.c's pool, pulled-body, finalizer, callback
+  # and body-function paths, about two minutes, and fails on a finding whose
+  # stack passes through zuhttp.
+  valgrind-glue:
+    name: valgrind (R glue, init.c)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install valgrind and OpenSSL
+        run: sudo apt-get update && sudo apt-get install -y valgrind libssl-dev
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::webfakes
+          needs: check
+
+      # -O1 -g: line numbers in the stacks, and code close to what users run.
+      - name: Install zuhttp with debug info
+        run: |
+          mkdir -p ~/.R
+          printf 'CFLAGS=-g -O1\n' > ~/.R/Makevars
+          R CMD INSTALL .
+
+      - name: Run the glue under valgrind
+        timeout-minutes: 15
+        run: tools/ci-valgrind-glue.sh "$RUNNER_TEMP/valgrind-glue.log"
+
+      - name: Keep the log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: valgrind-glue-log
+          path: ${{ runner.temp }}/valgrind-glue.log
+          if-no-files-found: ignore

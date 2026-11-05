@@ -22,7 +22,9 @@ zu_pool(
 \item{keepalive_time, keepalive_timeout}{HTTP/2 keepalive, in seconds
 (§65.6). An idle HTTP/2 connection silent for \code{keepalive_time} is sent a
 PING before it is reused, and discarded unless the answer arrives within
-\code{keepalive_timeout} (default 20); the request then opens a new one. This
+\code{keepalive_timeout} (\code{NULL}, the default, means 20 seconds) or the
+request's own \code{timeout}, whichever is sooner; the request then opens a
+new one. This
 finds a server or middlebox that dropped the connection without saying
 so. \code{NULL}, the default, sends no PING. HTTP/1.1 connections are
 unaffected.}

@@ -8,9 +8,11 @@ zu_set_json_backend(encode = NULL, decode = NULL)
 }
 \arguments{
 \item{encode}{A function \verb{(x, ...)} returning a single JSON string. Must
-accept \code{...}, since request-level options are forwarded to it.}
+accept \code{...}, since request-level options are forwarded to it. \code{NULL}
+restores \code{zujson}'s.}
 
-\item{decode}{A function \verb{(txt, ...)} returning an R object.}
+\item{decode}{A function \verb{(txt, ...)} returning an R object. \code{NULL}
+restores \code{zujson}'s.}
 }
 \value{
 The previous backend, invisibly.

@@ -375,6 +375,12 @@ void zuh_pool_stats_get(const zuh_pool *p, zuh_pool_stats *out) {
 
 size_t zuh_pool_idle_count(const zuh_pool *p) { return p ? p->idle : 0; }
 
+void zuh_pool_config_get(const zuh_pool *p, zuh_pool_config *out) {
+    if (!out) return;
+    if (!p) { zuh_pool_config_init(out); return; }
+    *out = p->cfg;
+}
+
 /* Does a comma-separated header value carry `tok` as a token?
  *
  * `Connection: close` is the common case, but the field is a LIST — a server

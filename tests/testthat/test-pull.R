@@ -87,6 +87,62 @@ test_that("stream must be TRUE or FALSE, and excludes path and callback", {
   )
 })
 
+test_that("D-98: mock trailers are NULL until a clean end, and after an abort", {
+  fake <- zu_mock_transport(function(req) {
+    zu_response(200L, body = "abcdef", trailers = c("grpc-status" = "0"))
+  })
+  api <- zu_client(transport = fake)
+  r <- zu_perform(
+    zu_request("GET", "https://x.test/"),
+    client = api,
+    stream = TRUE
+  )
+  expect_null(zu_resp_trailers(r))
+  expect_identical(rawToChar(zu_resp_read(r, 100)), "abcdef")
+  expect_null(zu_resp_trailers(r)) # all bytes, but the end not yet seen
+  expect_length(zu_resp_read(r, 100), 0)
+  expect_identical(zu_resp_trailers(r, "grpc-status"), "0")
+  r <- zu_perform(
+    zu_request("GET", "https://x.test/"),
+    client = api,
+    stream = TRUE
+  )
+  zu_resp_read(r, 2)
+  zu_resp_abort(r)
+  expect_null(zu_resp_trailers(r))
+  # Not streamed: the trailers are there at once; none sent is empty.
+  b <- zu_perform(zu_request("GET", "https://x.test/"), client = api)
+  expect_identical(zu_resp_trailers(b, "GRPC-STATUS"), "0")
+  expect_identical(
+    zu_resp_trailers(zu_response(200L)),
+    structure(character(), names = character())
+  )
+})
+
+test_that("the body accessors refuse a streamed mock response, as a native one (#144)", {
+  r <- zu_perform(
+    zu_request("GET", "https://x.test/"),
+    client = mock_client(),
+    stream = TRUE
+  )
+  expect_error(zu_resp_text(r), "zu_resp_read")
+  expect_error(zu_resp_raw(r), "zu_resp_read")
+  expect_error(zu_resp_json(r), "zu_resp_read")
+  expect_output(print(r), "streamed")
+})
+
+test_that("a cassette records trailers and replays them (#143, D-98)", {
+  dir <- withr::local_tempdir()
+  fake <- zu_mock_transport(function(req) {
+    zu_response(200L, body = "x", trailers = c("grpc-status" = "7"))
+  })
+  rec <- zu_cassette_transport(dir, "tr", mode = "auto", transport = fake)
+  invisible(zu_get("https://x.test/t", client = zu_client(transport = rec)))
+  rep <- zu_cassette_transport(dir, "tr", mode = "replay")
+  r <- zu_get("https://x.test/t", client = zu_client(transport = rep))
+  expect_identical(zu_resp_trailers(r, "grpc-status"), "7")
+})
+
 test_that("a streamed response with an error status raises after aborting it", {
   expect_error(
     zu_perform(
@@ -127,11 +183,22 @@ test_that("zu_pool() checks keepalive_time and keepalive_timeout", {
   }
 })
 
-test_that("a client with keepalive set builds its pool", {
+test_that("the keepalive settings reach the C pool as given (#152)", {
   # The pool is created lazily, on the first request; client_pool() is what
-  # that request calls, with the keepalive settings passed to C.
-  api <- zu_client(pool = zu_pool(keepalive_time = 1, keepalive_timeout = 1))
-  expect_true(pool_valid(client_pool(api)))
+  # that request calls. Read back from C, so a setting validated in R and
+  # then dropped or garbled on the way would fail here.
+  api <- zu_client(
+    pool = zu_pool(keepalive_time = 1.5, keepalive_timeout = 0.25)
+  )
+  p <- client_pool(api)
+  expect_true(pool_valid(p))
+  cfg <- pool_config(p)
+  expect_identical(cfg[["keepalive_time_ms"]], 1500)
+  expect_identical(cfg[["keepalive_timeout_ms"]], 250)
+  # Unset is off: zero, never whatever the stack held (#136's valgrind find).
+  cfg <- pool_config(client_pool(zu_client(pool = zu_pool())))
+  expect_identical(cfg[["keepalive_time_ms"]], 0)
+  expect_identical(cfg[["keepalive_timeout_ms"]], 0)
 })
 
 # --- §65.7 zu_body_stream(), offline ------------------------------------------

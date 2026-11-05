@@ -73,7 +73,11 @@ cassette_response <- function(resp) {
     body = as.raw(resp$body %||% raw()),
     url = zu_redact_url(resp$url %||% ""),
     tls_version = resp$tls_version,
-    redirects = resp$redirects %||% 0L
+    redirects = resp$redirects %||% 0L,
+    # §65.3: gRPC's status is here; redacted like any header block.
+    trailers = if (length(resp$trailers)) {
+      zu_redact_headers_for_display(resp$trailers)
+    }
   )
 }
 
@@ -84,7 +88,8 @@ replay_response <- function(rec) {
     body = rec$body,
     url = rec$url,
     tls_version = rec$tls_version,
-    redirects = rec$redirects %||% 0L
+    redirects = rec$redirects %||% 0L,
+    trailers = rec$trailers
   )
   r$replayed <- TRUE
   r
@@ -190,6 +195,13 @@ zu_transport_perform.zu_cassette_transport <- function(transport, req) {
   }
 
   resp <- zu_transport_perform(transport$transport, req)
+  # §65.4: a streamed response is read to its end before it is recorded, or
+  # the cassette would hold an empty body that every replay returned
+  # silently (review #143). The caller then reads it from memory, as from a
+  # replay; zu_perform() gives it the cursor.
+  if (!is.null(resp$stream)) {
+    resp <- drain_stream(resp)
+  }
   entry <- list(
     key = key,
     request = rr,
@@ -202,6 +214,21 @@ zu_transport_perform.zu_cassette_transport <- function(transport, req) {
     tape[[length(tape) + 1L]] <- entry
   }
   cassette_write(transport$dir, transport$name, tape)
+  resp
+}
+
+drain_stream <- function(resp) {
+  pieces <- list()
+  repeat {
+    p <- zu_resp_read(resp, 1048576)
+    if (!length(p)) {
+      break
+    }
+    pieces[[length(pieces) + 1L]] <- p
+  }
+  resp$trailers <- zu_resp_trailers(resp)
+  resp$body <- if (length(pieces)) do.call(c, pieces) else raw()
+  resp$stream <- NULL
   resp
 }
 

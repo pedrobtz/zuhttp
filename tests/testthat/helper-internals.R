@@ -4,6 +4,7 @@
 resolved <- function(req, client) zuhttp:::resolve_request(req, client)
 client_pool <- function(...) zuhttp:::client_pool(...)
 pool_valid <- function(ptr) .Call(zuhttp:::C_zu_pool_valid, ptr)
+pool_config <- function(ptr) .Call(zuhttp:::C_zu_pool_config, ptr)
 parse_retry_after <- function(...) zuhttp:::parse_retry_after(...)
 backoff_delay <- function(...) zuhttp:::backoff_delay(...)
 retry_sleep <- function(...) zuhttp:::retry_sleep(...)

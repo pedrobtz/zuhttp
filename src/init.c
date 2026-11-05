@@ -280,6 +280,34 @@ static SEXP C_zu_pool_valid(SEXP ptr) {
 /* §26.2 counters. These exist so a test can prove a connection was REUSED
  * rather than merely that two requests both succeeded — without them, pooling
  * is indistinguishable from not pooling from R. */
+/* The configuration in C, for the tests: a setting R validated but
+ * C_zu_pool_new() dropped or garbled would otherwise pass every test, as the
+ * uninitialised keepalive fields of W21 did until valgrind (review #152). */
+static SEXP C_zu_pool_config(SEXP ptr) {
+    static const char *nm[] = {
+        "max_idle", "max_per_host", "idle_timeout_ms", "keepalive_time_ms",
+        "keepalive_timeout_ms", NULL
+    };
+    zuh_pool *p = pool_ptr_get(ptr);
+    zuh_pool_config c;
+    SEXP out, names;
+    int i, n = 0;
+    while (nm[n]) n++;
+    if (!p) return R_NilValue;
+    zuh_pool_config_get(p, &c);
+    out = PROTECT(Rf_allocVector(REALSXP, n));
+    REAL(out)[0] = (double)c.max_idle;
+    REAL(out)[1] = (double)c.max_per_host;
+    REAL(out)[2] = (double)c.idle_timeout_ms;
+    REAL(out)[3] = (double)c.keepalive_time_ms;
+    REAL(out)[4] = (double)c.keepalive_timeout_ms;
+    names = PROTECT(Rf_allocVector(STRSXP, n));
+    for (i = 0; i < n; i++) SET_STRING_ELT(names, i, Rf_mkChar(nm[i]));
+    Rf_setAttrib(out, R_NamesSymbol, names);
+    UNPROTECT(2);
+    return out;
+}
+
 static SEXP C_zu_pool_stats(SEXP ptr) {
     static const char *nm[] = {
         "idle", "hits", "misses", "discarded_stale", "discarded_expired",
@@ -570,6 +598,12 @@ static SEXP zuh_stream_tag = NULL;
 
 static void stream_finalizer(SEXP ptr) {
     zuh_open_body *b = (zuh_open_body *)R_ExternalPtrAddr(ptr);
+    /* During a session the protected slot keeps the pool alive while this
+     * runs. At exit both finalizers are onexit, and this one dereferences
+     * the pool: it relies on R running the newer weak reference first, which
+     * a body's always is, since a body is made after the pool it came from.
+     * True of R's finalizer list today; if R ever ran them oldest first, the
+     * pool would have to drain its open bodies itself (review #169). */
     if (!b) return;
     R_ClearExternalPtr(ptr);
     zuh_open_body_free(b);
@@ -1350,6 +1384,7 @@ static const R_CallMethodDef call_methods[] = {
     {"C_zu_pool_new",          (DL_FUNC) &C_zu_pool_new,          5},
     {"C_zu_pool_valid",        (DL_FUNC) &C_zu_pool_valid,        1},
     {"C_zu_pool_stats",        (DL_FUNC) &C_zu_pool_stats,        1},
+    {"C_zu_pool_config",       (DL_FUNC) &C_zu_pool_config,       1},
     {"C_zu_pool_clear",        (DL_FUNC) &C_zu_pool_clear,        1},
     {"C_zu_tls_backend",       (DL_FUNC) &C_zu_tls_backend,       0},
     {"C_zu_tls_check",         (DL_FUNC) &C_zu_tls_check,         1},

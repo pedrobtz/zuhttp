@@ -1201,3 +1201,12 @@ changed the plan or the design.
   - The pinned nghttp2 1.71.0 tarball (#158) reproduces the vendored tree
     byte for byte through `tools/update-nghttp2`; its SHA-256 matches the
     `checksums.txt` upstream publishes.
+- **2026-11-05 — CI tiers, amended: the R glue under valgrind on every PR
+  (review #164, the maintainer's decision).** The quick profile skips
+  valgrind, and init.c is reachable only from R, so W21's uninitialised pool
+  configuration merged on #135 and was found by #136's full run. The tier
+  rule stands; one job is added to the quick profile, `valgrind (R glue,
+  init.c)` in `native-checks.yaml`, which runs `tools/ci-valgrind-glue.R`
+  under valgrind and fails on a finding whose stack passes through zuhttp's
+  own frames (the filter was checked against #136's real block, and against
+  a block from R alone, which it passes).

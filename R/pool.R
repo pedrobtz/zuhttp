@@ -28,7 +28,9 @@
 #' @param keepalive_time,keepalive_timeout HTTP/2 keepalive, in seconds
 #'   (§65.6). An idle HTTP/2 connection silent for `keepalive_time` is sent a
 #'   PING before it is reused, and discarded unless the answer arrives within
-#'   `keepalive_timeout` (default 20); the request then opens a new one. This
+#'   `keepalive_timeout` (`NULL`, the default, means 20 seconds) or the
+#'   request's own `timeout`, whichever is sooner; the request then opens a
+#'   new one. This
 #'   finds a server or middlebox that dropped the connection without saying
 #'   so. `NULL`, the default, sends no PING. HTTP/1.1 connections are
 #'   unaffected.
@@ -55,8 +57,8 @@ zu_pool <- function(
   keepalive_time = NULL,
   keepalive_timeout = NULL
 ) {
-  # Finite: as.integer(Inf) is NA, which C read as "the default" — so
-  # idle_timeout = Inf, a natural way to say "keep forever", silently meant 30.
+  # Finite: as.integer(Inf) is NA, which C read as "the default", so a count
+  # of Inf would silently become the default count.
   check_count <- function(x, nm) {
     if (
       !is.numeric(x) ||
@@ -74,17 +76,6 @@ zu_pool <- function(
     }
     as.integer(x)
   }
-  if (
-    !is.numeric(idle_timeout) ||
-      length(idle_timeout) != 1L ||
-      is.na(idle_timeout) ||
-      idle_timeout < 0.001
-  ) {
-    stop(
-      "`idle_timeout` must be a number of seconds, at least 0.001",
-      call. = FALSE
-    )
-  }
   check_secs <- function(x, nm) {
     if (is.null(x)) {
       return(0L)
@@ -98,6 +89,17 @@ zu_pool <- function(
       )
     }
     timeout_ms(x)
+  }
+  if (
+    !is.numeric(idle_timeout) ||
+      length(idle_timeout) != 1L ||
+      is.na(idle_timeout) ||
+      idle_timeout < 0.001
+  ) {
+    stop(
+      "`idle_timeout` must be a number of seconds, at least 0.001",
+      call. = FALSE
+    )
   }
   structure(
     list(
@@ -119,6 +121,20 @@ print.zu_pool_config <- function(x, ...) {
   cat("  max_idle:     ", x$max_idle, "\n", sep = "")
   cat("  max_per_host: ", x$max_per_host, "\n", sep = "")
   cat("  idle_timeout: ", x$idle_timeout_ms / 1000, "s\n", sep = "")
+  ka <- x$keepalive_time_ms %||% 0L
+  if (ka > 0) {
+    kt <- x$keepalive_timeout_ms %||% 0L
+    cat(
+      "  keepalive:    PING after ",
+      ka / 1000,
+      "s idle, answer within ",
+      if (kt > 0) kt / 1000 else 20,
+      "s\n",
+      sep = ""
+    )
+  } else {
+    cat("  keepalive:    off\n")
+  }
   invisible(x)
 }
 
@@ -170,6 +186,8 @@ client_pool <- function(client) {
     cfg$max_idle,
     cfg$max_per_host,
     cfg$idle_timeout_ms,
+    # %||%: a zu_pool_config saved by a build before W21 (§26.5's readRDS()
+    # case) has no keepalive fields, and means keepalive off.
     cfg$keepalive_time_ms %||% 0L,
     cfg$keepalive_timeout_ms %||% 0L
   )

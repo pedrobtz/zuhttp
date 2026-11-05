@@ -87,6 +87,8 @@ test_that("the export surface is D-65's 61, D-88's 2, W21's 3 and W22's 1, none 
   expect_true(all(
     c("zu_resp_read", "zu_resp_abort", "zu_resp_trailers") %in% exports
   ))
+  # §65.7, D-95.
+  expect_true("zu_body_stream" %in% exports)
 
   removed <- c(
     paste0("zu_client_", c("get", "head", "post", "put", "patch", "delete")),

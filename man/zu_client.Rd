@@ -82,7 +82,9 @@ server and uses it when the server chooses it, and HTTP/1.1 otherwise;
 \code{"required"} fails with \code{zu_connect_error} before sending anything when
 the connection is not HTTP/2, and on an \verb{http://} URL speaks cleartext
 HTTP/2 (h2c) directly, without an \code{Upgrade}; \code{"off"} uses HTTP/1.1 only.
-\code{\link[=zu_resp_connection]{zu_resp_connection()}} reports which version a response came over.}
+\code{\link[=zu_resp_connection]{zu_resp_connection()}} reports which version a response came over.
+A client setting only: there is no per-request form, because it chooses
+the connection, not the request.}
 }
 \value{
 A \code{zu_client} object.
