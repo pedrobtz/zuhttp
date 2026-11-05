@@ -1,9 +1,9 @@
 # §31.7 — responses.
 #
 # The accessor functions are the stable contract; `$status` and `$body` are
-# not. That is not pedantry: §31.8 leaves room for a response whose body is a
-# live stream rather than a vector, and code reaching into the list would break
-# the day that lands.
+# not. A response requested with `stream = TRUE` (§65.4) holds no body: its
+# `$body` is empty and its bytes come from zu_resp_read(), so code reaching
+# into the list reads nothing where the accessors would have refused.
 
 #' Construct a response
 #'
@@ -22,17 +22,22 @@
 #' @param url The final URL.
 #' @param tls_version TLS version string, or `NULL` for plain HTTP.
 #' @param redirects Number of redirects followed.
+#' @param trailers Named character vector of trailer fields (§65.3), as
+#'   [zu_resp_trailers()] returns them: where gRPC carries its status. `NULL`,
+#'   the default, means none were sent.
 #' @return A `zu_response`.
 #' @export
 #' @examples
 #' zu_response(200L, c("Content-Type" = "text/plain"), "hello")
+#' zu_response(200L, body = raw(), trailers = c("grpc-status" = "0"))
 zu_response <- function(
   status = 200L,
   headers = NULL,
   body = raw(),
   url = NULL,
   tls_version = NULL,
-  redirects = 0L
+  redirects = 0L,
+  trailers = NULL
 ) {
   if (is.character(body)) {
     body <- charToRaw(enc2utf8(paste0(body, collapse = "")))
@@ -47,7 +52,8 @@ zu_response <- function(
       redirects = as.integer(redirects),
       method = NULL,
       timings = c(total = NA_real_),
-      request = NULL
+      request = NULL,
+      trailers = if (is.null(trailers)) NULL else as_header_vec(trailers)
     ),
     class = "zu_response"
   )
@@ -128,12 +134,16 @@ zu_resp_headers <- function(resp) resp$headers
 #' trailers, or a chunked HTTP/1.1 body's trailer section (§65.3, D-91). gRPC
 #' carries its status there. Matching is case-insensitive as in
 #' [zu_resp_header()]. For a streamed response they are known once
-#' `zu_resp_read()` has returned the end of the body; before that,
-#' `zu_resp_trailers()` returns `NULL`.
+#' `zu_resp_read()` has returned the end of the body; before that, and after
+#' `zu_resp_abort()` or a failed read, `zu_resp_trailers()` returns `NULL`:
+#' the trailers are unknown, which is not the same as none (D-98).
 #'
-#' A response that was not streamed reads from its stored body, in pieces of
-#' `n`, so code written against `zu_resp_read()` runs against
-#' [zu_mock_transport()] and cassettes unchanged.
+#' A response that was not streamed by its transport (a mock, a cassette)
+#' reads from its stored body, in pieces of `n`, and follows the same rules,
+#' trailers included: build one with `zu_response(trailers = )`. So code
+#' written against `zu_resp_read()` runs against [zu_mock_transport()] and
+#' cassettes unchanged. A streamed response has no body to hand to
+#' [zu_resp_raw()], [zu_resp_text()] or [zu_resp_json()], which refuse it.
 #'
 #' @param resp A `zu_response`.
 #' @param n Maximum bytes to return.
@@ -144,9 +154,12 @@ zu_resp_headers <- function(resp) resp$headers
 #'   a streamed body is unread.
 #' @export
 #' @examples
-#' fake <- zu_mock_transport(function(req) zu_response(200L, body = charToRaw("hello")))
-#' r <- zu_perform(zu_request("GET", "https://example.com/"),
-#'                 client = zu_client(transport = fake), stream = TRUE)
+#' fake <- zu_mock_transport(function(req) zu_response(200L, body = "hello"))
+#' r <- zu_perform(
+#'   zu_request("GET", "https://example.com/"),
+#'   client = zu_client(transport = fake),
+#'   stream = TRUE
+#' )
 #' zu_resp_read(r, 3)
 #' zu_resp_read(r, 3)
 #' zu_resp_read(r, 3)
@@ -178,6 +191,7 @@ zu_resp_read <- function(resp, n = 65536) {
   from <- st$pos + 1
   to <- min(length(body), st$pos + n)
   if (from > to) {
+    st$ended <- TRUE # the trailers are known from here (D-98)
     return(raw())
   }
   st$pos <- to
@@ -199,8 +213,11 @@ zu_resp_abort <- function(resp) {
 #' @rdname zu_resp_read
 #' @export
 zu_resp_trailers <- function(resp, name = NULL) {
+  st <- resp$read_state
   h <- if (!is.null(resp$stream)) {
     .Call(C_zu_stream_trailers, resp$stream)
+  } else if (is.environment(st) && (!isTRUE(st$ended) || isTRUE(st$aborted))) {
+    NULL # D-98: unknown until a clean end, as for a native stream
   } else {
     resp$trailers %||% structure(character(), names = character())
   }
@@ -228,6 +245,15 @@ zu_resp_url <- function(resp) resp$url
 #' @rdname zu_resp
 #' @export
 zu_resp_method <- function(resp) resp$method
+
+# "HTTP/2", "HTTP/1.1", or NULL when the transport did not say (a mock).
+http_version_of <- function(resp) {
+  if (isTRUE((resp$http_major %||% 1L) == 2L)) {
+    return("HTTP/2")
+  }
+  v <- resp$http_minor
+  if (is.null(v) || is.na(v)) NULL else paste0("HTTP/1.", v)
+}
 
 #' Connection metadata
 #'
@@ -259,21 +285,13 @@ zu_resp_method <- function(resp) resp$method
 #' r <- zu_response(200L)
 #' zu_resp_connection(r)
 zu_resp_connection <- function(resp) {
-  v <- resp$http_minor
-  major <- resp$http_major %||% 1L
   list(
     reused_connection = isTRUE(resp$reused_connection),
     remote_ip = resp$remote_ip,
     tls_protocol = resp$tls_version,
     tls_cipher = resp$tls_cipher,
     trust_backend = resp$trust_backend,
-    http_version = if (identical(major, 2L)) {
-      "HTTP/2"
-    } else if (is.null(v) || is.na(v)) {
-      NULL
-    } else {
-      paste0("HTTP/1.", v)
-    },
+    http_version = http_version_of(resp),
     proxy_used = isTRUE(resp$proxy_used),
     # Filled by the retry layer (§33) and the engine respectively, so a
     # response that went through neither still answers 1 and 0 rather than
@@ -295,8 +313,9 @@ zu_resp_timings <- function(resp) {
   # time. Zero would claim they were instantaneous.
   ms <- resp$timings_ms
   if (is.null(ms)) {
+    # a hand-built zu_response()
     return(resp$timings)
-  } # a hand-built zu_response()
+  }
   secs <- c(
     "dns",
     "connect",
@@ -394,7 +413,21 @@ zu_resp_trace <- function(resp) {
 #' r <- zu_response(200L, body = "hello")
 #' zu_resp_raw(r)
 #' rawToChar(zu_resp_raw(r))
-zu_resp_raw <- function(resp) resp$body
+zu_resp_raw <- function(resp) held_body(resp)
+
+# A streamed response (§65.4) holds no body: its bytes are zu_resp_read()'s,
+# on the network and under a mock alike, so code that passes offline does not
+# read "" in production (review #144).
+held_body <- function(resp) {
+  if (!is.null(resp$stream) || is.environment(resp$read_state)) {
+    stop(
+      "this response was requested with `stream = TRUE`, so it holds no ",
+      "body\n  read it with zu_resp_read()",
+      call. = FALSE
+    )
+  }
+  resp$body
+}
 
 #' The response body as text
 #'
@@ -426,7 +459,7 @@ zu_resp_text <- function(
   on_invalid = c("error", "substitute")
 ) {
   on_invalid <- match.arg(on_invalid)
-  b <- resp$body
+  b <- held_body(resp)
   if (is.null(b) || !length(b)) {
     return("")
   }
@@ -590,10 +623,10 @@ bom_of <- function(b) {
 #'   zuhtml::html_title(h)
 #' }
 zu_resp_json <- function(resp, ...) {
-  txt <- zu_resp_text(resp, encoding = "UTF-8")
-  if (!nzchar(trimws(txt))) {
+  if (blank_body(held_body(resp))) {
     stop_empty_body(resp, "JSON")
   }
+  txt <- zu_resp_text(resp, encoding = "UTF-8")
   parse_body(resp, "JSON", function() json_decode(txt, ...))
 }
 
@@ -601,7 +634,7 @@ zu_resp_json <- function(resp, ...) {
 #' @export
 zu_resp_xml <- function(resp, ...) {
   need_suggested("zuxml", "zu_resp_xml()")
-  if (blank_body(resp$body)) {
+  if (blank_body(held_body(resp))) {
     stop_empty_body(resp, "XML")
   }
   parse_body(resp, "XML", function() {
@@ -613,7 +646,7 @@ zu_resp_xml <- function(resp, ...) {
 #' @export
 zu_resp_html <- function(resp, ...) {
   need_suggested("zuhtml", "zu_resp_html()")
-  if (blank_body(resp$body)) {
+  if (blank_body(held_body(resp))) {
     stop_empty_body(resp, "HTML")
   }
   parse_body(resp, "HTML", function() {
@@ -835,18 +868,37 @@ status_text <- function(s) {
 status_hint <- function(s) {
   switch(
     as.character(s),
-    "401" = "The request was not authenticated. Check the credential you sent, and that it goes in the header the API expects.",
-    "403" = "Authenticated but not permitted. The credential is valid and lacks this scope, or the resource belongs to someone else.",
-    "404" = "The server has no such resource. If you are using a client base_url, check the join: base_url and path are concatenated, not resolved.",
+    "401" = paste0(
+      "The request was not authenticated. Check the credential you ",
+      "sent, and that it goes in the header the API expects."
+    ),
+    "403" = paste0(
+      "Authenticated but not permitted. The credential is valid and ",
+      "lacks this scope, or the resource belongs to someone else."
+    ),
+    "404" = paste0(
+      "The server has no such resource. If you are using a client ",
+      "base_url, check the join: base_url and path are ",
+      "concatenated, not resolved."
+    ),
     "405" = "The path exists but not for this method.",
-    "407" = "The proxy refused the request. Check the user name and password in the proxy URL (http://user:password@host:port).",
+    "407" = paste0(
+      "The proxy refused the request. Check the user name and ",
+      "password in the proxy URL (http://user:password@host:port)."
+    ),
     "413" = "The request body was too large for the server.",
     "415" = "The server rejected the body's Content-Type.",
-    "429" = "Rate limited. Any Retry-After header is in zu_resp_header(resp, \"retry-after\").",
+    "429" = paste0(
+      "Rate limited. Any Retry-After header is in ",
+      "zu_resp_header(resp, \"retry-after\")."
+    ),
     "500" = ,
     "502" = ,
     "503" = ,
-    "504" = "A server-side failure, not a request the server rejected. Retrying is often reasonable for an idempotent request.",
+    "504" = paste0(
+      "A server-side failure, not a request the server rejected. ",
+      "Retrying is often reasonable for an idempotent request."
+    ),
     ""
   )
 }
@@ -911,7 +963,11 @@ print.zu_response <- function(x, ...) {
       cat("... and ", length(h) - n, " more headers\n", sep = "")
     }
   }
-  cat("Body: ", format_bytes(length(x$body)), " in memory\n", sep = "")
+  if (!is.null(x$stream) || is.environment(x$read_state)) {
+    cat("Body: streamed, read with zu_resp_read()\n")
+  } else {
+    cat("Body: ", format_bytes(length(x$body)), " in memory\n", sep = "")
+  }
   if (!is.na(x$timings[["total"]])) {
     cat("Total: ", round(x$timings[["total"]] * 1000), " ms\n", sep = "")
   }

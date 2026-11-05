@@ -136,6 +136,8 @@ int zuh_pool_check_fork(zuh_pool *p);
 /* An idle connection matching `key`, or NULL. Runs the fork guard, then the
  * §26.2 expiry and liveness checks, discarding anything that fails. */
 zuh_stream *zuh_pool_acquire(zuh_pool *p, const zuh_pool_key *key);
+/* The same, with the request's deadline bounding the §65.6 keepalive PING. */
+zuh_stream *zuh_pool_acquire_by(zuh_pool *p, const zuh_pool_key *key, zuh_deadline dl);
 
 /* Hand a connection back. Anything other than ZUH_REUSE_OK closes it, as do
  * capacity limits and a failed liveness probe. Takes ownership of `s` either
@@ -143,6 +145,9 @@ zuh_stream *zuh_pool_acquire(zuh_pool *p, const zuh_pool_key *key);
 void zuh_pool_release(zuh_pool *p, const zuh_pool_key *key, zuh_stream *s, zuh_reuse r);
 
 void zuh_pool_stats_get(const zuh_pool *p, zuh_pool_stats *out);
+/* The configuration the pool runs with, as zuh_pool_new() copied it: what
+ * the R layer asked for, read back (review #152). */
+void zuh_pool_config_get(const zuh_pool *p, zuh_pool_config *out);
 size_t zuh_pool_idle_count(const zuh_pool *p);
 
 /* Close and drop every idle connection. */

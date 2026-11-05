@@ -41,6 +41,25 @@ static void basic_key(zuh_pool_key *k, const char *host, uint16_t port) {
     k->min_version = 12;
 }
 
+/* #154: a connection whose liveness probe releases another connection into
+ * the same pool, as a pulled body's finalizer can when the probe's PING wait
+ * runs R (§25.1) and R collects garbage. */
+static zuh_pool     *g_reenter_pool;
+static zuh_pool_key *g_reenter_key;
+static int reenter_readable(zuh_stream *s, int ms) {
+    zuh_pool *p = g_reenter_pool;
+    ZUH_UNUSED(s); ZUH_UNUSED(ms);
+    if (!p) return 0;                          /* idle, until armed */
+    g_reenter_pool = NULL;
+    zuh_pool_release(p, g_reenter_key, idle_stream(), ZUH_REUSE_OK);
+    return 1;                                  /* and this one is stale */
+}
+static void reenter_close(zuh_stream *s) { ZUH_UNUSED(s); }
+static void reenter_destroy(zuh_stream *s) { zuh_free(s); }
+static const zuh_stream_vtable k_reenter_vt = {
+    "reenter", NULL, NULL, reenter_close, reenter_destroy, reenter_readable
+};
+
 void suite_pool(void) {
     zuh_pool_config cfg;
     zuh_pool_stats  st;
@@ -484,6 +503,39 @@ void suite_pool(void) {
         ZUH_CHECK_EQ_INT(zuh_reuse_decide(ZUH_ERR_TIMEOUT, &closed, &h, 1),
                         ZUH_NOREUSE_CANCELLED);
         zuh_headers_free(&h);
+    }
+
+    ZUH_CASE("#154: a release from inside acquire's probe cannot free what acquire holds");
+    {
+        /* List, newest first: X (x.test), Y (a.test, the re-entrant one).
+         * acquire(a.test) holds a link into X while it probes Y; the probe
+         * releases a third connection for x.test, and max_per_host = 1
+         * evicts X. Reading on from that link was a use-after-free. */
+        zuh_pool_key ka, kx, kc;
+        zuh_stream *y = (zuh_stream *)zuh_calloc(1, sizeof *y);
+        zuh_pool_config pc;
+        zuh_pool *rp;
+        zuh_pool_config_init(&pc);
+        pc.max_per_host = 1;
+        rp = zuh_pool_new(&pc);
+        basic_key(&ka, "a.test", 443);
+        basic_key(&kx, "x.test", 443);
+        basic_key(&kc, "x.test", 443); kc.min_version = 13;
+        y->vt = &k_reenter_vt;
+        zuh_pool_release(rp, &ka, y, ZUH_REUSE_OK);
+        zuh_pool_release(rp, &kx, idle_stream(), ZUH_REUSE_OK);
+        ZUH_CHECK_EQ_INT(zuh_pool_idle_count(rp), 2);
+        g_reenter_pool = rp; g_reenter_key = &kc;
+        ZUH_CHECK(zuh_pool_acquire(rp, &ka) == NULL);
+        ZUH_CHECK(g_reenter_pool == NULL);          /* the probe did run */
+        ZUH_CHECK_EQ_INT(zuh_pool_idle_count(rp), 1);
+        {
+            zuh_stream *got = zuh_pool_acquire(rp, &kc);
+            ZUH_CHECK(got != NULL);
+            zuh_stream_close(got); zuh_stream_free(got);
+        }
+        zuh_pool_free(rp);
+        zuh_pool_key_free(&ka); zuh_pool_key_free(&kx); zuh_pool_key_free(&kc);
     }
 
     ZUH_CASE("no leaks across the suite");

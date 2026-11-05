@@ -156,6 +156,14 @@ zuh_code zuh_open_body_read(zuh_open_body *b, zuh_buffer *out, size_t n,
  * pooled; over HTTP/1.1 it is closed. A no-op on an ended or aborted body. */
 void zuh_open_body_abort(zuh_open_body *b);
 int  zuh_open_body_done(const zuh_open_body *b);   /* all read, failed or aborted */
+/* All read and the stream ended cleanly: the trailers are what the server
+ * sent (§65.3, D-98). Not after an abort or a failure, whose trailers are
+ * unknown rather than empty. */
+int  zuh_open_body_ended_clean(const zuh_open_body *b);
+/* §65.7: is the request body function of this body's stream running now
+ * (full duplex over HTTP/2)? The session is then mid-call and must not be
+ * driven, so a read or an abort from inside that function is refused. */
+int  zuh_open_body_busy(const zuh_open_body *b);
 const zuh_headers *zuh_open_body_trailers(const zuh_open_body *b);
 /* Aborts first if the body is still open. */
 void zuh_open_body_free(zuh_open_body *b);

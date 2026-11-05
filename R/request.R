@@ -190,8 +190,9 @@ zu_headers <- function(req, ...) {
   req <- check_req(req)
   h <- list(...)
   if (length(h) == 1L && is.null(names(h))) {
+    # a bare named vector
     h <- h[[1]]
-  } # a bare named vector
+  }
   h <- as_header_vec(h)
   out <- if (is.null(req$headers)) character() else req$headers
   # As in zu_query(): an NA is carried, not applied, because what it erases is
@@ -237,7 +238,12 @@ zu_headers <- function(req, ...) {
 #'   `path` is always where a *response* goes (D-45).
 #' @param f For `zu_body_stream()`, a function of no arguments that returns
 #'   the next piece of the body as a raw vector each time it is called, and
-#'   `NULL` at the end.
+#'   `NULL` at the end. It is called for one request: a function that has
+#'   returned `NULL` has nothing left, so performing the same request again
+#'   sends whatever it returns then, usually an empty body. Build the request
+#'   afresh, with a new function, for each attempt you make. Inside `f`, the
+#'   rules of a callback hold (§27.4): it cannot make a request on the client
+#'   sending it, or read its own response.
 #' @return A `zu_request`.
 #' @name zu_body
 #' @examples
@@ -339,10 +345,9 @@ set_body <- function(req, bytes, kind, type) {
 #' the only way to escape a client default at the request level.
 #'
 #' @param req A `zu_request`.
-#' @param total Total seconds for the request, redirects included. A single
-#'   number today; the phase-specific model of §24 will accept richer values
-#'   through the same argument. DNS resolution is not bounded by it (nor by
-#'   Ctrl-C); see [zuhttp_tls].
+#' @param total Total seconds for the request, redirects included, as a
+#'   single number. DNS resolution is not bounded by it (nor by Ctrl-C); see
+#'   [zuhttp_tls].
 #' @param max Maximum redirects to follow. `0` returns the 3xx response itself.
 #' @param check Raise a condition for 4xx and 5xx (§31.14).
 #' @return A `zu_request`.

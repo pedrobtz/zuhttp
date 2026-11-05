@@ -21,9 +21,7 @@
 #' retried.
 #'
 #' @param attempts Total attempts *including the first*, so `attempts = 1`
-#'   means no retrying and `attempts = 3` means at most two retries. (An
-#'   earlier draft of the design used `attempts` and `max_attempts` with
-#'   meanings differing by one; there is one name and one meaning.)
+#'   means no retrying and `attempts = 3` means at most two retries.
 #' @param backoff `"exponential"` or `"constant"`.
 #' @param base Seconds for the first backoff interval.
 #' @param max_delay Ceiling for a single computed backoff, in seconds.
@@ -270,7 +268,7 @@ zu_req_replay_safe <- function(req) {
   if ("idempotency-key" %in% nms) {
     return(TRUE)
   }
-  # RFC 7231's idempotent methods. POST is deliberately absent.
+  # RFC 9110 §9.2.2's idempotent methods. POST is deliberately absent.
   toupper(req$method) %in% c("GET", "HEAD", "PUT", "DELETE", "OPTIONS", "TRACE")
 }
 
@@ -281,8 +279,9 @@ zu_req_replay_safe <- function(req) {
 #' than truncate.
 #'
 #' @param req A `zu_request`.
-#' @return A logical. `TRUE` for an absent body and for any in-memory body,
-#'   which is every body this version can construct.
+#' @return A logical. `TRUE` for an absent body and for any in-memory body;
+#'   `FALSE` for a body from [zu_body_stream()], which a function produces
+#'   once and cannot produce again.
 #' @seealso [zu_req_replay_safe()]
 #' @export
 #' @examples
@@ -290,9 +289,8 @@ zu_req_replay_safe <- function(req) {
 zu_body_rewindable <- function(req) {
   req <- check_req(req)
   # Explicitly marked wins, so a body source that knows it cannot rewind can
-  # say so. Streaming bodies (§28.2's connection and callback rows) will be
-  # the first to set this to FALSE; today every body this package can build
-  # is a raw vector in memory.
+  # say so: zu_body_stream() sets FALSE (§28.2, §65.7). Everything else this
+  # package builds is a raw vector in memory.
   if (!is.null(req$body_rewindable)) {
     return(isTRUE(req$body_rewindable))
   }
@@ -347,7 +345,10 @@ parse_retry_after <- function(v) {
   m <- regmatches(
     v,
     regexec(
-      "^[A-Za-z]{3}, ([0-9]{2}) ([A-Za-z]{3}) ([0-9]{4}) ([0-9]{2}):([0-9]{2}):([0-9]{2}) GMT$",
+      paste0(
+        "^[A-Za-z]{3}, ([0-9]{2}) ([A-Za-z]{3}) ([0-9]{4}) ",
+        "([0-9]{2}):([0-9]{2}):([0-9]{2}) GMT$"
+      ),
       v
     )
   )[[1]]

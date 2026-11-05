@@ -26,6 +26,7 @@
 #include "zuh_pool.h"
 #include "zuh_sink.h"
 #include "zuh_trace.h"
+#include <setjmp.h>
 #include <string.h>
 
 /* Anything a caller could make arbitrarily large is bounded here rather than
@@ -34,162 +35,180 @@
 
 /* --- §27 the R callback sink ----------------------------------------------
  *
- * §27.3 is the whole difficulty. A user callback can raise an R error, and
- * that error longjmps out of the middle of the C read loop — past the socket,
- * the TLS context and the inflate stream, all of which are C allocations with
- * no R finalizer. The identical hazard to §25.2, and it takes the identical
- * mechanism:
+ * §27.3 is the whole difficulty. A user callback runs inside the C read loop
+ * (and a §65.7 request body function inside nghttp2's data provider), and R
+ * leaves a function non-locally with a longjmp: an error, an interrupt, an
+ * exiting handler for a warning or message that the caller established
+ * around the zuhttp call, a restart, return() from a closure. Any of them
+ * would jump past the socket, the TLS context, the inflate stream and the
+ * nghttp2 session, all C allocations with no R finalizer.
  *
- *   1. call through R_tryCatch(), never a bare Rf_eval();
- *   2. on a caught condition, record it, let the native loop unwind NORMALLY
- *      so every C resource is released, and only then re-signal the original
- *      condition — so the user sees THEIR error, not a zu_* error that
- *      swallowed it.
+ *   1. The call is made under R_UnwindProtect, whose cleanup longjmps back to
+ *      the C frame that made it (guard_eval), so the jump stops there. Every
+ *      kind of jump is caught, and none is caught early: a warning() that
+ *      returns, or a calling handler, runs exactly as it would without us.
+ *   2. The native loop then unwinds NORMALLY, so every C resource is
+ *      released.
+ *   3. Only then does the .Call resume the jump with R_ContinueUnwind(), so
+ *      the user sees what R would have done with no zuhttp in between: their
+ *      error, unwrapped, at their handler.
  *
- * The re-signal is the part that is easy to get subtly wrong: wrapping the
- * condition, or reporting a cancellation, turns a clear "object 'x' not
- * found" in the user's own callback into a mysterious transport failure.
- */
+ * An earlier version caught only "error" and "interrupt" with R_tryCatch and
+ * re-signalled the condition; a warning under tryCatch(warning = ) longjmped
+ * straight through nghttp2 (review #141). R documents the longjmp from the
+ * cleanup, provided R_ContinueUnwind() follows.
+ *
+ * The continuation token is made before the engine runs, never inside it:
+ * an allocation failure there would itself be a longjmp through C. Its
+ * owner keeps it protected until R_ContinueUnwind(). */
+/* On Windows, R jumps with GCC's __builtin_setjmp/__builtin_longjmp, and
+ * the UCRT longjmp() unwinds with SEH through frames that R left that way,
+ * which killed the R process on both Windows CI legs (#172). The builtins
+ * restore registers and nothing else, as R's own jumps do, so they are what
+ * this jump uses there. Elsewhere the C library's pair is the documented
+ * one; the builtins' buffer is five words and their value is always 1. */
+#if defined(_WIN32) && defined(__GNUC__)
+typedef void *guard_jmpbuf[5];
+#  define GUARD_SETJMP(b)  __builtin_setjmp(b)
+#  define GUARD_LONGJMP(b) __builtin_longjmp(b, 1)
+#else
+typedef jmp_buf guard_jmpbuf;
+#  define GUARD_SETJMP(b)  setjmp(b)
+#  define GUARD_LONGJMP(b) longjmp(b, 1)
+#endif
+
 typedef struct {
-    SEXP fn;
-    SEXP caught;     /* preserved condition, or NULL */
-    int  stopped;    /* the callback asked to stop (§27.2 sentinel) */
+    SEXP         token;   /* R_MakeUnwindCont(), protected by the owner */
+    int          jumped;  /* a non-local exit was stopped; token carries it */
+    guard_jmpbuf jb;
+} r_guard;
+
+static void guard_cleanup(void *data, Rboolean jump) {
+    if (jump) GUARD_LONGJMP(((r_guard *)data)->jb);
+}
+
+/* fn(data); NULL with g->jumped set when it left non-locally. Once a jump
+ * has been stopped, nothing more is evaluated: the token holds that jump. */
+static SEXP guard_eval(r_guard *g, SEXP (*fn)(void *), void *data) {
+    if (g->jumped) return NULL;
+    if (GUARD_SETJMP(g->jb)) { g->jumped = 1; return NULL; }
+    return R_UnwindProtect(fn, data, guard_cleanup, g, g->token);
+}
+
+static SEXP interrupt_body(void *ignored) {
+    (void)ignored;
+    R_CheckUserInterrupt();
+    return R_NilValue;
+}
+
+typedef struct {
+    SEXP    fn;
+    r_guard g;
+    int     stopped;   /* the callback asked to stop (§27.2 sentinel) */
 } cb_ctx;
 
-typedef struct { cb_ctx *c; SEXP chunk; } cb_call;
+typedef struct { cb_ctx *c; const unsigned char *d; size_t n; } cb_call;
 
 /* --- §65.7 a request body from an R function -----------------------------
  *
  * The engine calls next() while it sends, which over HTTP/2 is from inside
- * nghttp2's data provider, so f must never longjmp through C: the call is
- * made under R_tryCatch as cb_write's is (§27.3), and a condition is kept and
- * re-raised once the engine has unwound. The engine owns the source and calls
- * release() once. When C_zu_perform is still on the stack, release() frees
- * the function and the buffer and leaves the context, whose condition
- * C_zu_perform re-raises; when a pulled body inherited the source (`detached`,
- * full duplex over HTTP/2), release() frees all of it. */
+ * nghttp2's data provider, so f is called through guard_eval as the body
+ * callback is. The engine owns the source and calls release() once. While
+ * C_zu_perform is on the stack, it frees the context and resumes a stopped
+ * jump; when a pulled body inherited the source (`detached`, full duplex over
+ * HTTP/2), C_zu_stream_read resumes it and release() frees all of it.
+ *
+ * `keep` is list(f, token), preserved once: one R_PreserveObject() that
+ * either happens or longjmps before any C state exists (review #142). */
 typedef struct {
-    SEXP       fn;          /* preserved */
-    SEXP       caught;      /* preserved condition, or NULL */
+    SEXP       keep;        /* preserved list(fn, token) */
+    r_guard    g;
     zuh_buffer piece;       /* the last piece, valid until the next call */
     int        released, detached;
 } src_ctx;
 
 static SEXP src_body(void *data) {
-    SEXP call = PROTECT(Rf_lang1(((src_ctx *)data)->fn));
+    SEXP call = PROTECT(Rf_lang1(VECTOR_ELT(((src_ctx *)data)->keep, 0)));
     SEXP res = Rf_eval(call, R_GlobalEnv);
     UNPROTECT(1);
     return res;
 }
 
-static SEXP src_handler(SEXP cond, void *data) {
-    src_ctx *c = (src_ctx *)data;
-    if (!c->caught) { R_PreserveObject(cond); c->caught = cond; }
-    return R_NilValue;
-}
-
 static zuh_code src_next(void *ctx, const void **data, size_t *len, zuh_error *err) {
     src_ctx *c = (src_ctx *)ctx;
-    SEXP classes, res;
-    if (c->caught) return ZUH_ERR_CANCELLED;
-    classes = PROTECT(Rf_allocVector(STRSXP, 2));
-    SET_STRING_ELT(classes, 0, Rf_mkChar("error"));
-    SET_STRING_ELT(classes, 1, Rf_mkChar("interrupt"));
-    res = PROTECT(R_tryCatch(src_body, c, classes, src_handler, c, NULL, NULL));
-    if (c->caught) {
-        UNPROTECT(2);
-        zuh_error_set(err, ZUH_ERR_CANCELLED, ZUH_PHASE_WRITE,
-                      "the request body function raised a condition");
-        return ZUH_ERR_CANCELLED;
+    for (;;) {
+        SEXP res = guard_eval(&c->g, src_body, c);
+        if (c->g.jumped) {
+            zuh_error_set(err, ZUH_ERR_CANCELLED, ZUH_PHASE_WRITE,
+                          "the request body function did not return");
+            return ZUH_ERR_CANCELLED;
+        }
+        if (res == R_NilValue) { *len = 0; return ZUH_OK; }
+        if (TYPEOF(res) != RAWSXP) {
+            zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_WRITE,
+                          "the request body function must return a raw vector, or NULL at the end");
+            return ZUH_ERR_PARSE;
+        }
+        if (XLENGTH(res) > 0) {
+            c->piece.len = 0;
+            if (!zuh_buf_append(&c->piece, RAW(res), (size_t)XLENGTH(res))) {
+                zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_WRITE, "out of memory");
+                return ZUH_ERR_NOMEM;
+            }
+            *data = c->piece.data;
+            *len = c->piece.len;
+            return ZUH_OK;
+        }
+        /* An empty raw vector is a piece of nothing, not the end: ask again,
+         * in a loop rather than by recursion, which grew the C stack once per
+         * empty piece (review #157). A function that only ever returns raw()
+         * is still interruptible. */
+        (void)guard_eval(&c->g, interrupt_body, NULL);
     }
-    if (res == R_NilValue) { UNPROTECT(2); *len = 0; return ZUH_OK; }
-    if (TYPEOF(res) != RAWSXP) {
-        UNPROTECT(2);
-        zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_WRITE,
-                      "the request body function must return a raw vector, or NULL at the end");
-        return ZUH_ERR_PARSE;
-    }
-    c->piece.len = 0;
-    if (XLENGTH(res) && !zuh_buf_append(&c->piece, RAW(res), (size_t)XLENGTH(res))) {
-        UNPROTECT(2);
-        zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_WRITE, "out of memory");
-        return ZUH_ERR_NOMEM;
-    }
-    UNPROTECT(2);
-    /* An empty raw vector is a piece of nothing, not the end: ask again. */
-    if (c->piece.len == 0) return src_next(ctx, data, len, err);
-    *data = c->piece.data;
-    *len = c->piece.len;
-    return ZUH_OK;
-}
-
-static void src_free_all(src_ctx *c) {
-    if (c->caught) R_ReleaseObject(c->caught);
-    zuh_free(c);
 }
 
 static void src_release(void *ctx) {
     src_ctx *c = (src_ctx *)ctx;
     if (c->released) return;
     c->released = 1;
-    R_ReleaseObject(c->fn);
     zuh_buf_free(&c->piece);
-    if (c->detached) src_free_all(c);
+    if (c->detached) {
+        R_ReleaseObject(c->keep);
+        zuh_free(c);
+    }
+    /* Not detached: C_zu_perform is still on the stack, holds `keep`
+     * protected, and frees the context once it has read g.jumped. */
 }
 
 static SEXP cb_body(void *data) {
     cb_call *cc = (cb_call *)data;
-    SEXP call = PROTECT(Rf_lang2(cc->c->fn, cc->chunk));
-    SEXP res  = Rf_eval(call, R_GlobalEnv);
-    UNPROTECT(1);
+    SEXP chunk = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t)cc->n));
+    SEXP call;
+    SEXP res;
+    if (cc->n) memcpy(RAW(chunk), cc->d, cc->n);
+    call = PROTECT(Rf_lang2(cc->c->fn, chunk));
+    res  = Rf_eval(call, R_GlobalEnv);
+    UNPROTECT(2);
     return res;
-}
-
-static SEXP cb_handler(SEXP cond, void *data) {
-    cb_ctx *c = (cb_ctx *)data;
-    /* Preserved rather than PROTECTed: this has to survive until after the
-     * engine has unwound, which is past the end of any protection frame we
-     * could open here. */
-    if (!c->caught) { R_PreserveObject(cond); c->caught = cond; }
-    return R_NilValue;
 }
 
 static zuh_code cb_write(zuh_sink *s, const unsigned char *d, size_t n,
                         zuh_error *err) {
     cb_ctx *c = (cb_ctx *)s->ctx;
     cb_call cc;
-    SEXP classes, res;
+    SEXP res;
 
-    if (c->caught || c->stopped) return ZUH_ERR_CANCELLED;
+    if (c->g.jumped || c->stopped) return ZUH_ERR_CANCELLED;
 
-    cc.c = c;
-    cc.chunk = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t)n));
-    memcpy(RAW(cc.chunk), d, n);
-
-    /* "error" and "interrupt", NOT "condition".
-     *
-     * §27.3 says to catch a condition, but catching every condition class is
-     * too broad and actively wrong: warning() and message() signal conditions
-     * and then INVOKE A RESTART to carry on, so they never unwind past C and
-     * never threaten the socket. Swallowing them would turn an informational
-     * message inside someone's callback into a fatal transport error. Worse,
-     * testthat signals its own expectation class as a condition, so a plain
-     * expect_true() inside a callback would be caught here and re-signalled
-     * as an error — which is exactly how this was found.
-     *
-     * Errors and interrupts are the two that longjmp, and they are the two
-     * this exists to intercept. */
-    classes = PROTECT(Rf_allocVector(STRSXP, 2));
-    SET_STRING_ELT(classes, 0, Rf_mkChar("error"));
-    SET_STRING_ELT(classes, 1, Rf_mkChar("interrupt"));
-    res = R_tryCatch(cb_body, &cc, classes, cb_handler, c, NULL, NULL);
-    UNPROTECT(2);
-
-    if (c->caught) {
-        /* Not reported as a transport error: the caller gets the original
-         * condition re-signalled once the loop has unwound (§27.3). */
+    /* The chunk is allocated inside the protected call too: an allocation
+     * failure is a longjmp like any other. */
+    cc.c = c; cc.d = d; cc.n = n;
+    res = guard_eval(&c->g, cb_body, &cc);
+    if (c->g.jumped) {
+        /* Not reported as a transport error: the caller's jump is resumed
+         * once the loop has unwound (§27.3). */
         zuh_error_set(err, ZUH_ERR_CANCELLED, ZUH_PHASE_READ,
-                     "the body callback raised a condition");
+                     "the body callback did not return");
         return ZUH_ERR_CANCELLED;
     }
     /* §27.2: "the callback's return value controls flow: a sentinel return
@@ -277,6 +296,34 @@ static SEXP C_zu_pool_valid(SEXP ptr) {
 /* §26.2 counters. These exist so a test can prove a connection was REUSED
  * rather than merely that two requests both succeeded — without them, pooling
  * is indistinguishable from not pooling from R. */
+/* The configuration in C, for the tests: a setting R validated but
+ * C_zu_pool_new() dropped or garbled would otherwise pass every test, as the
+ * uninitialised keepalive fields of W21 did until valgrind (review #152). */
+static SEXP C_zu_pool_config(SEXP ptr) {
+    static const char *nm[] = {
+        "max_idle", "max_per_host", "idle_timeout_ms", "keepalive_time_ms",
+        "keepalive_timeout_ms", NULL
+    };
+    zuh_pool *p = pool_ptr_get(ptr);
+    zuh_pool_config c;
+    SEXP out, names;
+    int i, n = 0;
+    while (nm[n]) n++;
+    if (!p) return R_NilValue;
+    zuh_pool_config_get(p, &c);
+    out = PROTECT(Rf_allocVector(REALSXP, n));
+    REAL(out)[0] = (double)c.max_idle;
+    REAL(out)[1] = (double)c.max_per_host;
+    REAL(out)[2] = (double)c.idle_timeout_ms;
+    REAL(out)[3] = (double)c.keepalive_time_ms;
+    REAL(out)[4] = (double)c.keepalive_timeout_ms;
+    names = PROTECT(Rf_allocVector(STRSXP, n));
+    for (i = 0; i < n; i++) SET_STRING_ELT(names, i, Rf_mkChar(nm[i]));
+    Rf_setAttrib(out, R_NamesSymbol, names);
+    UNPROTECT(2);
+    return out;
+}
+
 static SEXP C_zu_pool_stats(SEXP ptr) {
     static const char *nm[] = {
         "idle", "hits", "misses", "discarded_stale", "discarded_expired",
@@ -567,6 +614,12 @@ static SEXP zuh_stream_tag = NULL;
 
 static void stream_finalizer(SEXP ptr) {
     zuh_open_body *b = (zuh_open_body *)R_ExternalPtrAddr(ptr);
+    /* During a session the protected slot keeps the pool alive while this
+     * runs. At exit both finalizers are onexit, and this one dereferences
+     * the pool: it relies on R running the newer weak reference first, which
+     * a body's always is, since a body is made after the pool it came from.
+     * True of R's finalizer list today; if R ever ran them oldest first, the
+     * pool would have to drain its open bodies itself (review #169). */
     if (!b) return;
     R_ClearExternalPtr(ptr);
     zuh_open_body_free(b);
@@ -726,6 +779,12 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
     zuh_code rc;
     const char *u;
     int nh = 0, i;
+    /* list(body_stream, token) for §65.7 and the callback's token. Made
+     * here, PROTECTed, before any C state exists; see r_guard. */
+    SEXP src_keep = R_NilValue, cb_token = R_NilValue;
+    /* Both are PROTECTed below on every path, so every return after that,
+     * including the "not reached" ones after a raise, which rchk cannot tell
+     * apart, unprotects two. */
 
     if (!Rf_isString(url) || Rf_length(url) != 1 || STRING_ELT(url, 0) == NA_STRING)
         Rf_error("url must be a single non-NA string");
@@ -759,19 +818,14 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
     }
 
     if (Rf_isFunction(body_stream)) {
-        /* Allocated outside R's heap and preserved: the engine, or a pulled
-         * body after this .Call returns, owns it (see src_ctx). */
-        src_ctx *sc = (src_ctx *)zuh_calloc(1, sizeof *sc);
-        if (!sc || !zuh_buf_init(&sc->piece, 0, (size_t)-1)) {
-            zuh_free(sc);
-            Rf_error("out of memory");
-        }
-        sc->fn = body_stream;
-        R_PreserveObject(body_stream);
-        spec.source.next = src_next;
-        spec.source.release = src_release;
-        spec.source.ctx = sc;
+        src_keep = PROTECT(Rf_allocVector(VECSXP, 2));
+        SET_VECTOR_ELT(src_keep, 0, body_stream);
+        SET_VECTOR_ELT(src_keep, 1, R_MakeUnwindCont());
+    } else {
+        PROTECT(src_keep);
     }
+    if (Rf_isFunction(callback)) cb_token = R_MakeUnwindCont();
+    PROTECT(cb_token);
     if (body != R_NilValue) {
         if (TYPEOF(body) != RAWSXP)
             Rf_error("body must be a raw vector; the R layer serialises everything else");
@@ -864,6 +918,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
     if (Rf_isFunction(callback)) {
         memset(&cb_sink, 0, sizeof cb_sink);
         cb.fn         = callback;
+        cb.g.token    = cb_token;
         cb_sink.write = cb_write;
         cb_sink.ctx   = &cb;
         o.sink        = &cb_sink;
@@ -871,13 +926,33 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
                STRING_ELT(path, 0) != NA_STRING) {
         const char *dest = Rf_translateCharUTF8(STRING_ELT(path, 0));
         o.sink = zuh_sink_file(dest, &e);
-        if (!o.sink) { raise_zu_error(&e, u); return R_NilValue; }
+        if (!o.sink) { raise_zu_error(&e, u); UNPROTECT(2); return R_NilValue; }
     }
 
     /* §25.1: a checkpoint at most one tick apart, and never inside a blocking
      * call. 100 ms is the design's ceiling. */
     o.tick     = r_interrupt_tick;
     o.tick_ctx = NULL;       /* never per-request state in a pooled object */
+
+    /* §65.7. Last, so nothing above can longjmp with it allocated (review
+     * #142): from here to the engine call nothing raises. Outside R's heap,
+     * because a pulled body that inherits it outlives this .Call. */
+    if (src_keep != R_NilValue) {
+        src_ctx *sc;
+        R_PreserveObject(src_keep);
+        sc = (src_ctx *)zuh_calloc(1, sizeof *sc);
+        if (!sc || !zuh_buf_init(&sc->piece, 0, (size_t)-1)) {
+            zuh_free(sc);
+            R_ReleaseObject(src_keep);
+            if (o.sink && o.sink != &cb_sink) { zuh_sink_abort(o.sink); zuh_sink_free(o.sink); }
+            Rf_error("out of memory");
+        }
+        sc->keep = src_keep;
+        sc->g.token = VECTOR_ELT(src_keep, 1);
+        spec.source.next = src_next;
+        spec.source.release = src_release;
+        spec.source.ctx = sc;
+    }
 
     zuh_error_clear(&e);
     {
@@ -895,41 +970,29 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
         if (!sc->released) {
             sc->detached = 1;           /* the pulled body frees it */
         } else {
-            SEXP cond = sc->caught;
-            sc->caught = NULL;
-            src_free_all(sc);
+            int jumped = sc->g.jumped;
+            R_ReleaseObject(sc->keep);  /* still PROTECTed by this frame */
+            zuh_free(sc);
             spec.source.ctx = NULL;
-            if (cond) {
-                SEXP call;
+            if (jumped) {
                 tick_release(&tick);
                 if (o.sink && o.sink != &cb_sink) { zuh_sink_abort(o.sink); zuh_sink_free(o.sink); }
                 zuh_result_free(&r);
-                PROTECT(cond);
-                R_ReleaseObject(cond);
-                call = PROTECT(Rf_lang2(Rf_install("stop"), cond));
-                Rf_eval(call, R_GlobalEnv);
-                UNPROTECT(2);
-                return R_NilValue;   /* not reached */
+                R_ContinueUnwind(VECTOR_ELT(src_keep, 1));
+                UNPROTECT(2); return R_NilValue;   /* not reached */
             }
         }
     }
 
     /* §27.3: the loop has unwound and every C resource it held is released,
-     * so this is the first point at which raising is safe. Re-signal the
-     * USER's condition — wrapping it here would turn "object 'x' not found"
-     * inside their callback into a mysterious transport failure. */
-    if (cb.caught) {
-        SEXP cond = cb.caught;
-        SEXP call;
+     * so this is the first point at which the jump can go on. It is the
+     * USER's jump, resumed as it was: wrapping it would turn "object 'x' not
+     * found" inside their callback into a mysterious transport failure. */
+    if (cb.g.jumped) {
         tick_release(&tick);
-        cb.caught = NULL;
         zuh_result_free(&r);
-        PROTECT(cond);
-        R_ReleaseObject(cond);
-        call = PROTECT(Rf_lang2(Rf_install("stop"), cond));
-        Rf_eval(call, R_GlobalEnv);
-        UNPROTECT(2);
-        return R_NilValue;   /* not reached */
+        R_ContinueUnwind(cb_token);
+        UNPROTECT(2); return R_NilValue;   /* not reached */
     }
     if (o.sink && o.sink != &cb_sink) {
         /* Commit or discard, then release. A failure to rename is a failure
@@ -959,7 +1022,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
             call = PROTECT(Rf_lang2(Rf_install("stop"), cond));
             Rf_eval(call, R_GlobalEnv);
             UNPROTECT(2);
-            return R_NilValue;   /* not reached */
+            UNPROTECT(2); return R_NilValue;   /* not reached */
         }
         tick_release(&tick);
         if (rc == ZUH_ERR_CANCELLED) {
@@ -968,7 +1031,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
             snprintf(err2.message, sizeof err2.message,
                      "request interrupted by the user");
             raise_zu_error(&err2, u);
-            return R_NilValue;   /* not reached */
+            UNPROTECT(2); return R_NilValue;   /* not reached */
         }
         /* No C resources are live here: zuh_engine_get frees everything it
          * owns before returning non-OK, which is what makes it safe to raise
@@ -984,7 +1047,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
                          zuh_code_class(rc));
         }
         raise_zu_error(&e, u);
-        return R_NilValue;   /* not reached */
+        UNPROTECT(2); return R_NilValue;   /* not reached */
     }
 
     /* The continuation token must be NULL, not R_NilValue. R checks
@@ -996,7 +1059,9 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
         ctx.r = &r;
         ctx.t = o.trace;
         ctx.pool = pool;
-        return R_UnwindProtect(build_response, &ctx, free_result_on_unwind, &ctx, NULL);
+        SEXP out = R_UnwindProtect(build_response, &ctx, free_result_on_unwind, &ctx, NULL);
+        UNPROTECT(2);   /* src_keep, cb_token */
+        return out;
     }
 }
 
@@ -1223,7 +1288,23 @@ static SEXP C_zu_stream_read(SEXP ptr, SEXP n, SEXP url) {
     const char *u = (Rf_isString(url) && Rf_length(url) == 1)
                         ? Rf_translateCharUTF8(STRING_ELT(url, 0)) : NULL;
     SEXP out;
-    if (!b) Rf_error("this response's body is no longer readable");
+    if (!b) {
+        /* §34.1, as every other read failure: after saveRDS()/readRDS() the
+         * pointer comes back NULL, and the connection is gone. */
+        zuh_error_clear(&e);
+        zuh_error_set(&e, ZUH_ERR_IO, ZUH_PHASE_READ,
+                      "this response's body is no longer readable: its connection "
+                      "did not survive serialization, or the response was edited");
+        raise_zu_error(&e, u);
+    }
+    if (zuh_open_body_busy(b)) {
+        /* §65.7: the request body function is running inside nghttp2,
+         * which is not re-entrant (review #155). */
+        zuh_error_clear(&e);
+        zuh_error_set(&e, ZUH_ERR_IO, ZUH_PHASE_READ,
+                      "a response cannot be read from inside its own request body function");
+        raise_zu_error(&e, u);
+    }
     if (!(want >= 1)) want = 1;
     if (want > 64.0 * 1024 * 1024) want = 64.0 * 1024 * 1024;
     if (!zuh_buf_init(&got, 0, (size_t)-1)) Rf_error("out of memory");
@@ -1238,16 +1319,11 @@ static SEXP C_zu_stream_read(SEXP ptr, SEXP n, SEXP url) {
         src_ctx *sc = (src_ctx *)zuh_open_body_source_ctx(b);
         zuh_buf_free(&got);
         /* §65.7: the request body function, still running under a full
-         * duplex stream, raised a condition: that is the one to see. */
-        if (sc && sc->caught) {
-            SEXP cond = PROTECT(sc->caught);
-            SEXP call;
-            R_ReleaseObject(cond);
-            sc->caught = NULL;
+         * duplex stream, did not return: its jump is the one to resume. The
+         * token stays in sc->keep, preserved, until the body is freed. */
+        if (sc && sc->g.jumped) {
             tick_release(&tick);
-            call = PROTECT(Rf_lang2(Rf_install("stop"), cond));
-            Rf_eval(call, R_GlobalEnv);
-            UNPROTECT(2);
+            R_ContinueUnwind(sc->g.token);
             return R_NilValue;
         }
         if (rc == ZUH_ERR_CANCELLED && tick.caught &&
@@ -1286,14 +1362,23 @@ static SEXP C_zu_stream_read(SEXP ptr, SEXP n, SEXP url) {
 
 static SEXP C_zu_stream_abort(SEXP ptr) {
     zuh_open_body *b = stream_ptr_get(ptr);
+    if (zuh_open_body_busy(b)) {
+        zuh_error e;
+        zuh_error_clear(&e);
+        zuh_error_set(&e, ZUH_ERR_IO, ZUH_PHASE_READ,
+                      "a response cannot be aborted from inside its own request body function");
+        raise_zu_error(&e, NULL);
+    }
     if (b) zuh_open_body_abort(b);
     return R_NilValue;
 }
 
-/* NULL until the body has been read to its end: trailers come after it. */
+/* D-98: NULL until the body has been read to a clean end, since trailers
+ * come after it; still NULL after an abort or a failure, whose trailers are
+ * unknown. An empty vector means the stream ended with none. */
 static SEXP C_zu_stream_trailers(SEXP ptr) {
     zuh_open_body *b = stream_ptr_get(ptr);
-    if (!b || !zuh_open_body_done(b)) return R_NilValue;
+    if (!b || !zuh_open_body_ended_clean(b)) return R_NilValue;
     return headers_to_r(zuh_open_body_trailers(b));
 }
 
@@ -1318,6 +1403,7 @@ static const R_CallMethodDef call_methods[] = {
     {"C_zu_pool_new",          (DL_FUNC) &C_zu_pool_new,          5},
     {"C_zu_pool_valid",        (DL_FUNC) &C_zu_pool_valid,        1},
     {"C_zu_pool_stats",        (DL_FUNC) &C_zu_pool_stats,        1},
+    {"C_zu_pool_config",       (DL_FUNC) &C_zu_pool_config,       1},
     {"C_zu_pool_clear",        (DL_FUNC) &C_zu_pool_clear,        1},
     {"C_zu_tls_backend",       (DL_FUNC) &C_zu_tls_backend,       0},
     {"C_zu_tls_check",         (DL_FUNC) &C_zu_tls_check,         1},

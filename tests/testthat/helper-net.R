@@ -189,11 +189,7 @@ mock_client <- function(
 ) {
   zu_client(
     transport = zu_mock_transport(function(req) {
-      r <- zu_response(status, body = body)
-      if (!is.null(trailers)) {
-        r$trailers <- trailers
-      }
-      r
+      zu_response(status, body = body, trailers = trailers)
     })
   )
 }
@@ -217,4 +213,34 @@ pattern_body <- function(total, piece) {
   }
   attr(f, "calls") <- function() n_calls
   f
+}
+
+# Open file descriptors of this process, or NA where they cannot be listed
+# (Windows). A leaked connection shows as one more; tests compare counts
+# around a loop, so the descriptors R itself holds cancel out.
+open_fds <- function() {
+  for (d in c("/proc/self/fd", "/dev/fd")) {
+    if (dir.exists(d)) {
+      return(length(list.files(d)))
+    }
+  }
+  NA_integer_
+}
+
+# A local app that answers 503 to its first request on /flaky and 200 after,
+# for the retry-abort path of a streamed response (#151). One per test: the
+# counter lives in the app's process.
+local_flaky_app <- function(.local_envir = parent.frame()) {
+  skip_if_not_installed("webfakes")
+  app <- webfakes::new_app()
+  app$locals$n <- 0L
+  app$get("/flaky", function(req, res) {
+    req$app$locals$n <- req$app$locals$n + 1L
+    if (req$app$locals$n == 1L) {
+      res$set_status(503L)$send(strrep("x", 50000))
+    } else {
+      res$set_status(200L)$send("ok")
+    }
+  })
+  webfakes::local_app_process(app, .local_envir = .local_envir)
 }

@@ -38,7 +38,12 @@ large for that, see \code{zu_body_stream()}. Named \code{file} as in \code{\link
 
 \item{f}{For \code{zu_body_stream()}, a function of no arguments that returns
 the next piece of the body as a raw vector each time it is called, and
-\code{NULL} at the end.}
+\code{NULL} at the end. It is called for one request: a function that has
+returned \code{NULL} has nothing left, so performing the same request again
+sends whatever it returns then, usually an empty body. Build the request
+afresh, with a new function, for each attempt you make. Inside \code{f}, the
+rules of a callback hold (§27.4): it cannot make a request on the client
+sending it, or read its own response.}
 }
 \value{
 A \code{zu_request}.

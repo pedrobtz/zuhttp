@@ -18,9 +18,7 @@ zu_retry(
 }
 \arguments{
 \item{attempts}{Total attempts \emph{including the first}, so \code{attempts = 1}
-means no retrying and \code{attempts = 3} means at most two retries. (An
-earlier draft of the design used \code{attempts} and \code{max_attempts} with
-meanings differing by one; there is one name and one meaning.)}
+means no retrying and \code{attempts = 3} means at most two retries.}
 
 \item{backoff}{\code{"exponential"} or \code{"constant"}.}
 

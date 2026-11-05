@@ -12,7 +12,8 @@
 #' store decides trust, whether revocation is checked, what the default client
 #' is configured to do, and what the environment says about proxies.
 #'
-#' @return A `zu_info` list, printed as a report. Fields: `version`, `http`,
+#' @return A `zu_info` list, printed as a report. Fields: `version`, `http`
+#'   (the protocol versions this build speaks, `"HTTP/1.1"` and `"HTTP/2"`),
 #'   `tls_backend`, `trust`, `tls_available`, `revocation_default`,
 #'   `tls_capabilities` (the [zu_tls()] settings this backend honours, from
 #'   `"pins"`, `"tls13"`, `"ca_file"`, `"ca_extra"` and `"revocation"`; the
@@ -80,6 +81,7 @@ default_client_report <- function(cl) {
     verify = cl$verify %||% zu_defaults()$verify,
     check = cl$check %||% zu_defaults()$check,
     retry = (cl$retry %||% zu_defaults()$retry)$attempts,
+    http2 = cl$http2 %||% zu_defaults()$http2,
     pool = if (is.null(cl$pool)) {
       "disabled"
     } else {
@@ -136,6 +138,7 @@ print.zu_info <- function(x, ...) {
   f("  verify:", if (isTRUE(d$verify)) "yes" else "NO")
   f("  check:", if (isTRUE(d$check)) "4xx/5xx raise" else "statuses returned")
   f("  retry:", if (d$retry <= 1L) "off" else paste(d$retry, "attempts"))
+  f("  http2:", d$http2)
   f("  pool:", d$pool)
   f("  proxy:", d$proxy)
 

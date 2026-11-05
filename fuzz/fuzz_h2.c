@@ -16,7 +16,10 @@
  * assert()s (compiled in here, NDEBUG undefined):
  *   - the engine terminates (the mock never blocks; EOF ends every read);
  *   - a body delivered to the caller never exceeds max_body;
- *   - a response's header block never exceeds max_header_bytes (§40);
+ *   - a response's header block, and its trailer block (§65.3) whether
+ *     buffered or pulled, never exceeds max_header_bytes (§40);
+ *   - a streamed request body's source (§65.7) is released exactly once
+ *     per request, by the engine or by the pulled body that inherited it;
  *   - every allocation the client made for an input is freed by the end of
  *     it, nghttp2's included, since it allocates through zuh_alloc.
  */
@@ -66,6 +69,31 @@ static zuh_code dial(void *ctx, const char *host, uint16_t port,
     return ZUH_OK;
 }
 
+/* §65.7: a request body from a function, three pieces, failing at the
+ * second when asked to. */
+typedef struct { int sent, fail, released; } gen;
+static zuh_code gen_next(void *ctx, const void **out, size_t *len, zuh_error *err) {
+    gen *g = (gen *)ctx;
+    if (g->fail && g->sent == 1) {
+        zuh_error_set(err, ZUH_ERR_CANCELLED, ZUH_PHASE_WRITE, "fuzz: the body function failed");
+        return ZUH_ERR_CANCELLED;
+    }
+    if (g->sent == 3) { *len = 0; return ZUH_OK; }
+    g->sent++;
+    *out = "chunk";
+    *len = 5;
+    return ZUH_OK;
+}
+static void gen_release(void *ctx) { ((gen *)ctx)->released++; }
+
+static size_t block_bytes(const zuh_headers *h) {
+    size_t j, bytes = 0;
+    const char *nm, *v;
+    for (j = 0; h && zuh_headers_at(h, j, &nm, &v); j++)
+        bytes += strlen(nm) + strlen(v) + 32;
+    return bytes;
+}
+
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     static const char *hn[] = { "Authorization", "TE" };
     static const char *hv[] = { "Bearer fuzz-secret", "trailers" };
@@ -75,6 +103,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     zuh_pool *pool;
     zuh_result r;
     zuh_error e;
+    gen g;
     uint8_t sel;
     size_t i, start;
     int k;
@@ -98,8 +127,13 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
     memset(&spec, 0, sizeof spec);
     spec.header_names = hn; spec.header_values = hv; spec.n_headers = 2;
-    if (sel & 0x4) { spec.method = "POST"; spec.body = "payload"; spec.body_len = 7; }
-    if (sel & 0x8) spec.method = "HEAD";
+    if ((sel & 0xC) == 0xC) {
+        /* Both bits: a streamed body (§65.7), failing when bit 0 is set. */
+        spec.method = "POST";
+    } else {
+        if (sel & 0x4) { spec.method = "POST"; spec.body = "payload"; spec.body_len = 7; }
+        if (sel & 0x8) spec.method = "HEAD";
+    }
 
     pool = zuh_pool_new(NULL);
     zuh_get_opts_init(&o);
@@ -119,9 +153,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     for (k = 0; k < 2; k++) {
         zuh_result_init(&r);
         zuh_error_clear(&e);
+        memset(&g, 0, sizeof g);
+        if ((sel & 0xC) == 0xC) {
+            g.fail = (sel & 0x1) != 0;
+            spec.source.next = gen_next; spec.source.release = gen_release; spec.source.ctx = &g;
+        }
         if (zuh_engine_perform(&r, "http://origin.test/start", &spec, &o, &e) == ZUH_OK) {
-            size_t j, bytes = 0;
-            const char *nm, *v;
             if (r.open) {
                 zuh_buffer got;
                 int reads = 0;
@@ -133,13 +170,16 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
                     if (got.len > MAX_BODY) abort();
                     zuh_buf_free(&got);
                 }
+                if (block_bytes(zuh_open_body_trailers(r.open)) > ZUH_DEFAULT_MAX_HEADER_BYTES)
+                    abort();
             }
             if (r.body.len > MAX_BODY) abort();
-            for (j = 0; zuh_headers_at(&r.headers, j, &nm, &v); j++)
-                bytes += strlen(nm) + strlen(v) + 32;
-            if (bytes > ZUH_DEFAULT_MAX_HEADER_BYTES) abort();
+            if (block_bytes(&r.headers) > ZUH_DEFAULT_MAX_HEADER_BYTES) abort();
+            if (block_bytes(&r.trailers) > ZUH_DEFAULT_MAX_HEADER_BYTES) abort();
             zuh_result_free(&r);
         }
+        if (spec.source.ctx && g.released != 1) abort();
+        memset(&spec.source, 0, sizeof spec.source);
     }
     zuh_pool_free(pool);
     zuh_alloc_stats_get(&after);

@@ -10,8 +10,9 @@ zu_body_rewindable(req)
 \item{req}{A \code{zu_request}.}
 }
 \value{
-A logical. \code{TRUE} for an absent body and for any in-memory body,
-which is every body this version can construct.
+A logical. \code{TRUE} for an absent body and for any in-memory body;
+\code{FALSE} for a body from \code{\link[=zu_body_stream]{zu_body_stream()}}, which a function produces
+once and cannot produce again.
 }
 \description{
 §28.2 makes rewindability a property of the body rather than a convention,

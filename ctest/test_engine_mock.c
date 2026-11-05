@@ -40,6 +40,9 @@ typedef struct {
     zuh_buffer sent[MAXC];
     int      exhausted[MAXC];
     zuh_mock_step steps[MAXC][2];   /* the mock keeps a pointer to these */
+    /* A write carrying these bytes fails, as on a connection the peer reset
+     * mid-request (#153). NULL: never. */
+    const char *fail_on[MAXC];
 } dialer;
 
 typedef struct { zuh_stream *inner; dialer *d; size_t idx; } tap_impl;
@@ -49,7 +52,15 @@ static zuh_ssize tap_read(zuh_stream *s, void *b, size_t n, zuh_deadline dl, zuh
 }
 static zuh_ssize tap_write(zuh_stream *s, const void *b, size_t n, zuh_deadline dl, zuh_error *e) {
     tap_impl *t = (tap_impl *)s->impl;
-    zuh_ssize w = zuh_stream_write(t->inner, b, n, dl, e);
+    const char *bad = t->d->fail_on[t->idx];
+    zuh_ssize w;
+    size_t k, bl = bad ? strlen(bad) : 0;
+    for (k = 0; bad && k + bl <= n; k++) if (memcmp((const char *)b + k, bad, bl) == 0) break;
+    if (bad && k + bl <= n) {
+        zuh_error_set(e, ZUH_ERR_IO, ZUH_PHASE_WRITE, "mock: connection reset");
+        return -1;
+    }
+    w = zuh_stream_write(t->inner, b, n, dl, e);
     if (w > 0) zuh_buf_append(&t->d->sent[t->idx], b, (size_t)w);
     return w;
 }
@@ -193,8 +204,11 @@ static const char **h1_gen_pieces;
 static zuh_code h1_gen_next(void *ctx, const void **data, size_t *len, zuh_error *err) {
     struct { int i, released; } *g = ctx;
     const char *p = h1_gen_pieces[g->i];
-    (void)err;
     if (!p) { *len = 0; return ZUH_OK; }
+    if (strcmp(p, "FAIL") == 0) {                 /* #153: the function fails */
+        zuh_error_set(err, ZUH_ERR_CANCELLED, ZUH_PHASE_WRITE, "the generator failed");
+        return ZUH_ERR_CANCELLED;
+    }
     g->i++;
     *data = p;
     *len = strlen(p);
@@ -267,6 +281,60 @@ void suite_engine_mock(void) {
         ZUH_CHECK(has(sent(&d, 0), "\r\n\r\n2\r\nab\r\n3\r\ncde\r\n0\r\n\r\n"));
         ZUH_CHECK_EQ_INT(g.released, 1);
         if (rc == ZUH_OK) zuh_result_free(&r);
+        dialer_free(&d);
+    }
+
+    ZUH_CASE("§65.7, D-47 over HTTP/1.1: a failing body function ends the request, never pooled (#153)");
+    {
+        static const char *pieces[] = { "ab", "FAIL", NULL };
+        struct { int i, released; } g = { 0, 0 };
+        zuh_req_spec spec;
+        zuh_pool *pool = zuh_pool_new(NULL);
+        conn_script s[] = {
+            { "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok", 0, 0, 1, NULL },
+            { "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok", 0, 0, 1, NULL },
+        };
+        memset(&spec, 0, sizeof spec);
+        spec.method = "POST";
+        spec.source.next = h1_gen_next; spec.source.release = h1_gen_release;
+        spec.source.ctx = &g;
+        h1_gen_pieces = pieces;
+        dialer_init(&d, s, 2); opts_for(&o, &d); o.pool = pool;
+        rc = zuh_engine_perform(&r, "http://example.test/up", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_ERR_CANCELLED);
+        ZUH_CHECK(has(e.message, "generator"));
+        ZUH_CHECK_EQ_INT(g.released, 1);
+        ZUH_CHECK_EQ_INT(zuh_pool_idle_count(pool), 0);
+        rc = zuh_engine_get(&r, "http://example.test/next", &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) { ZUH_CHECK_EQ_INT(r.reused_connection, 0); zuh_result_free(&r); }
+        ZUH_CHECK_EQ_INT(d.next, 2);
+        zuh_pool_free(pool);
+        dialer_free(&d);
+    }
+
+    ZUH_CASE("§65.7 over HTTP/1.1: a chunk the connection cannot take is that error, never pooled (#153)");
+    {
+        static const char *pieces[] = { "ab", "cdefghij", NULL };
+        struct { int i, released; } g = { 0, 0 };
+        zuh_req_spec spec;
+        zuh_pool *pool = zuh_pool_new(NULL);
+        conn_script s[] = {
+            { "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok", 0, 0, 1, NULL },
+        };
+        memset(&spec, 0, sizeof spec);
+        spec.method = "POST";
+        spec.source.next = h1_gen_next; spec.source.release = h1_gen_release;
+        spec.source.ctx = &g;
+        h1_gen_pieces = pieces;
+        dialer_init(&d, s, 1); opts_for(&o, &d); o.pool = pool;
+        /* The head and the first chunk go out; the second does not. */
+        d.fail_on[0] = "cdefghij";
+        rc = zuh_engine_perform(&r, "http://example.test/up", &spec, &o, &e);
+        ZUH_CHECK(rc != ZUH_OK);
+        ZUH_CHECK_EQ_INT(g.released, 1);
+        ZUH_CHECK_EQ_INT(zuh_pool_idle_count(pool), 0);
+        zuh_pool_free(pool);
         dialer_free(&d);
     }
 

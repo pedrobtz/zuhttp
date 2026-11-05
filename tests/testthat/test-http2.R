@@ -90,13 +90,43 @@ test_that("§65.1: http2 = \"required\" refuses a server that only speaks HTTP/1
     zu_get_badssl("https://badssl.com/", client = api),
     error = function(e) e
   )
-  if (inherits(e, "zu_response")) {
+  # Skipped only when the host has really moved to h2. A response over
+  # HTTP/1.1 is the very failure this test exists for, and fails it (#138).
+  if (
+    inherits(e, "zu_response") &&
+      identical(zu_resp_connection(e)$http_version, "HTTP/2")
+  ) {
     skip(
       "badssl.com now negotiates h2; the refusal needs an HTTP/1.1-only host"
     )
   }
   expect_s3_class(e, "zu_connect_error")
   expect_match(conditionMessage(e), "HTTP/2 is required")
+})
+
+test_that("§65.1: http2 = \"required\" refuses a TLS server without h2, offline (#138)", {
+  skip_unless_local_tls()
+  # openssl s_server -www negotiates no ALPN at all, so the handshake
+  # completes and selects nothing: the refusal comes after TLS, before any
+  # request byte, and is the same on every backend that offers ALPN.
+  fx <- tls_fixture()
+  with_tls_server("good", function(url) {
+    api <- zu_client(
+      http2 = "required",
+      tls = zu_tls(ca_file = fx$ca),
+      pool = NULL,
+      timeout = 10
+    )
+    expect_error(
+      zu_get(url, client = api),
+      class = "zu_connect_error",
+      regexp = "HTTP/2 is required"
+    )
+    # The same server answers over HTTP/1.1 when HTTP/2 is not required, so
+    # the refusal is the policy, not a broken server.
+    r <- zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10)
+    expect_identical(zu_resp_status(r), 200L)
+  })
 })
 
 # --- a local server whose HTTP/2 is not nghttp2's ------------------------------
@@ -186,7 +216,8 @@ test_that("§65.4: a streamed body is read in the caller's pieces, then reused",
     client = api,
     stream = TRUE
   )
-  expect_length(zu_resp_raw(r), 0L)
+  # No body is held: the accessors refuse rather than return nothing (#144).
+  expect_error(zu_resp_raw(r), "zu_resp_read")
   total <- 0
   pieces <- 0L
   repeat {
@@ -264,12 +295,17 @@ test_that("§65.5: a callback returning FALSE over HTTP/2 also keeps the connect
   skip_unless_h2_server()
   base <- Sys.getenv("ZU_H2_TEST_SERVER")
   api <- zu_client(http2 = "required", proxy = FALSE)
+  calls <- 0L
   r <- zu_get(
     paste0(base, "/bytes?n=", sprintf("%.0f", 50e6)),
     client = api,
-    callback = function(x) FALSE
+    callback = function(x) {
+      calls <<- calls + 1L
+      FALSE
+    }
   )
   expect_identical(zu_resp_status(r), 200L)
+  expect_identical(calls, 1L) # stopped at the first chunk, not after
   hits <- zu_pool_stats(api)[["hits"]]
   zu_get(paste0(base, "/get"), client = api)
   expect_identical(zu_pool_stats(api)[["hits"]], hits + 1L)
@@ -305,12 +341,6 @@ test_that("§65.4: an interrupt inside zu_resp_read() returns within the bound",
   skip_on_os("windows")
   skip_under_gctorture()
   base <- Sys.getenv("ZU_H2_TEST_SERVER")
-  fds <- function() {
-    if (!dir.exists("/proc/self/fd")) {
-      return(NA_integer_)
-    }
-    length(list.files("/proc/self/fd"))
-  }
   api <- zu_client(http2 = "required", proxy = FALSE, timeout = 60)
   r <- zu_perform(
     zu_request("GET", paste0(base, "/slow")),
@@ -318,7 +348,7 @@ test_that("§65.4: an interrupt inside zu_resp_read() returns within the bound",
     stream = TRUE
   )
   expect_identical(rawToChar(zu_resp_read(r)), "slow")
-  before <- fds()
+  before <- open_fds()
   system(sprintf(
     "sh -c 'sleep 0.5; kill -INT %d' >/dev/null 2>&1 &",
     Sys.getpid()
@@ -331,9 +361,11 @@ test_that("§65.4: an interrupt inside zu_resp_read() returns within the bound",
   )
   elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
   expect_s3_class(e, "zu_interrupted_error")
-  expect_lt(elapsed, 0.5 + 0.2 + 0.3)
+  # The signal lands at 0.5 s; §25.1's tick is 100 ms; 0.15 s of slack for
+  # the shell and a loaded runner. It was 0.5 + 0.2 + 0.3 before #163.
+  expect_lt(elapsed, 0.5 + 0.1 + 0.15)
   # The interrupted body closed its connection: one descriptor fewer.
-  if (!is.na(before)) expect_lt(fds(), before)
+  if (!is.na(before)) expect_lt(open_fds(), before)
 })
 
 test_that("§51.3, §65.4: 1 GiB streamed in 1 MiB pieces stays under 16 MB of RSS", {
@@ -539,12 +571,15 @@ test_that("§65.7: an error inside the body function is re-raised, and the conne
 
 test_that("§28.2: a retry with a streamed body is refused before the first attempt", {
   api <- zu_client(retry = zu_retry(attempts = 3), proxy = FALSE)
+  f <- pattern_body(10, 10)
   req <- zu_body_stream(
     # PUT, which is idempotent and so would be retried; a POST never is.
     zu_request("PUT", "http://127.0.0.1:9/x"),
-    pattern_body(10, 10)
+    f
   )
   expect_error(zu_perform(req, client = api), class = "zu_body_not_replayable")
+  # Before the first attempt: the function was never asked for a piece.
+  expect_identical(attr(f, "calls")(), 0L)
 })
 
 test_that("§65.7: a 100 MB body from a 1 MB generator stays under 16 MB of RSS", {
@@ -593,6 +628,47 @@ test_that("§65.7: a 100 MB body from a 1 MB generator stays under 16 MB of RSS"
     delta / 1024^2
   ))
   expect_lt(delta, 16 * 1024^2)
+})
+
+test_that("§65.7: a body function cannot read or abort its own response (#155)", {
+  skip_unless_grpc_server()
+  # Full duplex: the function runs inside nghttp2's data provider while the
+  # response is read, and nghttp2 is not re-entrant. Reading the same
+  # response from inside it is refused, and the refusal reaches the caller.
+  # 200 messages of 32 KiB, past the server's window, so the function is
+  # still being called once the response is being read.
+  # StreamingOutputCallRequest { response_parameters: [{size: 1000}],
+  #   payload: Payload { body: 32 KiB } }: the server answers each message
+  # as it arrives, so the response headers come before the body ends.
+  msg <- grpc_frame(c(
+    as.raw(c(0x12, 0x03, 0x08, 0xe8, 0x07)),
+    as.raw(c(0x1a, 0x84, 0x80, 0x02, 0x12, 0x80, 0x80, 0x02)),
+    as.raw(rep(7, 32768))
+  ))
+  st <- new.env()
+  st$n <- 0L
+  f <- function() {
+    st$n <- st$n + 1L
+    if (!is.null(st$r)) {
+      zu_resp_read(st$r)
+    }
+    if (st$n > 200L) NULL else msg
+  }
+  st$r <- zu_perform(
+    zu_body_stream(
+      zu_request("POST", "/grpc.testing.TestService/FullDuplexCall"),
+      f
+    ),
+    client = grpc_client(),
+    stream = TRUE
+  )
+  expect_error(
+    while (length(zu_resp_read(st$r)) > 0) {
+      NULL
+    },
+    class = "zu_io_error",
+    regexp = "inside its own request body function"
+  )
 })
 
 test_that("§65.7: full duplex: the response is read while the body is still being sent", {

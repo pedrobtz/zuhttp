@@ -198,7 +198,8 @@ test_that("zu_verbose() narrates the phases when the request is traced", {
   expect_true(any(grepl("tls.done", lines, fixed = TRUE)))
   expect_true(any(grepl("headers.received", lines, fixed = TRUE)))
   # Still the HTTP view as well; the trace adds to it rather than replacing it.
-  expect_true(any(grepl("< HTTP 200", lines, fixed = TRUE)))
+  # The protocol version leads the status line since #171: "< HTTP/2 200".
+  expect_true(any(grepl("^< HTTP/[0-9.]+ 200", lines)))
 })
 
 test_that("zu_verbose() without a trace shows the HTTP layer only", {

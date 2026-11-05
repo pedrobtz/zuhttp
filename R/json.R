@@ -12,8 +12,10 @@ the_json <- new.env(parent = emptyenv())
 #' anything else, `jsonlite` included.
 #'
 #' @param encode A function `(x, ...)` returning a single JSON string. Must
-#'   accept `...`, since request-level options are forwarded to it.
-#' @param decode A function `(txt, ...)` returning an R object.
+#'   accept `...`, since request-level options are forwarded to it. `NULL`
+#'   restores `zujson`'s.
+#' @param decode A function `(txt, ...)` returning an R object. `NULL`
+#'   restores `zujson`'s.
 #' @return The previous backend, invisibly.
 #' @export
 #' @examples

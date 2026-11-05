@@ -78,7 +78,9 @@ typedef struct {
     const void        *body;
     size_t             body_len;
     /* §65.7: when set, the body comes from here instead, a piece at a time,
-     * as the peer's window allows. Borrowed until the stream ends. */
+     * as the peer's window allows. Borrowed until the stream ends. `body` is
+     * borrowed too, for as long as the caller's buffer lives; a pulled
+     * response that outlives it calls zuh_h2_own_body() first. */
     const zuh_body_source *source;
 } zuh_h2_request;
 
@@ -111,9 +113,23 @@ zuh_code zuh_h2_body_step(zuh_stream *conn, zuh_body_pipe *pipe, int *done,
  * reusable (zuh_h2_reusable()) unless sending the reset failed. */
 void zuh_h2_cancel(zuh_stream *conn, zuh_deadline dl);
 
-/* §65.6: PING the peer and wait up to `timeout_ms` for the ACK. 1 when it
+/* §65.6: PING the peer and wait until `dl` for the ACK. 1 when it
  * answered, 0 when it did not or the connection is unusable. */
-int  zuh_h2_ping(zuh_stream *conn, long timeout_ms);
+int  zuh_h2_ping(zuh_stream *conn, zuh_deadline dl);
+
+/* §65.7: the in-memory request body is borrowed for the call that sent it.
+ * When a pulled response (§65.4) takes the connection while that body is
+ * still going out, the caller's buffer is about to go away: copy the unsent
+ * part into the connection. A no-op when nothing is left to send. */
+zuh_code zuh_h2_own_body(zuh_stream *conn, zuh_error *err);
+
+/* Request body bytes sent on the open stream so far. When the response
+ * comes first (§65.7), the rest follows while it is read. */
+uint64_t zuh_h2_body_sent(const zuh_stream *conn);
+
+/* Is the request body function of the open stream running now? Then the
+ * session is inside nghttp2_session_mem_send2(), and nothing may drive it. */
+int  zuh_h2_in_source(const zuh_stream *conn);
 
 /* Milliseconds since the last bytes in either direction; -1 when `conn` is
  * not an HTTP/2 connection. */

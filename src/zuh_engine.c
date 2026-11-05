@@ -413,7 +413,7 @@ static zuh_code open_stream(zuh_stream **out, const zuh_uri *u,
         zuh_pool_key key;
         zuh_stream *reused = NULL;
         if (!zuh_engine_pool_key(&key, u, o, px)) return ZUH_ERR_NOMEM;
-        reused = zuh_pool_acquire(o->pool, &key);
+        reused = zuh_pool_acquire_by(o->pool, &key, dl);
         zuh_pool_key_free(&key);
         if (reused) {
             char ip[64];
@@ -721,8 +721,12 @@ static zuh_code open_body_new(zuh_open_body **out, zuh_stream *s, int h2,
                               zuh_headers *h, int minor, uint64_t cap, int no_decode,
                               const zuh_get_opts *o, const zuh_uri *u,
                               const zuh_proxy *px, zuh_error *err) {
-    zuh_open_body *b = (zuh_open_body *)zuh_calloc(1, sizeof *b);
+    zuh_open_body *b;
     zuh_code rc;
+    /* §65.7: the response can arrive before the in-memory request body has
+     * all gone out, and the caller's buffer does not outlive this call. */
+    if (h2 && (rc = zuh_h2_own_body(s, err)) != ZUH_OK) return rc;
+    b = (zuh_open_body *)zuh_calloc(1, sizeof *b);
     if (!b || !zuh_buf_init(&b->staged, 0, (size_t)-1)) {
         zuh_free(b);
         zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_READ, "out of memory");
@@ -815,6 +819,14 @@ int zuh_open_body_done(const zuh_open_body *b) {
     /* Ended means the wire is done; done means the caller has had it all. */
     return !b || b->aborted || b->failed ||
            (b->ended && b->staged_off == b->staged.len);
+}
+
+int zuh_open_body_ended_clean(const zuh_open_body *b) {
+    return b && !b->aborted && !b->failed && b->ended && b->staged_off == b->staged.len;
+}
+
+int zuh_open_body_busy(const zuh_open_body *b) {
+    return b && b->h2 && b->s && zuh_h2_in_source(b->s);
 }
 
 const zuh_headers *zuh_open_body_trailers(const zuh_open_body *b) {
@@ -1180,7 +1192,11 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
                 /* Written and answered in one call, so the write is timed to
                  * the response headers: an upper bound, not the write alone. */
                 out->timings.request_write = (long)(zuh_now_ms() - t_start);
-                zuh_trace_add(o->trace, ZUH_EV_REQUEST_SENT, method, (uint64_t)body_len);
+                /* The body bytes sent by the time the response headers
+                 * arrived: all of an in-memory body unless the server
+                 * answered first, and never body_len, which is 0 for a
+                 * streamed one (review #169). */
+                zuh_trace_add(o->trace, ZUH_EV_REQUEST_SENT, method, zuh_h2_body_sent(s));
                 /* END_STREAM frames an HTTP/2 body (§65.2), so §18.1 is not
                  * consulted. FRAME_NONE marks the bodiless responses, which
                  * are never decoded, exactly as for HTTP/1.1. */
