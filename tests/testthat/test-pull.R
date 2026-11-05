@@ -132,7 +132,9 @@ test_that("the body accessors refuse a streamed mock response, as a native one (
 })
 
 test_that("a cassette records trailers and replays them (#143, D-98)", {
-  dir <- withr::local_tempdir()
+  # Not withr: it is not a dependency (R CMD check refuses an undeclared ::).
+  dir <- tempfile("zu-cassette-")
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
   fake <- zu_mock_transport(function(req) {
     zu_response(200L, body = "x", trailers = c("grpc-status" = "7"))
   })

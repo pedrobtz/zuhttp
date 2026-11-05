@@ -658,7 +658,9 @@ test_that("the body accessors refuse a streamed native response (#144)", {
 
 test_that("a cassette records a streamed response whole, and replays it (#143)", {
   web <- local_httpbin("keep-alive", keep_alive = TRUE)
-  dir <- withr::local_tempdir()
+  # Not withr: it is not a dependency (R CMD check refuses an undeclared ::).
+  dir <- tempfile("zu-cassette-")
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
   rec <- zu_cassette_transport(dir, "streamed", mode = "auto")
   api <- zu_client(transport = rec)
   url <- web$url("/range/30000")
