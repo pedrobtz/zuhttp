@@ -36,10 +36,11 @@ zu_pool(
 
   HTTP/2 keepalive, in seconds (§65.6). An idle HTTP/2 connection silent
   for `keepalive_time` is sent a PING before it is reused, and discarded
-  unless the answer arrives within `keepalive_timeout` (default 20); the
-  request then opens a new one. This finds a server or middlebox that
-  dropped the connection without saying so. `NULL`, the default, sends
-  no PING. HTTP/1.1 connections are unaffected.
+  unless the answer arrives within `keepalive_timeout` (`NULL`, the
+  default, means 20 seconds) or the request's own `timeout`, whichever
+  is sooner; the request then opens a new one. This finds a server or
+  middlebox that dropped the connection without saying so. `NULL`, the
+  default, sends no PING. HTTP/1.1 connections are unaffected.
 
 ## Value
 

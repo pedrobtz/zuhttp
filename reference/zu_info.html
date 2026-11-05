@@ -60,7 +60,8 @@ is configured to do, and what the environment says about proxies.</p>
 
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>A <code>zu_info</code> list, printed as a report. Fields: <code>version</code>, <code>http</code>,
+    <p>A <code>zu_info</code> list, printed as a report. Fields: <code>version</code>, <code>http</code>
+(the protocol versions this build speaks, <code>"HTTP/1.1"</code> and <code>"HTTP/2"</code>),
 <code>tls_backend</code>, <code>trust</code>, <code>tls_available</code>, <code>revocation_default</code>,
 <code>tls_capabilities</code> (the <code><a href="zu_tls.html">zu_tls()</a></code> settings this backend honours, from
 <code>"pins"</code>, <code>"tls13"</code>, <code>"ca_file"</code>, <code>"ca_extra"</code> and <code>"revocation"</code>; the
@@ -96,6 +97,7 @@ when a certificate works in a browser and not here.</p>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   verify:           yes</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   check:            4xx/5xx raise</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   retry:            off</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   http2:            auto</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   pool:             max_idle 16, max_per_host 4, idle 30s</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   proxy:            from the environment</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> </span>

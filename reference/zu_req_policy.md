@@ -22,10 +22,8 @@ zu_req_check(req, check = TRUE)
 
 - total:
 
-  Total seconds for the request, redirects included. A single number
-  today; the phase-specific model of §24 will accept richer values
-  through the same argument. DNS resolution is not bounded by it (nor by
-  Ctrl-C); see
+  Total seconds for the request, redirects included, as a single number.
+  DNS resolution is not bounded by it (nor by Ctrl-C); see
   [zuhttp_tls](https://pedrobtz.github.io/zuhttp/reference/zuhttp_tls.md).
 
 - max:

@@ -58,7 +58,8 @@ from <code><a href="zu_perform.html">zu_perform()</a></code>.</p>
 <span>  body <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/raw.html" class="external-link">raw</a></span><span class="op">(</span><span class="op">)</span>,</span>
 <span>  url <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  tls_version <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  redirects <span class="op">=</span> <span class="fl">0L</span></span>
+<span>  redirects <span class="op">=</span> <span class="fl">0L</span>,</span>
+<span>  trailers <span class="op">=</span> <span class="cn">NULL</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -90,6 +91,12 @@ preserved (§18.3).</p></dd>
 <dt id="arg-redirects">redirects<a class="anchor" aria-label="anchor" href="#arg-redirects"></a></dt>
 <dd><p>Number of redirects followed.</p></dd>
 
+
+<dt id="arg-trailers">trailers<a class="anchor" aria-label="anchor" href="#arg-trailers"></a></dt>
+<dd><p>Named character vector of trailer fields (§65.3), as
+<code><a href="zu_resp_read.html">zu_resp_trailers()</a></code> returns them: where gRPC carries its status. <code>NULL</code>,
+the default, means none were sent.</p></dd>
+
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
@@ -110,6 +117,9 @@ functions, response accessors and conditions are the stable API.</p>
 <span class="r-out co"><span class="r-pr">#&gt;</span> &lt;zu_response [200 OK]&gt;</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Content-Type: text/plain</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Body: 5 B in memory</span>
+<span class="r-in"><span><span class="fu">zu_response</span><span class="op">(</span><span class="fl">200L</span>, body <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/raw.html" class="external-link">raw</a></span><span class="op">(</span><span class="op">)</span>, trailers <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"grpc-status"</span> <span class="op">=</span> <span class="st">"0"</span><span class="op">)</span><span class="op">)</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> &lt;zu_response [200 OK]&gt;</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Body: 0 B in memory</span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

@@ -64,11 +64,13 @@ anything else, <code>jsonlite</code> included.</p>
 
 <dl><dt id="arg-encode">encode<a class="anchor" aria-label="anchor" href="#arg-encode"></a></dt>
 <dd><p>A function <code>(x, ...)</code> returning a single JSON string. Must
-accept <code>...</code>, since request-level options are forwarded to it.</p></dd>
+accept <code>...</code>, since request-level options are forwarded to it. <code>NULL</code>
+restores <code>zujson</code>'s.</p></dd>
 
 
 <dt id="arg-decode">decode<a class="anchor" aria-label="anchor" href="#arg-decode"></a></dt>
-<dd><p>A function <code>(txt, ...)</code> returning an R object.</p></dd>
+<dd><p>A function <code>(txt, ...)</code> returning an R object. <code>NULL</code>
+restores <code>zujson</code>'s.</p></dd>
 
 </dl></div>
     <div class="section level2">

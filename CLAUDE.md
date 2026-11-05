@@ -32,7 +32,7 @@ the present tense, and put dated findings in the roadmap’s findings log.
 ## Commands
 
 ``` sh
-# C core — no R, no network, no TLS. 1993 checks against mock streams,
+# C core — no R, no network, no TLS. 2269 checks against mock streams,
 # including the whole engine through the dial seam (test_engine_mock.c) and
 # over HTTP/2 against an in-process nghttp2 server (test_h2.c).
 make -C ctest strict          # warnings-as-errors; the one to run by default
@@ -62,6 +62,9 @@ tools/h2-test-cert.sh /tmp/h2 && python3 tools/h2-test-server.py 18080 18443 /tm
 ZU_H2_TEST_SERVER=http://127.0.0.1:18080 ZU_H2_TEST_TLS=https://localhost:18443 \
   ZU_H2_TEST_CA=/tmp/h2/ca.pem Rscript -e 'testthat::test_local(filter = "http2")'
 
+# The R glue (init.c) under valgrind: Linux only; CI runs it on every PR (#164)
+tools/ci-valgrind-glue.sh
+
 # What CI actually runs for the R suite — reproduce THIS before claiming green,
 # because it differs from R CMD check in ways that have bitten before.
 Rscript tools/ci-run-tests.R
@@ -72,8 +75,10 @@ r-actions jobs run a quick profile on a pull request and the full one on
 `main`. Work-package pull requests merge on the quick profile; the
 `full-ci` label, which runs the full profile on a pull request, goes
 only on the pull request that closes a milestone (the maintainer’s rule,
-2026-10-29). Every merge still runs the full profile on `main`: read it
-before opening the next pull request, and fix what it finds there.
+2026-10-29). One memory check runs on every pull request regardless: the
+R glue under valgrind (2026-11-05, \#164). Every merge still runs the
+full profile on `main`: read it before opening the next pull request,
+and fix what it finds there.
 
 ``` sh
 tools/vendor/verify            # src/vendor/ is byte-for-byte what was recorded

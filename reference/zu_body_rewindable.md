@@ -18,8 +18,10 @@ zu_body_rewindable(req)
 
 ## Value
 
-A logical. `TRUE` for an absent body and for any in-memory body, which
-is every body this version can construct.
+A logical. `TRUE` for an absent body and for any in-memory body; `FALSE`
+for a body from
+[`zu_body_stream()`](https://pedrobtz.github.io/zuhttp/reference/zu_body.md),
+which a function produces once and cannot produce again.
 
 ## See also
 

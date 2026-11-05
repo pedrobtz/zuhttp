@@ -65,7 +65,7 @@
 </div>
 <div class="section level2">
 <h2 id="commands">Commands<a class="anchor" aria-label="anchor" href="#commands"></a></h2>
-<div class="sourceCode" id="cb1"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="co"># C core — no R, no network, no TLS. 1993 checks against mock streams,</span></span>
+<div class="sourceCode" id="cb1"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="co"># C core — no R, no network, no TLS. 2269 checks against mock streams,</span></span>
 <span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a><span class="co"># including the whole engine through the dial seam (test_engine_mock.c) and</span></span>
 <span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a><span class="co"># over HTTP/2 against an in-process nghttp2 server (test_h2.c).</span></span>
 <span id="cb1-4"><a href="#cb1-4" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> ctest strict          <span class="co"># warnings-as-errors; the one to run by default</span></span>
@@ -95,10 +95,13 @@
 <span id="cb1-28"><a href="#cb1-28" tabindex="-1"></a><span class="va">ZU_H2_TEST_SERVER</span><span class="op">=</span>http://127.0.0.1:18080 <span class="va">ZU_H2_TEST_TLS</span><span class="op">=</span>https://localhost:18443 <span class="dt">\</span></span>
 <span id="cb1-29"><a href="#cb1-29" tabindex="-1"></a>  <span class="va">ZU_H2_TEST_CA</span><span class="op">=</span>/tmp/h2/ca.pem <span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'testthat::test_local(filter = "http2")'</span></span>
 <span id="cb1-30"><a href="#cb1-30" tabindex="-1"></a></span>
-<span id="cb1-31"><a href="#cb1-31" tabindex="-1"></a><span class="co"># What CI actually runs for the R suite — reproduce THIS before claiming green,</span></span>
-<span id="cb1-32"><a href="#cb1-32" tabindex="-1"></a><span class="co"># because it differs from R CMD check in ways that have bitten before.</span></span>
-<span id="cb1-33"><a href="#cb1-33" tabindex="-1"></a><span class="ex">Rscript</span> tools/ci-run-tests.R</span></code></pre></div>
-<p><strong>Every pull request runs CI</strong> (W1). R-CMD-check, native-checks and the r-actions jobs run a quick profile on a pull request and the full one on <code>main</code>. Work-package pull requests merge on the quick profile; the <code>full-ci</code> label, which runs the full profile on a pull request, goes only on the pull request that closes a milestone (the maintainer’s rule, 2026-10-29). Every merge still runs the full profile on <code>main</code>: read it before opening the next pull request, and fix what it finds there.</p>
+<span id="cb1-31"><a href="#cb1-31" tabindex="-1"></a><span class="co"># The R glue (init.c) under valgrind: Linux only; CI runs it on every PR (#164)</span></span>
+<span id="cb1-32"><a href="#cb1-32" tabindex="-1"></a><span class="ex">tools/ci-valgrind-glue.sh</span></span>
+<span id="cb1-33"><a href="#cb1-33" tabindex="-1"></a></span>
+<span id="cb1-34"><a href="#cb1-34" tabindex="-1"></a><span class="co"># What CI actually runs for the R suite — reproduce THIS before claiming green,</span></span>
+<span id="cb1-35"><a href="#cb1-35" tabindex="-1"></a><span class="co"># because it differs from R CMD check in ways that have bitten before.</span></span>
+<span id="cb1-36"><a href="#cb1-36" tabindex="-1"></a><span class="ex">Rscript</span> tools/ci-run-tests.R</span></code></pre></div>
+<p><strong>Every pull request runs CI</strong> (W1). R-CMD-check, native-checks and the r-actions jobs run a quick profile on a pull request and the full one on <code>main</code>. Work-package pull requests merge on the quick profile; the <code>full-ci</code> label, which runs the full profile on a pull request, goes only on the pull request that closes a milestone (the maintainer’s rule, 2026-10-29). One memory check runs on every pull request regardless: the R glue under valgrind (2026-11-05, #164). Every merge still runs the full profile on <code>main</code>: read it before opening the next pull request, and fix what it finds there.</p>
 <div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="ex">tools/vendor/verify</span>            <span class="co"># src/vendor/ is byte-for-byte what was recorded</span></span>
 <span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a><span class="ex">tools/vendor/record</span>            <span class="co"># after tools/update-*, never after a hand edit</span></span>
 <span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a><span class="ex">tools/update-nghttp2</span> 1.71.0    <span class="co"># re-vendor nghttp2 with the §48 patches</span></span>

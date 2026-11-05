@@ -133,7 +133,9 @@ zu_client(
   cleartext HTTP/2 (h2c) directly, without an `Upgrade`; `"off"` uses
   HTTP/1.1 only.
   [`zu_resp_connection()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_connection.md)
-  reports which version a response came over.
+  reports which version a response came over. A client setting only:
+  there is no per-request form, because it chooses the connection, not
+  the request.
 
 ## Value
 

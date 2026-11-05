@@ -20,11 +20,13 @@ zu_set_json_backend(encode = NULL, decode = NULL)
 - encode:
 
   A function `(x, ...)` returning a single JSON string. Must accept
-  `...`, since request-level options are forwarded to it.
+  `...`, since request-level options are forwarded to it. `NULL`
+  restores `zujson`'s.
 
 - decode:
 
-  A function `(txt, ...)` returning an R object.
+  A function `(txt, ...)` returning an R object. `NULL` restores
+  `zujson`'s.
 
 ## Value
 

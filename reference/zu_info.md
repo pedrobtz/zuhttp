@@ -12,7 +12,8 @@ zu_info()
 
 ## Value
 
-A `zu_info` list, printed as a report. Fields: `version`, `http`,
+A `zu_info` list, printed as a report. Fields: `version`, `http` (the
+protocol versions this build speaks, `"HTTP/1.1"` and `"HTTP/2"`),
 `tls_backend`, `trust`, `tls_available`, `revocation_default`,
 `tls_capabilities` (the
 [`zu_tls()`](https://pedrobtz.github.io/zuhttp/reference/zu_tls.md)
@@ -48,6 +49,7 @@ zu_info()
 #>   verify:           yes
 #>   check:            4xx/5xx raise
 #>   retry:            off
+#>   http2:            auto
 #>   pool:             max_idle 16, max_per_host 4, idle 30s
 #>   proxy:            from the environment
 #> 

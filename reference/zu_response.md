@@ -13,7 +13,8 @@ zu_response(
   body = raw(),
   url = NULL,
   tls_version = NULL,
-  redirects = 0L
+  redirects = 0L,
+  trailers = NULL
 )
 ```
 
@@ -44,6 +45,13 @@ zu_response(
 
   Number of redirects followed.
 
+- trailers:
+
+  Named character vector of trailer fields (§65.3), as
+  [`zu_resp_trailers()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_read.md)
+  returns them: where gRPC carries its status. `NULL`, the default,
+  means none were sent.
+
 ## Value
 
 A `zu_response`.
@@ -61,4 +69,7 @@ zu_response(200L, c("Content-Type" = "text/plain"), "hello")
 #> <zu_response [200 OK]>
 #> Content-Type: text/plain
 #> Body: 5 B in memory
+zu_response(200L, body = raw(), trailers = c("grpc-status" = "0"))
+#> <zu_response [200 OK]>
+#> Body: 0 B in memory
 ```

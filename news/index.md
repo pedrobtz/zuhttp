@@ -32,16 +32,26 @@ dependency, its sibling `zujson`, for JSON.
   connection.
   [`zu_resp_trailers()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_read.md)
   returns trailer fields, HTTP/2 or chunked HTTP/1.1, where gRPC carries
-  its status. A callback returning `FALSE` over HTTP/2 now resets the
-  stream rather than closing the connection.
+  its status; it is `NULL` until the body has ended cleanly, and stays
+  `NULL` after an abort or a failure, so a missing trailer block is told
+  apart from an empty one. A callback returning `FALSE` over HTTP/2 now
+  resets the stream rather than closing the connection.
   `zu_pool(keepalive_time, keepalive_timeout)` PINGs an idle HTTP/2
-  connection before reusing it and drops it if no answer comes.
+  connection before reusing it and drops it if no answer comes, waiting
+  no longer than the request’s own `timeout`.
 - Streamed request bodies: `zu_body_stream(req, f)` sends a body a
   function produces a piece at a time — chunked over HTTP/1.1, as DATA
   under the server’s window over HTTP/2. With
   `zu_perform(stream = TRUE)` the response can be read while the body is
   still going out, as bidirectional gRPC calls need. A retry or a
   307/308 that would send it again raises `zu_body_not_replayable`.
+- A body callback or request body function may leave by any route R has
+  — an error, an interrupt, a warning or message caught by a
+  [`tryCatch()`](https://rdrr.io/r/base/conditions.html) around the
+  call, a restart — and zuhttp releases the connection first, then lets
+  it go on exactly as it would have: the caller’s handler sees the
+  caller’s condition. Neither may make a request on its own client, and
+  a request body function cannot read or abort its own response.
 - One-shot verbs
   ([`zu_get()`](https://pedrobtz.github.io/zuhttp/reference/zu_methods.md),
   [`zu_post()`](https://pedrobtz.github.io/zuhttp/reference/zu_methods.md),

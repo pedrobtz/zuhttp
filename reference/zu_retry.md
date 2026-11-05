@@ -23,9 +23,7 @@ zu_retry(
 - attempts:
 
   Total attempts *including the first*, so `attempts = 1` means no
-  retrying and `attempts = 3` means at most two retries. (An earlier
-  draft of the design used `attempts` and `max_attempts` with meanings
-  differing by one; there is one name and one meaning.)
+  retrying and `attempts = 3` means at most two retries.
 
 - backoff:
 

@@ -54,20 +54,31 @@ HTTP/2 trailers, or a chunked HTTP/1.1 body's trailer section (§65.3,
 D-91). gRPC carries its status there. Matching is case-insensitive as in
 [`zu_resp_header()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp.md).
 For a streamed response they are known once `zu_resp_read()` has
-returned the end of the body; before that, `zu_resp_trailers()` returns
-`NULL`.
+returned the end of the body; before that, and after `zu_resp_abort()`
+or a failed read, `zu_resp_trailers()` returns `NULL`: the trailers are
+unknown, which is not the same as none (D-98).
 
-A response that was not streamed reads from its stored body, in pieces
-of `n`, so code written against `zu_resp_read()` runs against
+A response that was not streamed by its transport (a mock, a cassette)
+reads from its stored body, in pieces of `n`, and follows the same
+rules, trailers included: build one with `zu_response(trailers = )`. So
+code written against `zu_resp_read()` runs against
 [`zu_mock_transport()`](https://pedrobtz.github.io/zuhttp/reference/zu_transport.md)
-and cassettes unchanged.
+and cassettes unchanged. A streamed response has no body to hand to
+[`zu_resp_raw()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_raw.md),
+[`zu_resp_text()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_text.md)
+or
+[`zu_resp_json()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_json.md),
+which refuse it.
 
 ## Examples
 
 ``` r
-fake <- zu_mock_transport(function(req) zu_response(200L, body = charToRaw("hello")))
-r <- zu_perform(zu_request("GET", "https://example.com/"),
-                client = zu_client(transport = fake), stream = TRUE)
+fake <- zu_mock_transport(function(req) zu_response(200L, body = "hello"))
+r <- zu_perform(
+  zu_request("GET", "https://example.com/"),
+  client = zu_client(transport = fake),
+  stream = TRUE
+)
 zu_resp_read(r, 3)
 #> [1] 68 65 6c
 zu_resp_read(r, 3)
