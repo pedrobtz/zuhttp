@@ -61,21 +61,37 @@
  * The continuation token is made before the engine runs, never inside it:
  * an allocation failure there would itself be a longjmp through C. Its
  * owner keeps it protected until R_ContinueUnwind(). */
+/* On Windows, R jumps with GCC's __builtin_setjmp/__builtin_longjmp, and
+ * the UCRT longjmp() unwinds with SEH through frames that R left that way,
+ * which killed the R process on both Windows CI legs (#172). The builtins
+ * restore registers and nothing else, as R's own jumps do, so they are what
+ * this jump uses there. Elsewhere the C library's pair is the documented
+ * one; the builtins' buffer is five words and their value is always 1. */
+#if defined(_WIN32) && defined(__GNUC__)
+typedef void *guard_jmpbuf[5];
+#  define GUARD_SETJMP(b)  __builtin_setjmp(b)
+#  define GUARD_LONGJMP(b) __builtin_longjmp(b, 1)
+#else
+typedef jmp_buf guard_jmpbuf;
+#  define GUARD_SETJMP(b)  setjmp(b)
+#  define GUARD_LONGJMP(b) longjmp(b, 1)
+#endif
+
 typedef struct {
-    SEXP    token;     /* R_MakeUnwindCont(), protected by the owner */
-    int     jumped;    /* a non-local exit was stopped; token carries it */
-    jmp_buf jb;
+    SEXP         token;   /* R_MakeUnwindCont(), protected by the owner */
+    int          jumped;  /* a non-local exit was stopped; token carries it */
+    guard_jmpbuf jb;
 } r_guard;
 
 static void guard_cleanup(void *data, Rboolean jump) {
-    if (jump) longjmp(((r_guard *)data)->jb, 1);
+    if (jump) GUARD_LONGJMP(((r_guard *)data)->jb);
 }
 
 /* fn(data); NULL with g->jumped set when it left non-locally. Once a jump
  * has been stopped, nothing more is evaluated: the token holds that jump. */
 static SEXP guard_eval(r_guard *g, SEXP (*fn)(void *), void *data) {
     if (g->jumped) return NULL;
-    if (setjmp(g->jb)) { g->jumped = 1; return NULL; }
+    if (GUARD_SETJMP(g->jb)) { g->jumped = 1; return NULL; }
     return R_UnwindProtect(fn, data, guard_cleanup, g, g->token);
 }
 
@@ -766,6 +782,9 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
     /* list(body_stream, token) for §65.7 and the callback's token. Made
      * here, PROTECTed, before any C state exists; see r_guard. */
     SEXP src_keep = R_NilValue, cb_token = R_NilValue;
+    /* Both are PROTECTed below on every path, so every return after that,
+     * including the "not reached" ones after a raise, which rchk cannot tell
+     * apart, unprotects two. */
 
     if (!Rf_isString(url) || Rf_length(url) != 1 || STRING_ELT(url, 0) == NA_STRING)
         Rf_error("url must be a single non-NA string");
@@ -907,7 +926,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
                STRING_ELT(path, 0) != NA_STRING) {
         const char *dest = Rf_translateCharUTF8(STRING_ELT(path, 0));
         o.sink = zuh_sink_file(dest, &e);
-        if (!o.sink) { raise_zu_error(&e, u); return R_NilValue; }
+        if (!o.sink) { raise_zu_error(&e, u); UNPROTECT(2); return R_NilValue; }
     }
 
     /* §25.1: a checkpoint at most one tick apart, and never inside a blocking
@@ -960,7 +979,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
                 if (o.sink && o.sink != &cb_sink) { zuh_sink_abort(o.sink); zuh_sink_free(o.sink); }
                 zuh_result_free(&r);
                 R_ContinueUnwind(VECTOR_ELT(src_keep, 1));
-                return R_NilValue;   /* not reached */
+                UNPROTECT(2); return R_NilValue;   /* not reached */
             }
         }
     }
@@ -973,7 +992,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
         tick_release(&tick);
         zuh_result_free(&r);
         R_ContinueUnwind(cb_token);
-        return R_NilValue;   /* not reached */
+        UNPROTECT(2); return R_NilValue;   /* not reached */
     }
     if (o.sink && o.sink != &cb_sink) {
         /* Commit or discard, then release. A failure to rename is a failure
@@ -1003,7 +1022,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
             call = PROTECT(Rf_lang2(Rf_install("stop"), cond));
             Rf_eval(call, R_GlobalEnv);
             UNPROTECT(2);
-            return R_NilValue;   /* not reached */
+            UNPROTECT(2); return R_NilValue;   /* not reached */
         }
         tick_release(&tick);
         if (rc == ZUH_ERR_CANCELLED) {
@@ -1012,7 +1031,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
             snprintf(err2.message, sizeof err2.message,
                      "request interrupted by the user");
             raise_zu_error(&err2, u);
-            return R_NilValue;   /* not reached */
+            UNPROTECT(2); return R_NilValue;   /* not reached */
         }
         /* No C resources are live here: zuh_engine_get frees everything it
          * owns before returning non-OK, which is what makes it safe to raise
@@ -1028,7 +1047,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
                          zuh_code_class(rc));
         }
         raise_zu_error(&e, u);
-        return R_NilValue;   /* not reached */
+        UNPROTECT(2); return R_NilValue;   /* not reached */
     }
 
     /* The continuation token must be NULL, not R_NilValue. R checks
