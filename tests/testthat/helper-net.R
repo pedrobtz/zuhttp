@@ -218,3 +218,15 @@ pattern_body <- function(total, piece) {
   attr(f, "calls") <- function() n_calls
   f
 }
+
+# Open file descriptors of this process, or NA where they cannot be listed
+# (Windows). A leaked connection shows as one more; tests compare counts
+# around a loop, so the descriptors R itself holds cancel out.
+open_fds <- function() {
+  for (d in c("/proc/self/fd", "/dev/fd")) {
+    if (dir.exists(d)) {
+      return(length(list.files(d)))
+    }
+  }
+  NA_integer_
+}

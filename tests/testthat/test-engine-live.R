@@ -382,6 +382,126 @@ test_that("a warning inside a callback does not abort the transfer (D-47)", {
   expect_gte(n, 1L)
 })
 
+test_that("any non-local exit from a callback unwinds the engine first (#141)", {
+  web <- local_httpbin("keep-alive", keep_alive = TRUE)
+  skip_if(is.na(open_fds()), "cannot count descriptors here")
+  # §27.3: a warning caught by an exiting handler around the call, and a
+  # restart, both leave the callback with a longjmp. They are stopped inside
+  # the engine and resumed once it has released the connection, so the
+  # caller's handler sees them and nothing leaks. R_tryCatch on "error" and
+  # "interrupt" let both jump straight through the C read loop.
+  api <- zu_client(base_url = web$url())
+  invisible(zu_get("get", client = api)) # the descriptors a pool keeps
+  before <- open_fds()
+  for (i in 1:5) {
+    v <- tryCatch(
+      zu_get("stream/5", client = api, callback = function(chunk) {
+        warning("not now")
+        TRUE
+      }),
+      warning = function(w) conditionMessage(w)
+    )
+    expect_identical(v, "not now")
+    v <- withRestarts(
+      zu_get("stream/5", client = api, callback = function(chunk) {
+        invokeRestart("give_up", 42L)
+      }),
+      give_up = function(x) x
+    )
+    expect_identical(v, 42L)
+  }
+  gc()
+  expect_lte(open_fds(), before)
+  expect_identical(zu_resp_status(zu_get("get", client = api)), 200L)
+})
+
+test_that("a body function's warning under tryCatch() unwinds the engine first (#141)", {
+  web <- local_httpbin("keep-alive", keep_alive = TRUE)
+  skip_if(is.na(open_fds()), "cannot count descriptors here")
+  # §65.7 over HTTP/1.1 chunked: the same guard as the callback's.
+  api <- zu_client(base_url = web$url())
+  invisible(zu_get("get", client = api))
+  before <- open_fds()
+  for (i in 1:5) {
+    req <- zu_body_stream(zu_request("POST", web$url("/post")), function() {
+      warning("not now")
+      charToRaw("x")
+    })
+    v <- tryCatch(
+      zu_perform(req, client = api),
+      warning = function(w) conditionMessage(w)
+    )
+    expect_identical(v, "not now")
+  }
+  gc()
+  expect_lte(open_fds(), before)
+  expect_identical(zu_resp_status(zu_get("get", client = api)), 200L)
+})
+
+test_that("a body function that fails before the engine runs is not kept alive (#142)", {
+  web <- local_httpbin("keep-alive", keep_alive = TRUE)
+  # The download path cannot be opened, so C_zu_perform raises before the
+  # engine runs. The function, and what it closes over, must not stay on
+  # R's precious list: once nothing references them, they are collected.
+  freed <- new.env()
+  freed$n <- 0L
+  for (i in 1:3) {
+    local({
+      e <- new.env()
+      reg.finalizer(e, function(x) freed$n <- freed$n + 1L)
+      f <- local(function() NULL, envir = e)
+      req <- zu_body_stream(zu_request("POST", web$url("/post")), f)
+      req <- zu_req_path(req, file.path(tempdir(), "no", "such", "dir", "x"))
+      expect_error(zu_perform(req))
+    })
+  }
+  gc()
+  gc()
+  expect_identical(freed$n, 3L)
+})
+
+test_that("a body function returning raw() many times does not grow the C stack (#157)", {
+  web <- local_httpbin("keep-alive", keep_alive = TRUE)
+  # §65.7: an empty piece is a piece of nothing, not the end. 100,000 of
+  # them recursed 100,000 deep, one R_tryCatch per level, before #157.
+  n <- 0L
+  f <- function() {
+    n <<- n + 1L
+    if (n <= 100000L) {
+      return(raw())
+    }
+    if (n == 100001L) {
+      return(charToRaw("payload"))
+    }
+    NULL
+  }
+  r <- zu_perform(zu_body_stream(zu_request("POST", web$url("/post")), f))
+  expect_identical(zu_resp_status(r), 200L)
+  expect_identical(n, 100002L) # every piece asked for, then the end
+})
+
+test_that("a request body function cannot use its own client (#155, §27.4)", {
+  web <- local_httpbin("keep-alive", keep_alive = TRUE)
+  api <- zu_client(base_url = web$url())
+  f <- function() {
+    zu_get("get", client = api)
+    NULL
+  }
+  expect_error(
+    zu_perform(zu_body_stream(zu_request("POST", "post"), f), client = api),
+    "same client"
+  )
+  expect_identical(zu_resp_status(zu_get("get", client = api)), 200L)
+})
+
+test_that("a pulled body whose connection did not survive serialization is zu_io_error (#156)", {
+  web <- local_httpbin("keep-alive", keep_alive = TRUE)
+  r <- zu_perform(zu_request("GET", web$url("/bytes/1000")), stream = TRUE)
+  r2 <- unserialize(serialize(r, NULL))
+  expect_error(zu_resp_read(r2), class = "zu_io_error")
+  zu_resp_abort(r)
+})
+
 test_that("proxy = FALSE ignores a proxy in the environment, offline", {
   web <- local_httpbin("keep-alive", keep_alive = TRUE)
   withr_local_env <- function(...) {

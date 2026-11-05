@@ -595,6 +595,47 @@ test_that("§65.7: a 100 MB body from a 1 MB generator stays under 16 MB of RSS"
   expect_lt(delta, 16 * 1024^2)
 })
 
+test_that("§65.7: a body function cannot read or abort its own response (#155)", {
+  skip_unless_grpc_server()
+  # Full duplex: the function runs inside nghttp2's data provider while the
+  # response is read, and nghttp2 is not re-entrant. Reading the same
+  # response from inside it is refused, and the refusal reaches the caller.
+  # 200 messages of 32 KiB, past the server's window, so the function is
+  # still being called once the response is being read.
+  # StreamingOutputCallRequest { response_parameters: [{size: 1000}],
+  #   payload: Payload { body: 32 KiB } }: the server answers each message
+  # as it arrives, so the response headers come before the body ends.
+  msg <- grpc_frame(c(
+    as.raw(c(0x12, 0x03, 0x08, 0xe8, 0x07)),
+    as.raw(c(0x1a, 0x84, 0x80, 0x02, 0x12, 0x80, 0x80, 0x02)),
+    as.raw(rep(7, 32768))
+  ))
+  st <- new.env()
+  st$n <- 0L
+  f <- function() {
+    st$n <- st$n + 1L
+    if (!is.null(st$r)) {
+      zu_resp_read(st$r)
+    }
+    if (st$n > 200L) NULL else msg
+  }
+  st$r <- zu_perform(
+    zu_body_stream(
+      zu_request("POST", "/grpc.testing.TestService/FullDuplexCall"),
+      f
+    ),
+    client = grpc_client(),
+    stream = TRUE
+  )
+  expect_error(
+    while (length(zu_resp_read(st$r)) > 0) {
+      NULL
+    },
+    class = "zu_io_error",
+    regexp = "inside its own request body function"
+  )
+})
+
 test_that("§65.7: full duplex: the response is read while the body is still being sent", {
   skip_unless_grpc_server()
   # FullDuplexCall answers each request message as it arrives. 200 requests

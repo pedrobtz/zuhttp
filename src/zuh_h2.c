@@ -18,6 +18,10 @@
 #define H2_FIELD_OVERHEAD 32u
 
 const char *zuh_h2_alpn_for(zuh_h2_mode m) {
+    /* REQUIRED offers http/1.1 too. Offering h2 alone would let a server
+     * that has ALPN but not h2 end the handshake with a
+     * no_application_protocol alert (RFC 7301 §3.2), a TLS error, where
+     * §65.1 promises zu_connect_error naming the protocol it did choose. */
     return m == ZUH_H2_OFF ? "http/1.1" : "h2,http/1.1";
 }
 
@@ -58,12 +62,17 @@ typedef struct {
 
     const unsigned char *body;
     size_t       body_len, body_off;
+    /* §65.7: the unsent part of an in-memory body, copied once a pulled
+     * response outlives the call that lent `body` (zuh_h2_own_body()). */
+    unsigned char *body_owned;
+    uint64_t     body_sent;     /* request DATA bytes handed to nghttp2 */
 
     /* §65.7: a streamed request body, borrowed for the open stream only. */
     zuh_body_source src;
     const unsigned char *src_data;
     size_t       src_len, src_off;
     int          src_end, src_failed;
+    int          in_source;     /* inside src.next(): nghttp2 is mid-call */
     zuh_error    src_err;
 } h2_impl;
 
@@ -209,7 +218,14 @@ static nghttp2_ssize body_source(nghttp2_session *s, int32_t sid, uint8_t *buf,
         while (h->src_off == h->src_len && !h->src_end) {
             const void *d = NULL;
             size_t l = 0;
-            if (h->src.next(h->src.ctx, &d, &l, &h->src_err) != ZUH_OK) {
+            zuh_code rc;
+            /* The function runs inside nghttp2_session_mem_send2(), which
+             * is not re-entrant: zuh_h2_in_source() lets the R layer refuse
+             * a read or abort of this same response from inside it. */
+            h->in_source = 1;
+            rc = h->src.next(h->src.ctx, &d, &l, &h->src_err);
+            h->in_source = 0;
+            if (rc != ZUH_OK) {
                 h->src_failed = 1;
                 return NGHTTP2_ERR_CALLBACK_FAILURE;
             }
@@ -219,12 +235,14 @@ static nghttp2_ssize body_source(nghttp2_session *s, int32_t sid, uint8_t *buf,
         if (n > h->src_len - h->src_off) n = h->src_len - h->src_off;
         if (n) memcpy(buf, h->src_data + h->src_off, n);
         h->src_off += n;
+        h->body_sent += n;
         if (h->src_end && h->src_off == h->src_len) *flags |= NGHTTP2_DATA_FLAG_EOF;
         return (nghttp2_ssize)n;
     }
     if (n > left) n = left;
     if (n) memcpy(buf, h->body + h->body_off, n);
     h->body_off += n;
+    h->body_sent += n;
     if (h->body_off == h->body_len) *flags |= NGHTTP2_DATA_FLAG_EOF;
     return (nghttp2_ssize)n;
 }
@@ -297,6 +315,10 @@ static zuh_code pump(h2_impl *h, zuh_deadline dl, zuh_error *err) {
     if (used < 0) {
         if (h->cb_code != ZUH_OK)
             return fail(h, err, h->cb_code, ZUH_PHASE_READ, h->cb_msg, 0);
+        /* Out of memory is ours, not the server's: reporting it as a
+         * protocol error would blame the peer (§34.1). */
+        if (used == NGHTTP2_ERR_NOMEM)
+            return fail(h, err, ZUH_ERR_NOMEM, ZUH_PHASE_READ, "out of memory", (int)used);
         {
             char msg[128];
             snprintf(msg, sizeof msg, "HTTP/2 protocol error from the server: %s",
@@ -308,6 +330,22 @@ static zuh_code pump(h2_impl *h, zuh_deadline dl, zuh_error *err) {
      * reset (a malformed response) only once the RST_STREAM is sent, and a
      * caller waiting on that close must not wait on the server instead. */
     return flush(h, dl, err);
+}
+
+/* pump() for the open stream. Sending can close it: the last DATA of a
+ * request body to a server that has already ended its side (an early 413, a
+ * gRPC status before the upload ends; RFC 9113 §8.1 makes the RST_STREAM
+ * optional) completes the stream inside mem_send2(), and a read after that
+ * would wait on a server with nothing more to say, until the deadline.
+ *
+ * Today pump() ends with a flush, so DATA a read made sendable goes out
+ * before pump() returns and the callers see `closed` before pumping again:
+ * a flush at the start of a pump carries only WINDOW_UPDATE and PING. This
+ * keeps that true if either order changes (review #140, measured). */
+static zuh_code pump_stream(h2_impl *h, zuh_deadline dl, zuh_error *err) {
+    zuh_code rc = flush(h, dl, err);
+    if (rc != ZUH_OK || h->closed) return rc;
+    return pump(h, dl, err);
 }
 
 /* §65.2: how a stream that closed with an error code reaches R. */
@@ -421,13 +459,16 @@ zuh_code zuh_h2_begin(zuh_stream *conn, const zuh_h2_request *rq,
     zuh_headers_free(&h->trailers);
     zuh_headers_init(&h->trailers);
     zuh_buf_reset(&h->data);
+    zuh_free(h->body_owned);
+    h->body_owned = NULL;
     h->body = (const unsigned char *)rq->body;
     h->body_len = rq->body ? rq->body_len : 0;
     h->body_off = 0;
+    h->body_sent = 0;
     memset(&h->src, 0, sizeof h->src);
     if (rq->source && rq->source->next) h->src = *rq->source;
     h->src_data = NULL; h->src_len = h->src_off = 0;
-    h->src_end = h->src_failed = 0;
+    h->src_end = h->src_failed = h->in_source = 0;
     zuh_error_clear(&h->src_err);
 
     prd.source.ptr = NULL;
@@ -449,7 +490,7 @@ zuh_code zuh_h2_begin(zuh_stream *conn, const zuh_h2_request *rq,
                           "the HTTP/2 stream ended without a response", 0);
             break;
         }
-        rc = pump(h, dl, err);
+        rc = pump_stream(h, dl, err);
     }
     if (rc == ZUH_OK) {
         *status = h->status;
@@ -495,7 +536,7 @@ zuh_code zuh_h2_body_step(zuh_stream *conn, zuh_body_pipe *pipe, int *done,
     if (!zuh_h2_is(conn)) return ZUH_ERR_IO;
     h = (h2_impl *)conn->impl;
     if (!h->data.len && !h->closed) {
-        rc = pump(h, dl, err);
+        rc = pump_stream(h, dl, err);
         if (rc != ZUH_OK) return rc;
     }
     rc = deliver(h, pipe, err);
@@ -526,6 +567,35 @@ zuh_code zuh_h2_body(zuh_stream *conn, zuh_body_pipe *pipe,
     return rc;
 }
 
+zuh_code zuh_h2_own_body(zuh_stream *conn, zuh_error *err) {
+    h2_impl *h;
+    size_t left;
+    unsigned char *copy;
+    if (!zuh_h2_is(conn)) return ZUH_OK;
+    h = (h2_impl *)conn->impl;
+    left = h->body_len - h->body_off;
+    if (h->closed || h->src.next || h->body_owned || left == 0) return ZUH_OK;
+    copy = (unsigned char *)zuh_alloc(left);
+    if (!copy) {
+        zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_WRITE, "out of memory");
+        return ZUH_ERR_NOMEM;
+    }
+    memcpy(copy, h->body + h->body_off, left);
+    h->body_owned = copy;
+    h->body = copy;
+    h->body_len = left;
+    h->body_off = 0;
+    return ZUH_OK;
+}
+
+uint64_t zuh_h2_body_sent(const zuh_stream *conn) {
+    return zuh_h2_is(conn) ? ((const h2_impl *)conn->impl)->body_sent : 0;
+}
+
+int zuh_h2_in_source(const zuh_stream *conn) {
+    return zuh_h2_is(conn) && ((const h2_impl *)conn->impl)->in_source;
+}
+
 /* §65.5: end the open stream and keep the connection. DATA already in
  * flight for it is discarded by nghttp2 when it arrives, and its connection
  * window is returned, so the next stream starts with the whole window. */
@@ -549,12 +619,11 @@ void zuh_h2_cancel(zuh_stream *conn, zuh_deadline dl) {
     h->cancelled = 1;
 }
 
-/* §65.6: is the peer still there? Sends a PING and waits up to `timeout_ms`
- * for its ACK, feeding whatever else arrives to the session. */
-int zuh_h2_ping(zuh_stream *conn, long timeout_ms) {
+/* §65.6: is the peer still there? Sends a PING and waits until `dl` for its
+ * ACK, feeding whatever else arrives to the session. */
+int zuh_h2_ping(zuh_stream *conn, zuh_deadline dl) {
     h2_impl *h;
     zuh_error e;
-    zuh_deadline dl = zuh_deadline_in(timeout_ms);
     if (!zuh_h2_is(conn)) return 0;
     h = (h2_impl *)conn->impl;
     if (h->failed || h->goaway) return 0;
@@ -596,6 +665,7 @@ static void h2_destroy(zuh_stream *s) {
         if (h->sess) nghttp2_session_del(h->sess);
         zuh_headers_free(&h->trailers);
         zuh_buf_free(&h->data);
+        zuh_free(h->body_owned);
         zuh_stream_free(h->inner);
         zuh_free(h);
     }
@@ -618,6 +688,15 @@ static int h2_readable(zuh_stream *s, int timeout_ms) {
          * deadline covers a TLS record that arrived in part. */
         if (pump(h, zuh_deadline_in(100), &e) != ZUH_OK || h->goaway) return 1;
         if (flush(h, zuh_deadline_in(100), &e) != ZUH_OK) return 1;
+        /* A protocol error in what arrived is not an error return:
+         * nghttp2 queues its own GOAWAY and stops reading, so the session
+         * is over even though the peer sent no GOAWAY (found by the review
+         * tests, #147). */
+        if (!nghttp2_session_want_read(h->sess) ||
+            !nghttp2_session_check_request_allowed(h->sess)) {
+            h->failed = 1;
+            return 1;
+        }
         r = zuh_stream_readable(h->inner, 0);
     }
     return r < 0 ? r : 0;

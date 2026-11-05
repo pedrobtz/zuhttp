@@ -1181,3 +1181,23 @@ changed the plan or the design.
   now zeroes the whole struct first, so a field added later cannot repeat
   it; a ctest case fills the struct with 0xA5 before init and fails without
   the fix.
+- **2026-11-05 — the critical review of `c4045e6` (#137–#171), C half.**
+  Measured, not taken on the reviewers' word:
+  - #141 was real and worse than reported. A warning under
+    `tryCatch(warning = )` inside a body callback leaked a descriptor per call,
+    and the abandoned engine state then failed every later request in the
+    session with a deadline (the new `test-engine-live.R` cases, run against
+    the old `init.c`).
+  - #154 was a use-after-free: ASan reports it in `zuh_pool_acquire_by()`
+    without the rescan, on a probe that releases into the pool.
+  - #140 is not reachable as written: `pump()` ends with a flush, so the last
+    DATA always goes out in the pump that made it sendable, and the callers
+    test `closed` before pumping again. Instrumented to confirm. The guard
+    stays, documented as such.
+  - The tests written for #147 found a bug the review did not: a protocol
+    error on an idle connection left it "fresh", because nghttp2 ends the
+    session with its own GOAWAY rather than an error return. Fixed in
+    `h2_readable()`.
+  - The pinned nghttp2 1.71.0 tarball (#158) reproduces the vendored tree
+    byte for byte through `tools/update-nghttp2`; its SHA-256 matches the
+    `checksums.txt` upstream publishes.

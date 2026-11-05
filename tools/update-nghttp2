@@ -23,8 +23,25 @@ URL="https://github.com/nghttp2/nghttp2/releases/download/v$VER/nghttp2-$VER.tar
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
+# The tarball's SHA-256, one line per version vendored, copied from the
+# checksums.txt upstream publishes beside the release (review #158). A new
+# version is added here in the same commit as the re-vendor; with no entry,
+# NGHTTP2_SHA256 must give it. Nothing is unpacked before it matches, and
+# tools/vendor/record would otherwise bless whatever arrived.
+case "$VER" in
+    1.71.0) SHA=0cdd35ecec77919b4b7b245f87fe8d2216e3d62da854eb0838c594ff058042fc ;;
+    *)      SHA=${NGHTTP2_SHA256:-} ;;
+esac
+[ -n "$SHA" ] || { echo "no SHA-256 for nghttp2 $VER: add it here or set NGHTTP2_SHA256" >&2; exit 1; }
+
 echo "fetching nghttp2 $VER"
-curl -sSL "$URL" -o "$TMP/n.tar.gz"
+curl -fsSL "$URL" -o "$TMP/n.tar.gz"
+if command -v sha256sum >/dev/null 2>&1; then
+    GOT=$(sha256sum "$TMP/n.tar.gz" | awk '{ print $1 }')
+else
+    GOT=$(shasum -a 256 "$TMP/n.tar.gz" | awk '{ print $1 }')
+fi
+[ "$GOT" = "$SHA" ] || { echo "nghttp2-$VER.tar.gz: SHA-256 $GOT, expected $SHA" >&2; exit 1; }
 tar xzf "$TMP/n.tar.gz" -C "$TMP"
 SRC="$TMP/nghttp2-$VER/lib"
 [ -f "$SRC/nghttp2_session.c" ] || { echo "unexpected tarball layout" >&2; exit 1; }
@@ -119,7 +136,10 @@ sed -e "s|^Version:.*|Version:    nghttp2-$VER (release tarball, lib/ only)|" \
 echo "compiling the patched tree"
 mkdir -p "$TMP/obj"
 for f in "$DEST"/*.c; do
-    ${CC:-cc} -std=gnu99 -O1 -w -DNDEBUG -DNGHTTP2_STATICLIB -DBUILDING_NGHTTP2 \
+    # Not -w: that would hide a patched return of the wrong type, should
+    # patch 2's return-type heuristic misread a definition (review #158).
+    ${CC:-cc} -std=gnu99 -O1 -Werror=int-conversion -Werror=return-type \
+        -Werror=incompatible-pointer-types -DNDEBUG -DNGHTTP2_STATICLIB -DBUILDING_NGHTTP2 \
         -DHAVE_ARPA_INET_H -DHAVE_NETINET_IN_H -DHAVE_CLOCK_GETTIME \
         -DHAVE_DECL_CLOCK_MONOTONIC=1 -I"$DEST" \
         -c "$f" -o "$TMP/obj/$(basename "$f" .c).o"

@@ -90,7 +90,7 @@ Five rules keep it that way:
 | D-44 | The retry loop sits inside middleware | Accepted | 31.13 |
 | D-45 | The response sink argument is `path =`; `file =` is a request body | Accepted | 27, 31.6 |
 | D-46 | The body path lives in `zuh_body.c`, so it is mock-testable | Accepted | 27, 50.1 |
-| D-47 | A callback is caught on error and interrupt only | Accepted | 27.3 |
+| D-47 | A callback is caught on error and interrupt only. **Amended by D-99** (2026-11-05): every non-local exit is stopped at the call, and only those R would have taken without zuhttp in between are resumed | Accepted | 27.3 |
 | D-48 | Proxying is disabled with `proxy = FALSE`, not `NULL` | Accepted | 20.1, 31.9 |
 | D-49 | `verify` is a merged policy argument; `zu_tls()` carries `ca_file`, `ca_extra`, `pins`, `revocation`, `min_version` | Accepted | 14.1, 31.9 |
 | D-50 | `redirect.followed` carries the resolved target, built like `final_url` | Accepted | 35.3 |
@@ -148,6 +148,8 @@ accepted when that work package's PR merges.
 | D-94 | **Keepalive PING** on idle HTTP/2 connections, `zu_pool(keepalive_time, keepalive_timeout)`, replaces the §26.2 readability probe for them: an idle h2 connection with no PING ACK inside `keepalive_timeout` is evicted | Accepted (built in W21, 2026-11-04) | 65.6, 26.2 | W21 |
 | D-95 | **A streaming request body** (a function yielding raw vectors), after W21, for client-streaming gRPC. Revises §28's "not planned"; amends D-78 and §17.4 for this body alone, which is sent chunked over HTTP/1.1. Not rewindable (§28.2), so never retried or replayed across a 307/308 | Accepted (built in W22, 2026-11-04) | 65.7, 28, 17.4 | W22 |
 | D-96 | **HTTP/2 ships in 0.1.0, the first CRAN submission**, not in 1.1.0 after 1.0 as D-89 first placed it. `zugrpc` and `zuspark` would otherwise wait on four more zuhttp releases at CRAN's six-week floor and on the 1.0 gate's external review; nothing in M1–M3 is a prerequisite of W20–W22, which touch the engine, pool and response object that exist now. Extends D-82's M0 list with W20, W21 and W22, and the 1.0 security review (W19) covers nghttp2 and the driver. D-89 to D-95 keep their content and only their timing changes. Cost accepted: the first submission carries a vendored library of about 20k code lines, and R-19's fallback (HTTP/2 off on a flavour whose symbol scan fails) must hold before submitting, not after | Accepted (maintainer, 2026-11-04) | 60, 65, 57 | W20, W21, W22 |
+| D-98 | **`zu_resp_trailers()` is `NULL` until the body has ended cleanly**, and stays `NULL` after an abort or a failure, whose trailers are unknown; an empty named vector means the stream ended with none. The same for native, mock and cassette responses: `zu_response(trailers = )` builds one (review #167) | Accepted 2026-11-05 (maintainer) | 65.3, 31.8 | review |
+| D-99 | **R callbacks (body callback, request body function) run under `R_UnwindProtect`**, whose cleanup longjmps back to the calling C frame; the engine unwinds normally, then the `.Call` resumes the jump with `R_ContinueUnwind()`. Replaces `R_tryCatch` on `error`/`interrupt`, which let a warning under an exiting handler, a restart or a `return()` jump through nghttp2 (review #141) | Accepted 2026-11-05 | 27.3, 65.7 | review |
 | D-97 | **The project-owned C budget is 10,000 code lines**, raised from 8,000; the abort threshold stays at 12,000. HTTP/2 (D-96) brought the 8,000 into 0.1.0 with W20 at 7,989 and W21, W22 and M1 still to add: about 500 lines for the HTTP/2 accessors, keepalive and the streaming body (W20 cost about 200 around a 450-line driver), and the §51.3 estimate of 900 for W7–W14, so about 9,400. 10,000 holds that with a margin; raising it to 12,000 would remove the warning R-4 exists to give. The budget is a trigger to cut, not a target to fill | Accepted (maintainer, 2026-11-04) | 51.3, 61, B (R-4) | W20 |
 
 ---
@@ -1191,9 +1193,19 @@ the transfer cleanly and makes the connection unpoolable.
 
 #### 27.3 Callback errors and the longjmp hazard (D-47)
 
-Callbacks run under `R_tryCatch()` catching **error and interrupt only** —
-warnings and messages continue. A caught condition unwinds the native loop,
-releases the connection, and is re-signalled unchanged.
+Callbacks — the body callback and the §65.7 request body function — run
+under `R_UnwindProtect()` (D-99). Its cleanup longjmps back to the C frame
+that made the call, so any non-local exit stops there: an error, an
+interrupt, a warning or message caught by an exiting handler the caller
+established, a restart, `return()` from a closure. The native loop then
+unwinds normally and releases the connection, which is never pooled, and
+the `.Call` resumes the jump with `R_ContinueUnwind()`: the caller sees
+exactly what R would have done with no zuhttp in between, their condition
+unwrapped, at their handler. A warning that returns, a message, or a
+calling handler runs as it would anyway, and the transfer continues. The
+continuation token is made before the engine runs, never inside it. Until
+2026-11-05 the call used `R_tryCatch()` on `error` and `interrupt` alone,
+and the other exits jumped through the C read loop and nghttp2 (#141).
 
 #### 27.4 Re-entrancy
 
@@ -2239,8 +2251,13 @@ sense as frames. Its §26.2 probe differs from HTTP/1.1's: an idle h2
 connection is readable whenever the server sends SETTINGS ACK, WINDOW_UPDATE
 or PING, so the probe feeds what arrived to the session, answers it, and
 reports the connection stale only on EOF, GOAWAY, a protocol error, or
-exhausted stream ids. nghttp2 allocates through `zuh_alloc` (§8.2), so §43's
-allocation-balance oracle and the allocation-failure tests cover it.
+exhausted stream ids. A protocol error in what arrived does not come back as
+an error: nghttp2 queues its own GOAWAY and stops reading, so the probe asks
+the session whether it still reads and still allows a request (found by the
+review tests, #147). nghttp2 allocates through `zuh_alloc` (§8.2), so §43's
+allocation-balance oracle and the allocation-failure tests cover it, and its
+`NGHTTP2_ERR_NOMEM` is `ZUH_ERR_NOMEM`, never a protocol error that would
+blame the server (#139).
 
 #### 65.3 Trailers
 
@@ -2255,6 +2272,14 @@ per D-84). Trailers and headers are never merged. They are bounded by the
 reach twice `max_header_bytes`, and a trailer block over the limits is
 `zu_http_parse_error` after the body has been delivered to the sink, which
 then aborts (§27.1).
+
+`NULL` and empty differ (D-98): on a pulled body `zu_resp_trailers()` is
+`NULL` until the body has been read to a clean end, and stays `NULL` after
+`zu_resp_abort()` or a failure, whose trailers are unknown; an empty named
+vector means the stream ended with none. gRPC tells a dropped trailer block
+from an empty one this way. A mock response is built with
+`zu_response(trailers = )` and follows the same rule, and a cassette records
+the block and replays it.
 
 A Trailers-Only response — one HEADERS block that ends the stream — reaches
 the caller as a response with those headers, an empty body and no trailers.
@@ -2327,7 +2352,13 @@ passed since the last frame in either direction, and evicts the connection
 if no ACK arrives inside `keepalive_timeout`. The PING is sent and awaited
 inside the next acquire, on the request's clock, since zuhttp has no loop of
 its own (§30): a connection whose PING is overdue is probed before it is
-handed out, and one whose ACK does not arrive is closed and replaced. Both
+handed out, and one whose ACK does not arrive is closed and replaced. The
+wait ends at `keepalive_timeout` or at the request's own deadline, whichever
+comes first (§24.1; review #145), so `timeout = 2` is never spent waiting 20
+s on a peer that silently left. The wait ticks the §25.1 interrupt check, so
+R can run, collect garbage and finalize a pulled body that releases its
+connection into this same pool: acquire unlinks the entry it probes and
+reads the list again from its head after each probe (review #154). Both
 unset is the default and means no PING; the idle timeout still applies.
 `zugrpc` passes Spark's 60 s and 20 s. HTTP/1.1 connections keep the §26.2
 readability probe.
@@ -2342,9 +2373,19 @@ the peer's window and ends the stream after `NULL`; over HTTP/1.1 it sends
 chunked, the one case in which zuhttp chunks a request (D-78 is amended by
 D-95 for this body alone). The body is not rewindable (§28.2), so a retry or
 a 307/308 raises `zu_body_not_replayable`. `f` runs on R's thread under the
-§27.3 rules: its errors and interrupts are caught at the call and re-raised,
-unchanged, once the engine has unwound, and the connection is closed, never
-pooled (D-47). An empty raw vector is a piece of nothing, not the end.
+§27.3 rules (D-99): any non-local exit from it is stopped at the call and
+resumed, unchanged, once the engine has unwound, and the connection is
+closed, never pooled. It is a callback for §27.4, so it cannot make a
+request on its own client, and over full duplex it cannot read or abort its
+own response, which would re-enter nghttp2 from inside its data provider
+(`zu_io_error`; review #155). An empty raw vector is a piece of nothing, not
+the end, and is asked for again in a loop, interruptibly (#157).
+
+An in-memory body is borrowed from the caller for the engine call. When a
+pulled response (§65.4) takes the connection before that body has all gone
+out — a server that answers on the request headers — the driver first
+copies the unsent part into the connection (`zuh_h2_own_body()`): R may
+collect the raw vector once `zu_perform()` returns (review #137).
 
 Half-close works for a bidirectional call. With `zu_perform(stream = TRUE)`
 the call returns once the response headers are in, possibly before `f` has

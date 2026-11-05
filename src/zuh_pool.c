@@ -229,7 +229,7 @@ static size_t count_for_host(const zuh_pool *p, const zuh_pool_key *key) {
  * previous response; both mean discard. An "unknown" probe (-1) is treated as
  * NOT stale, because a backend with no probe would otherwise empty the pool
  * on every acquisition — the expiry check remains the backstop. */
-static int entry_unusable(zuh_pool *p, pool_entry *e, zuh_millis now) {
+static int entry_unusable(zuh_pool *p, pool_entry *e, zuh_millis now, zuh_deadline dl) {
     if (p->cfg.idle_timeout_ms > 0 && now - e->idle_since >= p->cfg.idle_timeout_ms) {
         p->stats.discarded_expired++;
         return 1;
@@ -241,11 +241,14 @@ static int entry_unusable(zuh_pool *p, pool_entry *e, zuh_millis now) {
     /* §65.6: the probe above answers "did the peer leave?" for a closed
      * socket; it cannot see a peer that is silently gone. A PING can, at the
      * cost of a round trip, so only after keepalive_time of silence. The wait
-     * is on this request's clock: zuhttp has no loop of its own (§30). */
+     * is on this request's clock: zuhttp has no loop of its own (§30), and
+     * the request's deadline bounds it (§24.1), so a timeout of 2 s is never
+     * spent waiting 20 s for a peer that silently left. */
     if (p->cfg.keepalive_time_ms > 0 && zuh_h2_is(e->stream) &&
         zuh_h2_idle_ms(e->stream) >= p->cfg.keepalive_time_ms &&
-        !zuh_h2_ping(e->stream, p->cfg.keepalive_timeout_ms > 0
-                                ? p->cfg.keepalive_timeout_ms : 20000)) {
+        !zuh_h2_ping(e->stream, zuh_deadline_min(dl, zuh_deadline_in(
+                         p->cfg.keepalive_timeout_ms > 0 ? p->cfg.keepalive_timeout_ms
+                                                         : 20000)))) {
         p->stats.discarded_stale++;
         return 1;
     }
@@ -253,6 +256,10 @@ static int entry_unusable(zuh_pool *p, pool_entry *e, zuh_millis now) {
 }
 
 zuh_stream *zuh_pool_acquire(zuh_pool *p, const zuh_pool_key *key) {
+    return zuh_pool_acquire_by(p, key, zuh_deadline_never());
+}
+
+zuh_stream *zuh_pool_acquire_by(zuh_pool *p, const zuh_pool_key *key, zuh_deadline dl) {
     pool_entry **link, *e;
     zuh_millis now;
     if (!p || !key) return NULL;
@@ -264,7 +271,17 @@ zuh_stream *zuh_pool_acquire(zuh_pool *p, const zuh_pool_key *key) {
         if (!zuh_pool_key_eq(&e->key, key)) { link = &e->next; continue; }
         *link = e->next;
         p->idle--;
-        if (entry_unusable(p, e, now)) { entry_destroy(e, 1); continue; }
+        if (entry_unusable(p, e, now, dl)) {
+            entry_destroy(e, 1);
+            /* The probe can run R (a PING's wait ticks §25.1's interrupt
+             * check), R can collect garbage, and a finalizer can release a
+             * pulled body's connection into this pool, evicting the entry
+             * `link` points into. The list is read again from its head,
+             * which nothing the probe does can free; `e` was unlinked first,
+             * so nothing else could free it either. */
+            link = &p->head;
+            continue;
+        }
         {
             zuh_stream *s = e->stream;
             e->stream = NULL;

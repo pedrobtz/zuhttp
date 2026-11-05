@@ -405,6 +405,11 @@ zu_perform <- function(req, client = zu_default_client(), stream = FALSE) {
   if (is.function(r$callback)) {
     r$callback <- guard_callback(r$callback, st)
   }
+  # §27.4, §65.7: a request body function is a callback too, run while its
+  # connection is live; the same rule holds for it (review #155).
+  if (is.function(r$body_stream)) {
+    r$body_stream <- guard_body_stream(r$body_stream, st)
+  }
   hooks <- client$hooks %||% list()
 
   t0 <- proc.time()[["elapsed"]]
@@ -599,6 +604,18 @@ watch_delivery <- function(req) {
 # plain assignment after the call, so an error thrown by the callback — which
 # §27.3 re-signals — still clears the flag and does not leave the client
 # permanently unusable.
+guard_body_stream <- function(f, state) {
+  force(f) # as in guard_callback(): the caller rebinds the name to this
+  if (!is.environment(state)) {
+    return(f)
+  }
+  function() {
+    state$in_callback <- TRUE
+    on.exit(state$in_callback <- FALSE, add = TRUE)
+    f()
+  }
+}
+
 guard_callback <- function(f, state) {
   # force() is load-bearing, not defensive. The caller writes
   #   r$callback <- guard_callback(r$callback, st)

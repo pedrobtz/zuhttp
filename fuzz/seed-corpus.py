@@ -254,6 +254,12 @@ def main():
       fr(DATA, 0, 1, b"a" * 1000) +
       fr(HEADERS, END_HEADERS | END_STREAM, 1, lit(b"grpc-status", b"0")))
     w("h2/two-connections", bytes([0x12]) + pre + ok1 + b"\x00ZU\x00" + pre + ok1)
+    # §65.7 (review #159): option bits 0x4|0x8 send a streamed request body;
+    # with 0x1 the body function fails on its second piece. 0x80 pulls the
+    # response, so a source the pulled body inherits is released by it.
+    w("h2/streamed-body", bytes([0x0E]) + pre + ok1 + ok3)
+    w("h2/streamed-body-fails", bytes([0x0D]) + pre + ok1 + b"\x00ZU\x00" + pre + ok1)
+    w("h2/streamed-body-pulled", bytes([0x8E]) + pre + ok1 + ok3)
 
     with open(os.path.join("corpus", "README"), "w") as f:
         f.write(README)
