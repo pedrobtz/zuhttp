@@ -244,7 +244,7 @@ void suite_pool(void) {
         ZUH_CHECK(p0 != NULL);
         zuh_pool_set_clock(p0, fake_now, NULL);
         zuh_pool_release(p0, &a, idle_stream(), ZUH_REUSE_OK);
-        g_now += 1000L * 60 * 60 * 24 * 365;
+        g_now += (zuh_millis)1000 * 60 * 60 * 24 * 365;   /* a year; long is 32-bit on Windows */
         s = zuh_pool_acquire(p0, &a);
         ZUH_CHECK(s != NULL);
         zuh_pool_stats_get(p0, &st);
