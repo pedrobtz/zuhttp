@@ -757,3 +757,21 @@ test_that("Ctrl-C (SIGINT) cancels within the 200 ms bound (§25, #7)", {
   expect_lt(elapsed, 0.5 + 0.2 + 0.3) # the signal, the bound, scheduling slack
   expect_identical(zu_resp_status(zu_get(web$url("/get"))), 200L)
 })
+
+test_that("zu_resp_read(timeout = ) bounds one read of a stalled body, then the body is over (#173)", {
+  web <- local_httpbin("keep-alive", keep_alive = TRUE)
+  # Two bytes over four seconds: the second is about two seconds after the
+  # first. The request's own timeout is far longer, so only the per-call
+  # bound can end the second read early.
+  r <- zu_perform(
+    zu_request("GET", web$url("/drip?numbytes=2&duration=4")),
+    client = zu_client(timeout = 30, pool = NULL),
+    stream = TRUE
+  )
+  first <- zu_resp_read(r, 1)
+  expect_length(first, 1L)
+  t0 <- proc.time()[["elapsed"]]
+  expect_error(zu_resp_read(r, 1, timeout = 0.3), class = "zu_timeout_error")
+  expect_lt(proc.time()[["elapsed"]] - t0, 1.5)
+  expect_error(zu_resp_read(r, 1), class = "zu_io_error")
+})

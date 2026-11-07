@@ -1314,7 +1314,7 @@ static SEXP C_zu_build_info(void) {
 /* §65.4: up to n decoded bytes, a raw vector of length 0 at the end. Every
  * wait is a §25.1 wait: the stream's tick reads g_tick_current, set here as
  * C_zu_perform sets it, and an interrupt ends the body as an abort would. */
-static SEXP C_zu_stream_read(SEXP ptr, SEXP n, SEXP url) {
+static SEXP C_zu_stream_read(SEXP ptr, SEXP n, SEXP url, SEXP timeout_ms) {
     zuh_open_body *b = stream_ptr_get(ptr);
     tick_ctx tick = { NULL };
     zuh_buffer got;
@@ -1348,7 +1348,9 @@ static SEXP C_zu_stream_read(SEXP ptr, SEXP n, SEXP url) {
     {
         tick_ctx *prev = g_tick_current;
         g_tick_current = &tick;
-        rc = zuh_open_body_read(b, &got, (size_t)want, &e);
+        /* #173: this call's bound, when the caller gave one; 0 otherwise. */
+        rc = zuh_open_body_read_within(b, &got, (size_t)want,
+                                       (long)Rf_asInteger(timeout_ms), &e);
         g_tick_current = prev;
     }
     if (rc != ZUH_OK) {
@@ -1434,7 +1436,7 @@ static const R_CallMethodDef call_methods[] = {
     {"C_zu_is_secret_header",  (DL_FUNC) &C_zu_is_secret_header,  2},
     {"C_zu_is_secret_param",   (DL_FUNC) &C_zu_is_secret_param,   2},
     {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          22},
-    {"C_zu_stream_read",       (DL_FUNC) &C_zu_stream_read,       3},
+    {"C_zu_stream_read",       (DL_FUNC) &C_zu_stream_read,       4},
     {"C_zu_stream_abort",      (DL_FUNC) &C_zu_stream_abort,      1},
     {"C_zu_stream_trailers",   (DL_FUNC) &C_zu_stream_trailers,   1},
     {"C_zu_pool_new",          (DL_FUNC) &C_zu_pool_new,          5},

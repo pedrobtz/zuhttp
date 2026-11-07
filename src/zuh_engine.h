@@ -156,6 +156,12 @@ typedef struct zuh_open_body zuh_open_body;
  * and closes the connection. */
 zuh_code zuh_open_body_read(zuh_open_body *b, zuh_buffer *out, size_t n,
                             zuh_error *err);
+/* The same, with this call's waits bounded by `timeout_ms` instead (#173):
+ * a caller with an absolute deadline, zugrpc's call deadline, passes what
+ * is left of it. <= 0 means the request's timeout, as zuh_open_body_read().
+ * A timeout ends the body like any other error. */
+zuh_code zuh_open_body_read_within(zuh_open_body *b, zuh_buffer *out, size_t n,
+                                   long timeout_ms, zuh_error *err);
 /* §65.5: stop reading. Over HTTP/2 the stream is reset and the connection
  * pooled; over HTTP/1.1 it is closed. A no-op on an ended or aborted body. */
 void zuh_open_body_abort(zuh_open_body *b);

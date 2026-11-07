@@ -244,3 +244,20 @@ test_that("a mock transport sees a streamed body collected whole", {
     "raw vector"
   )
 })
+
+test_that("zu_resp_read(timeout = ) is validated, and a stored body ignores it (#173)", {
+  r <- zu_perform(
+    zu_request("GET", "https://x.test/"),
+    client = mock_client(),
+    stream = TRUE
+  )
+  expect_error(zu_resp_read(r, timeout = 0), "positive number of seconds")
+  expect_error(zu_resp_read(r, timeout = -1), "positive number of seconds")
+  expect_error(
+    zu_resp_read(r, timeout = NA_real_),
+    "positive number of seconds"
+  )
+  expect_error(zu_resp_read(r, timeout = "1"), "positive number of seconds")
+  expect_identical(zu_resp_read(r, 5, timeout = 0.001), charToRaw("hello"))
+  expect_identical(zu_resp_read(r, 100, timeout = Inf), charToRaw(" world"))
+})

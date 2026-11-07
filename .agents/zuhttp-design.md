@@ -2340,7 +2340,10 @@ interruptible at the checkpoint, and bounded by the request's `timeout`
 afresh on each call (the engine takes it separately from the attempt's
 share of the budget, `zuh_get_opts.body_timeout_ms`; review #181), since one
 `total` budget across a stream the caller reads at its own pace would end it
-for being read slowly; the phase
+for being read slowly. A caller with an absolute deadline for the whole
+stream, zugrpc's call deadline, passes what is left of it as
+`zu_resp_read(timeout = )`, which bounds that one call instead and, run out,
+raises `zu_timeout_error` and ends the body as any failed read does (#173); the phase
 timeouts of §24 take over when W4 and W7 build them. An interrupt ends the
 body and closes its connection.
 

@@ -1533,6 +1533,35 @@ void suite_engine_mock(void) {
         }
     }
 
+    ZUH_CASE("§65.4: a per-call bound overrides the request's timeout for that read only (#173)");
+    {
+        zuh_buffer got;
+        zuh_millis t0;
+        conn_script s[] = {{ "HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nhello", 0, 0, 0, NULL }};
+        dialer_init(&d, s, 1); opts_for(&o, &d);
+        d.block_after[0] = 1;
+        o.stream_body = 1;
+        o.body_timeout_ms = 5000;            /* the request's: far longer */
+        zuh_buf_init(&got, 0, (size_t)-1);
+        rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            ZUH_CHECK_EQ_INT(zuh_open_body_read_within(r.open, &got, 100, 150, &e), ZUH_OK);
+            ZUH_CHECK_EQ_INT(got.len, 5);
+            t0 = zuh_now_ms();
+            rc = zuh_open_body_read_within(r.open, &got, 100, 150, &e);
+            ZUH_CHECK_EQ_INT(rc, ZUH_ERR_TIMEOUT);
+            ZUH_CHECK(zuh_now_ms() - t0 >= 100);
+            ZUH_CHECK(zuh_now_ms() - t0 < 2000);       /* 150 ms, not 5 s */
+            ZUH_CHECK(zuh_open_body_done(r.open));     /* the body ended */
+            ZUH_CHECK_EQ_INT(zuh_open_body_read_within(r.open, &got, 100, 150, &e), ZUH_ERR_IO);
+            zuh_result_free(&r);
+        }
+        ZUH_CHECK_EQ_INT(d.closed[0], 1);
+        zuh_buf_free(&got);
+        dialer_free(&d);
+    }
+
     ZUH_CASE("engine: every error path closes its connection exactly once; success without a pool too (#187)");
     {
         /* A truncated body. */
