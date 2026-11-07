@@ -36,17 +36,19 @@ checks.
   package to install when it is missing. zlib is linked on every platform.
   No certificate bundle is shipped.
 
-* **Bundled code.** Two small libraries are compiled in: 'picohttpparser'
-  (MIT) and a subset of 'uriparser' (BSD-3-Clause). Their copyright holders
-  are in `Authors@R` with role `cph`, their details in `inst/COPYRIGHTS`, and
-  their full licence texts are installed under `licenses/`.
+* **Bundled code.** Three libraries are compiled in: 'picohttpparser'
+  (MIT), a subset of 'uriparser' (BSD-3-Clause), and the `lib/` directory of
+  'nghttp2' (MIT), which includes 'sfparse'. Their copyright holders are in
+  `Authors@R` with role `cph`, their details in `inst/COPYRIGHTS`, and their
+  full licence texts are installed under `licenses/`.
 
 * **No network access during checks.** Examples use a mock transport and run
   offline; the few that make a real request are guarded by `interactive()`.
   Tests that need the network run only when `ZU_TEST_NETWORK=1` is set, which
-  CRAN does not set; the certificate tests use a locally generated CA and a
-  loopback server, and skip on CRAN.
+  CRAN does not set; the certificate tests use committed test certificates and
+  a loopback server, and skip on CRAN.
 
 * **Method references.** There is no publication describing the package's
   methods. It implements HTTP/1.1 as specified in RFC 9110
-  (<doi:10.17487/RFC9110>) and RFC 9112 (<doi:10.17487/RFC9112>).
+  (<doi:10.17487/RFC9110>) and RFC 9112 (<doi:10.17487/RFC9112>), and HTTP/2
+  as specified in RFC 9113 (<doi:10.17487/RFC9113>).
