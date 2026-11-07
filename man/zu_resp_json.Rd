@@ -55,7 +55,7 @@ if (requireNamespace("zuxml", quietly = TRUE)) {
     c("Content-Type" = "application/xml"),
     "<feed><title>News</title></feed>"
   ))
-  zuxml::xml_text(zuxml::xml_find_first(x, "//title"))
+  zuxml::xml_text(zuxml::xml_find_first(x, "title"))
 }
 
 if (requireNamespace("zuhtml", quietly = TRUE)) {
