@@ -53,7 +53,8 @@
     <p><code>zuhttp</code> bundles no cryptography and no CA bundle. It uses the TLS stack and
 the trust store the platform already ships, chosen by <code>./configure</code> at
 install time and reported by <code><a href="zu_tls_backend.html">zu_tls_backend()</a></code>:</p>
-<table class="table table"><tr><td><strong>Platform</strong></td><td><strong>Engine</strong></td><td><strong>Trust store</strong></td></tr><tr><td>Windows</td><td>Schannel</td><td>the system certificate stores</td></tr><tr><td>macOS</td><td>Network.framework</td><td>Keychain, via <code>SecTrustEvaluateWithError</code></td></tr><tr><td>elsewhere</td><td>system OpenSSL</td><td>the system CA directory</td></tr></table><p>The consequence worth knowing is that behaviour is not uniform, because the
+<table class="table table"><tr><td><strong>Platform</strong></td><td><strong>Engine</strong></td><td><strong>Trust store</strong></td></tr><tr><td>Windows</td><td>Schannel</td><td>the system certificate stores</td></tr><tr><td>macOS</td><td>Network.framework</td><td>Keychain, via
+<code>SecTrustEvaluateWithError</code></td></tr><tr><td>elsewhere</td><td>system OpenSSL</td><td>the system CA directory</td></tr></table><p>The consequence worth knowing is that behaviour is not uniform, because the
 platforms are not. What follows is what actually differs.</p>
     </div>
     <div class="section level2">
@@ -110,7 +111,7 @@ the platform then does differs. OpenSSL and Schannel check nothing. <strong>macO
 may check anyway</strong>: the system's trust evaluation consults Apple's own
 revocation data when it has it, with no policy asking for it, so a
 certificate Apple knows to be revoked can be rejected even with
-<code>revocation = FALSE</code> – on one run and not the next.
+<code>revocation = FALSE</code> — on one run and not the next.
 <code>zuhttp</code> cannot switch that off and does not try.</p>
 <p><code>zu_tls(revocation = TRUE)</code> opts in, and what that buys you is
 backend-dependent in a way worth knowing before you rely on it:</p><ul><li><p><strong>OpenSSL: refused.</strong> OpenSSL neither downloads CRLs nor performs OCSP on

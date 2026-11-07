@@ -2,7 +2,8 @@
 
 The defaults are `Authorization`, `Proxy-Authorization`, `Cookie`,
 `Set-Cookie`, `X-Api-Key` and `X-Auth-Token` (§42.1). This adds to them;
-it cannot remove a default.
+it cannot remove a default. Each call replaces the names registered by
+an earlier call, so pass the whole set at once.
 
 ## Usage
 
@@ -18,7 +19,7 @@ zu_redact_headers(...)
 
 ## Value
 
-The resulting character vector of extra names, invisibly.
+The character vector of extra names now registered, invisibly.
 
 ## Examples
 
@@ -26,7 +27,8 @@ The resulting character vector of extra names, invisibly.
 old <- getOption("zuhttp.redact_headers")
 zu_redact_headers("X-Session")
 # Printed requests, traces, cassettes and conditions now hide it:
-zu_headers(zu_request("GET", "https://api.example.com"), `X-Session` = "abc123")
+req <- zu_request("GET", "https://api.example.com")
+zu_headers(req, `X-Session` = "abc123")
 #> <zu_request>
 #> GET https://api.example.com
 #> X-Session: <redacted>

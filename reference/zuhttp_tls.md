@@ -76,7 +76,7 @@ What the platform then does differs. OpenSSL and Schannel check nothing.
 **macOS may check anyway**: the system's trust evaluation consults
 Apple's own revocation data when it has it, with no policy asking for
 it, so a certificate Apple knows to be revoked can be rejected even with
-`revocation = FALSE` – on one run and not the next. `zuhttp` cannot
+`revocation = FALSE` — on one run and not the next. `zuhttp` cannot
 switch that off and does not try.
 
 `zu_tls(revocation = TRUE)` opts in, and what that buys you is

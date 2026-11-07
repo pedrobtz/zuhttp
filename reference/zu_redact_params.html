@@ -3,11 +3,13 @@
 client_secret, password, passwd, pwd, secret, token,
 refresh_token, id_token, private_key, auth_token and
 session_token, matched exactly and case-insensitively (§42.1). This adds
-to them; it cannot remove a default."><meta property="og:description" content="The defaults are access_token, api_key, apikey, signature, sig,
+to them; it cannot remove a default. Each call replaces the names
+registered by an earlier call, so pass the whole set at once."><meta property="og:description" content="The defaults are access_token, api_key, apikey, signature, sig,
 client_secret, password, passwd, pwd, secret, token,
 refresh_token, id_token, private_key, auth_token and
 session_token, matched exactly and case-insensitively (§42.1). This adds
-to them; it cannot remove a default."></head><body>
+to them; it cannot remove a default. Each call replaces the names
+registered by an earlier call, so pass the whole set at once."></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
 
 
@@ -56,7 +58,8 @@ to them; it cannot remove a default."></head><body>
 <code>client_secret</code>, <code>password</code>, <code>passwd</code>, <code>pwd</code>, <code>secret</code>, <code>token</code>,
 <code>refresh_token</code>, <code>id_token</code>, <code>private_key</code>, <code>auth_token</code> and
 <code>session_token</code>, matched exactly and case-insensitively (§42.1). This adds
-to them; it cannot remove a default.</p>
+to them; it cannot remove a default. Each call replaces the names
+registered by an earlier call, so pass the whole set at once.</p>
     </div>
 
     <div class="section level2">
@@ -74,7 +77,7 @@ to them; it cannot remove a default.</p>
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>The resulting character vector of extra names, invisibly.</p>
+    <p>The character vector of extra names now registered, invisibly.</p>
     </div>
 
     <div class="section level2">

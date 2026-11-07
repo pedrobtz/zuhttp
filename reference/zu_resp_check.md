@@ -31,6 +31,9 @@ things: a 404 is a successful HTTP exchange whose answer is "no".
 
 ``` r
 r <- zu_response(404L, url = "https://example.com/missing")
-tryCatch(zu_resp_check(r), zu_http_client_error = function(e) conditionMessage(e))
+tryCatch(
+  zu_resp_check(r),
+  zu_http_client_error = function(e) conditionMessage(e)
+)
 #> [1] "https://example.com/missing failed: HTTP 404 Not Found\n  The server has no such resource. If you are using a client base_url, check the join: base_url and path are concatenated, not resolved."
 ```

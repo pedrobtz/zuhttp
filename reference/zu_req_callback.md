@@ -23,7 +23,7 @@ zu_req_callback(req, callback)
 
 ## Value
 
-The request, modified.
+A `zu_request`.
 
 ## If your callback raises an error
 
@@ -49,6 +49,8 @@ to stream to a file instead.
 
 ``` r
 total <- 0
-req <- zu_req_callback(zu_request("GET", "https://x.test/big"),
-                       function(chunk) total <<- total + length(chunk))
+req <- zu_req_callback(
+  zu_request("GET", "https://x.test/big"),
+  function(chunk) total <<- total + length(chunk)
+)
 ```

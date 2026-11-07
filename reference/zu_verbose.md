@@ -56,7 +56,9 @@ for your own handlers.
 ## Examples
 
 ``` r
-cli <- zu_client(hooks = zu_verbose(),
-                 transport = zu_mock_transport(function(r) zu_response(200L)))
+cli <- zu_client(
+  hooks = zu_verbose(),
+  transport = zu_mock_transport(function(r) zu_response(200L))
+)
 invisible(zu_get("https://example.test/x", client = cli))
 ```

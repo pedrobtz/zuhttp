@@ -21,7 +21,7 @@ zu_req_trace(req, trace = TRUE)
 
 ## Value
 
-The request, modified.
+A `zu_request`.
 
 ## See also
 

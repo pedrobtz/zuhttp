@@ -86,10 +86,9 @@ latency, while one that is slightly too eager to reuse corrupts responses.</p>
 PING before it is reused, and discarded unless the answer arrives within
 <code>keepalive_timeout</code> (<code>NULL</code>, the default, means 20 seconds) or the
 request's own <code>timeout</code>, whichever is sooner; the request then opens a
-new one. This
-finds a server or middlebox that dropped the connection without saying
-so. <code>NULL</code>, the default, sends no PING. HTTP/1.1 connections are
-unaffected.</p></dd>
+new one. This finds a server or middlebox that dropped the connection
+without saying so. <code>NULL</code>, the default, sends no PING. HTTP/1.1
+connections are unaffected.</p></dd>
 
 </dl></div>
     <div class="section level2">

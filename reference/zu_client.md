@@ -167,7 +167,7 @@ to derive a client without mutating it.
 ``` r
 api <- zu_client(
   base_url = "https://api.example.com",
-  headers  = c(Accept = "application/json")
+  headers = c(Accept = "application/json")
 )
 api
 #> <zu_client>

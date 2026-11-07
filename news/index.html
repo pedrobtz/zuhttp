@@ -75,7 +75,14 @@
 </div>
 <div class="section level3">
 <h3 id="fixed-before-release-0-1-0">Fixed before release<a class="anchor" aria-label="anchor" href="#fixed-before-release-0-1-0"></a></h3>
-<ul><li><p><strong>A redirect to another origin no longer carries credentials.</strong> <code>Authorization</code>, <code>Cookie</code> and <code>Proxy-Authorization</code> set by the caller were re-sent on every hop, including to a different host, port or scheme. They are now dropped at the first cross-origin hop and stay dropped for the rest of the chain.</p></li>
+<ul><li><p>A URL longer than 8 KB (a signed URL, an OData filter) is sent, answered and reported; it used to fail after the response arrived, as <code>zu_memory_error</code>. A host name over 253 characters is <code>zu_url_error</code>.</p></li>
+<li><p>A bodiless <code>POST</code>, <code>PUT</code> or <code>PATCH</code> sends <code>Content-Length: 0</code> over HTTP/1.1, which some servers require (411 otherwise).</p></li>
+<li><p>A form-typed body containing a NUL byte no longer turns the HTTP error for its response into a bare <code>simpleError</code> from the redaction step, and a URL too long to redact is shown as <code>&lt;redacted&gt;</code> rather than raising.</p></li>
+<li><p><code><a href="../reference/zu_resp_read.html">zu_resp_read()</a></code> waits the request’s <code>timeout</code> on each call, as documented, not the remaining share of a retry budget.</p></li>
+<li><p>A caller <code>Content-Length</code> on a streamed body is refused with a message that says the body is streamed.</p></li>
+<li><p><code>zu_client(hooks = )</code> accepts what [zu_hooks()] makes, or a named list of its handlers, and refuses anything else at construction rather than at the first request.</p></li>
+<li><p>A cassette <code>name</code> must be a file name, not a path; <code>ca_file</code>, <code>ca_extra</code> and <code><a href="../reference/zu_body.html">zu_body_file()</a></code> say so when given a directory.</p></li>
+<li><p><strong>A redirect to another origin no longer carries credentials.</strong> <code>Authorization</code>, <code>Cookie</code> and <code>Proxy-Authorization</code> set by the caller were re-sent on every hop, including to a different host, port or scheme. They are now dropped at the first cross-origin hop and stay dropped for the rest of the chain.</p></li>
 <li><p>The <code>Host</code> header includes the port when it is not the scheme’s default.</p></li>
 <li><p>A redirect chain longer than <code>redirects</code> raises <code>zu_too_many_redirects</code> instead of returning its last 3xx as if it were the final response. <code>redirects = 0</code> still returns the 3xx itself.</p></li>
 <li><p>An HTTP status missing from zuhttp’s table of status texts (412, 451, a proxy’s 407, …) crashed <code><a href="../reference/zu_resp_check.html">zu_resp_check()</a></code> with “subscript out of bounds” instead of raising <code>zu_http_client_error</code> or <code>zu_http_server_error</code>.</p></li>
@@ -106,7 +113,7 @@
 </div>
 <div class="section level3">
 <h3 id="not-in-this-release-0-1-0">Not in this release<a class="anchor" aria-label="anchor" href="#not-in-this-release-0-1-0"></a></h3>
-<p>Asynchronous and parallel requests, R connection sinks, and client certificates are deferred to 0.2.0. HTTP/2, Brotli, zstd and Unix-domain sockets are not planned.</p>
+<p>Asynchronous and parallel requests, R connection sinks, and client certificates are deferred to 0.2.0. Brotli, zstd and Unix-domain sockets are not planned.</p>
 </div>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

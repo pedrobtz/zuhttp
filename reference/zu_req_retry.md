@@ -49,7 +49,7 @@ zu_req_retry(
 
 ## Value
 
-The request, modified.
+A `zu_request`.
 
 ## See also
 

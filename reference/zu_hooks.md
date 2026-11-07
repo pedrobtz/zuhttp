@@ -51,8 +51,10 @@ mechanism by which a bearer token reaches a log file.
 ``` r
 seen <- character()
 h <- zu_hooks(before_request = function(p) seen <<- c(seen, p$request$url))
-cli <- zu_client(hooks = h,
-                 transport = zu_mock_transport(function(r) zu_response(200L)))
+cli <- zu_client(
+  hooks = h,
+  transport = zu_mock_transport(function(r) zu_response(200L))
+)
 invisible(zu_get("https://x.test/a", client = cli))
 seen
 #> [1] "https://x.test/a"

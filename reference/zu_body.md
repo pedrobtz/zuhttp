@@ -75,7 +75,7 @@ is sent chunked. Such a body cannot be sent twice: a retry, or a 307 or
 308 redirect, raises `zu_body_not_replayable` instead (§28.2), and an
 error raised inside `f` stops the request, closes its connection, and is
 re-raised unchanged. The implied content type is only a default: a
-header set on the request or the client always wins (§31.2).
+header set on the request or the client always wins (§31.6).
 
 ## Examples
 

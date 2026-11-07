@@ -24,7 +24,7 @@ zu_req_path(req, path)
 
 ## Value
 
-The request, modified.
+A `zu_request`.
 
 ## Details
 

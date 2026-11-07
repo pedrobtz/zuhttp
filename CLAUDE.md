@@ -49,13 +49,16 @@ make -C fuzz replay-asan      # the same corpus under ASan + UBSan
 make -C fuzz fuzz-run         # libFuzzer, needs clang
 
 # R
-R CMD INSTALL .
+R CMD INSTALL --preclean .    # --preclean: an in-tree build reuses stale src/*.o,
+                              #   which once linked in pre-visibility vendored objects
 Rscript -e 'testthat::test_local()'                     # offline
 ZU_TEST_NETWORK=1 Rscript -e 'testthat::test_local()'   # + the network suite
 Rscript -e 'roxygen2::roxygenise()'                     # after touching roxygen blocks
 air format R tests && air format --check .              # before every push that touches R;
                                                         #   the conventions job fails otherwise
 ./tools/check-vendor-licenses                           # after a re-vendor
+tools/make-tls-fixture                                  # the §50.5 certificates; 397-day leaves,
+                                                        #   test-certs.R says when (fixtures/README.md)
 
 # HTTP/2 live tests (test-http2.R): a local server whose HTTP/2 is not nghttp2's
 tools/h2-test-cert.sh /tmp/h2 && python3 tools/h2-test-server.py 18080 18443 /tmp/h2/cert.pem /tmp/h2/key.pem &

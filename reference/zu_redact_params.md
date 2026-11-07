@@ -4,7 +4,8 @@ The defaults are `access_token`, `api_key`, `apikey`, `signature`,
 `sig`, `client_secret`, `password`, `passwd`, `pwd`, `secret`, `token`,
 `refresh_token`, `id_token`, `private_key`, `auth_token` and
 `session_token`, matched exactly and case-insensitively (§42.1). This
-adds to them; it cannot remove a default.
+adds to them; it cannot remove a default. Each call replaces the names
+registered by an earlier call, so pass the whole set at once.
 
 ## Usage
 
@@ -20,7 +21,7 @@ zu_redact_params(...)
 
 ## Value
 
-The resulting character vector of extra names, invisibly.
+The character vector of extra names now registered, invisibly.
 
 ## Examples
 

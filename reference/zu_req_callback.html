@@ -73,7 +73,7 @@ to stop.</p></dd>
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>The request, modified.</p>
+    <p>A <code>zu_request</code>.</p>
     </div>
     <div class="section level2">
     <h2 id="if-your-callback-raises-an-error">If your callback raises an error<a class="anchor" aria-label="anchor" href="#if-your-callback-raises-an-error"></a></h2>
@@ -102,8 +102,10 @@ read, so it raises an error naming the problem instead. A request through a
     <div class="section level2">
     <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
     <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="va">total</span> <span class="op">&lt;-</span> <span class="fl">0</span></span></span>
-<span class="r-in"><span><span class="va">req</span> <span class="op">&lt;-</span> <span class="fu">zu_req_callback</span><span class="op">(</span><span class="fu"><a href="zu_request.html">zu_request</a></span><span class="op">(</span><span class="st">"GET"</span>, <span class="st">"https://x.test/big"</span><span class="op">)</span>,</span></span>
-<span class="r-in"><span>                       <span class="kw">function</span><span class="op">(</span><span class="va">chunk</span><span class="op">)</span> <span class="va">total</span> <span class="op">&lt;&lt;-</span> <span class="va">total</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="va">chunk</span><span class="op">)</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="va">req</span> <span class="op">&lt;-</span> <span class="fu">zu_req_callback</span><span class="op">(</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="zu_request.html">zu_request</a></span><span class="op">(</span><span class="st">"GET"</span>, <span class="st">"https://x.test/big"</span><span class="op">)</span>,</span></span>
+<span class="r-in"><span>  <span class="kw">function</span><span class="op">(</span><span class="va">chunk</span><span class="op">)</span> <span class="va">total</span> <span class="op">&lt;&lt;-</span> <span class="va">total</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="va">chunk</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="op">)</span></span></span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
