@@ -406,14 +406,19 @@ void suite_body(void) {
         zuh_sink *d;
         int cap;
         for (cap = 1; cap <= 30; cap++) {
+            zuh_code rc;
             d = zuh_sink_discard();
             ZUH_CHECK(d != NULL);
             zuh_headers_init(&h);
-            (void)run_body(steps, 3, ZUH_FRAME_UNTIL_CLOSE, 0, d, &h, 1,
-                           (uint64_t)cap, &e);
+            rc = run_body(steps, 3, ZUH_FRAME_UNTIL_CLOSE, 0, d, &h, 1,
+                          (uint64_t)cap, &e);
             /* Exactly the promise §40 makes, at every cap around the read
-             * boundaries — not just at a convenient one. */
+             * boundaries — not just at a convenient one. And the refusal
+             * itself, with what was delivered before it, so a reader that
+             * delivers nothing cannot pass (#196). */
             ZUH_CHECK(d->written <= (uint64_t)cap);
+            ZUH_CHECK_EQ_INT(rc, cap < 30 ? ZUH_ERR_BODY_LIMIT : ZUH_OK);
+            if (cap >= 10) ZUH_CHECK(d->written >= 10);
             zuh_headers_free(&h);
             zuh_sink_free(d);
         }

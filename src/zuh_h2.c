@@ -112,7 +112,10 @@ static int on_begin_headers(nghttp2_session *s, const nghttp2_frame *f, void *ud
         /* A second block after the final response is the trailers. */
         h->in_trailers = 1;
     } else {
-        /* A response block: the first, or the one after a 1xx. */
+        /* A response block: the first, or the one after a 1xx. `hdrs` is
+         * the caller's, and only while zuh_h2_begin() runs (review #178). */
+        if (!h->hdrs)
+            return cb_fail(h, ZUH_ERR_PARSE, "HTTP/2 response headers arrived outside a request");
         zuh_headers_free(h->hdrs);
         zuh_headers_init(h->hdrs);
         h->status = 0;
@@ -142,6 +145,8 @@ static int on_header(nghttp2_session *s, const nghttp2_frame *f,
             h->status = (value[0] - '0') * 100 + (value[1] - '0') * 10 + (value[2] - '0');
         return 0;
     }
+    if (!h->in_trailers && !h->hdrs)
+        return cb_fail(h, ZUH_ERR_PARSE, "HTTP/2 response headers arrived outside a request");
     rc = zuh_headers_add(h->in_trailers ? &h->trailers : h->hdrs,
                          (const char *)name, nlen, (const char *)value, vlen);
     if (rc == ZUH_ERR_NOMEM) return cb_fail(h, rc, "out of memory");
@@ -168,6 +173,8 @@ static int on_frame_recv(nghttp2_session *s, const nghttp2_frame *f, void *ud) {
         if (h->status >= 100 && h->status < 200) {
             /* §18: an informational response is skipped. 101 never reaches
              * here; nghttp2 refuses it on an HTTP/2 stream. */
+            if (!h->hdrs)
+                return cb_fail(h, ZUH_ERR_PARSE, "HTTP/2 response headers arrived outside a request");
             zuh_headers_free(h->hdrs);
             zuh_headers_init(h->hdrs);
             h->status = 0;
@@ -476,6 +483,10 @@ zuh_code zuh_h2_begin(zuh_stream *conn, const zuh_h2_request *rq,
     sid = nghttp2_submit_request2(h->sess, NULL, nv, nv_n,
                                   (h->body_len || h->src.next) ? &prd : NULL, NULL);
     if (sid < 0) {
+        /* NOMEM is the one code a client can meet here (#139). The others
+         * nghttp2 documents, STREAM_ID_NOT_AVAILABLE after 2^30 streams on
+         * one connection and PROTO for a server session, no test can
+         * reach from this driver, which is why no test does (#192). */
         rc = fail(h, err, sid == NGHTTP2_ERR_NOMEM ? ZUH_ERR_NOMEM : ZUH_ERR_IO,
                   ZUH_PHASE_WRITE, nghttp2_strerror(sid), sid);
         goto out;
@@ -498,6 +509,12 @@ zuh_code zuh_h2_begin(zuh_stream *conn, const zuh_h2_request *rq,
     }
 
 out:
+    /* `headers` lives on the caller's stack. The callbacks that write
+     * through it are gated on !headers_done and nghttp2 does not deliver
+     * headers for a closed stream, but a pointer into a frame that has
+     * returned is not something to keep for the connection's pooled life
+     * (review #178): the callbacks refuse a block when it is NULL. */
+    h->hdrs = NULL;
     if (rc == ZUH_ERR_NOMEM && !err->code)
         zuh_error_set(err, rc, ZUH_PHASE_WRITE, "out of memory");
     if (names) {

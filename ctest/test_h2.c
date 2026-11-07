@@ -43,6 +43,7 @@ typedef struct {
     int         goaway_refuse;   /* GOAWAY below the stream id instead of answering */
     int         rst_no_error;    /* RST_STREAM(NO_ERROR) instead of answering */
     int         block_on_empty;  /* a read with nothing to give waits for its deadline */
+    int         wouldblock_every; /* every other read is WOULDBLOCK first (#192) */
     /* Hostile mode: no server session at all; these bytes are the "server". */
     const unsigned char *raw;
     size_t      raw_len;
@@ -71,6 +72,7 @@ typedef struct {
     int pings;                   /* PINGs from the client, ACKs not counted */
     int fail_writes;             /* every client write fails from now on */
     size_t written;              /* bytes the client wrote on this connection */
+    int reads, wouldblocks;      /* client reads, and how many blocked first */
 } srv;
 
 typedef struct {
@@ -78,6 +80,8 @@ typedef struct {
     const srv_cfg *cfg;
     int dials;
     size_t client_bytes;         /* everything the client wrote, all conns */
+    zuh_tick_fn tick;            /* #189: consulted before every read */
+    void       *tick_ctx;
 } srv_dialer;
 
 static void out_append(srv *v, const uint8_t *p, size_t n) {
@@ -243,9 +247,21 @@ static int s_on_frame_recv(nghttp2_session *s, const nghttp2_frame *f, void *ud)
 
 /* --- the server as a zuh_stream -------------------------------------------- */
 
+static srv_dialer *g_lb_dialer;      /* the dialer whose tick lb_read asks */
+
 static zuh_ssize lb_read(zuh_stream *st, void *b, size_t n, zuh_deadline d, zuh_error *e) {
     srv *v = (srv *)st->impl;
     size_t have = v->out_len - v->out_off;
+    if (g_lb_dialer && g_lb_dialer->tick && g_lb_dialer->tick(g_lb_dialer->tick_ctx)) {
+        zuh_error_set(e, ZUH_ERR_CANCELLED, ZUH_PHASE_NONE, "operation cancelled");
+        return -1;
+    }
+    v->reads++;
+    if (v->cfg->wouldblock_every && (v->reads % 2) == 1) {
+        v->wouldblocks++;
+        zuh_error_set(e, ZUH_ERR_WOULDBLOCK, ZUH_PHASE_READ, "loopback: would block");
+        return -1;
+    }
     if (have == 0) {
         if (v->eof || v->cfg->raw) return 0;
         if (v->cfg->block_on_empty) {
@@ -339,6 +355,7 @@ static zuh_code lb_dial(void *ctx, const char *host, uint16_t port,
 static void dialer_init(srv_dialer *dd, const srv_cfg *c) {
     memset(dd, 0, sizeof *dd);
     dd->cfg = c;
+    g_lb_dialer = dd;
 }
 
 static void dialer_free(srv_dialer *dd) {
@@ -831,6 +848,31 @@ static zuh_code scn_source_abort(zuh_error *e) {
     return rc;
 }
 
+/* #137's shape: the response arrives before the in-memory body has gone
+ * out, so the driver copies the unsent part (zuh_h2_own_body), then the
+ * pulled body is read to the end. */
+static zuh_code scn_own_body(zuh_error *e) {
+    srv_dialer dd; zuh_get_opts o; zuh_result r; zuh_code rc; zuh_req_spec spec; zuh_buffer got;
+    static unsigned char body[200000];
+    srv_cfg c; memset(&c, 0, sizeof c);
+    if (!body[1]) { size_t i; for (i = 0; i < sizeof body; i++) body[i] = (unsigned char)((i * 7 + 3) & 0xff); }
+    c.respond_on_headers = 1;
+    c.body = k_abc; c.body_len = 3;
+    memset(&spec, 0, sizeof spec);
+    spec.method = "POST"; spec.body = body; spec.body_len = sizeof body;
+    if (!zuh_buf_init(&got, 0, (size_t)-1)) { zuh_error_set(e, ZUH_ERR_NOMEM, ZUH_PHASE_NONE, "out of memory"); return ZUH_ERR_NOMEM; }
+    dialer_init(&dd, &c); h2c_opts(&o, &dd); o.stream_body = 1;
+    rc = zuh_engine_perform(&r, "http://example.test/up", &spec, &o, e);
+    if (rc == ZUH_OK) {
+        while ((rc = zuh_open_body_read(r.open, &got, 100, e)) == ZUH_OK &&
+               !zuh_open_body_done(r.open)) { }
+        zuh_result_free(&r);
+    }
+    zuh_buf_free(&got);
+    dialer_free(&dd);
+    return rc;
+}
+
 static void sweep(const char *name, h2_scenario scn) {
     zuh_alloc_stats before, after;
     zuh_error e;
@@ -873,6 +915,8 @@ static void cases_alloc(void) {
     sweep("§43: a pulled body and its trailers, every allocation failing", scn_pulled);
     sweep("§43: a streamed request body and an aborted pulled body, every allocation failing",
           scn_source_abort);
+    sweep("§43: a body the driver had to copy (#137) and a pulled response, every allocation failing (#188)",
+          scn_own_body);
 }
 
 void suite_h2(void) {
@@ -1409,6 +1453,14 @@ static void poke_ping_settings(srv *v) {
 
 static unsigned char k_huge[5u << 20];
 
+/* #189: a tick that cancels on its n-th call. */
+typedef struct { int calls, cancel_at; } tick_ctr;
+static int counting_tick(void *ctx) {
+    tick_ctr *c = (tick_ctr *)ctx;
+    c->calls++;
+    return c->calls >= c->cancel_at;
+}
+
 static void cases_review(void) {
     srv_dialer dd;
     zuh_get_opts o;
@@ -1585,12 +1637,16 @@ static void cases_review(void) {
         rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
         ZUH_CHECK_EQ_INT(rc, ZUH_OK);
         if (rc == ZUH_OK) {
+            size_t written = dd.conns[0].written;
             dd.conns[0].fail_writes = 1;
             zuh_open_body_abort(r.open);
             zuh_result_free(&r);
+            /* Nothing more reached the wire (#196): the server session
+             * never sees the RST_STREAM, so `rst_seen` would be 0 whatever
+             * the client did, and is not the evidence. */
+            ZUH_CHECK_EQ_INT(dd.conns[0].written, written);
         }
         ZUH_CHECK_EQ_INT(zuh_pool_idle_count(pool), 0);
-        ZUH_CHECK(!dd.conns[0].rst_seen);
         zuh_pool_free(pool);
         dialer_free(&dd);
     }
@@ -1744,8 +1800,73 @@ static void cases_review(void) {
         rc = zuh_engine_perform(&r, "http://example.test/2", NULL, &o, &e);
         if (rc == ZUH_OK) zuh_result_free(&r);
         /* 300 ms, not keepalive_timeout's 10 s; whether the request then
-         * fits on a new connection in what is left is the deadline's call. */
-        ZUH_CHECK(zuh_now_ms() - t0 < 3000);
+         * fits on a new connection in what is left is the deadline's call,
+         * so the outcome is one of those two (#196). */
+        ZUH_CHECK(zuh_now_ms() - t0 < 1000);
+        ZUH_CHECK(rc == ZUH_OK || rc == ZUH_ERR_TIMEOUT);
+        zuh_pool_free(pool);
+        dialer_free(&dd);
+    }
+
+    ZUH_CASE("§65.2: a read that would block is retried, not an error (#192)");
+    {
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.body = k_abc; c.body_len = 3; c.wouldblock_every = 1;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd);
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            ZUH_CHECK(r.body.len == 3 && memcmp(r.body.data, "abc", 3) == 0);
+            zuh_result_free(&r);
+        }
+        ZUH_CHECK(dd.conns[0].wouldblocks > 0);      /* the branch ran */
+        dialer_free(&dd);
+    }
+
+    ZUH_CASE("§65.2: a server that breaks the protocol mid-request ends the session as zu_http_parse_error (#192)");
+    {
+        /* A server preface (an empty SETTINGS), then DATA on stream 0: a
+         * connection error (RFC 9113 §6.1). nghttp2 answers with GOAWAY and
+         * wants nothing more, which is the "session over" branch of pump(),
+         * with no GOAWAY from the peer to blame. */
+        static const unsigned char raw[] = {
+            0, 0, 0, 4, 0, 0, 0, 0, 0,           /* SETTINGS, empty */
+            0, 0, 1, 0, 0, 0, 0, 0, 0, 'x' };    /* DATA on stream 0 */
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.raw = raw; c.raw_len = sizeof raw;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd);
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_ERR_PARSE);
+        ZUH_CHECK(has(e.message, "broke the HTTP/2 protocol"));
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        dialer_free(&dd);
+    }
+
+    ZUH_CASE("§25.1, §65.4: an interrupt inside a pulled HTTP/2 read cancels the body and pools nothing (#189)");
+    {
+        zuh_pool *pool = zuh_pool_new(NULL);
+        zuh_buffer got;
+        tick_ctr ctr = { 0, 3 };
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.body = k_huge; c.body_len = 300000;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); o.pool = pool; o.stream_body = 1;
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            dd.tick = counting_tick; dd.tick_ctx = &ctr;
+            zuh_buf_init(&got, 0, (size_t)-1);
+            while ((rc = zuh_open_body_read(r.open, &got, 1000, &e)) == ZUH_OK &&
+                   !zuh_open_body_done(r.open)) { }
+            ZUH_CHECK_EQ_INT(rc, ZUH_ERR_CANCELLED);
+            ZUH_CHECK(ctr.calls >= 3);
+            ZUH_CHECK(zuh_open_body_done(r.open));
+            zuh_buf_free(&got);
+            zuh_result_free(&r);
+        }
+        ZUH_CHECK_EQ_INT(zuh_pool_idle_count(pool), 0);
         zuh_pool_free(pool);
         dialer_free(&dd);
     }

@@ -140,6 +140,57 @@ void suite_stream(void) {
         zuh_mock_stream_free(s);
     }
 
+    ZUH_CASE("write_all retries a write that would block, and a short one (#187)");
+    {
+        static const zuh_mock_write_fault kinds[] = { ZUH_MOCK_WRITE_WOULDBLOCK, ZUH_MOCK_WRITE_SHORT };
+        int k;
+        for (k = 0; k < 2; k++) {
+            zuh_stream *s = zuh_mock_stream_new(NULL, 0, 0, 0);
+            zuh_error err; const zuh_buffer *w;
+            zuh_deadline d = zuh_deadline_never();
+            zuh_mock_stream_set_write_fault(s, kinds[k], 3);
+            zuh_error_clear(&err);
+            ZUH_CHECK(zuh_stream_write_all(s, "0123456789", 10, d, &err));
+            ZUH_CHECK_EQ_INT(err.code, ZUH_OK);           /* WOULDBLOCK cleared */
+            w = zuh_mock_stream_written(s);
+            ZUH_CHECK_EQ_INT(w->len, 10);
+            ZUH_CHECK_MEM(w->data, "0123456789", 10);
+            zuh_mock_stream_free(s);
+        }
+    }
+
+    ZUH_CASE("write_all reports a zero-byte write as closed and a failed one with its code (#187)");
+    {
+        zuh_stream *s = zuh_mock_stream_new(NULL, 0, 0, 0);
+        zuh_error err;
+        zuh_deadline d = zuh_deadline_never();
+        zuh_mock_stream_set_write_fault(s, ZUH_MOCK_WRITE_ZERO, 0);
+        zuh_error_clear(&err);
+        ZUH_CHECK(!zuh_stream_write_all(s, "0123456789", 10, d, &err));
+        ZUH_CHECK_EQ_INT(err.code, ZUH_ERR_CLOSED);
+        ZUH_CHECK_EQ_INT(err.phase, ZUH_PHASE_WRITE);
+        ZUH_CHECK_EQ_INT(zuh_mock_stream_written(s)->len, 0);
+        zuh_mock_stream_free(s);
+        s = zuh_mock_stream_new(NULL, 0, 0, 0);
+        zuh_mock_stream_set_write_fault(s, ZUH_MOCK_WRITE_ERROR, 0);
+        zuh_error_clear(&err);
+        ZUH_CHECK(!zuh_stream_write_all(s, "0123456789", 10, d, &err));
+        ZUH_CHECK_EQ_INT(err.code, ZUH_ERR_IO);
+        ZUH_CHECK_EQ_INT(zuh_mock_stream_written(s)->len, 0);
+        zuh_mock_stream_free(s);
+    }
+
+    ZUH_CASE("close() is counted, once per call (#187)");
+    {
+        zuh_stream *s = zuh_mock_stream_new(NULL, 0, 0, 0);
+        long before = zuh_mock_stream_closes_total();
+        ZUH_CHECK_EQ_INT(zuh_mock_stream_closed(s), 0);
+        zuh_stream_close(s);
+        ZUH_CHECK_EQ_INT(zuh_mock_stream_closed(s), 1);
+        ZUH_CHECK_EQ_INT(zuh_mock_stream_closes_total() - before, 1);
+        zuh_mock_stream_free(s);
+    }
+
     ZUH_CASE("a stream with no vtable entry fails rather than crashing");
     {
         zuh_stream bare; zuh_error err;

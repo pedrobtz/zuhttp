@@ -234,6 +234,35 @@ void suite_pool(void) {
     ZUH_CHECK_EQ_INT(st.discarded_expired, 1);
     ZUH_CHECK_EQ_INT(zuh_pool_idle_count(p), 0);
 
+    ZUH_CASE("idle_timeout_ms of 0 means never expire (#197)");
+    {
+        zuh_pool_config c0;
+        zuh_pool *p0;
+        zuh_pool_config_init(&c0);
+        c0.idle_timeout_ms = 0;
+        p0 = zuh_pool_new(&c0);
+        ZUH_CHECK(p0 != NULL);
+        zuh_pool_set_clock(p0, fake_now, NULL);
+        zuh_pool_release(p0, &a, idle_stream(), ZUH_REUSE_OK);
+        g_now += 1000L * 60 * 60 * 24 * 365;
+        s = zuh_pool_acquire(p0, &a);
+        ZUH_CHECK(s != NULL);
+        zuh_pool_stats_get(p0, &st);
+        ZUH_CHECK_EQ_INT(st.discarded_expired, 0);
+        if (s) { zuh_stream_close(s); zuh_stream_free(s); }
+        zuh_pool_free(p0);
+    }
+
+    ZUH_CASE("a release with no pool or no key closes and frees the connection (#197)");
+    {
+        long before = zuh_mock_stream_closes_total();
+        zuh_pool_release(NULL, &a, idle_stream(), ZUH_REUSE_OK);
+        ZUH_CHECK_EQ_INT(zuh_mock_stream_closes_total() - before, 1);
+        zuh_pool_release(p, NULL, idle_stream(), ZUH_REUSE_OK);
+        ZUH_CHECK_EQ_INT(zuh_mock_stream_closes_total() - before, 2);
+        ZUH_CHECK_EQ_INT(zuh_pool_idle_count(p), 0);
+    }
+
     ZUH_CASE("a connection readable before use is stale and discarded (§26.2)");
     {
         zuh_stream *stale = idle_stream();
@@ -370,10 +399,14 @@ void suite_pool(void) {
              * nothing more, which is not a diagnostic. 0 means all passed. */
             int step = 0;
             zuh_pool_stats cst;
+            long closes = zuh_mock_stream_closes_total();
 
             if (zuh_pool_idle_count(p) != 1)     step = 1;   /* inherited one */
             else if (zuh_pool_check_fork(p) != 1) step = 2;  /* fork detected */
             else if (zuh_pool_idle_count(p) != 0) step = 3;  /* and dropped */
+            /* Dropped WITHOUT close(): a graceful close would write to the
+             * parent's socket (§26.4; #196 made it observable). */
+            else if (zuh_mock_stream_closes_total() != closes) step = 8;
             else {
                 zuh_pool_stats_get(p, &cst);
                 if (cst.discarded_fork != 1)      step = 4;
@@ -408,6 +441,29 @@ void suite_pool(void) {
         }
         /* The parent still holds its connection: the child dropped its own
          * copy of the descriptor, not the parent's. */
+        ZUH_CHECK_EQ_INT(zuh_pool_idle_count(p), 1);
+    }
+
+    ZUH_CASE("a child that only frees the pool drops the inherited connection without a close (#196)");
+    {
+        /* The finalizer path: zuh_pool_free() in a child that never asked
+         * for a connection, so the guard trips inside the free itself. */
+        pid_t kid = fork();
+        if (kid == 0) {
+            long closes = zuh_mock_stream_closes_total();
+            int step = 0;
+            zuh_pool_free(p);
+            if (zuh_mock_stream_closes_total() != closes) step = 1;
+            zuh_pool_key_free(&a);
+            _exit(step);
+        }
+        ZUH_CHECK(kid > 0);
+        if (kid > 0) {
+            int status = -1;
+            ZUH_CHECK(waitpid(kid, &status, 0) == kid);
+            ZUH_CHECK(WIFEXITED(status));
+            ZUH_CHECK_EQ_INT(WIFEXITED(status) ? WEXITSTATUS(status) : -1, 0);
+        }
         ZUH_CHECK_EQ_INT(zuh_pool_idle_count(p), 1);
     }
 #endif
