@@ -77,13 +77,17 @@ free_port <- function() {
 # to a file next to its script and is returned, so a child that never reaches
 # "ready" can say why (review #185: every R CMD check leg lost these 25 tests
 # to a skip, with the one line that would have explained it discarded).
-# R_TESTS is cleared for the child as testthat clears it for this process: R
-# CMD check sets it to a start-up file that only exists in the directory the
-# check runs tests from, and a child started elsewhere dies reading it.
+# The child is R.home()'s own Rscript, by path: under `R CMD check --as-cran`
+# a bare `Rscript` aborts with "'Rscript' should not be used without a path"
+# (R-exts 1.6), which is what every R CMD check leg had been hiding behind
+# "did not start" (#185). R_TESTS is cleared for the child as testthat clears
+# it for this process: R CMD check sets it to a start-up file that only
+# exists in the directory the check runs tests from.
 spawn_helper_r <- function(script, args, dir, pid_file = NULL) {
   outf <- file.path(dir, "helper-output.txt")
   cmd <- sprintf(
-    "exec Rscript %s %s",
+    "exec %s %s %s",
+    shQuote(file.path(R.home("bin"), "Rscript")),
     shQuote(script),
     paste(args, collapse = " ")
   )
