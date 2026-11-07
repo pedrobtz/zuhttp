@@ -1239,6 +1239,10 @@ changed the plan or the design.
   - #186: the valgrind workflow in r-actions takes no `env` input, so
     `NOT_CRAN` reaches the sanitizer legs only; the glue's valgrind coverage
     stays `valgrind-glue`.
+  - The 100 MB streamed-upload test's RSS bound (16 MB) was R's own slack,
+    not the leak it guards against: 3.7, 11.8 and 21.9 MB on three CI runs
+    of the same code. It is 40 MB now, with the dead pieces collected every
+    eight calls; a client that held the body would grow by 100 MB.
   - #192: `nghttp2_submit_request2()` fails for a non-NOMEM reason only after
     2^30 streams on one connection or on a server session; recorded at the
     branch rather than tested.
