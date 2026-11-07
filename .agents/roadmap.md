@@ -1210,3 +1210,32 @@ changed the plan or the design.
   under valgrind and fails on a finding whose stack passes through zuhttp's
   own frames (the filter was checked against #136's real block, and against
   a block from R alone, which it passes).
+- **2026-11-07 — the critical review of `8afb36c` (#174–#204).** Measured
+  while fixing, not taken from the reports:
+  - #174's shape appeared a second time while reaching #197's "host name too
+    long" branch: `zuh_redirect.c`'s `trail_key()` holds the origin in 320
+    bytes and reported a 310-character host as "out of memory" before the
+    engine's own check ran. A host name is now refused at 253 characters on
+    every hop, as `zu_url_error`.
+  - #187's close counter found ten error exits in `perform_hops()` and three
+    in `open_stream()` that freed a connection without closing it. No
+    descriptor leaked (every backend's destroy closes the socket), but the
+    orderly close was skipped; every exit now closes first (`drop_stream()`).
+  - #193: Apple's SecTrust refuses a TLS server certificate valid for more
+    than 398 days, whoever signed it ("certificate is not standards
+    compliant"), so the committed leaves are valid 397 days and the matrix
+    carries an expiry guard that names `tools/make-tls-fixture`.
+  - #198's N10 was stale build products: `src/vendor/picohttpparser/*.o` and
+    `uriparser/*.o` compiled on 2026-09-10, before the visibility flags, which
+    `R CMD INSTALL .` reuses. `--preclean` is now the documented command.
+  - #185's root cause is settled by the CI run of the pull request that closes
+    it: the helpers now record the child's output and fail, naming it, when
+    the child does not start; `R_TESTS` is cleared for the child as testthat
+    clears it for the test process.
+  - #186: the valgrind workflow in r-actions takes no `env` input, so
+    `NOT_CRAN` reaches the sanitizer legs only; the glue's valgrind coverage
+    stays `valgrind-glue`.
+  - #192: `nghttp2_submit_request2()` fails for a non-NOMEM reason only after
+    2^30 streams on one connection or on a server session; recorded at the
+    branch rather than tested.
+

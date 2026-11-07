@@ -671,6 +671,47 @@ test_that("§65.7: a body function cannot read or abort its own response (#155)"
   )
 })
 
+test_that("§65.7: a body function that raises mid-stream is raised once; later reads report the failed body (#175)", {
+  skip_unless_grpc_server()
+  # Full duplex, as the #155 case: the function runs inside nghttp2's data
+  # provider while the response is read. On its 20th call it raises. The
+  # error reaches the caller from the zu_resp_read() that ran it, once; a
+  # second zu_resp_read() on the same response is the failed-body error, not
+  # the same continuation resumed again, which R cannot survive.
+  msg <- grpc_frame(c(
+    as.raw(c(0x12, 0x03, 0x08, 0xe8, 0x07)),
+    as.raw(c(0x1a, 0x84, 0x80, 0x02, 0x12, 0x80, 0x80, 0x02)),
+    as.raw(rep(7, 32768))
+  ))
+  n <- 0L
+  f <- function() {
+    n <<- n + 1L
+    if (n == 20L) {
+      stop("the body function gave up", call. = FALSE)
+    }
+    if (n > 200L) NULL else msg
+  }
+  r <- zu_perform(
+    zu_body_stream(
+      zu_request("POST", "/grpc.testing.TestService/FullDuplexCall"),
+      f
+    ),
+    client = grpc_client(),
+    stream = TRUE
+  )
+  expect_error(
+    while (length(zu_resp_read(r)) > 0) {
+      NULL
+    },
+    "the body function gave up",
+    fixed = TRUE
+  )
+  expect_identical(n, 20L)
+  # The second read, in a fresh frame: a classed error about the body.
+  expect_error(zu_resp_read(r), class = "zu_io_error")
+  expect_error(zu_resp_read(r), class = "zu_io_error")
+})
+
 test_that("§65.7: full duplex: the response is read while the body is still being sent", {
   skip_unless_grpc_server()
   # FullDuplexCall answers each request message as it arrives. 200 requests

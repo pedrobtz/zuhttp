@@ -6,6 +6,8 @@
 # the proxy" is to look at the bytes the engine actually sent — inferring it
 # from a request having succeeded proves nothing about either.
 
+# The environment a helper R process needs. Past this gate a helper that
+# does not start is a failure (helper-net.R, spawn_helper_r()).
 skip_unless_forkable <- function() {
   testthat::skip_on_cran()
   skip_under_gctorture()
@@ -25,7 +27,7 @@ with_fake_proxy <- function(mode, code) {
   script <- file.path(d, "proxy.R")
   logf <- file.path(d, "seen.bin")
   readyf <- file.path(d, "ready")
-  port <- sample(20000:59000, 1L)
+  port <- free_port()
 
   writeLines(
     c(
@@ -63,31 +65,8 @@ with_fake_proxy <- function(mode, code) {
     script
   )
 
-  system2(
-    "sh",
-    c(
-      "-c",
-      shQuote(sprintf(
-        "exec Rscript %s %d %s %s %s",
-        script,
-        port,
-        mode,
-        logf,
-        readyf
-      ))
-    ),
-    wait = FALSE,
-    stdout = NULL,
-    stderr = NULL
-  )
-
-  deadline <- Sys.time() + 20
-  while (!file.exists(readyf) && Sys.time() < deadline) {
-    Sys.sleep(0.05)
-  }
-  if (!file.exists(readyf)) {
-    skip("the helper proxy did not start")
-  }
+  outf <- spawn_helper_r(script, c(port, mode, logf, readyf), d)
+  wait_helper_ready(function() file.exists(readyf), outf, "the helper proxy")
   Sys.sleep(0.2)
 
   code(sprintf("http://127.0.0.1:%d", port))

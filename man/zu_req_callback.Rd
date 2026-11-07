@@ -13,7 +13,7 @@ zu_req_callback(req, callback)
 to stop.}
 }
 \value{
-The request, modified.
+A \code{zu_request}.
 }
 \description{
 \code{f} is called with each decoded chunk as a raw vector, as it arrives.
@@ -39,8 +39,10 @@ read, so it raises an error naming the problem instead. A request through a
 
 \examples{
 total <- 0
-req <- zu_req_callback(zu_request("GET", "https://x.test/big"),
-                       function(chunk) total <<- total + length(chunk))
+req <- zu_req_callback(
+  zu_request("GET", "https://x.test/big"),
+  function(chunk) total <<- total + length(chunk)
+)
 }
 \seealso{
 \code{\link[=zu_req_path]{zu_req_path()}} to stream to a file instead.

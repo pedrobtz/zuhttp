@@ -24,10 +24,9 @@ zu_pool(
 PING before it is reused, and discarded unless the answer arrives within
 \code{keepalive_timeout} (\code{NULL}, the default, means 20 seconds) or the
 request's own \code{timeout}, whichever is sooner; the request then opens a
-new one. This
-finds a server or middlebox that dropped the connection without saying
-so. \code{NULL}, the default, sends no PING. HTTP/1.1 connections are
-unaffected.}
+new one. This finds a server or middlebox that dropped the connection
+without saying so. \code{NULL}, the default, sends no PING. HTTP/1.1
+connections are unaffected.}
 }
 \value{
 A \code{zu_pool_config}, for \code{zu_client(pool = )}. \code{zu_client(pool = NULL)} disables reuse entirely, which is what one-shot calls want.

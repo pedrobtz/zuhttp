@@ -24,5 +24,8 @@ a 404 is a successful HTTP exchange whose answer is "no".
 }
 \examples{
 r <- zu_response(404L, url = "https://example.com/missing")
-tryCatch(zu_resp_check(r), zu_http_client_error = function(e) conditionMessage(e))
+tryCatch(
+  zu_resp_check(r),
+  zu_http_client_error = function(e) conditionMessage(e)
+)
 }

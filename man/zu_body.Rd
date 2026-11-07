@@ -66,7 +66,7 @@ redirect, raises \code{zu_body_not_replayable} instead (§28.2), and an error
 raised inside \code{f} stops the request, closes its connection, and is
 re-raised unchanged.
 The implied content type is only a default: a header set on the request or
-the client always wins (§31.2).
+the client always wins (§31.6).
 }
 \examples{
 req <- zu_request("POST", "https://example.com/upload")

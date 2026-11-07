@@ -432,15 +432,8 @@ test_that("attempt_timeout reaches the engine: a stalled server is retried, not 
   # per-attempt bound the first attempt waits out the whole 20 s budget.
   # A random port can be taken; try a few rather than fail the run on a
   # collision (ubsan leg, #135).
-  srv <- NULL
-  for (try in 1:10) {
-    port <- sample(20000:59000, 1L)
-    srv <- tryCatch(serverSocket(port), error = function(e) NULL)
-    if (!is.null(srv)) break
-  }
-  if (is.null(srv)) {
-    skip("no free port")
-  }
+  port <- free_port()
+  srv <- serverSocket(port)
   on.exit(close(srv), add = TRUE)
   cli <- zu_client(
     pool = NULL,
@@ -712,14 +705,7 @@ test_that("a backoff sleep responds to Ctrl-C", {
     script
   )
 
-  # `exec` so the recorded pid is R's own and not a shell that wraps it.
-  system2(
-    "sh",
-    c("-c", shQuote(sprintf("echo $$ > %s; exec Rscript %s", pidf, script))),
-    wait = FALSE,
-    stdout = NULL,
-    stderr = NULL
-  )
+  helper_out <- spawn_helper_r(script, character(), tmp, pid_file = pidf)
 
   wait_for <- function(f, what, limit = 30) {
     deadline <- Sys.time() + limit
@@ -732,9 +718,14 @@ test_that("a backoff sleep responds to Ctrl-C", {
     FALSE
   }
 
-  if (!wait_for(outf, "START")) {
-    skip("the helper R process did not start")
-  }
+  wait_helper_ready(
+    function() {
+      file.exists(outf) && any(grepl("START", readLines(outf, warn = FALSE)))
+    },
+    helper_out,
+    "the helper R process",
+    limit = 30
+  )
   pid <- as.integer(readLines(pidf, warn = FALSE)[[1]])
   Sys.sleep(0.5) # let it reach the backoff sleep
 

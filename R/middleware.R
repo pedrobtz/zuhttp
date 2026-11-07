@@ -35,8 +35,10 @@
 #' @examples
 #' seen <- character()
 #' h <- zu_hooks(before_request = function(p) seen <<- c(seen, p$request$url))
-#' cli <- zu_client(hooks = h,
-#'                  transport = zu_mock_transport(function(r) zu_response(200L)))
+#' cli <- zu_client(
+#'   hooks = h,
+#'   transport = zu_mock_transport(function(r) zu_response(200L))
+#' )
 #' invisible(zu_get("https://x.test/a", client = cli))
 #' seen
 zu_hooks <- function(
@@ -112,6 +114,33 @@ compose_middleware <- function(middleware, terminal) {
     })
   }
   f
+}
+
+# `hooks` is documented as coming from zu_hooks(); a function or an unnamed
+# list used to be accepted here and fail several frames later in fire_hook()
+# with "object of type 'closure' is not subsettable" (review #202). A plain
+# named list of functions is accepted by passing it through zu_hooks(),
+# which checks the names and the functions.
+check_hooks <- function(hooks) {
+  if (is.null(hooks)) {
+    return(list())
+  }
+  if (inherits(hooks, "zu_hooks")) {
+    return(hooks)
+  }
+  if (
+    is.list(hooks) &&
+      (length(hooks) == 0L ||
+        (!is.null(names(hooks)) &&
+          all(names(hooks) %in% names(formals(zu_hooks)))))
+  ) {
+    return(do.call(zu_hooks, hooks))
+  }
+  stop(
+    "`hooks` must come from zu_hooks(); got ",
+    if (is.list(hooks)) "a list with other names" else class(hooks)[[1]],
+    call. = FALSE
+  )
 }
 
 check_middleware <- function(middleware) {

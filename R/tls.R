@@ -138,6 +138,9 @@ print.zu_tls_config <- function(x, ...) {
 # backends' own errors ("cannot read CA file") do not say which was wrong, so
 # the file is checked here, where the message can say how to convert it.
 check_pem <- function(path, arg) {
+  if (dir.exists(path)) {
+    stop("`", arg, "` is a directory, not a PEM file: ", path, call. = FALSE)
+  }
   bytes <- readBin(path, "raw", n = min(file.size(path), 1e6))
   if (length(grepRaw("-----BEGIN CERTIFICATE-----", bytes, fixed = TRUE))) {
     return(invisible())

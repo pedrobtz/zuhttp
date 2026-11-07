@@ -26,8 +26,12 @@
 #' req <- zu_body_json(req, list(name = "Alice"))
 #' req
 zu_request <- function(method, url) {
-  stopifnot(is.character(method), length(method) == 1L, !is.na(method))
-  stopifnot(is.character(url), length(url) == 1L, !is.na(url))
+  if (!is.character(method) || length(method) != 1L || is.na(method)) {
+    stop("`method` must be a single string", call. = FALSE)
+  }
+  if (!is.character(url) || length(url) != 1L || is.na(url)) {
+    stop("`url` must be a single string", call. = FALSE)
+  }
   if (!grepl("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$", method)) {
     stop("`", method, "` is not a valid HTTP method token", call. = FALSE)
   }
@@ -38,7 +42,7 @@ zu_request <- function(method, url) {
       query = NULL,
       headers = NULL,
       body = NULL,
-      body_kind = NULL, # for printing: "JSON", "form", "raw", "file"
+      body_kind = NULL, # for printing: "JSON", "form", "raw", "file", "stream"
       content_type = NULL, # implied by the body; a header still wins
       policy = list()
     ),
@@ -67,7 +71,7 @@ zu_request <- function(method, url) {
 #'
 #' @param req A `zu_request`.
 #' @param path Destination path.
-#' @return The request, modified.
+#' @return A `zu_request`.
 #' @seealso [zu_body_file()], which is the opposite direction — a request body
 #'   read *from* a file.
 #' @export
@@ -107,13 +111,15 @@ zu_req_path <- function(req, path) {
 #' @param req A `zu_request`.
 #' @param callback A function of one argument (a raw vector). Return `FALSE`
 #'   to stop.
-#' @return The request, modified.
+#' @return A `zu_request`.
 #' @seealso [zu_req_path()] to stream to a file instead.
 #' @export
 #' @examples
 #' total <- 0
-#' req <- zu_req_callback(zu_request("GET", "https://x.test/big"),
-#'                        function(chunk) total <<- total + length(chunk))
+#' req <- zu_req_callback(
+#'   zu_request("GET", "https://x.test/big"),
+#'   function(chunk) total <<- total + length(chunk)
+#' )
 zu_req_callback <- function(req, callback) {
   req <- check_req(req)
   if (!is.function(callback)) {
@@ -131,7 +137,7 @@ zu_req_callback <- function(req, callback) {
 #' @param req A `zu_request`.
 #' @param trace `TRUE` (the default) to collect the trace; `FALSE` to turn
 #'   off one that an earlier step requested.
-#' @return The request, modified.
+#' @return A `zu_request`.
 #' @seealso [zu_resp_trace()] to read it back.
 #' @export
 #' @examples
@@ -190,7 +196,7 @@ zu_headers <- function(req, ...) {
   req <- check_req(req)
   h <- list(...)
   if (length(h) == 1L && is.null(names(h))) {
-    # a bare named vector
+    # A bare named vector is the common case.
     h <- h[[1]]
   }
   h <- as_header_vec(h)
@@ -223,7 +229,7 @@ zu_headers <- function(req, ...) {
 #' raised inside `f` stops the request, closes its connection, and is
 #' re-raised unchanged.
 #' The implied content type is only a default: a header set on the request or
-#' the client always wins (§31.2).
+#' the client always wins (§31.6).
 #'
 #' @param req A `zu_request`.
 #' @param x For `zu_body_json()`, any object the backend can serialise; for
@@ -307,6 +313,9 @@ zu_body_file <- function(req, file, type = "application/octet-stream") {
   req <- check_req(req)
   if (!file.exists(file)) {
     stop("no such file: ", file, call. = FALSE)
+  }
+  if (dir.exists(file)) {
+    stop("`file` is a directory: ", file, call. = FALSE)
   }
   n <- file.info(file)$size
   set_body(req, readBin(file, "raw", n = n), "file", type)

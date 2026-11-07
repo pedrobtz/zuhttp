@@ -46,31 +46,9 @@ with_raw_server <- function(response, code) {
     script
   )
 
-  port <- sample(20000:59000, 1L)
-  system2(
-    "sh",
-    c(
-      "-c",
-      shQuote(sprintf(
-        "exec Rscript %s %d %s %s %s",
-        script,
-        port,
-        respf,
-        logf,
-        readyf
-      ))
-    ),
-    wait = FALSE,
-    stdout = NULL,
-    stderr = NULL
-  )
-  deadline <- Sys.time() + 20
-  while (!file.exists(readyf) && Sys.time() < deadline) {
-    Sys.sleep(0.05)
-  }
-  if (!file.exists(readyf)) {
-    skip("the raw test server did not start")
-  }
+  port <- free_port()
+  outf <- spawn_helper_r(script, c(port, respf, logf, readyf), d)
+  wait_helper_ready(function() file.exists(readyf), outf, "the raw test server")
   Sys.sleep(0.2)
 
   code(sprintf("http://127.0.0.1:%d", port))

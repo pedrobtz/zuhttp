@@ -30,10 +30,9 @@
 #'   PING before it is reused, and discarded unless the answer arrives within
 #'   `keepalive_timeout` (`NULL`, the default, means 20 seconds) or the
 #'   request's own `timeout`, whichever is sooner; the request then opens a
-#'   new one. This
-#'   finds a server or middlebox that dropped the connection without saying
-#'   so. `NULL`, the default, sends no PING. HTTP/1.1 connections are
-#'   unaffected.
+#'   new one. This finds a server or middlebox that dropped the connection
+#'   without saying so. `NULL`, the default, sends no PING. HTTP/1.1
+#'   connections are unaffected.
 #' @return A `zu_pool_config`, for `zu_client(pool = )`. `zu_client(pool =
 #'   NULL)` disables reuse entirely, which is what one-shot calls want.
 #'

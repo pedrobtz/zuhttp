@@ -25,17 +25,18 @@ the_json <- new.env(parent = emptyenv())
 #'   encode = function(x, ...) sprintf('{"n":%d}', length(x)),
 #'   decode = function(txt, ...) list(text = txt)
 #' )
-#' req <- zu_body_json(zu_request("POST", "https://api.example.com"), list(1, 2))
+#' req <- zu_request("POST", "https://api.example.com")
+#' req <- zu_body_json(req, list(1, 2))
 #' rawToChar(req$body)
 #'
 #' zu_set_json_backend(old$encode, old$decode)   # restore
 zu_set_json_backend <- function(encode = NULL, decode = NULL) {
   old <- list(encode = the_json$encode, decode = the_json$decode)
-  if (!is.null(encode)) {
-    stopifnot(is.function(encode))
+  if (!is.null(encode) && !is.function(encode)) {
+    stop("`encode` must be a function, or NULL", call. = FALSE)
   }
-  if (!is.null(decode)) {
-    stopifnot(is.function(decode))
+  if (!is.null(decode) && !is.function(decode)) {
+    stop("`decode` must be a function, or NULL", call. = FALSE)
   }
   the_json$encode <- encode
   the_json$decode <- decode

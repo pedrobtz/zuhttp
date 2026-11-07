@@ -44,9 +44,12 @@ Mostly internal, but exported so that package authors building on zuhttp can
 raise conditions their users can catch with the same handlers.
 }
 \examples{
-cnd <- zu_condition("zu_timeout_error", "the request took too long",
-                    url = "https://user:pw@api.example.com/v1",
-                    phase = "read")
+cnd <- zu_condition(
+  "zu_timeout_error",
+  "the request took too long",
+  url = "https://user:pw@api.example.com/v1",
+  phase = "read"
+)
 class(cnd)
 cnd$url        # redacted: the userinfo is gone
 

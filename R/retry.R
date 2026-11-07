@@ -167,7 +167,7 @@ print.zu_retry_policy <- function(x, ...) {
 #'   §33.1, because the header is the mechanism the payment and API ecosystem
 #'   standardised on for exactly this.
 #' @param ... Further [zu_retry()] arguments.
-#' @return The request, modified.
+#' @return A `zu_request`.
 #' @seealso [zu_retry()]
 #' @export
 #' @examples

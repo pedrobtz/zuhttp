@@ -10,14 +10,15 @@ zu_redact_params(...)
 \item{...}{Parameter names, or a single character vector.}
 }
 \value{
-The resulting character vector of extra names, invisibly.
+The character vector of extra names now registered, invisibly.
 }
 \description{
 The defaults are \code{access_token}, \code{api_key}, \code{apikey}, \code{signature}, \code{sig},
 \code{client_secret}, \code{password}, \code{passwd}, \code{pwd}, \code{secret}, \code{token},
 \code{refresh_token}, \code{id_token}, \code{private_key}, \code{auth_token} and
 \code{session_token}, matched exactly and case-insensitively (§42.1). This adds
-to them; it cannot remove a default.
+to them; it cannot remove a default. Each call replaces the names
+registered by an earlier call, so pass the whole set at once.
 }
 \examples{
 old <- getOption("zuhttp.redact_params")

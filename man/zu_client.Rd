@@ -112,7 +112,7 @@ misplaced argument into a confusing error instead of a clear one (§31.3).
 \examples{
 api <- zu_client(
   base_url = "https://api.example.com",
-  headers  = c(Accept = "application/json")
+  headers = c(Accept = "application/json")
 )
 api
 }

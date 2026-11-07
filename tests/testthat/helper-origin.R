@@ -17,7 +17,7 @@ with_redirect_origin <- function(code, target_query = "") {
   on.exit(unlink(d, recursive = TRUE), add = TRUE)
   script <- file.path(d, "origin.R")
   readyf <- file.path(d, "ready")
-  port <- sample(20000:59000, 1L)
+  port <- free_port()
   target <- sprintf("http://127.0.0.1:%d/final%s", port, target_query)
 
   writeLines(
@@ -49,30 +49,8 @@ with_redirect_origin <- function(code, target_query = "") {
     script
   )
 
-  system2(
-    "sh",
-    c(
-      "-c",
-      shQuote(sprintf(
-        "exec Rscript %s %d %s %s",
-        script,
-        port,
-        shQuote(target),
-        readyf
-      ))
-    ),
-    wait = FALSE,
-    stdout = NULL,
-    stderr = NULL
-  )
-
-  deadline <- Sys.time() + 20
-  while (!file.exists(readyf) && Sys.time() < deadline) {
-    Sys.sleep(0.05)
-  }
-  if (!file.exists(readyf)) {
-    skip("the loopback origin did not start")
-  }
+  outf <- spawn_helper_r(script, c(port, shQuote(target), readyf), d)
+  wait_helper_ready(function() file.exists(readyf), outf, "the loopback origin")
   Sys.sleep(0.2)
 
   code(sprintf("http://127.0.0.1:%d/start", port), target)

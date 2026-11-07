@@ -12,7 +12,7 @@ zu_req_path(req, path)
 \item{path}{Destination path.}
 }
 \value{
-The request, modified.
+A \code{zu_request}.
 }
 \description{
 The composable equivalent of \code{zu_get(url, path = )}. The body is written to

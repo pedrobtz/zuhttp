@@ -102,6 +102,23 @@ have used: the client-first wrappers `zu_client_get()` and friends (use
 
 ## Fixed before release
 
+* A URL longer than 8 KB (a signed URL, an OData filter) is sent, answered
+  and reported; it used to fail after the response arrived, as
+  `zu_memory_error`. A host name over 253 characters is `zu_url_error`.
+* A bodiless `POST`, `PUT` or `PATCH` sends `Content-Length: 0` over
+  HTTP/1.1, which some servers require (411 otherwise).
+* A form-typed body containing a NUL byte no longer turns the HTTP error for
+  its response into a bare `simpleError` from the redaction step, and a URL
+  too long to redact is shown as `<redacted>` rather than raising.
+* `zu_resp_read()` waits the request's `timeout` on each call, as documented,
+  not the remaining share of a retry budget.
+* A caller `Content-Length` on a streamed body is refused with a message that
+  says the body is streamed.
+* `zu_client(hooks = )` accepts what [zu_hooks()] makes, or a named list of
+  its handlers, and refuses anything else at construction rather than at the
+  first request.
+* A cassette `name` must be a file name, not a path; `ca_file`, `ca_extra`
+  and `zu_body_file()` say so when given a directory.
 * **A redirect to another origin no longer carries credentials.**
   `Authorization`, `Cookie` and `Proxy-Authorization` set by the caller were
   re-sent on every hop, including to a different host, port or scheme. They
@@ -184,5 +201,5 @@ raises on macOS; and no parallel or asynchronous requests.
 ## Not in this release
 
 Asynchronous and parallel requests, R connection sinks, and client
-certificates are deferred to 0.2.0. HTTP/2, Brotli, zstd and Unix-domain
-sockets are not planned.
+certificates are deferred to 0.2.0. Brotli, zstd and Unix-domain sockets are
+not planned.
