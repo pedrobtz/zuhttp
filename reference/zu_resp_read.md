@@ -9,11 +9,14 @@ HTTP/2 the server is allowed to send only as far ahead as the caller
 reads, so a body nobody reads holds the server at one flow-control
 window. `max_body` is enforced across the whole body, and every wait is
 bounded by the request's `timeout` afresh and interruptible with Ctrl-C.
+`timeout` bounds one call instead: a caller with a deadline for the
+whole stream passes what is left of it, and a read that runs out raises
+`zu_timeout_error` and ends the body, as any failed read does.
 
 ## Usage
 
 ``` r
-zu_resp_read(resp, n = 65536)
+zu_resp_read(resp, n = 65536, timeout = NULL)
 
 zu_resp_abort(resp)
 
@@ -29,6 +32,12 @@ zu_resp_trailers(resp, name = NULL)
 - n:
 
   Maximum bytes to return.
+
+- timeout:
+
+  Seconds this call may wait, or `NULL` (the default) for the request's
+  `timeout`. A response that was not streamed by its transport never
+  waits, and ignores it.
 
 - name:
 

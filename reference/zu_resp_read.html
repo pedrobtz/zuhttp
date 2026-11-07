@@ -5,13 +5,19 @@ decoded bytes, waiting for at least one, and a raw vector of length 0 at
 the end. Over HTTP/2 the server is allowed to send only as far ahead as the
 caller reads, so a body nobody reads holds the server at one flow-control
 window. max_body is enforced across the whole body, and every wait is
-bounded by the request's timeout afresh and interruptible with Ctrl-C."><meta property="og:description" content="A response from zu_perform() with stream = TRUE arrives with its body
+bounded by the request's timeout afresh and interruptible with Ctrl-C.
+timeout bounds one call instead: a caller with a deadline for the whole
+stream passes what is left of it, and a read that runs out raises
+zu_timeout_error and ends the body, as any failed read does."><meta property="og:description" content="A response from zu_perform() with stream = TRUE arrives with its body
 unread (§65.4). zu_resp_read() returns the next piece of it: up to n
 decoded bytes, waiting for at least one, and a raw vector of length 0 at
 the end. Over HTTP/2 the server is allowed to send only as far ahead as the
 caller reads, so a body nobody reads holds the server at one flow-control
 window. max_body is enforced across the whole body, and every wait is
-bounded by the request's timeout afresh and interruptible with Ctrl-C."></head><body>
+bounded by the request's timeout afresh and interruptible with Ctrl-C.
+timeout bounds one call instead: a caller with a deadline for the whole
+stream passes what is left of it, and a read that runs out raises
+zu_timeout_error and ends the body, as any failed read does."></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
 
 
@@ -62,12 +68,15 @@ decoded bytes, waiting for at least one, and a raw vector of length 0 at
 the end. Over HTTP/2 the server is allowed to send only as far ahead as the
 caller reads, so a body nobody reads holds the server at one flow-control
 window. <code>max_body</code> is enforced across the whole body, and every wait is
-bounded by the request's <code>timeout</code> afresh and interruptible with Ctrl-C.</p>
+bounded by the request's <code>timeout</code> afresh and interruptible with Ctrl-C.
+<code>timeout</code> bounds one call instead: a caller with a deadline for the whole
+stream passes what is left of it, and a read that runs out raises
+<code>zu_timeout_error</code> and ends the body, as any failed read does.</p>
     </div>
 
     <div class="section level2">
     <h2 id="ref-usage">Usage<a class="anchor" aria-label="anchor" href="#ref-usage"></a></h2>
-    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">zu_resp_read</span><span class="op">(</span><span class="va">resp</span>, n <span class="op">=</span> <span class="fl">65536</span><span class="op">)</span></span>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">zu_resp_read</span><span class="op">(</span><span class="va">resp</span>, n <span class="op">=</span> <span class="fl">65536</span>, timeout <span class="op">=</span> <span class="cn">NULL</span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu">zu_resp_abort</span><span class="op">(</span><span class="va">resp</span><span class="op">)</span></span>
 <span></span>
@@ -84,6 +93,12 @@ bounded by the request's <code>timeout</code> afresh and interruptible with Ctrl
 
 <dt id="arg-n">n<a class="anchor" aria-label="anchor" href="#arg-n"></a></dt>
 <dd><p>Maximum bytes to return.</p></dd>
+
+
+<dt id="arg-timeout">timeout<a class="anchor" aria-label="anchor" href="#arg-timeout"></a></dt>
+<dd><p>Seconds this call may wait, or <code>NULL</code> (the default) for the
+request's <code>timeout</code>. A response that was not streamed by its transport
+never waits, and ignores it.</p></dd>
 
 
 <dt id="arg-name">name<a class="anchor" aria-label="anchor" href="#arg-name"></a></dt>

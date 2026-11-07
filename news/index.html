@@ -78,7 +78,7 @@
 <ul><li><p>A URL longer than 8 KB (a signed URL, an OData filter) is sent, answered and reported; it used to fail after the response arrived, as <code>zu_memory_error</code>. A host name over 253 characters is <code>zu_url_error</code>.</p></li>
 <li><p>A bodiless <code>POST</code>, <code>PUT</code> or <code>PATCH</code> sends <code>Content-Length: 0</code> over HTTP/1.1, which some servers require (411 otherwise).</p></li>
 <li><p>A form-typed body containing a NUL byte no longer turns the HTTP error for its response into a bare <code>simpleError</code> from the redaction step, and a URL too long to redact is shown as <code>&lt;redacted&gt;</code> rather than raising.</p></li>
-<li><p><code><a href="../reference/zu_resp_read.html">zu_resp_read()</a></code> waits the request’s <code>timeout</code> on each call, as documented, not the remaining share of a retry budget.</p></li>
+<li><p><code><a href="../reference/zu_resp_read.html">zu_resp_read()</a></code> waits the request’s <code>timeout</code> on each call, as documented, not the remaining share of a retry budget, and <code>zu_resp_read(timeout = )</code> bounds a single call, for a caller with a deadline for the whole stream.</p></li>
 <li><p>A caller <code>Content-Length</code> on a streamed body is refused with a message that says the body is streamed.</p></li>
 <li><p><code>zu_client(hooks = )</code> accepts what [zu_hooks()] makes, or a named list of its handlers, and refuses anything else at construction rather than at the first request.</p></li>
 <li><p>A cassette <code>name</code> must be a file name, not a path; <code>ca_file</code>, <code>ca_extra</code> and <code><a href="../reference/zu_body.html">zu_body_file()</a></code> say so when given a directory.</p></li>

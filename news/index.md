@@ -149,7 +149,9 @@ may have used: the client-first wrappers `zu_client_get()` and friends
 
 - [`zu_resp_read()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_read.md)
   waits the request’s `timeout` on each call, as documented, not the
-  remaining share of a retry budget.
+  remaining share of a retry budget, and `zu_resp_read(timeout = )`
+  bounds a single call, for a caller with a deadline for the whole
+  stream.
 
 - A caller `Content-Length` on a streamed body is refused with a message
   that says the body is streamed.
