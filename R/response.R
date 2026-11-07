@@ -123,6 +123,9 @@ zu_resp_headers <- function(resp) resp$headers
 #' caller reads, so a body nobody reads holds the server at one flow-control
 #' window. `max_body` is enforced across the whole body, and every wait is
 #' bounded by the request's `timeout` afresh and interruptible with Ctrl-C.
+#' `timeout` bounds one call instead: a caller with a deadline for the whole
+#' stream passes what is left of it, and a read that runs out raises
+#' `zu_timeout_error` and ends the body, as any failed read does.
 #'
 #' `zu_resp_abort()` stops reading (§65.5). Over HTTP/2 it resets the stream
 #' (`RST_STREAM(CANCEL)`) and keeps the connection for the next request; over
@@ -147,6 +150,9 @@ zu_resp_headers <- function(resp) resp$headers
 #'
 #' @param resp A `zu_response`.
 #' @param n Maximum bytes to return.
+#' @param timeout Seconds this call may wait, or `NULL` (the default) for the
+#'   request's `timeout`. A response that was not streamed by its transport
+#'   never waits, and ignores it.
 #' @param name A field name, or `NULL` for all of them.
 #' @return `zu_resp_read()` a raw vector; `zu_resp_abort()` `resp`,
 #'   invisibly; `zu_resp_trailers()` a named character vector (`name = NULL`)
@@ -163,12 +169,26 @@ zu_resp_headers <- function(resp) resp$headers
 #' zu_resp_read(r, 3)
 #' zu_resp_read(r, 3)
 #' zu_resp_read(r, 3)
-zu_resp_read <- function(resp, n = 65536) {
+zu_resp_read <- function(resp, n = 65536, timeout = NULL) {
   if (!is.numeric(n) || length(n) != 1L || is.na(n) || n < 1) {
     stop("`n` must be a number of bytes, at least 1", call. = FALSE)
   }
+  if (
+    !is.null(timeout) &&
+      (!is.numeric(timeout) ||
+        length(timeout) != 1L ||
+        is.na(timeout) ||
+        timeout <= 0)
+  ) {
+    stop(
+      "`timeout` must be a positive number of seconds, or NULL",
+      call. = FALSE
+    )
+  }
   if (!is.null(resp$stream)) {
-    return(.Call(C_zu_stream_read, resp$stream, as.numeric(n), resp$url))
+    # A bound of under a millisecond is still a bound, not the "unset" 0.
+    ms <- if (is.null(timeout)) 0L else max(1L, timeout_ms(timeout))
+    return(.Call(C_zu_stream_read, resp$stream, as.numeric(n), resp$url, ms))
   }
   # Not streamed by the transport (a mock, a cassette): serve the body
   # already held, in the same pieces, from a cursor in the response.

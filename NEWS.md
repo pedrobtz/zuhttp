@@ -111,7 +111,8 @@ have used: the client-first wrappers `zu_client_get()` and friends (use
   its response into a bare `simpleError` from the redaction step, and a URL
   too long to redact is shown as `<redacted>` rather than raising.
 * `zu_resp_read()` waits the request's `timeout` on each call, as documented,
-  not the remaining share of a retry budget.
+  not the remaining share of a retry budget, and `zu_resp_read(timeout = )`
+  bounds a single call, for a caller with a deadline for the whole stream.
 * A caller `Content-Length` on a streamed body is refused with a message that
   says the body is streamed.
 * `zu_client(hooks = )` accepts what [zu_hooks()] makes, or a named list of

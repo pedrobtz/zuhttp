@@ -754,7 +754,7 @@ Everything else in it passed locally (2026-11-04).
 
 ### W22 — Streaming request body
 
-**Status:** in review (#136, 2026-11-04). **Milestone:** M0 (was M4; D-96). **Closes:** #131.
+**Status:** done (#136, merged 2026-11-05). **Milestone:** M0 (was M4; D-96). **Closes:** #131.
 **Implements:** D-95, §28, §65.7. **Estimate:** 3 days, medium — the h2
 side is nghttp2's data provider; the HTTP/1.1 side is the first chunked
 request body zuhttp sends. **Depends on:** W21.

@@ -805,6 +805,11 @@ static zuh_code open_body_new(zuh_open_body **out, zuh_stream *s, int h2,
 
 zuh_code zuh_open_body_read(zuh_open_body *b, zuh_buffer *out, size_t n,
                             zuh_error *err) {
+    return zuh_open_body_read_within(b, out, n, 0, err);
+}
+
+zuh_code zuh_open_body_read_within(zuh_open_body *b, zuh_buffer *out, size_t n,
+                                   long timeout_ms, zuh_error *err) {
     zuh_deadline dl;
     if (!b || b->failed) {
         zuh_error_set(err, ZUH_ERR_IO, ZUH_PHASE_READ, "the response body failed earlier");
@@ -814,7 +819,7 @@ zuh_code zuh_open_body_read(zuh_open_body *b, zuh_buffer *out, size_t n,
         zuh_error_set(err, ZUH_ERR_CANCELLED, ZUH_PHASE_READ, "the response body was aborted");
         return ZUH_ERR_CANCELLED;
     }
-    dl = zuh_deadline_in(b->timeout_ms);
+    dl = zuh_deadline_in(timeout_ms > 0 ? timeout_ms : b->timeout_ms);
     while (b->staged.len == b->staged_off && !b->ended) {
         zuh_code rc;
         b->staged.len = 0;

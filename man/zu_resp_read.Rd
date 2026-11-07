@@ -6,7 +6,7 @@
 \alias{zu_resp_trailers}
 \title{Read a streamed response body, its trailers, or stop reading}
 \usage{
-zu_resp_read(resp, n = 65536)
+zu_resp_read(resp, n = 65536, timeout = NULL)
 
 zu_resp_abort(resp)
 
@@ -16,6 +16,10 @@ zu_resp_trailers(resp, name = NULL)
 \item{resp}{A \code{zu_response}.}
 
 \item{n}{Maximum bytes to return.}
+
+\item{timeout}{Seconds this call may wait, or \code{NULL} (the default) for the
+request's \code{timeout}. A response that was not streamed by its transport
+never waits, and ignores it.}
 
 \item{name}{A field name, or \code{NULL} for all of them.}
 }
@@ -33,6 +37,9 @@ the end. Over HTTP/2 the server is allowed to send only as far ahead as the
 caller reads, so a body nobody reads holds the server at one flow-control
 window. \code{max_body} is enforced across the whole body, and every wait is
 bounded by the request's \code{timeout} afresh and interruptible with Ctrl-C.
+\code{timeout} bounds one call instead: a caller with a deadline for the whole
+stream passes what is left of it, and a read that runs out raises
+\code{zu_timeout_error} and ends the body, as any failed read does.
 }
 \details{
 \code{zu_resp_abort()} stops reading (§65.5). Over HTTP/2 it resets the stream
