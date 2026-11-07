@@ -69,9 +69,9 @@ if (requireNamespace("zuxml", quietly = TRUE)) {
     c("Content-Type" = "application/xml"),
     "<feed><title>News</title></feed>"
   ))
-  zuxml::xml_text(zuxml::xml_find_first(x, "//title"))
+  zuxml::xml_text(zuxml::xml_find_first(x, "title"))
 }
-#> [1] NA
+#> [1] "News"
 
 if (requireNamespace("zuhtml", quietly = TRUE)) {
   h <- zu_resp_html(zu_response(
