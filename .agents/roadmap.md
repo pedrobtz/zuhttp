@@ -1228,10 +1228,14 @@ changed the plan or the design.
   - #198's N10 was stale build products: `src/vendor/picohttpparser/*.o` and
     `uriparser/*.o` compiled on 2026-09-10, before the visibility flags, which
     `R CMD INSTALL .` reuses. `--preclean` is now the documented command.
-  - #185's root cause is settled by the CI run of the pull request that closes
-    it: the helpers now record the child's output and fail, naming it, when
-    the child does not start; `R_TESTS` is cleared for the child as testthat
-    clears it for the test process.
+  - #185's root cause, read from the first CI run that captured the child's
+    output: under `R CMD check --as-cran` a bare `Rscript` aborts with
+    "'Rscript' should not be used without a path" (R-exts 1.6), on every leg,
+    and the discarded stderr had turned that into a skip since the helpers
+    were written. The helpers spawn `R.home("bin")/Rscript` by path, record
+    the child's output, and fail naming it when the child does not start;
+    `R_TESTS` is cleared for the child as testthat clears it for the test
+    process.
   - #186: the valgrind workflow in r-actions takes no `env` input, so
     `NOT_CRAN` reaches the sanitizer legs only; the glue's valgrind coverage
     stays `valgrind-glue`.
