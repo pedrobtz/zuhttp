@@ -17,16 +17,18 @@ zu_redact_opt <- function(name, default = character()) {
 #'
 #' The defaults are `Authorization`, `Proxy-Authorization`, `Cookie`,
 #' `Set-Cookie`, `X-Api-Key` and `X-Auth-Token` (§42.1). This adds to them; it
-#' cannot remove a default.
+#' cannot remove a default. Each call replaces the names registered by an
+#' earlier call, so pass the whole set at once.
 #'
 #' @param ... Header names, or a single character vector.
-#' @return The resulting character vector of extra names, invisibly.
+#' @return The character vector of extra names now registered, invisibly.
 #' @export
 #' @examples
 #' old <- getOption("zuhttp.redact_headers")
 #' zu_redact_headers("X-Session")
 #' # Printed requests, traces, cassettes and conditions now hide it:
-#' zu_headers(zu_request("GET", "https://api.example.com"), `X-Session` = "abc123")
+#' req <- zu_request("GET", "https://api.example.com")
+#' zu_headers(req, `X-Session` = "abc123")
 #' options(zuhttp.redact_headers = old)   # restore
 zu_redact_headers <- function(...) {
   v <- unique(as.character(unlist(list(...), use.names = FALSE)))
@@ -40,10 +42,11 @@ zu_redact_headers <- function(...) {
 #' `client_secret`, `password`, `passwd`, `pwd`, `secret`, `token`,
 #' `refresh_token`, `id_token`, `private_key`, `auth_token` and
 #' `session_token`, matched exactly and case-insensitively (§42.1). This adds
-#' to them; it cannot remove a default.
+#' to them; it cannot remove a default. Each call replaces the names
+#' registered by an earlier call, so pass the whole set at once.
 #'
 #' @param ... Parameter names, or a single character vector.
-#' @return The resulting character vector of extra names, invisibly.
+#' @return The character vector of extra names now registered, invisibly.
 #' @export
 #' @examples
 #' old <- getOption("zuhttp.redact_params")
@@ -135,9 +138,24 @@ redact_request_fields <- function(req) {
   }
   req$headers <- zu_redact_headers_for_display(req$headers)
   if (length(req$body) && is_form_body(req)) {
-    req$body <- charToRaw(zu_redact_form(rawToChar(as.raw(req$body))))
+    req$body <- redact_form_bytes(req$body)
   }
   redact_request_proxy(req)
+}
+
+# A form body is bytes, and `zu_body_raw()` can give one with a NUL in it
+# under a form content type, which `rawToChar()` refuses. This runs inside
+# condition construction, so a body it cannot redact becomes the marker
+# rather than an error that replaces the condition (review #177). A NUL is
+# dropped first: a credential is never a NUL (helper-canary.R does the same).
+redact_form_bytes <- function(body) {
+  body <- as.raw(body)
+  body <- body[body != as.raw(0)]
+  out <- tryCatch(
+    charToRaw(zu_redact_form(rawToChar(body))),
+    error = function(e) NULL
+  )
+  out %||% charToRaw("<redacted>")
 }
 
 # The same for a response, and the request it carries.

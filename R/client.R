@@ -104,7 +104,9 @@ collect_policy <- function(env = parent.frame()) {
 #' @param pool Connection reuse settings from [zu_pool()], or `NULL` to open a
 #'   fresh connection for every request.
 #' @param retry A [zu_retry()] policy. The default retries nothing.
-#' @param tls Certificate trust settings from [zu_tls()].
+#' @param middleware A function of `(req, next_fn)`, or a list of them,
+#'   wrapping request execution (§31.13). The first is outermost.
+#' @param hooks Lifecycle observers from [zu_hooks()].
 #' @param proxy Proxy URL, e.g. `"http://proxy:3128"`. Leave unset to honour
 #'   the environment (§20.1); pass `FALSE` to force a direct connection.
 #'   **Not `NULL`** — under the §31.9 merge rules `NULL` means "reset to the
@@ -112,6 +114,7 @@ collect_policy <- function(env = parent.frame()) {
 #'   is the only spelling that can mean "definitely do not proxy" without
 #'   making this one argument an exception to a rule every other policy
 #'   argument follows.
+#' @param tls Certificate trust settings from [zu_tls()].
 #' @param http2 HTTP/2 use: `"auto"` (the default) offers it to every HTTPS
 #'   server and uses it when the server chooses it, and HTTP/1.1 otherwise;
 #'   `"required"` fails with `zu_connect_error` before sending anything when
@@ -120,9 +123,6 @@ collect_policy <- function(env = parent.frame()) {
 #'   [zu_resp_connection()] reports which version a response came over.
 #'   A client setting only: there is no per-request form, because it chooses
 #'   the connection, not the request.
-#' @param middleware A function of `(req, next_fn)`, or a list of them,
-#'   wrapping request execution (§31.13). The first is outermost.
-#' @param hooks Lifecycle observers from [zu_hooks()].
 #' @return A `zu_client` object.
 #'
 #' @details
@@ -143,7 +143,7 @@ collect_policy <- function(env = parent.frame()) {
 #' @examples
 #' api <- zu_client(
 #'   base_url = "https://api.example.com",
-#'   headers  = c(Accept = "application/json")
+#'   headers = c(Accept = "application/json")
 #' )
 #' api
 zu_client <- function(
@@ -189,7 +189,7 @@ zu_client <- function(
       # merge, because "reset to the package default" is meaningless for a
       # list of the caller's own functions.
       middleware = check_middleware(middleware),
-      hooks = hooks %||% list()
+      hooks = check_hooks(hooks)
     ),
     class = "zu_client",
     # §26.5. The live pool is native state, so it does NOT belong in the list

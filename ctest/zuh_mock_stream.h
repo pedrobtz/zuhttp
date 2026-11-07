@@ -19,8 +19,22 @@ typedef enum {
     ZUH_MOCK_DATA = 0,   /* hand out `len` bytes from `data` */
     ZUH_MOCK_WOULDBLOCK, /* one -1 / ZUH_ERR_WOULDBLOCK, then continue */
     ZUH_MOCK_ERROR,      /* -1 with `code`, permanently */
-    ZUH_MOCK_EOF         /* orderly close: read returns 0 */
+    ZUH_MOCK_EOF,        /* orderly close: read returns 0 */
+    ZUH_MOCK_BLOCK       /* a peer gone silent: the read lasts until its
+                          * deadline, then -1 / ZUH_ERR_TIMEOUT; permanently */
 } zuh_mock_kind;
+
+/* Write-side faults (review #187). Reads follow the script; writes are
+ * accepted whole unless a fault is armed, which takes effect on the first
+ * write once `after` bytes have been accepted. The one-shot kinds clear
+ * themselves; ERROR is sticky, as a dead socket is. */
+typedef enum {
+    ZUH_MOCK_WRITE_OK = 0,
+    ZUH_MOCK_WRITE_WOULDBLOCK, /* one -1 / ZUH_ERR_WOULDBLOCK, then accept */
+    ZUH_MOCK_WRITE_SHORT,      /* accept one byte of that write, then all */
+    ZUH_MOCK_WRITE_ERROR,      /* -1 / ZUH_ERR_IO, permanently */
+    ZUH_MOCK_WRITE_ZERO        /* return 0 once: the peer closed as we wrote */
+} zuh_mock_write_fault;
 
 typedef struct {
     zuh_mock_kind kind;
@@ -51,5 +65,16 @@ int zuh_mock_stream_exhausted(const zuh_stream *s);
  * stale connection without a real peer. `value` is 1, 0 or -1; pass forced=0
  * to go back to deriving it from the script. */
 void zuh_mock_stream_set_readable(zuh_stream *s, int forced, int value);
+
+void zuh_mock_stream_set_write_fault(zuh_stream *s, zuh_mock_write_fault kind,
+                                     size_t after);
+
+/* How many times close() was called on this stream: once on every engine
+ * error path, and never on a connection a child inherited (§26.4). */
+int zuh_mock_stream_closed(const zuh_stream *s);
+
+/* The same, summed over every mock stream ever made, for a stream the code
+ * under test has already freed. */
+long zuh_mock_stream_closes_total(void);
 
 #endif /* ZUHTTP_MOCK_STREAM_H */

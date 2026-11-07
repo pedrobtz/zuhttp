@@ -1,6 +1,9 @@
 #include "zuh_mock_stream.h"
 #include "zuh_alloc.h"
+#include "zuh_time.h"
 #include <string.h>
+
+static long g_closes_total;
 
 typedef struct {
     const zuh_mock_step *steps;
@@ -15,6 +18,9 @@ typedef struct {
     void               *owned;      /* script allocated on our behalf, if any */
     int                 readable_forced;    /* §26.2: pin the liveness probe */
     int                 readable_value;
+    zuh_mock_write_fault wfault;            /* #187: armed write fault */
+    size_t              wafter, accepted;
+    int                 closed;
 } mock_impl;
 
 static zuh_ssize mock_read(zuh_stream *s, void *buf, size_t n, zuh_deadline d, zuh_error *err) {
@@ -55,6 +61,11 @@ static zuh_ssize mock_read(zuh_stream *s, void *buf, size_t n, zuh_deadline d, z
 
             case ZUH_MOCK_EOF:
                 return 0;
+
+            case ZUH_MOCK_BLOCK:
+                while (!zuh_deadline_expired(d)) { }
+                zuh_error_set(err, ZUH_ERR_TIMEOUT, ZUH_PHASE_READ, "mock: deadline");
+                return -1;
         }
     }
     return 0;   /* script exhausted == orderly close */
@@ -65,16 +76,40 @@ static zuh_ssize mock_write(zuh_stream *s, const void *buf, size_t n, zuh_deadli
     size_t take = n;
     ZUH_UNUSED(d);
 
+    if (m->wfault != ZUH_MOCK_WRITE_OK && m->accepted >= m->wafter) {
+        switch (m->wfault) {
+            case ZUH_MOCK_WRITE_WOULDBLOCK:
+                m->wfault = ZUH_MOCK_WRITE_OK;
+                zuh_error_set(err, ZUH_ERR_WOULDBLOCK, ZUH_PHASE_WRITE, "mock: write would block");
+                return -1;
+            case ZUH_MOCK_WRITE_SHORT:
+                m->wfault = ZUH_MOCK_WRITE_OK;
+                take = 1;
+                break;
+            case ZUH_MOCK_WRITE_ERROR:
+                zuh_error_set(err, ZUH_ERR_IO, ZUH_PHASE_WRITE, "mock: write failed");
+                return -1;
+            case ZUH_MOCK_WRITE_ZERO:
+                m->wfault = ZUH_MOCK_WRITE_OK;
+                return 0;
+            default:
+                break;
+        }
+    }
     if (m->max_write && take > m->max_write) take = m->max_write;
     if (take == 0) return 0;
     if (!zuh_buf_append(&m->written, buf, take)) {
         zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_WRITE, "mock write buffer exhausted");
         return -1;
     }
+    m->accepted += take;
     return (zuh_ssize)take;
 }
 
-static void mock_close(zuh_stream *s) { ZUH_UNUSED(s); }
+static void mock_close(zuh_stream *s) {
+    if (s && s->impl) ((mock_impl *)s->impl)->closed++;
+    g_closes_total++;
+}
 
 static void mock_destroy(zuh_stream *s);
 
@@ -91,7 +126,8 @@ static int mock_readable(zuh_stream *s, int timeout_ms) {
     if (m->failed) return 1;                 /* sticky error: do not reuse */
     if (m->step >= m->nsteps) return 1;      /* script exhausted == EOF */
     switch (m->steps[m->step].kind) {
-        case ZUH_MOCK_WOULDBLOCK: return 0;   /* nothing waiting: idle and clean */
+        case ZUH_MOCK_WOULDBLOCK:             /* nothing waiting: idle and clean */
+        case ZUH_MOCK_BLOCK:      return 0;
         case ZUH_MOCK_DATA:                   /* unread bytes: do not reuse */
         case ZUH_MOCK_ERROR:
         case ZUH_MOCK_EOF:
@@ -165,3 +201,19 @@ void zuh_mock_stream_set_readable(zuh_stream *s, int forced, int value) {
     m->readable_forced = forced;
     m->readable_value  = value;
 }
+
+void zuh_mock_stream_set_write_fault(zuh_stream *s, zuh_mock_write_fault kind,
+                                     size_t after) {
+    mock_impl *m;
+    if (!s || !s->impl) return;
+    m = (mock_impl *)s->impl;
+    m->wfault = kind;
+    m->wafter = after;
+}
+
+int zuh_mock_stream_closed(const zuh_stream *s) {
+    if (!s || !s->impl) return 0;
+    return ((const mock_impl *)s->impl)->closed;
+}
+
+long zuh_mock_stream_closes_total(void) { return g_closes_total; }

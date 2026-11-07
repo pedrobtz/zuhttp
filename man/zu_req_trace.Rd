@@ -13,7 +13,7 @@ zu_req_trace(req, trace = TRUE)
 off one that an earlier step requested.}
 }
 \value{
-The request, modified.
+A \code{zu_request}.
 }
 \description{
 Record a §35.3 event trace for this request

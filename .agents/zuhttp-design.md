@@ -151,6 +151,7 @@ accepted when that work package's PR merges.
 | D-98 | **`zu_resp_trailers()` is `NULL` until the body has ended cleanly**, and stays `NULL` after an abort or a failure, whose trailers are unknown; an empty named vector means the stream ended with none. The same for native, mock and cassette responses: `zu_response(trailers = )` builds one (review #167) | Accepted 2026-11-05 (maintainer) | 65.3, 31.8 | review |
 | D-99 | **R callbacks (body callback, request body function) run under `R_UnwindProtect`**, whose cleanup longjmps back to the calling C frame; the engine unwinds normally, then the `.Call` resumes the jump with `R_ContinueUnwind()`. Replaces `R_tryCatch` on `error`/`interrupt`, which let a warning under an exiting handler, a restart or a `return()` jump through nghttp2 (review #141) | Accepted 2026-11-05 | 27.3, 65.7 | review |
 | D-97 | **The project-owned C budget is 10,000 code lines**, raised from 8,000; the abort threshold stays at 12,000. HTTP/2 (D-96) brought the 8,000 into 0.1.0 with W20 at 7,989 and W21, W22 and M1 still to add: about 500 lines for the HTTP/2 accessors, keepalive and the streaming body (W20 cost about 200 around a 450-line driver), and the §51.3 estimate of 900 for W7–W14, so about 9,400. 10,000 holds that with a margin; raising it to 12,000 would remove the warning R-4 exists to give. The budget is a trigger to cut, not a target to fill | Accepted (maintainer, 2026-11-04) | 51.3, 61, B (R-4) | W20 |
+| D-100 | **A bodiless `POST`, `PUT` or `PATCH` sends `Content-Length: 0` over HTTP/1.1** (RFC 9110 §8.6), as curl and Go do; some servers answer its absence with 411. `GET`, `DELETE` and the other methods send no framing header for no body, and over HTTP/2 the end-of-stream flag says it. Amends D-78 for the empty body, which it had not addressed | Accepted 2026-11-07 (#179) | 17.4 | review |
 
 ---
 
@@ -796,6 +797,17 @@ One that agrees is accepted and not sent: the engine emits the framing of each
 hop's own body, which after a 303 is no body at all (RFC 9112 §6.2 forbids the
 two together; a wrong length puts the connection out of step with the server).
 
+No body is still a framing question for the methods that define a meaning for
+content: a bodiless `POST`, `PUT` or `PATCH` sends `Content-Length: 0` over
+HTTP/1.1 (D-100; RFC 9110 §8.6), the other methods send nothing, and HTTP/2
+needs neither. A streamed body (D-95) has no length to agree with, so a
+caller `Content-Length` on one is refused with a message that says so.
+
+The request line carries the URL at whatever length the parser accepted
+(64 KiB; a host name is at most 253 characters, `zu_url_error` past that):
+no buffer after the parser bounds it again, and none reports its bound as
+"out of memory" (review #174, #197).
+
 ### 18. Response Parsing and Body Framing
 
 **Status:** Built — `src/zuh_framing.c`, the primary fuzz target.
@@ -1136,7 +1148,10 @@ Body not fully consumed; cancelled or timed out; any §18.1 rejection;
 close-delimited framing; `Connection: close` from either side; a redirect body
 over `max_redirect_body`; any TLS error, including an unsupported-setting
 refusal; **any byte received past the response's framing** (D-73). When in
-doubt, close.
+doubt, close. A hop the engine gives up on before the response, a refused
+tunnel, a failed handshake, a write the peer closed under, closes its
+connection before freeing it, so every connection the engine opens is
+closed exactly once, which the mock stream counts (review #187).
 
 #### 26.4 Fork safety
 
@@ -1656,6 +1671,12 @@ match. Known gap: a URL nested inside a query value is not descended into.
 
 #### 42.2 Where it applies
 
+A text the formatting layer cannot redact within its bounds (1 MiB in, 2 MiB
+out) is shown as the marker in full and never raised over: redaction runs
+inside condition construction, printing, hooks and cassettes, where an error
+would replace the diagnostic the caller was about to see (review #180). A
+form body is redacted as bytes; a NUL in it is dropped first (review #177).
+
 `print()`/`format()` of requests and responses; condition messages and
 payloads; trace and hook payloads; cassettes; `zu_resp_url()` (D-52); verbose
 output. The one exception is the caller asking for their own header by name.
@@ -1865,14 +1886,20 @@ timeouts are tested against servers that actually stall.
 
 #### 50.5 TLS integration tests
 
-Against locally generated certificates, on every backend, in CI: trusted,
+Against committed certificates, on every backend, in CI: trusted,
 untrusted issuer, wrong host, expired, not yet valid, `ca_file` replace,
 `ca_extra` add, pin match, pin mismatch, and matching-pin-over-untrusted-chain.
 Negative rows are mandatory from a backend's first commit (S0 F-3: a build
 that accepted every certificate). Rows a backend refuses skip via
-`skip_unless_tls_supports()`. The fixture needs a POSIX shell today, so
-Windows runs none of it; W8 ports it so the Windows backend is tested by the
-same rows.
+`skip_unless_tls_supports()`. The two CAs and five leaves live in
+`tests/testthat/fixtures/tls/`, made by `tools/make-tls-fixture` with their
+provenance recorded (review #193): generating them at test time let a CLI
+change retire the matrix silently. The live leaves are valid for 397 days,
+the most Apple's SecTrust accepts for a TLS server certificate, and
+`test-certs.R` fails, naming the generator, when they are within 45 days of
+expiry. The `openssl` CLI still serves them and computes the independent
+pin, so the matrix needs a POSIX shell and Windows runs none of it; W8 ports
+it so the Windows backend is tested by the same rows.
 
 #### 50.6 Concurrency and lifecycle tests
 
@@ -2310,8 +2337,10 @@ iterator relies on for back pressure. `max_body` is enforced across the
 whole stream, not per read, so a long stream needs `max_body` raised
 (`Inf` for none). Every wait inside `zu_resp_read()` is a §25.1 wait:
 interruptible at the checkpoint, and bounded by the request's `timeout`
-afresh on each call, since one `total` budget across a stream the caller
-reads at its own pace would end it for being read slowly; the phase
+afresh on each call (the engine takes it separately from the attempt's
+share of the budget, `zuh_get_opts.body_timeout_ms`; review #181), since one
+`total` budget across a stream the caller reads at its own pace would end it
+for being read slowly; the phase
 timeouts of §24 take over when W4 and W7 build them. An interrupt ends the
 body and closes its connection.
 

@@ -139,6 +139,10 @@ typedef struct {
      * body unread in zuh_result.open, for the caller to pull. Redirects are
      * followed first; a body bound for `sink` is never streamed. */
     int         stream_body;
+    /* §65.4: the bound on each zuh_open_body_read() wait, the request's own
+     * `timeout`; <=0 falls back to timeout_ms, which under the retry loop is
+     * the attempt's share of the total budget (§24.3), not the timeout. */
+    long        body_timeout_ms;
 } zuh_get_opts;
 
 /* §65.4: a response body the caller reads in pieces. It owns the connection

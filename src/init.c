@@ -80,6 +80,7 @@ typedef jmp_buf guard_jmpbuf;
 typedef struct {
     SEXP         token;   /* R_MakeUnwindCont(), protected by the owner */
     int          jumped;  /* a non-local exit was stopped; token carries it */
+    int          resumed; /* the jump went on: the token is spent (#175) */
     guard_jmpbuf jb;
 } r_guard;
 
@@ -458,12 +459,16 @@ static SEXP redact_one(SEXP text, SEXP extra_headers, SEXP extra_params,
      * translating to the native encoding could mangle what we must show. */
     s = Rf_translateCharUTF8(e);
     n = strlen(s);
-    if (n > ZUH_R_TEXT_MAX) Rf_error("input is too long to redact (%lu bytes)",
-                                    (unsigned long)n);
+    /* A text the bound refuses, or one whose redaction outgrows the output
+     * bound, is shown as the marker and never raised over: this runs inside
+     * condition construction, printing, hooks and cassettes, where an error
+     * would replace the diagnostic the caller was about to see (review
+     * #180), as zuh_trace_add_url() already does. */
+    if (n > ZUH_R_TEXT_MAX) return Rf_mkString(ZUH_REDACTED);
 
     policy_from(extra_headers, extra_params, &p);
     if (!zuh_buf_init(&b, n + 32, ZUH_R_TEXT_MAX * 2)) Rf_error("out of memory");
-    if (!fn(&p, s, n, &b)) { zuh_buf_free(&b); Rf_error("redaction failed"); }
+    if (!fn(&p, s, n, &b)) { zuh_buf_free(&b); return Rf_mkString(ZUH_REDACTED); }
 
     out = PROTECT(Rf_allocVector(STRSXP, 1));
     SET_STRING_ELT(out, 0, Rf_mkCharLenCE((const char *)b.data, (int)b.len, CE_UTF8));
@@ -595,6 +600,30 @@ static void tick_release(tick_ctx *t) {
     if (t->caught) { R_ReleaseObject(t->caught); t->caught = NULL; }
 }
 
+/* The one place a stopped jump goes on (review #176). Every C resource the
+ * call held is released first, then the token is marked spent, because a
+ * continuation can be resumed once: its target context is gone the moment
+ * it has been. A pulled body keeps its source, and with it the guard, until
+ * it is freed, so a second zu_resp_read() after the body function raised
+ * used to resume the same token again (review #175); it now sees `resumed`
+ * and reports the failed body instead. Does not return. */
+static void guard_resume(r_guard *g, tick_ctx *tick, zuh_sink *sink, zuh_result *r) {
+    if (tick) tick_release(tick);
+    if (sink) { zuh_sink_abort(sink); zuh_sink_free(sink); }
+    if (r) zuh_result_free(r);
+    g->resumed = 1;
+    R_ContinueUnwind(g->token);
+}
+
+/* A string the engine built from UTF-8 input, marked as such at the R
+ * boundary, as headers_to_r() marks header values. */
+static SEXP utf8_string(const char *s) {
+    SEXP x = PROTECT(Rf_allocVector(STRSXP, 1));
+    SET_STRING_ELT(x, 0, Rf_mkCharCE(s, CE_UTF8));
+    UNPROTECT(1);
+    return x;
+}
+
 /* --- §63.2 the vertical slice --------------------------------------------- */
 
 /* build_response needs the trace as well as the result, and R_UnwindProtect
@@ -664,8 +693,8 @@ static void raise_zu_error(const zuh_error *e, const char *url) {
     SEXP p      = args;
 
     SETCAR(p, Rf_ScalarInteger((int)zuh_code_public(e->code)));         p = CDR(p);
-    SETCAR(p, Rf_mkString(e->message[0] ? e->message : "request failed")); p = CDR(p);
-    SETCAR(p, url ? Rf_mkString(url) : R_NilValue);                     p = CDR(p);
+    SETCAR(p, utf8_string(e->message[0] ? e->message : "request failed")); p = CDR(p);
+    SETCAR(p, url ? utf8_string(url) : R_NilValue);                     p = CDR(p);
     SETCAR(p, Rf_mkString(zuh_phase_name(e->phase)));                    p = CDR(p);
     SETCAR(p, e->backend[0] ? Rf_mkString(e->backend) : R_NilValue);    p = CDR(p);
     SETCAR(p, Rf_ScalarInteger(e->backend_code));
@@ -765,7 +794,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
                          SEXP user_agent, SEXP decode, SEXP pool,
                          SEXP path, SEXP callback, SEXP proxy, SEXP tls,
                          SEXP trace, SEXP redact, SEXP http2, SEXP stream,
-                         SEXP body_stream) {
+                         SEXP body_stream, SEXP body_timeout_ms) {
     zuh_get_opts o;
     tick_ctx tick = { NULL };
     zuh_req_spec spec;
@@ -851,6 +880,9 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
     o.no_decode     = Rf_asLogical(decode) != TRUE;
     /* §65.4. The R layer has refused it together with path or callback. */
     o.stream_body   = Rf_asLogical(stream) == TRUE;
+    /* §65.4: the request's own `timeout`, for each pulled read; `timeout_ms`
+     * is this attempt's share of the total budget (#181). */
+    o.body_timeout_ms = (long)Rf_asInteger(body_timeout_ms);
     /* §65.1. The R layer has refused anything but these three words. */
     if (Rf_isString(http2) && Rf_length(http2) == 1 && STRING_ELT(http2, 0) != NA_STRING) {
         const char *m = CHAR(STRING_ELT(http2, 0));
@@ -914,6 +946,32 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
         o.trace = &tracebuf;
     }
 
+    /* §25.1: a checkpoint at most one tick apart, and never inside a blocking
+     * call. 100 ms is the design's ceiling. */
+    o.tick     = r_interrupt_tick;
+    o.tick_ctx = NULL;       /* never per-request state in a pooled object */
+
+    /* §65.7. After everything that can longjmp (review #142) and before the
+     * file sink, whose exclusive creation on disk must not be followed by an
+     * allocation that can longjmp past it: R_PreserveObject() is one.
+     * Outside R's heap, because a pulled body that inherits it outlives
+     * this .Call. */
+    if (src_keep != R_NilValue) {
+        src_ctx *sc;
+        R_PreserveObject(src_keep);
+        sc = (src_ctx *)zuh_calloc(1, sizeof *sc);
+        if (!sc || !zuh_buf_init(&sc->piece, 0, (size_t)-1)) {
+            zuh_free(sc);
+            R_ReleaseObject(src_keep);
+            Rf_error("out of memory");
+        }
+        sc->keep = src_keep;
+        sc->g.token = VECTOR_ELT(src_keep, 1);
+        spec.source.next = src_next;
+        spec.source.release = src_release;
+        spec.source.ctx = sc;
+    }
+
     memset(&cb, 0, sizeof cb);
     if (Rf_isFunction(callback)) {
         memset(&cb_sink, 0, sizeof cb_sink);
@@ -926,32 +984,15 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
                STRING_ELT(path, 0) != NA_STRING) {
         const char *dest = Rf_translateCharUTF8(STRING_ELT(path, 0));
         o.sink = zuh_sink_file(dest, &e);
-        if (!o.sink) { raise_zu_error(&e, u); UNPROTECT(2); return R_NilValue; }
-    }
-
-    /* §25.1: a checkpoint at most one tick apart, and never inside a blocking
-     * call. 100 ms is the design's ceiling. */
-    o.tick     = r_interrupt_tick;
-    o.tick_ctx = NULL;       /* never per-request state in a pooled object */
-
-    /* §65.7. Last, so nothing above can longjmp with it allocated (review
-     * #142): from here to the engine call nothing raises. Outside R's heap,
-     * because a pulled body that inherits it outlives this .Call. */
-    if (src_keep != R_NilValue) {
-        src_ctx *sc;
-        R_PreserveObject(src_keep);
-        sc = (src_ctx *)zuh_calloc(1, sizeof *sc);
-        if (!sc || !zuh_buf_init(&sc->piece, 0, (size_t)-1)) {
-            zuh_free(sc);
-            R_ReleaseObject(src_keep);
-            if (o.sink && o.sink != &cb_sink) { zuh_sink_abort(o.sink); zuh_sink_free(o.sink); }
-            Rf_error("out of memory");
+        if (!o.sink) {
+            if (spec.source.ctx) {   /* nothing has run it: free it here */
+                src_ctx *sc = (src_ctx *)spec.source.ctx;
+                R_ReleaseObject(sc->keep);
+                zuh_buf_free(&sc->piece);
+                zuh_free(sc);
+            }
+            raise_zu_error(&e, u); UNPROTECT(2); return R_NilValue;
         }
-        sc->keep = src_keep;
-        sc->g.token = VECTOR_ELT(src_keep, 1);
-        spec.source.next = src_next;
-        spec.source.release = src_release;
-        spec.source.ctx = sc;
     }
 
     zuh_error_clear(&e);
@@ -970,15 +1011,12 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
         if (!sc->released) {
             sc->detached = 1;           /* the pulled body frees it */
         } else {
-            int jumped = sc->g.jumped;
-            R_ReleaseObject(sc->keep);  /* still PROTECTed by this frame */
+            r_guard g = sc->g;          /* the token is still PROTECTed by this frame */
+            R_ReleaseObject(sc->keep);
             zuh_free(sc);
             spec.source.ctx = NULL;
-            if (jumped) {
-                tick_release(&tick);
-                if (o.sink && o.sink != &cb_sink) { zuh_sink_abort(o.sink); zuh_sink_free(o.sink); }
-                zuh_result_free(&r);
-                R_ContinueUnwind(VECTOR_ELT(src_keep, 1));
+            if (g.jumped) {
+                guard_resume(&g, &tick, o.sink && o.sink != &cb_sink ? o.sink : NULL, &r);
                 UNPROTECT(2); return R_NilValue;   /* not reached */
             }
         }
@@ -989,9 +1027,7 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
      * USER's jump, resumed as it was: wrapping it would turn "object 'x' not
      * found" inside their callback into a mysterious transport failure. */
     if (cb.g.jumped) {
-        tick_release(&tick);
-        zuh_result_free(&r);
-        R_ContinueUnwind(cb_token);
+        guard_resume(&cb.g, &tick, NULL, &r);
         UNPROTECT(2); return R_NilValue;   /* not reached */
     }
     if (o.sink && o.sink != &cb_sink) {
@@ -1320,11 +1356,12 @@ static SEXP C_zu_stream_read(SEXP ptr, SEXP n, SEXP url) {
         zuh_buf_free(&got);
         /* §65.7: the request body function, still running under a full
          * duplex stream, did not return: its jump is the one to resume. The
-         * token stays in sc->keep, preserved, until the body is freed. */
-        if (sc && sc->g.jumped) {
-            tick_release(&tick);
-            R_ContinueUnwind(sc->g.token);
-            return R_NilValue;
+         * token stays in sc->keep, preserved, until the body is freed, and
+         * is resumed once: a later read of the failed body reports the
+         * failure below (review #175). */
+        if (sc && sc->g.jumped && !sc->g.resumed) {
+            guard_resume(&sc->g, &tick, NULL, NULL);
+            return R_NilValue;             /* not reached */
         }
         if (rc == ZUH_ERR_CANCELLED && tick.caught &&
             !Rf_inherits(tick.caught, "interrupt")) {
@@ -1396,7 +1433,7 @@ static const R_CallMethodDef call_methods[] = {
     {"C_zu_redact_form",       (DL_FUNC) &C_zu_redact_form,       2},
     {"C_zu_is_secret_header",  (DL_FUNC) &C_zu_is_secret_header,  2},
     {"C_zu_is_secret_param",   (DL_FUNC) &C_zu_is_secret_param,   2},
-    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          21},
+    {"C_zu_perform",           (DL_FUNC) &C_zu_perform,          22},
     {"C_zu_stream_read",       (DL_FUNC) &C_zu_stream_read,       3},
     {"C_zu_stream_abort",      (DL_FUNC) &C_zu_stream_abort,      1},
     {"C_zu_stream_trailers",   (DL_FUNC) &C_zu_stream_trailers,   1},

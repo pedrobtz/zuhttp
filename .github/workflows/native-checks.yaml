@@ -35,6 +35,13 @@ jobs:
     uses: pedrobtz/r-actions/.github/workflows/sanitizers.yml@v1
     with:
       asan: true
+      # NOT_CRAN: without it every skip_on_cran() test, which is the whole
+      # loopback suite (the TLS matrix, the raw servers, the proxy, the
+      # pulled bodies), skipped under ASan as "On CRAN" (review #186). The
+      # valgrind workflow takes no env input; its glue coverage is the
+      # valgrind-glue job below.
+      env: |
+        NOT_CRAN=true
       profile: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-ci') && 'quick' || 'full' }}
 
   valgrind:

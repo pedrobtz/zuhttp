@@ -29,7 +29,7 @@ standardised on for exactly this.}
 \item{...}{Further \code{\link[=zu_retry]{zu_retry()}} arguments.}
 }
 \value{
-The request, modified.
+A \code{zu_request}.
 }
 \description{
 The only way to make a non-idempotent request retryable. \code{zu_retry()} on a

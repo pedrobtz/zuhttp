@@ -149,8 +149,15 @@ zu_cassette_transport <- function(
   transport = zu_native_transport()
 ) {
   mode <- match.arg(mode)
-  if (!is.character(name) || length(name) != 1L || !nzchar(name)) {
+  if (
+    !is.character(name) || length(name) != 1L || is.na(name) || !nzchar(name)
+  ) {
     stop("`name` must be a single non-empty string", call. = FALSE)
+  }
+  # The cassette is `<name>.rds` inside `dir`: a name with a directory part
+  # would write outside it (review #184).
+  if (grepl("[/\\\\]", name) || name %in% c(".", "..")) {
+    stop("`name` must be a file name, not a path: ", name, call. = FALSE)
   }
   structure(
     list(dir = dir, name = name, mode = mode, transport = transport),
@@ -220,7 +227,7 @@ zu_transport_perform.zu_cassette_transport <- function(transport, req) {
 drain_stream <- function(resp) {
   pieces <- list()
   repeat {
-    p <- zu_resp_read(resp, 1048576)
+    p <- zu_resp_read(resp, 1024^2)
     if (!length(p)) {
       break
     }

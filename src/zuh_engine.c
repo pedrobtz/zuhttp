@@ -81,13 +81,17 @@ static int host_header(const zuh_uri *u, char *out, size_t cap) {
     return n > 0 && (size_t)n < cap;
 }
 
+/* Unbounded: every part is already bounded by the parser (§8, 64 KiB), and
+ * a cap here once failed a request the server had answered, as "out of
+ * memory", for a URL of 9 KiB (review #174). NULL means the allocator failed
+ * and nothing else. */
 static char *url_of(const zuh_uri *u) {
     zuh_buffer b;
     const char *s = NULL;
     char *out = NULL;
     char port[8];
 
-    if (!zuh_buf_init(&b, 128, 8192)) return NULL;
+    if (!zuh_buf_init(&b, 128, 0)) return NULL;
     if (!zuh_buf_append_str(&b, u->scheme) || !zuh_buf_append_str(&b, "://")) goto done;
     if (strchr(u->host, ':')) {
         if (!zuh_buf_append_byte(&b, '[') || !zuh_buf_append_str(&b, u->host)
@@ -125,12 +129,22 @@ static char *redacted_url_of(const zuh_uri *u, const zuh_redact_policy *p) {
     raw = url_of(u);
     if (!raw) return NULL;
     if (!p) { zuh_redact_policy_init(&dflt); p = &dflt; }
-    if (!zuh_buf_init(&b, 128, 8192)) { zuh_free(raw); return NULL; }
+    if (!zuh_buf_init(&b, 128, 0)) { zuh_free(raw); return NULL; }
     if (zuh_redact_url(p, raw, strlen(raw), &b) && zuh_buf_cstr(&b, &s))
         out = dup_str(s);
     zuh_buf_free(&b);
     zuh_free(raw);
     return out;                       /* NULL feeds the caller's NOMEM path */
+}
+
+/* A connection the hop gives up on before done_with_stream() would run:
+ * closed, then freed, so every connection the engine opens is closed exactly
+ * once (§26.3; review #187 made the mock count it). A free alone releases the
+ * descriptor on every backend, but skips the orderly close. */
+static void drop_stream(zuh_stream *s) {
+    if (!s) return;
+    zuh_stream_close(s);
+    zuh_stream_free(s);
 }
 
 /* Open the transport for one hop: TCP, then TLS when the scheme says so. */
@@ -304,7 +318,7 @@ static zuh_code proxy_tunnel(zuh_stream *tcp, const zuh_proxy *px,
     int status = 0;
     size_t consumed = 0;
 
-    if (!zuh_buf_init(&req, 256, 8192)) return ZUH_ERR_NOMEM;
+    if (!zuh_buf_init(&req, 256, 0)) return ZUH_ERR_NOMEM;
     rc = zuh_proxy_connect_request(px, target, &req, err);
     if (rc == ZUH_OK && !zuh_stream_write_all(tcp, req.data, req.len, dl, err))
         rc = err->code ? err->code : ZUH_ERR_IO;
@@ -487,13 +501,13 @@ static zuh_code open_stream(zuh_stream **out, const zuh_uri *u,
      * makes the proxy unable to see or forge the origin's certificate. */
     if (via_proxy) {
         rc = proxy_tunnel(tcp, px, u, dl, err);
-        if (rc != ZUH_OK) { zuh_stream_free(tcp); return rc; }
+        if (rc != ZUH_OK) { drop_stream(tcp); return rc; }
     }
 
     if (!zuh_tls_available()) {
         zuh_error_set(err, ZUH_ERR_TLS, ZUH_PHASE_TLS,
                      "this build has no TLS backend, so https:// is unavailable");
-        zuh_stream_free(tcp);
+        drop_stream(tcp);
         return ZUH_ERR_TLS;
     }
     {
@@ -509,8 +523,8 @@ static zuh_code open_stream(zuh_stream **out, const zuh_uri *u,
         }
         if (rc != ZUH_OK) {
             /* zuh_tls_connect does not take ownership of `inner` on failure,
-             * so the TCP stream is still ours to free (S7). */
-            zuh_stream_free(tcp);
+             * so the TCP stream is still ours to close and free (S7). */
+            drop_stream(tcp);
             return rc;
         }
         record_tls_info(tls, res);
@@ -558,6 +572,28 @@ zuh_code zuh_engine_get(zuh_result *out, const char *url,
     return zuh_engine_perform(out, url, NULL, o, err);
 }
 
+/* RFC 9110 §8.6: the methods that define a meaning for request content.
+ * DELETE and the safe methods do not, so a bodiless one says nothing. */
+/* A host name is at most 253 characters on the wire (RFC 1035), and the
+ * fixed buffers downstream (the Host header, the redirect trail's origin)
+ * hold a little more than that. Refused as the URL error it is, on every
+ * hop: a buffer that would not fit it used to surface as "out of memory"
+ * (#197). */
+#define ZUH_MAX_HOST_LEN 253
+static zuh_code check_host(const zuh_uri *u, zuh_error *err) {
+    size_t n = u->host ? strlen(u->host) : 0;
+    if (n <= ZUH_MAX_HOST_LEN) return ZUH_OK;
+    zuh_error_set(err, ZUH_ERR_URL, ZUH_PHASE_NONE,
+                 "host name too long (%lu characters; the limit is %u)",
+                 (unsigned long)n, (unsigned)ZUH_MAX_HOST_LEN);
+    return ZUH_ERR_URL;
+}
+
+static int method_expects_content(const char *method) {
+    return method && (strcmp(method, "POST") == 0 || strcmp(method, "PUT") == 0 ||
+                      strcmp(method, "PATCH") == 0);
+}
+
 /* RFC 9112 §6.2 (D-78): the body decides the framing. A caller's
  * Content-Length used to go out as written, so "1" on a five-byte body sent
  * five bytes the server would read as one plus the start of the next
@@ -566,7 +602,7 @@ zuh_code zuh_engine_get(zuh_result *out, const char *url,
  * connection out of step with the server. A Content-Length that matches the
  * body is harmless and is accepted — the engine emits its own either way. */
 static zuh_code check_caller_framing(const zuh_req_spec *req, size_t body_len,
-                                    zuh_error *err) {
+                                    int streamed, zuh_error *err) {
     size_t i;
     if (!req) return ZUH_OK;
     for (i = 0; i < req->n_headers; i++) {
@@ -582,6 +618,15 @@ static zuh_code check_caller_framing(const zuh_req_spec *req, size_t body_len,
         if (zuh_ascii_casecmp(name, "Content-Length") == 0) {
             uint64_t n = 0;
             int digits = 0, ok = 1;
+            if (streamed) {
+                /* D-95: a streamed body has no length to match, so the
+                 * message says that rather than "the 0-byte body" (#183). */
+                zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_NONE,
+                             "a Content-Length header cannot be set on a "
+                             "streamed body, which carries no length: zuhttp "
+                             "sends it chunked, or as HTTP/2 DATA");
+                return ZUH_ERR_PARSE;
+            }
             const char *c = v ? v : "";
             while (*c == ' ' || *c == '\t') c++;
             for (; *c >= '0' && *c <= '9'; c++, digits++) {
@@ -740,7 +785,11 @@ static zuh_code open_body_new(zuh_open_body **out, zuh_stream *s, int h2,
     }
     if (rc != ZUH_OK) { zuh_buf_free(&b->staged); zuh_free(b); return rc; }
     b->h2 = h2;
-    b->timeout_ms = o->timeout_ms > 0 ? o->timeout_ms : ZUH_DEFAULT_TIMEOUT_MS;
+    /* §65.4: each read gets the request's `timeout` afresh, which is not
+     * the attempt's share of the total budget that `timeout_ms` carries
+     * (review #181). */
+    b->timeout_ms = o->body_timeout_ms > 0 ? o->body_timeout_ms
+                  : o->timeout_ms > 0      ? o->timeout_ms : ZUH_DEFAULT_TIMEOUT_MS;
     b->reuse_if_ended = h2 ? ZUH_REUSE_OK : zuh_reuse_decide(ZUH_OK, fr, h, minor);
     /* The key is built now, while the hop's options are in scope; the pool
      * outlives any one request (§26.5), and the R layer keeps it alive for
@@ -910,7 +959,8 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
         return ZUH_ERR_URL;
     }
 
-    rc = check_caller_framing(req, body_len, err);
+    rc = check_host(&cur, err);
+    if (rc == ZUH_OK) rc = check_caller_framing(req, body_len, src_live, err);
     if (rc == ZUH_OK) rc = check_caller_headers(req, err);
     if (rc != ZUH_OK) { zuh_uri_free(&cur); zuh_result_free(out); return rc; }
     rc = zuh_redirect_trail_add(trail, method, &cur);
@@ -936,6 +986,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
         size_t consumed = 0;
         size_t sent_bytes = 0;
         int may_follow = 0;
+
         int use_h2 = 0;
         int streamed = 0;
         uint64_t surplus = 0;
@@ -973,7 +1024,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
         rq.close_connection = o->pool == NULL;
         if (!host_header(&cur, hosthdr, sizeof hosthdr)) {
             zuh_error_set(err, ZUH_ERR_URL, ZUH_PHASE_NONE, "host name too long");
-            zuh_request_free(&rq); zuh_stream_free(s);
+            zuh_request_free(&rq); drop_stream(s);
             zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
             return ZUH_ERR_URL;
         }
@@ -984,8 +1035,8 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
          * a CONNECT tunnel talking to the origin itself, and an absolute-form
          * request there would be both wrong and a disclosure. */
         if (px.in_use && !cur.is_https) {
-            if (!zuh_buf_init(&absform, 128, 8192)) {
-                zuh_request_free(&rq); zuh_stream_free(s);
+            if (!zuh_buf_init(&absform, 128, 0)) {   /* bounded by the URI (#174) */
+                zuh_request_free(&rq); drop_stream(s);
                 zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
                 return ZUH_ERR_NOMEM;
             }
@@ -993,7 +1044,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
             if (!zuh_proxy_absolute_form(&cur, &absform) ||
                 !zuh_buf_cstr(&absform, &rq.target)) {
                 zuh_buf_free(&absform);
-                zuh_request_free(&rq); zuh_stream_free(s);
+                zuh_request_free(&rq); drop_stream(s);
                 zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
                 return ZUH_ERR_NOMEM;
             }
@@ -1017,7 +1068,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
                 }
                 if (rc != ZUH_OK) {
                     if (have_absform) zuh_buf_free(&absform);
-                    zuh_request_free(&rq); zuh_stream_free(s);
+                    zuh_request_free(&rq); drop_stream(s);
                     zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
                     return rc;
                 }
@@ -1027,7 +1078,11 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
             /* D-95: the one request zuhttp chunks (HTTP/1.1; HTTP/2 frames
              * it as DATA), since its length is not known in advance. */
             rq.body = ZUH_BODY_CHUNKED;
-        } else if (body_len > 0) {
+        } else if (body_len > 0 || method_expects_content(method)) {
+            /* D-100: a bodiless POST, PUT or PATCH says `Content-Length: 0`
+             * (RFC 9110 §8.6), as curl and Go do; some servers answer the
+             * header's absence with 411. Over HTTP/2 the end-of-stream flag
+             * says it, and zuh_h2_begin() adds nothing. */
             rq.body           = ZUH_BODY_LENGTH;
             rq.content_length = (uint64_t)body_len;
         } else {
@@ -1042,7 +1097,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
             rc = zuh_headers_add_str(&rq.headers, "Accept-Encoding", "identity");
             if (rc != ZUH_OK) {
                 if (have_absform) zuh_buf_free(&absform);
-                zuh_request_free(&rq); zuh_stream_free(s);
+                zuh_request_free(&rq); drop_stream(s);
                 zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
                 return rc;
             }
@@ -1073,7 +1128,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
                              "request header %lu could not be added",
                              (unsigned long)hi + 1);
                 if (have_absform) zuh_buf_free(&absform);
-                zuh_request_free(&rq); zuh_stream_free(s);
+                zuh_request_free(&rq); drop_stream(s);
                 zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
                 return rc;
             }
@@ -1093,14 +1148,14 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
             if (rc != ZUH_OK) {
                 if (!err->code)
                     zuh_error_set(err, rc, ZUH_PHASE_NONE, "could not build the request");
-                zuh_request_free(&rq); zuh_stream_free(s);
+                zuh_request_free(&rq); drop_stream(s);
                 zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
                 return rc;
             }
         } else {
             if (!zuh_buf_init(&wire, 512, 64 * 1024)) {
                 if (have_absform) zuh_buf_free(&absform);
-                zuh_request_free(&rq); zuh_stream_free(s);
+                zuh_request_free(&rq); drop_stream(s);
                 zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
                 return ZUH_ERR_NOMEM;
             }
@@ -1162,7 +1217,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
             if (have_absform) { zuh_buf_free(&absform); have_absform = 0; }
             zuh_request_free(&rq);
             if (rc != ZUH_OK) {
-                zuh_stream_free(s); zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
+                drop_stream(s); zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
                 return rc;
             }
         }
@@ -1171,7 +1226,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
         zuh_response_init(&resp);
         if (!zuh_buf_init(&raw, 4096, ZUH_MAX_HEADER_BYTES + ZUH_READ_CHUNK)) {
             if (use_h2) zuh_request_free(&rq);
-            zuh_response_free(&resp); zuh_stream_free(s);
+            zuh_response_free(&resp); drop_stream(s);
             zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
             return ZUH_ERR_NOMEM;
         }
@@ -1428,7 +1483,8 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
                  * a loop, and following it again can only repeat what the
                  * server already said. The hop count alone made a self-
                  * redirect cost max_redirects round trips to report. */
-                rc = zuh_redirect_trail_add(trail, method, &cur);
+                rc = check_host(&cur, err);
+                if (rc == ZUH_OK) rc = zuh_redirect_trail_add(trail, method, &cur);
                 if (rc != ZUH_OK) {
                     if (rc == ZUH_ERR_REDIRECT)
                         zuh_error_set(err, rc, ZUH_PHASE_NONE,

@@ -97,8 +97,10 @@ test_that("an existing file is replaced, and only on success (§27.1)", {
   on.exit(unlink(d, recursive = TRUE), add = TRUE)
   f <- file.path(d, "keep.bin")
   writeLines("previous contents", f)
+  # proxy = FALSE: an http_proxy in the environment would otherwise turn the
+  # refused port into whatever the proxy answers (#194).
   expect_error(
-    zu_get("http://127.0.0.1:9/x", path = f, timeout = 5),
+    zu_get("http://127.0.0.1:9/x", path = f, timeout = 5, proxy = FALSE),
     class = "zu_connect_error"
   )
   expect_identical(readLines(f, warn = FALSE), "previous contents")

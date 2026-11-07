@@ -14,6 +14,31 @@
 # accepting row exists to prove the fixture can succeed at all — without it,
 # a build that rejected everything would pass every other test here.
 
+test_that("the committed TLS fixture is not about to expire (#193)", {
+  skip_on_cran()
+  # The live leaves are valid for 397 days (fixtures/README.md). When they
+  # run out the whole matrix fails for the wrong reason, so this says why
+  # first, and what to do: tools/make-tls-fixture, then commit fixtures/tls.
+  fx <- tls_fixture()
+  for (n in c("good", "wronghost", "untrusted")) {
+    pem <- readLines(fx$cert(n), warn = FALSE)
+    # The notAfter date, read without the openssl CLI: the certificate's
+    # DER, base64 in the PEM, carries it as a UTCTime "YYMMDDhhmmssZ" right
+    # after notBefore in the Validity sequence.
+    der <- openssl_der(pem)
+    not_after <- der_utc_times(der)[2]
+    expect_true(
+      not_after - Sys.Date() > 45,
+      info = paste0(
+        n,
+        ".pem expires on ",
+        not_after,
+        ": run tools/make-tls-fixture and commit tests/testthat/fixtures/tls"
+      )
+    )
+  }
+})
+
 test_that("a valid certificate from a trusted CA is accepted", {
   # The control. Every rejection below is only meaningful if this passes:
   # a client that refused everything would satisfy the whole matrix.

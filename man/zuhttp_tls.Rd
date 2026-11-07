@@ -14,7 +14,8 @@ install time and reported by \code{\link[=zu_tls_backend]{zu_tls_backend()}}:
 \tabular{lll}{
 \strong{Platform} \tab \strong{Engine} \tab \strong{Trust store} \cr
 Windows \tab Schannel \tab the system certificate stores \cr
-macOS \tab Network.framework \tab Keychain, via \code{SecTrustEvaluateWithError} \cr
+macOS \tab Network.framework \tab Keychain, via
+\code{SecTrustEvaluateWithError} \cr
 elsewhere \tab system OpenSSL \tab the system CA directory \cr
 }
 
@@ -79,7 +80,7 @@ the platform then does differs. OpenSSL and Schannel check nothing. \strong{macO
 may check anyway}: the system's trust evaluation consults Apple's own
 revocation data when it has it, with no policy asking for it, so a
 certificate Apple knows to be revoked can be rejected even with
-\code{revocation = FALSE} -- on one run and not the next.
+\code{revocation = FALSE} — on one run and not the next.
 \code{zuhttp} cannot switch that off and does not try.
 
 \code{zu_tls(revocation = TRUE)} opts in, and what that buys you is

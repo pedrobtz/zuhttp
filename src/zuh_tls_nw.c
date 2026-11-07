@@ -472,10 +472,14 @@ static zuh_ssize nw_stream_read(zuh_stream *s, void *buf, size_t n, zuh_deadline
         return (zuh_ssize)take;
     }
     if (sh->rx_eof) { pthread_mutex_unlock(&sh->mu); return 0; }
-    pthread_mutex_unlock(&sh->mu);
-    zuh_error_set(err, ZUH_ERR_IO, ZUH_PHASE_READ,
-                  "connection failed while reading (Network.framework domain %d, code %d)",
-                  sh->nw_domain, sh->nw_code);
+    {
+        /* Read under the mutex, as every other field of `sh` is. */
+        int domain = sh->nw_domain, code = sh->nw_code;
+        pthread_mutex_unlock(&sh->mu);
+        zuh_error_set(err, ZUH_ERR_IO, ZUH_PHASE_READ,
+                      "connection failed while reading (Network.framework domain %d, code %d)",
+                      domain, code);
+    }
     return -1;
 }
 
@@ -1079,8 +1083,10 @@ zuh_code zuh_tls_dial(zuh_stream **out, const char *host, uint16_t port,
         int ready;
         pthread_mutex_lock(&sh->mu);
         ready = (sh->state == NW_READY);
-        pthread_mutex_unlock(&sh->mu);
+        /* failure_error() reads the error fields, so it runs under the
+         * mutex like every other reader of `sh`; it only formats. */
         if (!ready) rc = failure_error(sh, host, port, via_proxy, err);
+        pthread_mutex_unlock(&sh->mu);
     } else if (rc == ZUH_ERR_TIMEOUT) {
         int verified;
         pthread_mutex_lock(&sh->mu);

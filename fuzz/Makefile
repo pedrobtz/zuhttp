@@ -115,7 +115,10 @@ replay-run: replay
 	  find $(CORPUS)/$$t -type f -print0 | xargs -0 -n 500 ./replay_$$t || exit 1; \
 	done
 
-replay-asan: REPLAY_FLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer
+# -fno-sanitize-recover: UBSan prints and continues by default, and the
+# replay driver returns 0, so a finding would not fail the job (review #190).
+replay-asan: REPLAY_FLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer \
+                             -fno-sanitize-recover=undefined
 replay-asan: clean-bin replay-run
 
 clean-bin:

@@ -42,19 +42,28 @@ An empty body, or one the parser rejects, raises \code{zu_body_decode_error}
 naming the format; the parser's own message comes last (§34.4).
 }
 \examples{
-r <- zu_response(200L, c("Content-Type" = "application/json"),
-                 '{"name": "Alice", "tags": ["a", "b"]}')
+r <- zu_response(
+  200L,
+  c("Content-Type" = "application/json"),
+  '{"name": "Alice", "tags": ["a", "b"]}'
+)
 str(zu_resp_json(r))
 
 if (requireNamespace("zuxml", quietly = TRUE)) {
-  x <- zu_resp_xml(zu_response(200L, c("Content-Type" = "application/xml"),
-                               "<feed><title>News</title></feed>"))
+  x <- zu_resp_xml(zu_response(
+    200L,
+    c("Content-Type" = "application/xml"),
+    "<feed><title>News</title></feed>"
+  ))
   zuxml::xml_text(zuxml::xml_find_first(x, "//title"))
 }
 
 if (requireNamespace("zuhtml", quietly = TRUE)) {
-  h <- zu_resp_html(zu_response(200L, c("Content-Type" = "text/html"),
-                                "<title>Hello</title><p>World</p>"))
+  h <- zu_resp_html(zu_response(
+    200L,
+    c("Content-Type" = "text/html"),
+    "<title>Hello</title><p>World</p>"
+  ))
   zuhtml::html_title(h)
 }
 }

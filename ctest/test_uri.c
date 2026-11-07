@@ -271,10 +271,13 @@ void suite_uri(void) {
         zuh_alloc_stats_get(&before);
         for (n = 0; n < 40; n++) {
             zuh_uri tmp;
+            zuh_code rc;
             zuh_alloc_fail_after(n);
-            if (P(&tmp, "https://user@example.com:8443/a/b?q=1") == ZUH_OK)
-                zuh_uri_free(&tmp);
+            rc = P(&tmp, "https://user@example.com:8443/a/b?q=1");
             zuh_alloc_fail_after(-1);
+            if (rc == ZUH_OK) zuh_uri_free(&tmp);
+            /* An allocation failure is NOMEM, never "not a URL" (#197). */
+            ZUH_CHECK(rc == ZUH_OK || rc == ZUH_ERR_NOMEM);
         }
         zuh_alloc_stats_get(&after);
         /* If the parser had used bare malloc, live_blocks would not move at

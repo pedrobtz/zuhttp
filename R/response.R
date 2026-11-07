@@ -68,9 +68,9 @@ zu_response <- function(
 #'   `zu_resp_headers()` a named character vector, named as the server
 #'   spelled each field — over HTTP/2 that is always lowercase (RFC 9113
 #'   §8.2.1), so compare names with [zu_resp_header()] or `tolower()`;
-#'   `zu_resp_header()` a
-#'   character vector, length 0 when the header is absent and longer than 1
-#'   when it repeats; `zu_resp_url()` the final URL after redirects, with
+#'   `zu_resp_header()` a character vector, length 0 when the header is
+#'   absent and longer than 1 when it repeats; `zu_resp_url()` the final URL
+#'   after redirects, with
 #'   credentials removed (§42.1: userinfo dropped, and a secret query
 #'   parameter shown as `<redacted>` — see the Credentials section);
 #'   `zu_resp_path()` the file the body was written to, or `NULL` when it was
@@ -530,7 +530,7 @@ zu_resp_text <- function(
 # do_iconv() allocates its conversion buffer before it can error, and an error
 # skips the free. valgrind found it (W1), 8 KiB per call. So the output is
 # taken as raw bytes, which cannot fail on an embedded NUL the way building a
-# string does, and a NUL is reported as undecodable here instead -- an R string
+# string does, and a NUL is reported as undecodable here instead — an R string
 # cannot hold one anyway.
 try_iconv <- function(bytes, from, sub = NA_character_) {
   out <- tryCatch(
@@ -607,19 +607,28 @@ bom_of <- function(b) {
 #'   document.
 #' @export
 #' @examples
-#' r <- zu_response(200L, c("Content-Type" = "application/json"),
-#'                  '{"name": "Alice", "tags": ["a", "b"]}')
+#' r <- zu_response(
+#'   200L,
+#'   c("Content-Type" = "application/json"),
+#'   '{"name": "Alice", "tags": ["a", "b"]}'
+#' )
 #' str(zu_resp_json(r))
 #'
 #' if (requireNamespace("zuxml", quietly = TRUE)) {
-#'   x <- zu_resp_xml(zu_response(200L, c("Content-Type" = "application/xml"),
-#'                                "<feed><title>News</title></feed>"))
+#'   x <- zu_resp_xml(zu_response(
+#'     200L,
+#'     c("Content-Type" = "application/xml"),
+#'     "<feed><title>News</title></feed>"
+#'   ))
 #'   zuxml::xml_text(zuxml::xml_find_first(x, "//title"))
 #' }
 #'
 #' if (requireNamespace("zuhtml", quietly = TRUE)) {
-#'   h <- zu_resp_html(zu_response(200L, c("Content-Type" = "text/html"),
-#'                                 "<title>Hello</title><p>World</p>"))
+#'   h <- zu_resp_html(zu_response(
+#'     200L,
+#'     c("Content-Type" = "text/html"),
+#'     "<title>Hello</title><p>World</p>"
+#'   ))
 #'   zuhtml::html_title(h)
 #' }
 zu_resp_json <- function(resp, ...) {
@@ -732,7 +741,10 @@ parse_body <- function(resp, format, parse) {
 #' @export
 #' @examples
 #' r <- zu_response(404L, url = "https://example.com/missing")
-#' tryCatch(zu_resp_check(r), zu_http_client_error = function(e) conditionMessage(e))
+#' tryCatch(
+#'   zu_resp_check(r),
+#'   zu_http_client_error = function(e) conditionMessage(e)
+#' )
 zu_resp_check <- function(resp) {
   if (zu_resp_ok(resp)) {
     return(invisible(resp))

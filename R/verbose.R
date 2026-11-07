@@ -45,8 +45,10 @@
 #' @seealso [zu_resp_trace()], [zu_hooks()] for your own handlers.
 #' @export
 #' @examples
-#' cli <- zu_client(hooks = zu_verbose(),
-#'                  transport = zu_mock_transport(function(r) zu_response(200L)))
+#' cli <- zu_client(
+#'   hooks = zu_verbose(),
+#'   transport = zu_mock_transport(function(r) zu_response(200L))
+#' )
 #' invisible(zu_get("https://example.test/x", client = cli))
 zu_verbose <- function(to = stderr(), body = TRUE) {
   say <- function(...) cat(..., "\n", sep = "", file = to)

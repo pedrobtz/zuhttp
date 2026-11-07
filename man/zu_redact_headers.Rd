@@ -10,17 +10,19 @@ zu_redact_headers(...)
 \item{...}{Header names, or a single character vector.}
 }
 \value{
-The resulting character vector of extra names, invisibly.
+The character vector of extra names now registered, invisibly.
 }
 \description{
 The defaults are \code{Authorization}, \code{Proxy-Authorization}, \code{Cookie},
 \code{Set-Cookie}, \code{X-Api-Key} and \code{X-Auth-Token} (§42.1). This adds to them; it
-cannot remove a default.
+cannot remove a default. Each call replaces the names registered by an
+earlier call, so pass the whole set at once.
 }
 \examples{
 old <- getOption("zuhttp.redact_headers")
 zu_redact_headers("X-Session")
 # Printed requests, traces, cassettes and conditions now hide it:
-zu_headers(zu_request("GET", "https://api.example.com"), `X-Session` = "abc123")
+req <- zu_request("GET", "https://api.example.com")
+zu_headers(req, `X-Session` = "abc123")
 options(zuhttp.redact_headers = old)   # restore
 }

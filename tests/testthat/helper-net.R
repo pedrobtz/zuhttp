@@ -54,6 +54,81 @@ skip_unless_online <- function() {
   if (!zu_have_network()) testthat::skip("no network")
 }
 
+# A loopback port nothing is listening on, for the tests that start a
+# server of their own. A port drawn at random can be taken (the ubsan leg,
+# #135), so the draw is checked by binding it once; the window between the
+# close here and the bind that follows is a few milliseconds (#194).
+free_port <- function() {
+  skip_if(getRversion() < "4.0.0", "serverSocket() is R 4.0")
+  for (attempt in 1:20) {
+    port <- sample(20000:59000, 1L)
+    srv <- tryCatch(serverSocket(port), error = function(e) NULL)
+    if (!is.null(srv)) {
+      close(srv)
+      return(port)
+    }
+  }
+  skip("no free loopback port in 20 draws")
+}
+
+# A helper R process on loopback, for bytes a well-behaved server never sends
+# (helper-rawserver.R, helper-proxy.R, helper-origin.R) and for a process to
+# interrupt (test-retry.R). `args` are already quoted. The child's output goes
+# to a file next to its script and is returned, so a child that never reaches
+# "ready" can say why (review #185: every R CMD check leg lost these 25 tests
+# to a skip, with the one line that would have explained it discarded).
+# The child is R.home()'s own Rscript, by path: under `R CMD check --as-cran`
+# a bare `Rscript` aborts with "'Rscript' should not be used without a path"
+# (R-exts 1.6), which is what every R CMD check leg had been hiding behind
+# "did not start" (#185). R_TESTS is cleared for the child as testthat clears
+# it for this process: R CMD check sets it to a start-up file that only
+# exists in the directory the check runs tests from.
+spawn_helper_r <- function(script, args, dir, pid_file = NULL) {
+  outf <- file.path(dir, "helper-output.txt")
+  cmd <- sprintf(
+    "exec %s %s %s",
+    shQuote(file.path(R.home("bin"), "Rscript")),
+    shQuote(script),
+    paste(args, collapse = " ")
+  )
+  if (!is.null(pid_file)) {
+    # `exec` so the recorded pid is R's own and not a shell that wraps it.
+    cmd <- sprintf("echo $$ > %s; %s", shQuote(pid_file), cmd)
+  }
+  system2(
+    "sh",
+    c("-c", shQuote(cmd)),
+    wait = FALSE,
+    stdout = outf,
+    stderr = outf,
+    env = "R_TESTS="
+  )
+  outf
+}
+
+# Waits for `ready()`; a child that does not get there is a FAILURE, not a
+# skip. skip_unless_forkable() has established the shell and Rscript, so by
+# here a child that does not start is the kind of thing the tests exist to
+# find, and its output is in the message.
+wait_helper_ready <- function(ready, outf, what, limit = 20) {
+  deadline <- Sys.time() + limit
+  while (!ready() && Sys.time() < deadline) {
+    Sys.sleep(0.05)
+  }
+  if (ready()) {
+    return(invisible(TRUE))
+  }
+  out <- if (file.exists(outf)) readLines(outf, warn = FALSE) else character()
+  stop(
+    what,
+    " did not start within ",
+    limit,
+    " s; its output was:\n",
+    paste(out, collapse = "\n"),
+    call. = FALSE
+  )
+}
+
 # D-56: a zu_tls() setting the linked backend cannot honour is refused before
 # any network I/O, so a test that needs the setting to WORK must skip where it
 # is refused. The capability list comes from C (zuh_tls_backend_caps), the one

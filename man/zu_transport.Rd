@@ -33,8 +33,11 @@ functions, response accessors and conditions are the stable API.
 
 \examples{
 fake <- zu_mock_transport(function(req) {
-  zu_response(status = 200L, body = charToRaw('{"ok":true}'),
-              headers = c("Content-Type" = "application/json"))
+  zu_response(
+    status = 200L,
+    body = charToRaw('{"ok":true}'),
+    headers = c("Content-Type" = "application/json")
+  )
 })
 r <- zu_get("https://example.com", client = zu_client(transport = fake))
 zu_resp_status(r)

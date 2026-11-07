@@ -29,7 +29,8 @@ old <- zu_set_json_backend(
   encode = function(x, ...) sprintf('{"n":\%d}', length(x)),
   decode = function(txt, ...) list(text = txt)
 )
-req <- zu_body_json(zu_request("POST", "https://api.example.com"), list(1, 2))
+req <- zu_request("POST", "https://api.example.com")
+req <- zu_body_json(req, list(1, 2))
 rawToChar(req$body)
 
 zu_set_json_backend(old$encode, old$decode)   # restore

@@ -63,9 +63,12 @@ as_zu_code <- function(code) {
 #'   and `condition`.
 #' @export
 #' @examples
-#' cnd <- zu_condition("zu_timeout_error", "the request took too long",
-#'                     url = "https://user:pw@api.example.com/v1",
-#'                     phase = "read")
+#' cnd <- zu_condition(
+#'   "zu_timeout_error",
+#'   "the request took too long",
+#'   url = "https://user:pw@api.example.com/v1",
+#'   phase = "read"
+#' )
 #' class(cnd)
 #' cnd$url        # redacted: the userinfo is gone
 #'

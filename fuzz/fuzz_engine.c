@@ -11,9 +11,22 @@
  * the connections the engine opens. Two requests are made on one pool, so
  * reuse, stale connections and surplus bytes are fuzzed too.
  *
+ * The option byte (review #191 added the last three, inside the bits the
+ * format already had, so every seed keeps its meaning):
+ *   0x03  reads of 1 byte (0), 7 bytes (1), or whatever is asked (2, 3);
+ *         3 also pulls the body (§65.4) in small pieces and aborts the second
+ *         request's half-way (§65.5);
+ *   0x04  POST with a body; 0x08 HEAD; both at once (0x0C) a streamed body
+ *         (§65.7) that fails when 0x01 is also set;
+ *   0x10  no redirects; 0x20 no decoding; 0x40 a trace, and the §26.2
+ *         liveness probe derived from the script rather than pinned idle, so
+ *         the pool's stale path runs.
+ *
  * Oracles, beyond ASan/UBSan and libFuzzer's leak check:
  *   - the engine terminates (the mock never blocks; EOF ends every read);
- *   - a body delivered to the caller never exceeds max_body;
+ *   - a body delivered to the caller never exceeds max_body, and a header
+ *     or trailer block never exceeds the §40 limit;
+ *   - a streamed body source is released exactly once;
  *   - every allocation the engine made for an input is freed by the end of
  *     it, counted by zuh_alloc itself — which works where LeakSanitizer does
  *     not (macOS, Windows under Rtools).
@@ -25,6 +38,7 @@
 #include "zuh_mock_stream.h"
 #include "zuh_pool.h"
 #include "zuh_alloc.h"
+#include "zuh_headers.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -40,10 +54,36 @@ typedef struct {
     size_t         len[MAXC];
     size_t         n, next;
     size_t         max_read;
+    int            probe_from_script;
     zuh_mock_step   step[MAXC];
     zuh_stream     *mock[MAXC];
     char           host[MAXC][64];
 } dialer;
+
+/* A streamed request body (§65.7): four pieces, or a failure on the third. */
+typedef struct { int i, fail, released; } gen;
+static zuh_code gen_next(void *ctx, const void **data, size_t *len, zuh_error *err) {
+    gen *g = (gen *)ctx;
+    static const char piece[] = "piece-of-a-streamed-body";
+    if (g->fail && g->i == 2) {
+        zuh_error_set(err, ZUH_ERR_CANCELLED, ZUH_PHASE_WRITE, "the source failed");
+        return ZUH_ERR_CANCELLED;
+    }
+    if (g->i >= 4) { *len = 0; return ZUH_OK; }
+    g->i++;
+    *data = piece; *len = sizeof piece - 1;
+    return ZUH_OK;
+}
+static void gen_release(void *ctx) { ((gen *)ctx)->released++; }
+
+/* §40 as the result reports it: what a header block cost, roughly. */
+static size_t block_bytes(const zuh_headers *h) {
+    size_t j, bytes = 0;
+    const char *nm, *v;
+    for (j = 0; h && zuh_headers_at(h, j, &nm, &v); j++)
+        bytes += strlen(nm) + strlen(v) + 32;
+    return bytes;
+}
 
 static zuh_code dial(void *ctx, const char *host, uint16_t port,
                     zuh_stream **out, zuh_error *err) {
@@ -61,7 +101,9 @@ static zuh_code dial(void *ctx, const char *host, uint16_t port,
     d->step[i].len  = d->len[i];
     *out = zuh_mock_stream_new(&d->step[i], 1, d->max_read, 0);
     if (!*out) return ZUH_ERR_NOMEM;
-    zuh_mock_stream_set_readable(*out, 1, 0);   /* let the pool keep it */
+    /* Pinned idle, the pool keeps it; derived from the script, unread bytes
+     * make it stale (§26.2) and the discard path runs. */
+    if (!d->probe_from_script) zuh_mock_stream_set_readable(*out, 1, 0);
     return ZUH_OK;
 }
 
@@ -75,6 +117,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     zuh_result r;
     zuh_error e;
     zuh_trace tr;
+    gen g;
     uint8_t sel;
     size_t i, start;
     int k;
@@ -86,6 +129,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     sel = data[0];
     memset(&d, 0, sizeof d);
     d.max_read = (sel & 0x3) == 0 ? 1 : (sel & 0x3) == 1 ? 7 : 0;
+    d.probe_from_script = (sel & 0x40) != 0;
 
     /* Split on "\0ZU\0". */
     start = 1;
@@ -99,8 +143,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
     memset(&spec, 0, sizeof spec);
     spec.header_names = hn; spec.header_values = hv; spec.n_headers = 1;
-    if (sel & 0x4) { spec.method = "POST"; spec.body = "payload"; spec.body_len = 7; }
-    if (sel & 0x8) spec.method = "HEAD";
+    if ((sel & 0xC) == 0xC) {
+        spec.method = "POST";               /* a streamed body, below */
+    } else {
+        if (sel & 0x4) { spec.method = "POST"; spec.body = "payload"; spec.body_len = 7; }
+        if (sel & 0x8) spec.method = "HEAD";
+    }
 
     pool = zuh_pool_new(NULL);
     zuh_get_opts_init(&o);
@@ -112,14 +160,38 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     o.no_decode = (sel & 0x20) != 0;
     zuh_trace_init(&tr);
     o.trace = (sel & 0x40) ? &tr : NULL;
+    o.stream_body = (sel & 0x3) == 3;
 
     for (k = 0; k < 2; k++) {
         zuh_result_init(&r);
         zuh_error_clear(&e);
+        memset(&g, 0, sizeof g);
+        if ((sel & 0xC) == 0xC) {
+            g.fail = (sel & 0x1) != 0;
+            spec.source.next = gen_next; spec.source.release = gen_release; spec.source.ctx = &g;
+        }
         if (zuh_engine_perform(&r, "http://origin.test/start", &spec, &o, &e) == ZUH_OK) {
+            if (r.open) {
+                zuh_buffer got;
+                int reads = 0;
+                if (zuh_buf_init(&got, 0, (size_t)-1)) {
+                    while (!zuh_open_body_done(r.open) &&
+                           zuh_open_body_read(r.open, &got, 333, &e) == ZUH_OK) {
+                        if (k == 1 && ++reads == 3) zuh_open_body_abort(r.open);
+                    }
+                    if (got.len > MAX_BODY) abort();
+                    zuh_buf_free(&got);
+                }
+                if (block_bytes(zuh_open_body_trailers(r.open)) > ZUH_DEFAULT_MAX_HEADER_BYTES)
+                    abort();
+            }
             if (r.body.len > MAX_BODY) abort();
+            if (block_bytes(&r.headers) > ZUH_DEFAULT_MAX_HEADER_BYTES) abort();
+            if (block_bytes(&r.trailers) > ZUH_DEFAULT_MAX_HEADER_BYTES) abort();
             zuh_result_free(&r);
         }
+        if (spec.source.ctx && g.released != 1) abort();
+        memset(&spec.source, 0, sizeof spec.source);
     }
     zuh_pool_free(pool);
     zuh_alloc_stats_get(&after);

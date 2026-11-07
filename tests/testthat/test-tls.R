@@ -120,7 +120,10 @@ test_that("zu_info() reports the zu_tls() capabilities from C", {
   expect_type(caps, "character")
   expect_true(all(caps %in% names(unsupported_cases())))
   # Pinned to what each backend's zuh_tls_backend_caps() says, so a change to a
-  # backend's support has to be made here on purpose.
+  # backend's support has to be made here on purpose. This is the one place a
+  # table of backend names is right (CLAUDE.md forbids it elsewhere): it is a
+  # change detector for the C mask, not a decision about what to test; every
+  # other test asks skip_unless_tls_supports() (review #198).
   expected <- switch(
     zu_tls_backend(),
     openssl = c("pins", "tls13", "ca_file", "ca_extra"),

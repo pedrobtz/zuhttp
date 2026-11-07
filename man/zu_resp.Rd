@@ -39,9 +39,9 @@ for a 2xx or 3xx status (a 3xx reaches you with \code{redirects = 0});
 \code{zu_resp_headers()} a named character vector, named as the server
 spelled each field — over HTTP/2 that is always lowercase (RFC 9113
 §8.2.1), so compare names with \code{\link[=zu_resp_header]{zu_resp_header()}} or \code{tolower()};
-\code{zu_resp_header()} a
-character vector, length 0 when the header is absent and longer than 1
-when it repeats; \code{zu_resp_url()} the final URL after redirects, with
+\code{zu_resp_header()} a character vector, length 0 when the header is
+absent and longer than 1 when it repeats; \code{zu_resp_url()} the final URL
+after redirects, with
 credentials removed (§42.1: userinfo dropped, and a secret query
 parameter shown as \verb{<redacted>} — see the Credentials section);
 \code{zu_resp_path()} the file the body was written to, or \code{NULL} when it was

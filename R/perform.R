@@ -26,8 +26,11 @@
 #' @name zu_transport
 #' @examples
 #' fake <- zu_mock_transport(function(req) {
-#'   zu_response(status = 200L, body = charToRaw('{"ok":true}'),
-#'               headers = c("Content-Type" = "application/json"))
+#'   zu_response(
+#'     status = 200L,
+#'     body = charToRaw('{"ok":true}'),
+#'     headers = c("Content-Type" = "application/json")
+#'   )
 #' })
 #' r <- zu_get("https://example.com", client = zu_client(transport = fake))
 #' zu_resp_status(r)
@@ -126,7 +129,10 @@ zu_transport_perform.zu_native_transport <- function(transport, req) {
     ),
     p$http2 %||% "auto",
     isTRUE(req$stream),
-    req$body_stream
+    req$body_stream,
+    # §65.4: each zu_resp_read() wait is bounded by the request's `timeout`
+    # afresh, not by this attempt's share of the total budget above.
+    timeout_ms(p$timeout)
   )
   # §27.1: by here the sink has been committed, so the destination is a fact
   # about this response rather than something that was merely asked for. Set
@@ -147,7 +153,7 @@ default_user_agent <- function() {
 }
 
 # The deadline crosses into C as an int of milliseconds, so timeout = Inf --
-# a reasonable way to write "no timeout" -- must land on the largest value
+# a reasonable way to write "no timeout" — must land on the largest value
 # that survives the conversion rather than on NA, which C would read as
 # INT_MIN and silently replace with the 30-second default.
 timeout_ms <- function(seconds) {
@@ -248,7 +254,8 @@ resolve_request <- function(req, client) {
 
   headers <- merge_headers(client$headers, req$headers)
   # The content type implied by the body is a default, so it loses to any
-  # header that survived the merge (§31.2: "unless explicitly overridden").
+  # header that survived the merge (§31.6: a semantic body sets its content
+  # type unless one is set; §28.3).
   if (
     !is.null(req$content_type) &&
       !any(tolower(names(headers)) == "content-type")

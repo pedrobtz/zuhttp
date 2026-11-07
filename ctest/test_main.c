@@ -51,6 +51,21 @@ static void watchdog(int sig) {
     (void)!write(2, b, sizeof b - 1);
     _exit(3);
 }
+#else
+/* The same bound on Windows, where there is no alarm(): a thread that sleeps
+ * it out and then ends the process, so a hang on the Rtools leg is a named
+ * failure rather than the job's own timeout (review #197). */
+#include <windows.h>
+#define ZUH_TEST_WATCHDOG_S 300
+static DWORD WINAPI watchdog_thread(LPVOID arg) {
+    (void)arg;
+    Sleep(ZUH_TEST_WATCHDOG_S * 1000);
+    fprintf(stderr, "\nWATCHDOG: the C suite ran past its time limit in case: %s\n",
+            zuh_test_current ? zuh_test_current : "(none)");
+    fflush(stderr);
+    _exit(3);
+    return 0;
+}
 #endif
 
 int main(void) {
@@ -59,6 +74,8 @@ int main(void) {
 #ifndef _WIN32
     signal(SIGALRM, watchdog);
     alarm(ZUH_TEST_WATCHDOG_S);
+#else
+    CloseHandle(CreateThread(NULL, 0, watchdog_thread, NULL, 0, NULL));
 #endif
 
     printf("zuhttp C core tests (S2 foundations + S3 wire)\n\n");

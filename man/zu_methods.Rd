@@ -227,20 +227,29 @@ client default (§31.9). Omitting it inherits the client's.
 # A mock transport answers instead of the network, so these run anywhere.
 # Swap `client = api` for nothing and the same calls go over the wire.
 echo <- zu_mock_transport(function(req) {
-  zu_response(200L, c("Content-Type" = "text/plain"),
-              paste(req$method, req$url))
+  zu_response(
+    200L,
+    c("Content-Type" = "text/plain"),
+    paste(req$method, req$url)
+  )
 })
 api <- zu_client(transport = echo)
 
-r <- zu_get("https://api.example.com/search",
-            query = list(q = "HTTP", limit = 20), client = api)
+r <- zu_get(
+  "https://api.example.com/search",
+  query = list(q = "HTTP", limit = 20),
+  client = api
+)
 zu_resp_status(r)
 zu_resp_text(r)
 
 zu_resp_text(zu_delete("https://api.example.com/users/42", client = api))
 
-zu_resp_text(zu_post("https://api.example.com/users",
-                     json = list(name = "Alice"), client = api))
+zu_resp_text(zu_post(
+  "https://api.example.com/users",
+  json = list(name = "Alice"),
+  client = api
+))
 
 if (interactive()) {
   # Download straight to disk: the body never passes through memory, and

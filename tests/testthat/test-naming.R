@@ -22,24 +22,10 @@ test_that("every export uses the zu_ prefix (D-1)", {
   )
 })
 
-test_that("no export masks an httr2 export (D-2, success criterion 61.13)", {
-  skip_if_not_installed("httr2")
-
-  ours <- getNamespaceExports("zuhttp")
-  theirs <- getNamespaceExports("httr2")
-  skip_if(length(ours) == 0, "no exports yet")
-
-  collisions <- intersect(ours, theirs)
-  expect_identical(
-    collisions,
-    character(0),
-    info = paste(
-      "zuhttp and httr2 are expected to coexist in one session (design 5).",
-      "Colliding:",
-      paste(collisions, collapse = ", ")
-    )
-  )
-})
+# §61.13, "no export masks an httr2 export", is checked by conventions.yaml's
+# httr2-masking job (tools/ci-masking.R), which installs httr2 for the
+# purpose. A copy here skipped on every leg, httr2 not being in Suggests
+# (review #198).
 
 test_that("response accessors use the zu_resp_ prefix (D-1)", {
   # The concern D-1 actually names is a BARE response property at top level:
