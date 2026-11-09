@@ -1,7 +1,6 @@
 ^zuhttp\.Rproj$
 ^\.Rproj\.user$
 ^\.agents$
-^\.claude$
 ^CLAUDE\.md$
 ^spike$
 ^fuzz$

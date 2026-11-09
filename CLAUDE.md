@@ -6,18 +6,6 @@ system OpenSSL elsewhere — rather than bundling cryptography or a CA bundle.
 One hard R dependency, the sibling `zujson` (D-88); `zuxml` and `zuhtml` are
 Suggests.
 
-## Shared conventions
-
-The portfolio's shared rules are synced into `.claude/shared/` from
-`pedrobtz/packages:claude/shared/`. Never edit them here. Where this file and
-a shared file disagree, this file wins for this package.
-
-@.claude/shared/workflow.md
-@.claude/shared/r-package.md
-@.claude/shared/ci.md
-@.claude/shared/native-code.md
-@.claude/shared/correctness.md
-
 ## The two documents that govern this repo
 
 Both live in [`.agents/`](.agents/) and are excluded from the R package build:
