@@ -14,6 +14,7 @@
 #include "zuh_proxy.h"
 #include "zuh_trace.h"
 #include "zuh_time.h"
+#include "zuh_fork.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -748,6 +749,11 @@ struct zuh_open_body {
     size_t          staged_off;
     long            timeout_ms;
     int             ended, aborted, failed;
+    /* §26.4: the process that opened it. The pool's guard covers idle
+     * connections only; one checked out into a pulled body is invisible to
+     * it, and a forked child that read it consumed the parent's bytes and
+     * closed the parent's socket in its finalizer (#209). */
+    zuh_fork_guard  guard;
     /* §65.7: a request body still being sent while the response streams
      * (full duplex); released when this body is freed. */
     zuh_body_source src;
@@ -777,6 +783,7 @@ static zuh_code open_body_new(zuh_open_body **out, zuh_stream *s, int h2,
         zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_READ, "out of memory");
         return ZUH_ERR_NOMEM;
     }
+    zuh_fork_guard_arm(&b->guard);
     zuh_sink_memory_init(&b->sink, &b->staged);
     rc = zuh_body_pipe_init(&b->pipe, &b->sink, h, no_decode, cap, err);
     if (rc == ZUH_OK && !h2) {
@@ -814,6 +821,12 @@ zuh_code zuh_open_body_read_within(zuh_open_body *b, zuh_buffer *out, size_t n,
     if (!b || b->failed) {
         zuh_error_set(err, ZUH_ERR_IO, ZUH_PHASE_READ, "the response body failed earlier");
         return ZUH_ERR_IO;
+    }
+    if (zuh_fork_guard_tripped(&b->guard)) {
+        zuh_error_set(err, ZUH_ERR_FORK, ZUH_PHASE_READ,
+                      "a streamed response cannot be read in a forked child: "
+                      "its connection belongs to the parent process (§26.4)");
+        return ZUH_ERR_FORK;
     }
     if (b->aborted) {
         zuh_error_set(err, ZUH_ERR_CANCELLED, ZUH_PHASE_READ, "the response body was aborted");
@@ -860,6 +873,9 @@ zuh_code zuh_open_body_read_within(zuh_open_body *b, zuh_buffer *out, size_t n,
 
 void zuh_open_body_abort(zuh_open_body *b) {
     if (!b || b->aborted || b->failed) return;
+    /* An HTTP/2 cancel writes RST_STREAM, and a close may write too: on the
+     * parent's connection either corrupts it (§26.4, #209). */
+    if (zuh_fork_guard_tripped(&b->guard)) return;
     /* Ended is not done (#213): the wire can be over with bytes still
      * staged, and an abort withholds those too. The connection went back
      * when the wire ended, so there is nothing more to release. */
@@ -896,6 +912,12 @@ const zuh_headers *zuh_open_body_trailers(const zuh_open_body *b) {
 
 void zuh_open_body_free(zuh_open_body *b) {
     if (!b) return;
+    if (b->s && zuh_fork_guard_tripped(&b->guard)) {
+        /* A finalizer in a forked child: drop the child's copy without a
+         * close, as the pool drops an inherited connection (§26.4, #209). */
+        zuh_stream_free(b->s);
+        b->s = NULL;
+    }
     zuh_open_body_abort(b);
     open_body_release(b, ZUH_NOREUSE_CANCELLED);
     if (!b->h2) zuh_body_reader_free(&b->rd);

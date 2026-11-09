@@ -1162,7 +1162,10 @@ Two hazards, one mechanism (`zu_fork.{h,c}`):
 1. **Inherited connections.** Every pool records its creator's PID and checks
    it on every acquire, release and free. On mismatch, inherited connections
    are dropped without a TLS shutdown (which would write into the parent's
-   session) and the pool is re-initialised.
+   session) and the pool is re-initialised. A connection checked out into a
+   streamed response (§65.4) is not in any pool, so the open body records its
+   creator's PID too: in a child, a read raises `zu_fork_error`, an abort does
+   nothing, and the finalizer frees the child's copy without a close (#209).
 2. **The trust evaluator (macOS).** On a PID mismatch after the parent used
    Security.framework, trust evaluation is refused with `zu_fork_error`
    instead of a SIGSEGV (D-32). Forked HTTPS does not work on macOS; PSOCK

@@ -17,6 +17,10 @@
 #include "zuh_alloc.h"
 #include "zuh_sink.h"
 #include <zlib.h>
+#if defined(ZUH_POSIX)
+#  include <unistd.h>
+#  include <sys/wait.h>
+#endif
 
 void suite_engine_mock(void);
 
@@ -1785,6 +1789,62 @@ void suite_engine_mock(void) {
             dialer_free(&d);
         }
     }
+
+#if defined(ZUH_POSIX)
+    ZUH_CASE("§26.4: a forked child can neither read nor close the parent's streamed body (#209)");
+    {
+        /* One byte per read, so the body is still on the wire when the
+         * response comes back. The child inherits the open body: a read
+         * there consumed the parent's bytes and its free closed the parent's
+         * connection, because nothing on the body said who owned it. Now
+         * the child's read raises ZUH_ERR_FORK, and its abort and free leave
+         * the connection alone. The child reports the index of the first
+         * failed check in its exit status, as test_pool.c's fork case does. */
+        conn_script s[] = {{ "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello", 0, 1, 1, NULL }};
+        zuh_buffer got;
+        pid_t kid;
+        dialer_init(&d, s, 1); opts_for(&o, &d); o.stream_body = 1;
+        rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            ZUH_CHECK(!zuh_open_body_done(r.open));
+            kid = fork();
+            if (kid == 0) {
+                int step = 0;
+                long closes = zuh_mock_stream_closes_total();
+                zuh_buffer cg;
+                zuh_error ce;
+                zuh_buf_init(&cg, 0, (size_t)-1);
+                zuh_error_clear(&ce);
+                if (zuh_open_body_read(r.open, &cg, 100, &ce) != ZUH_ERR_FORK) step = 1;
+                else if (cg.len != 0) step = 2;
+                zuh_open_body_abort(r.open);
+                if (!step && zuh_mock_stream_closes_total() != closes) step = 3;
+                zuh_result_free(&r);
+                if (!step && zuh_mock_stream_closes_total() != closes) step = 4;
+                zuh_buf_free(&cg);
+                dialer_free(&d);
+                _exit(step);
+            }
+            ZUH_CHECK(kid > 0);
+            if (kid > 0) {
+                int status = -1;
+                ZUH_CHECK(waitpid(kid, &status, 0) == kid);
+                ZUH_CHECK(WIFEXITED(status));
+                ZUH_CHECK_EQ_INT(WIFEXITED(status) ? WEXITSTATUS(status) : -1, 0);
+            }
+            /* The parent's body is intact. */
+            zuh_buf_init(&got, 0, (size_t)-1);
+            while (zuh_open_body_read(r.open, &got, 100, &e) == ZUH_OK &&
+                   !zuh_open_body_done(r.open)) { }
+            ZUH_CHECK_EQ_INT((int)got.len, 5);
+            ZUH_CHECK(got.len == 5 && memcmp(got.data, "hello", 5) == 0);
+            zuh_buf_free(&got);
+            zuh_result_free(&r);
+        }
+        dialer_free(&d);
+    }
+#endif
 
     /* #188: the allocation-failure sweep, once per scenario. Each scenario
      * runs clean first to count its allocations, then once per allocation
