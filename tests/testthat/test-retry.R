@@ -15,6 +15,15 @@ test_that("zu_retry() counts the FIRST attempt, and validates", {
 
   expect_error(zu_retry(attempts = 0), "at least 1")
   expect_error(zu_retry(attempts = NA), "at least 1")
+  # #222: as.integer() of these is NA, and `if (NA)` failed every request
+  # on the client, far from here.
+  expect_error(zu_retry(attempts = 1e10), "at most")
+  expect_error(zu_retry(attempts = .Machine$integer.max + 1), "at most")
+  expect_error(zu_retry(attempts = Inf), "at most")
+  expect_identical(
+    zu_retry(attempts = .Machine$integer.max)$attempts,
+    .Machine$integer.max
+  )
   expect_error(zu_retry(base = -1), "non-negative")
   expect_error(zu_retry(backoff = "linear"), "should be one of")
 })
