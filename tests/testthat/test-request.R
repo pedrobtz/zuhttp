@@ -218,3 +218,27 @@ test_that("the body decides the framing: a conflicting header is refused before 
     class = "zu_connect_error"
   )
 })
+
+test_that("query parameters go before a URL's fragment, not into it (#219)", {
+  # Appended after the whole URL they landed inside the fragment, which the
+  # URI parser then dropped, parameters and all, without an error.
+  seen <- character()
+  cli <- zu_client(
+    transport = zu_mock_transport(function(req) {
+      seen <<- c(seen, req$url)
+      zu_response()
+    })
+  )
+  zu_get("http://h.test/p#sec", query = list(x = "hello"), client = cli)
+  zu_get("http://h.test/p?a=1#sec", query = list(x = "hello"), client = cli)
+  # A `?` inside the fragment is not a query: the separator is still `?`.
+  zu_get("http://h.test/p#a?b", query = list(x = "hello"), client = cli)
+  expect_identical(
+    seen,
+    c(
+      "http://h.test/p?x=hello#sec",
+      "http://h.test/p?a=1&x=hello#sec",
+      "http://h.test/p?x=hello#a?b"
+    )
+  )
+})

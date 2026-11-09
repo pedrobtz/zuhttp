@@ -95,10 +95,17 @@ url_with_query <- function(url, q) {
   if (is.null(qs)) {
     return(url)
   }
+  # The fragment comes last (RFC 3986 §3.5), so the parameters go before
+  # it: appended after it, they were part of the fragment, which the URI
+  # parser drops, and they vanished without an error (#219). A `?` inside
+  # the fragment is not a query either.
+  hash <- regexpr("#", url, fixed = TRUE)
+  frag <- if (hash > 0L) substring(url, hash) else ""
+  base <- if (hash > 0L) substr(url, 1L, hash - 1L) else url
   # A URL that already carries a query keeps it; the merged parameters are
   # appended rather than replacing what the caller wrote.
-  sep <- if (grepl("?", url, fixed = TRUE)) "&" else "?"
-  paste0(url, sep, qs)
+  sep <- if (grepl("?", base, fixed = TRUE)) "&" else "?"
+  paste0(base, sep, qs, frag)
 }
 
 # For printing only, so it goes through the §42 redaction filter like any
