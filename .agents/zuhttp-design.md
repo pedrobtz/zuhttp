@@ -826,7 +826,7 @@ Strict, not permissive (D-15):
 | both `Transfer-Encoding` and `Content-Length` | reject |
 | more than one `Content-Length`, equal or not | reject |
 | `Content-Length` not plain decimal or overflowing `uint64` | reject |
-| chunk size invalid hex, overflowing, or above `max_chunk_size` (when set; checked as the chunk arrives, so exact to one read; the engine sets none, and `max_body` bounds the total) | reject |
+| chunk size invalid hex or overflowing (no per-chunk size cap: `max_body` bounds the decoded total, #223) | reject |
 | neither header, body possible | read to close; not poolable |
 | `obs-fold` | reject |
 | malformed status line, status not three digits | reject |
@@ -977,7 +977,9 @@ Enforced during inflation, not after: `max_body` caps decoded output
 just under deflate's ceiling of about 1030:1. Either raises
 `zu_body_limit_error`, naming the cap that was binding, and closes the
 connection. The absolute cap bounds a bomb in megabytes; the ratio makes it
-fail after kilobytes. `Transfer-Encoding: gzip` is rejected (§18.1).
+fail after kilobytes. `Transfer-Encoding: gzip` is rejected (§18.1). A stacked
+encoding is refused rather than half-decoded: a `gzip, br` value and two
+`Content-Encoding` fields alike raise `zu_body_decode_error` (#211).
 
 #### 21.5 Completeness (D-76)
 
@@ -1160,7 +1162,10 @@ Two hazards, one mechanism (`zu_fork.{h,c}`):
 1. **Inherited connections.** Every pool records its creator's PID and checks
    it on every acquire, release and free. On mismatch, inherited connections
    are dropped without a TLS shutdown (which would write into the parent's
-   session) and the pool is re-initialised.
+   session) and the pool is re-initialised. A connection checked out into a
+   streamed response (§65.4) is not in any pool, so the open body records its
+   creator's PID too: in a child, a read raises `zu_fork_error`, an abort does
+   nothing, and the finalizer frees the child's copy without a close (#209).
 2. **The trust evaluator (macOS).** On a PID mismatch after the parent used
    Security.framework, trust evaluation is refused with `zu_fork_error`
    instead of a SIGSEGV (D-32). Forked HTTPS does not work on macOS; PSOCK

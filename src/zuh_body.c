@@ -24,6 +24,14 @@ zuh_code zuh_body_pipe_init(zuh_body_pipe *p, zuh_sink *sink, zuh_headers *h,
     p->max_body = max_body;
     zuh_headers_init(&p->trailers);
 
+    /* Two fields are a stacked encoding (RFC 9110 §8.4), refused as a
+     * "gzip, br" value is (§21.4): decoding the first and dropping both
+     * would hand back still-encoded bytes with the evidence gone (#211). */
+    if (!no_decode && zuh_headers_count(h, "Content-Encoding") > 1) {
+        zuh_error_set(err, ZUH_ERR_BODY_DECODE, ZUH_PHASE_DECODE,
+                     "repeated Content-Encoding fields (a stacked encoding) are not supported");
+        return ZUH_ERR_BODY_DECODE;
+    }
     kind = no_decode ? ZUH_ENC_IDENTITY
                      : zuh_encoding_parse(zuh_headers_get(h, "Content-Encoding"));
     if (kind == ZUH_ENC_IDENTITY) return ZUH_OK;
@@ -118,8 +126,7 @@ zuh_code zuh_body_pipe_finish(zuh_body_pipe *p, zuh_error *err) {
  * runs, so a pulled body cannot be framed differently from a buffered one. */
 
 zuh_code zuh_body_reader_init(zuh_body_reader *r, const zuh_framing *fr,
-                              const char *seed, size_t seed_len,
-                              uint64_t max_body, zuh_error *err) {
+                              const char *seed, size_t seed_len, zuh_error *err) {
     memset(r, 0, sizeof *r);
     r->fr = *fr;
     r->work = (char *)zuh_alloc(ZUH_READ_CHUNK);
@@ -130,7 +137,7 @@ zuh_code zuh_body_reader_init(zuh_body_reader *r, const zuh_framing *fr,
         return ZUH_ERR_NOMEM;
     }
     if (fr->kind == ZUH_FRAME_CHUNKED) {
-        zuh_code rc = zuh_chunked_init(&r->dec, 0, max_body);
+        zuh_code rc = zuh_chunked_init(&r->dec);
         if (rc != ZUH_OK) {
             zuh_body_reader_free(r);
             zuh_error_set(err, rc, ZUH_PHASE_READ, "out of memory");
@@ -206,12 +213,13 @@ static zuh_code step_framed(zuh_body_reader *r, zuh_stream *s, zuh_body_pipe *p,
          * someone comparing the two numbers wants to see. */
         p->raw_seen += (uint64_t)n;
         rc = zuh_chunked_decode(&r->dec, r->work, &len, err);
+        /* The result first: a failed decode delivers nothing (#210). */
+        if (rc != ZUH_OK && rc != ZUH_ERR_WOULDBLOCK) return rc;
         if (len) {
             w = zuh_body_pipe_feed(p, r->work, len, err);
             if (w != ZUH_OK) return w;
         }
         if (rc == ZUH_ERR_WOULDBLOCK) return ZUH_OK;
-        if (rc != ZUH_OK) return rc;
         /* The last chunk and its trailers are in, and with them the end of
          * the message: whatever followed it, in this read or still held from
          * the headers, belongs to no response we asked for. */
@@ -258,9 +266,9 @@ zuh_code zuh_body_reader_step(zuh_body_reader *r, zuh_stream *s, zuh_body_pipe *
 
 zuh_code zuh_body_read(zuh_stream *s, const zuh_framing *fr, zuh_body_pipe *p,
                          const char *seed, size_t seed_len,
-                         uint64_t max_body, zuh_deadline dl, zuh_error *err) {
+                         zuh_deadline dl, zuh_error *err) {
     zuh_body_reader r;
-    zuh_code rc = zuh_body_reader_init(&r, fr, seed, seed_len, max_body, err);
+    zuh_code rc = zuh_body_reader_init(&r, fr, seed, seed_len, err);
     while (rc == ZUH_OK && !r.done) rc = zuh_body_reader_step(&r, s, p, dl, err);
     zuh_body_reader_free(&r);
     return rc;

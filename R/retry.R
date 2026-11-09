@@ -55,15 +55,19 @@ zu_retry <- function(
   on = NULL
 ) {
   backoff <- match.arg(backoff)
+  # The upper bound as zu_pool() has it: as.integer() of anything above
+  # .Machine$integer.max is NA, and the retry loop's `if` on it failed
+  # every request made with this policy (#222).
   if (
     !is.numeric(attempts) ||
       length(attempts) != 1L ||
-      is.na(attempts) ||
-      attempts < 1
+      !is.finite(attempts) ||
+      attempts < 1 ||
+      attempts > .Machine$integer.max
   ) {
     stop(
       "`attempts` must be a single number of at least 1 ",
-      "(1 means no retrying)",
+      "(1 means no retrying), and at most .Machine$integer.max",
       call. = FALSE
     )
   }

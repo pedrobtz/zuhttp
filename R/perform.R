@@ -306,13 +306,20 @@ resolve_request <- function(req, client) {
   ) {
     stop("`timeout` must be a positive number of seconds", call. = FALSE)
   }
+  # The bound as zu_pool() has it: the transport sends `redirects` to C as
+  # an integer, and as.integer() of anything above .Machine$integer.max is
+  # NA, which C read as INT_MIN and so as "follow none" (#221).
   if (
     !is.numeric(policy$redirects) ||
       length(policy$redirects) != 1L ||
-      is.na(policy$redirects) ||
-      policy$redirects < 0
+      !is.finite(policy$redirects) ||
+      policy$redirects < 0 ||
+      policy$redirects > .Machine$integer.max
   ) {
-    stop("`redirects` must be 0 or more", call. = FALSE)
+    stop(
+      "`redirects` must be 0 or more, and at most .Machine$integer.max",
+      call. = FALSE
+    )
   }
   # Not merely a range check: the C side reads max_body == 0 as "use the
   # default", so a caller writing max_body = 0 to mean "refuse any body"
@@ -441,8 +448,9 @@ zu_perform <- function(req, client = zu_default_client(), stream = FALSE) {
   }
 
   # Fields the transport should not have to fill in, and that a mock would
-  # otherwise have to fake to keep the accessors honest.
-  resp$method <- r$method
+  # otherwise have to fake to keep the accessors honest. The native
+  # transport reports the method it sent, which a 303 rewrites (#220).
+  resp$method <- resp$method %||% r$method
   # §65.4: a transport that did not stream (a mock, a cassette) holds the
   # whole body; zu_resp_read() serves it in pieces from this cursor.
   if (isTRUE(r$stream) && is.null(resp$stream)) {
@@ -529,11 +537,6 @@ attempt_with_retries <- function(r, client, hooks, deadline_at) {
     if (!isTRUE(v$retry)) {
       break
     }
-    # §65.4: a streamed response that is about to be retried is never read.
-    if (!is.null(resp$stream)) {
-      zu_resp_abort(resp)
-    }
-
     delay <- backoff_delay(policy, attempt, v$after)
     # §33.3: check the budget BEFORE sleeping and fail now rather than sleep
     # past the deadline. Without this, `timeout = 30` with three retries is a
@@ -541,6 +544,12 @@ attempt_with_retries <- function(r, client, hooks, deadline_at) {
     left <- deadline_at - proc.time()[["elapsed"]]
     if (left <= 0 || delay >= left) {
       break
+    }
+    # §65.4: a streamed response that is about to be retried is never read.
+    # Only now is it certain to be: aborted before the budget check, the
+    # response the loop then returned had lost its body (#218).
+    if (!is.null(resp$stream)) {
+      zu_resp_abort(resp)
     }
 
     fire_hook(

@@ -62,8 +62,10 @@ typedef struct {
 
 /* A streamed request body (§65.7): four pieces, or a failure on the third. */
 typedef struct { int i, fail, released; } gen;
-static zuh_code gen_next(void *ctx, const void **data, size_t *len, zuh_error *err) {
+static zuh_code gen_next(void *ctx, const void **data, size_t *len, zuh_deadline dl,
+                         zuh_error *err) {
     gen *g = (gen *)ctx;
+    (void)dl;
     static const char piece[] = "piece-of-a-streamed-body";
     if (g->fail && g->i == 2) {
         zuh_error_set(err, ZUH_ERR_CANCELLED, ZUH_PHASE_WRITE, "the source failed");

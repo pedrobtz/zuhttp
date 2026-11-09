@@ -366,7 +366,8 @@ jobs:
 
       # D-86, offline: a TLS server that closes without close_notify, and one
       # that sends close_notify behind the body. Both broke the OpenSSL
-      # backend at 237bf96 (#99, #100) and passed every other suite.
+      # backend at 237bf96 (#99, #100) and passed every other suite. Since
+      # #215 also one that renegotiates, run again under ASan.
       - name: OpenSSL end of stream and pool liveness
         timeout-minutes: 5
         working-directory: ctest
@@ -377,6 +378,9 @@ jobs:
             export OPENSSL="$(brew --prefix openssl@3)/bin/openssl"
           fi
           make tls-eof
+          # #215: the renegotiation case is a memory error, visible only
+          # under ASan; the same script, against an instrumented driver.
+          make tls-eof-asan
 
   # The macOS system stack: Network.framework engine + SecTrust trust (D-63,
   # W13). Needs no OpenSSL at all, which is the point (§2). The slice covers

@@ -7,6 +7,10 @@
  *                           handshake (trusting OTHER), then the pooled
  *                           connection again: a failed handshake must not
  *                           leave an error that poisons the next read
+ *   drive one URL CA        one request, which must come back 200 with the
+ *                           body "ok": for the server that renegotiates
+ *                           mid-response (#215, run under ASan) and for a
+ *                           certificate that names only an IP address (#216)
  *
  * Exits 0 when the engine behaved, 1 otherwise, saying which. */
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
@@ -49,6 +53,25 @@ static int stale(const char *url, const char *ca, const char *other) {
     return bad;
 }
 
+static int one(const char *url, const char *ca) {
+    zuh_get_opts o;
+    zuh_result r;
+    zuh_error e;
+    zuh_code rc;
+    int bad = 0;
+    zuh_get_opts_init(&o);
+    o.ca_file = ca; o.proxy_set = 1; o.timeout_ms = 10000;
+    rc = zuh_engine_get(&r, url, &o, &e);
+    if (rc != ZUH_OK) { printf("FAIL one %s: code %d, %s\n", url, rc, e.message); return 1; }
+    printf("one %s: status %d, %lu body bytes\n", url, r.status, (unsigned long)r.body.len);
+    if (r.status != 200 || r.body.len < 2 || memcmp(r.body.data, "ok", 2) != 0) {
+        printf("FAIL one %s: not the 200 \"ok\" the server sent\n", url);
+        bad = 1;
+    }
+    zuh_result_free(&r);
+    return bad;
+}
+
 int main(int argc, char **argv) {
     zuh_get_opts o;
     zuh_result r;
@@ -57,7 +80,8 @@ int main(int argc, char **argv) {
     int together, i, bad = 0;
     zuh_pool *pool = NULL;
     if (argc == 5 && strcmp(argv[1], "stale") == 0) return stale(argv[2], argv[3], argv[4]);
-    if (argc != 4) { fprintf(stderr, "usage: drive noclose|together URL CA | stale URL CA OTHER\n"); return 2; }
+    if (argc == 4 && strcmp(argv[1], "one") == 0) return one(argv[2], argv[3]);
+    if (argc != 4) { fprintf(stderr, "usage: drive noclose|together|one URL CA | stale URL CA OTHER\n"); return 2; }
     together = strcmp(argv[1], "together") == 0;
     zuh_get_opts_init(&o);
     o.ca_file = argv[3]; o.proxy_set = 1; o.timeout_ms = 10000;

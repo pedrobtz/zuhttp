@@ -15,6 +15,15 @@ test_that("zu_retry() counts the FIRST attempt, and validates", {
 
   expect_error(zu_retry(attempts = 0), "at least 1")
   expect_error(zu_retry(attempts = NA), "at least 1")
+  # #222: as.integer() of these is NA, and `if (NA)` failed every request
+  # on the client, far from here.
+  expect_error(zu_retry(attempts = 1e10), "at most")
+  expect_error(zu_retry(attempts = .Machine$integer.max + 1), "at most")
+  expect_error(zu_retry(attempts = Inf), "at most")
+  expect_identical(
+    zu_retry(attempts = .Machine$integer.max)$attempts,
+    .Machine$integer.max
+  )
   expect_error(zu_retry(base = -1), "non-negative")
   expect_error(zu_retry(backoff = "linear"), "should be one of")
 })
@@ -813,4 +822,29 @@ test_that("no automatic retry once a callback has been handed bytes (§27, §33.
   expect_identical(rawToChar(got), "OK")
   expect_identical(zu_resp_status(r), 200L)
   expect_identical(r$attempts, 2L)
+})
+
+test_that("a streamed response that will not be retried comes back readable (#218)", {
+  # A 503 is retryable, but a 2 s backoff does not fit a 1 s budget, so the
+  # loop stops and returns it. It used to abort the stream first, deciding
+  # to retry before asking whether it could: the caller got a 503 whose
+  # body was gone.
+  resp <- crlf(
+    "HTTP/1.1 503 Service Unavailable",
+    "Content-Length: 5",
+    "Connection: close",
+    "",
+    "sorry"
+  )
+  with_raw_server(resp, function(u) {
+    cli <- zu_client(
+      pool = NULL,
+      check = FALSE,
+      retry = zu_retry(attempts = 3, base = 2, jitter = FALSE)
+    )
+    req <- zu_req_timeout(zu_request("GET", u), 1)
+    r <- zu_perform(req, client = cli, stream = TRUE)
+    expect_identical(zu_resp_status(r), 503L)
+    expect_identical(rawToChar(zu_resp_read(r)), "sorry")
+  })
 })

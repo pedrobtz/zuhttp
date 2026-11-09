@@ -22,7 +22,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     split = data[0] % size;          /* first byte picks the fragmentation */
     data++; size--;
 
-    if (zuh_chunked_init(&c, 1u << 20, 1u << 22) != ZUH_OK) return 0;
+    if (zuh_chunked_init(&c) != ZUH_OK) return 0;
 
     buf = (unsigned char *)malloc(size ? size : 1);
     if (!buf) { zuh_chunked_free(&c); return 0; }

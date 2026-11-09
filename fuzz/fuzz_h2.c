@@ -72,8 +72,10 @@ static zuh_code dial(void *ctx, const char *host, uint16_t port,
 /* §65.7: a request body from a function, three pieces, failing at the
  * second when asked to. */
 typedef struct { int sent, fail, released; } gen;
-static zuh_code gen_next(void *ctx, const void **out, size_t *len, zuh_error *err) {
+static zuh_code gen_next(void *ctx, const void **out, size_t *len, zuh_deadline dl,
+                         zuh_error *err) {
     gen *g = (gen *)ctx;
+    (void)dl;
     if (g->fail && g->sent == 1) {
         zuh_error_set(err, ZUH_ERR_CANCELLED, ZUH_PHASE_WRITE, "fuzz: the body function failed");
         return ZUH_ERR_CANCELLED;

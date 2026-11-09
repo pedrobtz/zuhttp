@@ -44,7 +44,12 @@ typedef struct {
     BIO       *wbio;          /* SSL -> network */
     zuh_stream *inner;         /* owned once the handshake succeeds */
     zuh_tls_info info;
-    const zuh_tls_config *cfg;
+    /* The pins, copied (#215). verify_cb runs again on a TLS 1.2
+     * renegotiation, long after zuh_tls_dial() has returned, so it may read
+     * only what the connection owns: the config it was dialled with lived on
+     * the engine's stack. Nothing else here points into the config. */
+    char     **pins;
+    size_t     n_pins;
     char       hostname[256];
     /* Set only when the pin comparison RAN and failed. "Not matched" is not
      * the same as "mismatched": verify_cb returns before comparing when the
@@ -122,6 +127,28 @@ static int pin_matches(X509 *leaf, const char *const *pins, size_t n_pins) {
     return ok;
 }
 
+static void pins_free(tls_impl *t) {
+    size_t i;
+    for (i = 0; i < t->n_pins; i++) zuh_free(t->pins[i]);
+    zuh_free(t->pins);
+    t->pins = NULL;
+    t->n_pins = 0;
+}
+
+static int pins_copy(tls_impl *t, const zuh_tls_config *cfg) {
+    if (cfg->n_pins == 0) return 1;
+    t->pins = (char **)zuh_calloc(cfg->n_pins, sizeof *t->pins);
+    if (!t->pins) return 0;
+    for (; t->n_pins < cfg->n_pins; t->n_pins++) {
+        size_t len = strlen(cfg->pins[t->n_pins]);
+        char *c = (char *)zuh_alloc(len + 1);
+        if (!c) return 0;                     /* pins_free() takes the rest */
+        memcpy(c, cfg->pins[t->n_pins], len + 1);
+        t->pins[t->n_pins] = c;
+    }
+    return 1;
+}
+
 static int verify_cb(X509_STORE_CTX *sctx, void *arg) {
     tls_impl *t = (tls_impl *)arg;
     int ok;
@@ -131,9 +158,9 @@ static int verify_cb(X509_STORE_CTX *sctx, void *arg) {
     ok = X509_verify_cert(sctx);
     if (ok != 1) return 0;
 
-    if (t->cfg && t->cfg->n_pins > 0) {
+    if (t->n_pins > 0) {
         X509 *leaf = X509_STORE_CTX_get0_cert(sctx);
-        if (!leaf || !pin_matches(leaf, t->cfg->pins, t->cfg->n_pins)) {
+        if (!leaf || !pin_matches(leaf, (const char *const *)t->pins, t->n_pins)) {
             t->pin_mismatch = 1;
             return 0;                 /* §14.4: in addition to, not instead of */
         }
@@ -320,6 +347,7 @@ static void tls_destroy(zuh_stream *s) {
     /* The TLS stream owns the inner stream once the handshake succeeded, and
      * cannot know its concrete type — hence the generic hook (§9). */
     if (t && t->inner) zuh_stream_free(t->inner);
+    if (t) pins_free(t);
     zuh_free(t);
     zuh_free(s);
 }
@@ -342,8 +370,11 @@ zuh_code zuh_tls_connect(zuh_stream **out, zuh_stream *inner, const char *hostna
     s = (zuh_stream *)zuh_calloc(1, sizeof *s);
     t = (tls_impl *)zuh_calloc(1, sizeof *t);
     if (!s || !t) { zuh_free(s); zuh_free(t); return ZUH_ERR_NOMEM; }
-    t->cfg = cfg;
     strncpy(t->hostname, hostname, sizeof t->hostname - 1);
+    if (!pins_copy(t, cfg)) {
+        zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_TLS, "out of memory");
+        rc = ZUH_ERR_NOMEM; goto fail;
+    }
 
     t->ctx = SSL_CTX_new(TLS_client_method());
     if (!t->ctx) {
@@ -383,14 +414,24 @@ zuh_code zuh_tls_connect(zuh_stream **out, zuh_stream *inner, const char *hostna
     SSL_set_connect_state(t->ssl);
 
     /* SNI, and hostname verification driven by the name WE asked for — never
-     * a name taken from the certificate. */
-    SSL_set_tlsext_host_name(t->ssl, t->hostname);
-    if (cfg->verify_peer && cfg->verify_hostname) {
-        X509_VERIFY_PARAM *p = SSL_get0_param(t->ssl);
-        X509_VERIFY_PARAM_set_hostflags(p, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
-        if (X509_VERIFY_PARAM_set1_host(p, t->hostname, 0) != 1) {
-            zuh_error_set(err, ZUH_ERR_TLS, ZUH_PHASE_TLS, "cannot set the verification host");
-            goto fail;
+     * a name taken from the certificate. An IP literal is neither a DNS name
+     * nor allowed in SNI (RFC 6066 §3): set1_host() matches dNSName entries
+     * only, so https://127.0.0.1/ never verified against IP:127.0.0.1; an
+     * address goes through set1_ip_asc(), which matches iPAddress (#216). */
+    {
+        ASN1_OCTET_STRING *ip = a2i_IPADDRESS(t->hostname);   /* NULL: a name */
+        int is_ip = ip != NULL;
+        ASN1_OCTET_STRING_free(ip);
+        ERR_clear_error();          /* a name is not an error worth keeping */
+        if (!is_ip) SSL_set_tlsext_host_name(t->ssl, t->hostname);
+        if (cfg->verify_peer && cfg->verify_hostname) {
+            X509_VERIFY_PARAM *p = SSL_get0_param(t->ssl);
+            X509_VERIFY_PARAM_set_hostflags(p, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+            if ((is_ip ? X509_VERIFY_PARAM_set1_ip_asc(p, t->hostname)
+                       : X509_VERIFY_PARAM_set1_host(p, t->hostname, 0)) != 1) {
+                zuh_error_set(err, ZUH_ERR_TLS, ZUH_PHASE_TLS, "cannot set the verification host");
+                goto fail;
+            }
         }
     }
 
@@ -499,6 +540,7 @@ fail:
     if (t->ssl) SSL_free(t->ssl);              /* frees the BIOs */
     else { if (t->rbio) BIO_free(t->rbio); if (t->wbio) BIO_free(t->wbio); }
     if (t->ctx) SSL_CTX_free(t->ctx);
+    pins_free(t);
     zuh_free(t);
     zuh_free(s);
     return rc;

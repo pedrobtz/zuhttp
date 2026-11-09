@@ -14,6 +14,7 @@
 #include "zuh_proxy.h"
 #include "zuh_trace.h"
 #include "zuh_time.h"
+#include "zuh_fork.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -50,6 +51,7 @@ void zuh_result_free(zuh_result *r) {
     zuh_open_body_free(r->open);
     zuh_buf_free(&r->body);
     zuh_free(r->final_url);
+    zuh_free(r->final_method);
     zuh_free(r->tls_version);
     zuh_free(r->tls_cipher);
     zuh_free(r->remote_ip);
@@ -748,6 +750,11 @@ struct zuh_open_body {
     size_t          staged_off;
     long            timeout_ms;
     int             ended, aborted, failed;
+    /* §26.4: the process that opened it. The pool's guard covers idle
+     * connections only; one checked out into a pulled body is invisible to
+     * it, and a forked child that read it consumed the parent's bytes and
+     * closed the parent's socket in its finalizer (#209). */
+    zuh_fork_guard  guard;
     /* §65.7: a request body still being sent while the response streams
      * (full duplex); released when this body is freed. */
     zuh_body_source src;
@@ -777,10 +784,11 @@ static zuh_code open_body_new(zuh_open_body **out, zuh_stream *s, int h2,
         zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_READ, "out of memory");
         return ZUH_ERR_NOMEM;
     }
+    zuh_fork_guard_arm(&b->guard);
     zuh_sink_memory_init(&b->sink, &b->staged);
     rc = zuh_body_pipe_init(&b->pipe, &b->sink, h, no_decode, cap, err);
     if (rc == ZUH_OK && !h2) {
-        rc = zuh_body_reader_init(&b->rd, fr, seed, seed_len, cap, err);
+        rc = zuh_body_reader_init(&b->rd, fr, seed, seed_len, err);
         if (rc != ZUH_OK) zuh_body_pipe_free(&b->pipe);
     }
     if (rc != ZUH_OK) { zuh_buf_free(&b->staged); zuh_free(b); return rc; }
@@ -808,12 +816,19 @@ zuh_code zuh_open_body_read(zuh_open_body *b, zuh_buffer *out, size_t n,
     return zuh_open_body_read_within(b, out, n, 0, err);
 }
 
-zuh_code zuh_open_body_read_within(zuh_open_body *b, zuh_buffer *out, size_t n,
-                                   long timeout_ms, zuh_error *err) {
+/* Stage the next decoded bytes unless some are staged already, or the body
+ * has ended. */
+static zuh_code open_body_fill(zuh_open_body *b, long timeout_ms, zuh_error *err) {
     zuh_deadline dl;
     if (!b || b->failed) {
         zuh_error_set(err, ZUH_ERR_IO, ZUH_PHASE_READ, "the response body failed earlier");
         return ZUH_ERR_IO;
+    }
+    if (zuh_fork_guard_tripped(&b->guard)) {
+        zuh_error_set(err, ZUH_ERR_FORK, ZUH_PHASE_READ,
+                      "a streamed response cannot be read in a forked child: "
+                      "its connection belongs to the parent process (§26.4)");
+        return ZUH_ERR_FORK;
     }
     if (b->aborted) {
         zuh_error_set(err, ZUH_ERR_CANCELLED, ZUH_PHASE_READ, "the response body was aborted");
@@ -846,20 +861,55 @@ zuh_code zuh_open_body_read_within(zuh_open_body *b, zuh_buffer *out, size_t n,
             open_body_release(b, r);
         }
     }
-    {
-        size_t avail = b->staged.len - b->staged_off;
-        if (n > avail) n = avail;
-        if (n && !zuh_buf_append(out, b->staged.data + b->staged_off, n)) {
-            zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_READ, "out of memory");
-            return ZUH_ERR_NOMEM;
-        }
-        b->staged_off += n;
+    return ZUH_OK;
+}
+
+zuh_code zuh_open_body_peek(zuh_open_body *b, size_t n, const void **data, size_t *len,
+                            long timeout_ms, zuh_error *err) {
+    size_t avail;
+    zuh_code rc = open_body_fill(b, timeout_ms, err);
+    *data = NULL;
+    *len = 0;
+    if (rc != ZUH_OK) return rc;
+    avail = b->staged.len - b->staged_off;
+    *len = n < avail ? n : avail;
+    if (*len) *data = b->staged.data + b->staged_off;
+    return ZUH_OK;
+}
+
+void zuh_open_body_consume(zuh_open_body *b, size_t n) {
+    size_t avail;
+    if (!b) return;
+    avail = b->staged.len - b->staged_off;
+    b->staged_off += n < avail ? n : avail;
+}
+
+zuh_code zuh_open_body_read_within(zuh_open_body *b, zuh_buffer *out, size_t n,
+                                   long timeout_ms, zuh_error *err) {
+    const void *p;
+    size_t len;
+    zuh_code rc = zuh_open_body_peek(b, n, &p, &len, timeout_ms, err);
+    if (rc != ZUH_OK) return rc;
+    if (len && !zuh_buf_append(out, p, len)) {
+        zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_READ, "out of memory");
+        return ZUH_ERR_NOMEM;
     }
+    zuh_open_body_consume(b, len);
     return ZUH_OK;
 }
 
 void zuh_open_body_abort(zuh_open_body *b) {
-    if (!b || b->ended || b->aborted || b->failed) return;
+    if (!b || b->aborted || b->failed) return;
+    /* An HTTP/2 cancel writes RST_STREAM, and a close may write too: on the
+     * parent's connection either corrupts it (§26.4, #209). */
+    if (zuh_fork_guard_tripped(&b->guard)) return;
+    /* Ended is not done (#213): the wire can be over with bytes still
+     * staged, and an abort withholds those too. The connection went back
+     * when the wire ended, so there is nothing more to release. */
+    if (b->ended) {
+        if (b->staged_off != b->staged.len) b->aborted = 1;
+        return;
+    }
     b->aborted = 1;
     if (b->h2 && b->s) {
         zuh_h2_cancel(b->s, zuh_deadline_in(1000));
@@ -889,6 +939,12 @@ const zuh_headers *zuh_open_body_trailers(const zuh_open_body *b) {
 
 void zuh_open_body_free(zuh_open_body *b) {
     if (!b) return;
+    if (b->s && zuh_fork_guard_tripped(&b->guard)) {
+        /* A finalizer in a forked child: drop the child's copy without a
+         * close, as the pool drops an inherited connection (§26.4, #209). */
+        zuh_stream_free(b->s);
+        b->s = NULL;
+    }
     zuh_open_body_abort(b);
     open_body_release(b, ZUH_NOREUSE_CANCELLED);
     if (!b->h2) zuh_body_reader_free(&b->rd);
@@ -990,6 +1046,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
         zuh_sink *hop_sink = NULL;
         size_t consumed = 0;
         size_t sent_bytes = 0;
+        int combine = 0;            /* the body rides in the header write */
         int may_follow = 0;
 
         int use_h2 = 0;
@@ -1179,12 +1236,17 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
              * write means one TCP segment for a small request. A larger one is
              * written after them, under the same deadline. It used to be appended
              * regardless, so the header cap limited every upload to 64 KiB. */
+            /* Decided once, on the header block alone: the append grows
+             * wire.len, so testing the room again afterwards sent a body
+             * that had just been combined a second time (#208). */
             sent_bytes = wire.len + body_len;
-            if (rc == ZUH_OK && body_len > 0 && body_len <= wire.max - wire.len &&
-                !zuh_buf_append(&wire, body, body_len)) {
-                zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_NONE, "out of memory");
-                rc = ZUH_ERR_NOMEM;
-            } else if (rc == ZUH_OK && body_len > 0 && body_len > wire.max - wire.len) {
+            combine = body_len > 0 && body_len <= wire.max - wire.len;
+            if (rc == ZUH_OK && combine) {
+                if (!zuh_buf_append(&wire, body, body_len)) {
+                    zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_NONE, "out of memory");
+                    rc = ZUH_ERR_NOMEM;
+                }
+            } else if (rc == ZUH_OK && body_len > 0) {
                 if (!zuh_stream_write_all(s, wire.data, wire.len, total, err))
                     rc = err->code ? err->code : ZUH_ERR_IO;
                 else
@@ -1202,7 +1264,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
                 const void *d = NULL;
                 size_t l = 0;
                 char hex[24];
-                rc = src->next(src->ctx, &d, &l, err);
+                rc = src->next(src->ctx, &d, &l, total, err);
                 if (rc != ZUH_OK) break;
                 snprintf(hex, sizeof hex, "%lx\r\n", (unsigned long)l);
                 if (!zuh_stream_write_all(s, hex, strlen(hex), total, err) ||
@@ -1354,7 +1416,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
             else if (rc == ZUH_OK)
                 rc = zuh_body_read(s, &fr, &pipe,
                                (const char *)raw.data + consumed, raw.len - consumed,
-                               cap, total, err);
+                               total, err);
             if (!may_follow && !streamed) {
                 /* §65.3: the trailers belong to the caller's response. */
                 zuh_headers_free(&out->trailers);
@@ -1550,8 +1612,13 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
     zuh_trace_add(o->trace, ZUH_EV_REQUEST_DONE, NULL, (uint64_t)out->status);
 
     out->final_url = redacted_url_of(&cur, o->redact);
+    out->final_method = dup_str(method);
     zuh_uri_free(&cur);
-    if (!out->final_url) { zuh_result_free(out); return ZUH_ERR_NOMEM; }
+    if (!out->final_url || !out->final_method) {
+        zuh_result_free(out);
+        zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_NONE, "out of memory");
+        return ZUH_ERR_NOMEM;
+    }
     return ZUH_OK;
 }
 

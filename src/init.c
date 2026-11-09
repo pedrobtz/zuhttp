@@ -135,7 +135,8 @@ static SEXP src_body(void *data) {
     return res;
 }
 
-static zuh_code src_next(void *ctx, const void **data, size_t *len, zuh_error *err) {
+static zuh_code src_next(void *ctx, const void **data, size_t *len, zuh_deadline dl,
+                         zuh_error *err) {
     src_ctx *c = (src_ctx *)ctx;
     for (;;) {
         SEXP res = guard_eval(&c->g, src_body, c);
@@ -163,7 +164,14 @@ static zuh_code src_next(void *ctx, const void **data, size_t *len, zuh_error *e
         /* An empty raw vector is a piece of nothing, not the end: ask again,
          * in a loop rather than by recursion, which grew the C stack once per
          * empty piece (review #157). A function that only ever returns raw()
-         * is still interruptible. */
+         * is still interruptible, and still bound by the timeout: an empty
+         * piece writes nothing, so no write can notice the deadline (#217). */
+        if (zuh_deadline_expired(dl)) {
+            zuh_error_set(err, ZUH_ERR_TIMEOUT, ZUH_PHASE_WRITE,
+                          "request timed out: the request body function returned "
+                          "only empty pieces");
+            return ZUH_ERR_TIMEOUT;
+        }
         (void)guard_eval(&c->g, interrupt_body, NULL);
     }
 }
@@ -1117,8 +1125,8 @@ static SEXP build_response(void *data) {
     /* §35.2's connection metadata rides on the response rather than being a
      * second call, because it describes the connection THIS response came
      * over — asking again later would answer about a different one. */
-    out = PROTECT(Rf_allocVector(VECSXP, 17));
-    nms = PROTECT(Rf_allocVector(STRSXP, 17));
+    out = PROTECT(Rf_allocVector(VECSXP, 18));
+    nms = PROTECT(Rf_allocVector(STRSXP, 18));
     SET_VECTOR_ELT(out, 0, Rf_ScalarInteger(r.status));
     SET_STRING_ELT(nms, 0, Rf_mkChar("status"));
     SET_VECTOR_ELT(out, 1, headers_to_r(&r.headers));
@@ -1151,6 +1159,8 @@ static SEXP build_response(void *data) {
     SET_STRING_ELT(nms, 14, Rf_mkChar("http_major"));
     SET_VECTOR_ELT(out, 15, headers_to_r(&r.trailers));
     SET_STRING_ELT(nms, 15, Rf_mkChar("trailers"));
+    SET_VECTOR_ELT(out, 17, r.final_method ? Rf_mkString(r.final_method) : R_NilValue);
+    SET_STRING_ELT(nms, 17, Rf_mkChar("method"));
     SET_STRING_ELT(nms, 16, Rf_mkChar("stream"));
     if (rp->open) {
         /* Ownership moves to the pointer before anything else can longjmp:
@@ -1317,7 +1327,8 @@ static SEXP C_zu_build_info(void) {
 static SEXP C_zu_stream_read(SEXP ptr, SEXP n, SEXP url, SEXP timeout_ms) {
     zuh_open_body *b = stream_ptr_get(ptr);
     tick_ctx tick = { NULL };
-    zuh_buffer got;
+    const void *got = NULL;
+    size_t got_len = 0;
     zuh_error e;
     zuh_code rc;
     double want = Rf_asReal(n);
@@ -1343,19 +1354,17 @@ static SEXP C_zu_stream_read(SEXP ptr, SEXP n, SEXP url, SEXP timeout_ms) {
     }
     if (!(want >= 1)) want = 1;
     if (want > 64.0 * 1024 * 1024) want = 64.0 * 1024 * 1024;
-    if (!zuh_buf_init(&got, 0, (size_t)-1)) Rf_error("out of memory");
     zuh_error_clear(&e);
     {
         tick_ctx *prev = g_tick_current;
         g_tick_current = &tick;
         /* #173: this call's bound, when the caller gave one; 0 otherwise. */
-        rc = zuh_open_body_read_within(b, &got, (size_t)want,
-                                       (long)Rf_asInteger(timeout_ms), &e);
+        rc = zuh_open_body_peek(b, (size_t)want, &got, &got_len,
+                                (long)Rf_asInteger(timeout_ms), &e);
         g_tick_current = prev;
     }
     if (rc != ZUH_OK) {
         src_ctx *sc = (src_ctx *)zuh_open_body_source_ctx(b);
-        zuh_buf_free(&got);
         /* §65.7: the request body function, still running under a full
          * duplex stream, did not return: its jump is the one to resume. The
          * token stays in sc->keep, preserved, until the body is freed, and
@@ -1392,10 +1401,12 @@ static SEXP C_zu_stream_read(SEXP ptr, SEXP n, SEXP url, SEXP timeout_ms) {
     }
     tick_release(&tick);
     /* The copy into R comes last and is the only allocation that can
-     * longjmp; `got` is freed on both sides of it. */
-    out = Rf_allocVector(RAWSXP, (R_xlen_t)got.len);
-    if (got.len) memcpy(RAW(out), got.data, got.len);
-    zuh_buf_free(&got);
+     * longjmp. The bytes are still the body's, which `ptr` keeps alive and
+     * its finalizer frees, so a jump here owns nothing and loses nothing:
+     * they are consumed only once copied (#214). */
+    out = Rf_allocVector(RAWSXP, (R_xlen_t)got_len);
+    if (got_len) memcpy(RAW(out), got, got_len);
+    zuh_open_body_consume(b, got_len);
     return out;
 }
 

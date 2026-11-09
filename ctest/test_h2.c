@@ -821,7 +821,8 @@ typedef struct {
     unsigned long expect_sum;
     size_t expect_total;
 } gen_ctx;
-static zuh_code gen_next(void *ctx, const void **data, size_t *len, zuh_error *err);
+static zuh_code gen_next(void *ctx, const void **data, size_t *len, zuh_deadline dl,
+                         zuh_error *err);
 static void gen_release(void *ctx);
 
 /* A streamed request body, and a pulled response that is aborted. */
@@ -1293,9 +1294,11 @@ static void cases_w21(void) {
 
 /* --- W22: a streamed request body (§65.7) ---------------------------------- */
 
-static zuh_code gen_next(void *ctx, const void **data, size_t *len, zuh_error *err) {
+static zuh_code gen_next(void *ctx, const void **data, size_t *len, zuh_deadline dl,
+                         zuh_error *err) {
     gen_ctx *g = (gen_ctx *)ctx;
     int k;
+    (void)dl;
     g->calls++;
     if (g->fail_at && g->sent == g->fail_at) {
         zuh_error_set(err, ZUH_ERR_CANCELLED, ZUH_PHASE_WRITE, "the generator failed");

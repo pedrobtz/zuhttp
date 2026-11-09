@@ -55,13 +55,10 @@ int zuh_response_is_informational(const zuh_response *r);
 typedef struct {
     void   *state;          /* opaque; picohttpparser's decoder */
     int     started;
-    uint64_t max_chunk;     /* §18.1 max_chunk_size; 0 disables. Checked
-                             * against the unread rest of the current chunk
-                             * when a feed ends inside it, so it is exact to
-                             * within one feed: a whole chunk delivered in one
-                             * call is not measured. */
-    uint64_t total;         /* running decoded total */
-    uint64_t max_total;     /* §40 max_body_bytes; 0 disables */
+    /* No byte caps (#223): max_body counts decoded bytes and is the body
+     * pipe's to enforce (§21.4, #212), and a per-chunk cap that nothing
+     * could set is a promise in the API that nothing keeps. A chunk size
+     * that does not fit a uint64 is still malformed (§18.1). */
     size_t   surplus;       /* bytes after the final chunk and trailers, once
                              * decoding is complete: data the server sent
                              * beyond this response (§26.3) */
@@ -72,7 +69,7 @@ typedef struct {
     zuh_headers trailers;
 } zuh_chunked;
 
-zuh_code zuh_chunked_init(zuh_chunked *c, uint64_t max_chunk, uint64_t max_total);
+zuh_code zuh_chunked_init(zuh_chunked *c);
 void    zuh_chunked_free(zuh_chunked *c);
 
 /* Decode in place. On entry *len is the byte count in buf; on return it is the
@@ -83,7 +80,9 @@ void    zuh_chunked_free(zuh_chunked *c);
  *   ZUH_OK              the final chunk was seen; decoding is complete
  *   ZUH_ERR_WOULDBLOCK  more input needed
  *   ZUH_ERR_PARSE       malformed chunk framing
- *   ZUH_ERR_BODY_LIMIT  a §40 limit was exceeded
+ *
+ * On any result but ZUH_OK and ZUH_ERR_WOULDBLOCK, *len is 0: no output byte
+ * of a failed call is valid, so none can reach a sink (#210).
  */
 zuh_code zuh_chunked_decode(zuh_chunked *c, char *buf, size_t *len, zuh_error *err);
 

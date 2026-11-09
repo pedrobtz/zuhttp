@@ -72,15 +72,23 @@ zuh_code zuh_body_pipe_finish(zuh_body_pipe *p, zuh_error *err);
  * frees `ctx`, and is called exactly once, by whoever owns the source last:
  * the engine, or the pulled body it was handed to (§65.4). A source is not
  * rewindable, so it is never replayed (§28.2). */
+/* `dl` is the deadline of the wait `next` is called under: the attempt's
+ * over HTTP/1.1, the send's over HTTP/2. Empty pieces write nothing, so a
+ * source that loops past them is the only thing that can see time pass, and
+ * it stops at `dl` with ZUH_ERR_TIMEOUT (#217). */
 typedef struct {
-    zuh_code (*next)(void *ctx, const void **data, size_t *len, zuh_error *err);
+    zuh_code (*next)(void *ctx, const void **data, size_t *len, zuh_deadline dl,
+                     zuh_error *err);
     void     (*release)(void *ctx);
     void      *ctx;
 } zuh_body_source;
 
 /* One response body under one framing, read a step at a time (§65.4).
  * zuh_body_read() loops over the steps; a pulled body takes them one by one.
- * `seed` is copied, so the caller's buffer need not outlive the reader. */
+ * `seed` is copied, so the caller's buffer need not outlive the reader.
+ * There is no byte cap here: max_body counts DECODED bytes (§21.4, §40), so
+ * it belongs to the pipe, after inflation; a cap on the de-chunked payload
+ * bound compressed bytes under chunked framing alone (#212). */
 typedef struct {
     zuh_framing fr;
     zuh_chunked dec;
@@ -91,8 +99,7 @@ typedef struct {
 } zuh_body_reader;
 
 zuh_code zuh_body_reader_init(zuh_body_reader *r, const zuh_framing *fr,
-                              const char *seed, size_t seed_len,
-                              uint64_t max_body, zuh_error *err);
+                              const char *seed, size_t seed_len, zuh_error *err);
 /* One read's worth: feeds the pipe, sets r->done (after finishing the pipe)
  * when the framing says the body is over. */
 zuh_code zuh_body_reader_step(zuh_body_reader *r, zuh_stream *s, zuh_body_pipe *p,
@@ -101,6 +108,6 @@ void     zuh_body_reader_free(zuh_body_reader *r);
 
 zuh_code zuh_body_read(zuh_stream *s, const zuh_framing *fr, zuh_body_pipe *p,
                      const char *seed, size_t seed_len,
-                     uint64_t max_body, zuh_deadline dl, zuh_error *err);
+                     zuh_deadline dl, zuh_error *err);
 
 #endif /* ZUHTTP_BODY_H */

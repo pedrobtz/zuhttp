@@ -162,6 +162,14 @@ zuh_code zuh_open_body_read(zuh_open_body *b, zuh_buffer *out, size_t n,
  * A timeout ends the body like any other error. */
 zuh_code zuh_open_body_read_within(zuh_open_body *b, zuh_buffer *out, size_t n,
                                    long timeout_ms, zuh_error *err);
+/* The same bytes a read would return, left in the body: *data points into
+ * it and stays valid until the next call on `b`, and *len is 0 at the end.
+ * zuh_open_body_consume() takes them. A caller that copies them into memory
+ * whose allocation can longjmp (the R glue, #214) owns nothing across it,
+ * and a peek never consumed is served again. */
+zuh_code zuh_open_body_peek(zuh_open_body *b, size_t n, const void **data, size_t *len,
+                            long timeout_ms, zuh_error *err);
+void     zuh_open_body_consume(zuh_open_body *b, size_t n);
 /* §65.5: stop reading. Over HTTP/2 the stream is reset and the connection
  * pooled; over HTTP/1.1 it is closed. A no-op on an ended or aborted body. */
 void zuh_open_body_abort(zuh_open_body *b);
@@ -193,6 +201,10 @@ typedef struct {
      * is the field's contract, not a side effect of how it is built — it used
      * to be the latter, and a token in the query came back out of it. */
     char      *final_url;
+    /* The method the final hop sent: a 303 rewrites it to GET (§19.1), and
+     * a response that reported the request's method instead said POST for
+     * a GET it never sent (#220). */
+    char      *final_method;
     char      *tls_version;      /* NULL for http:// */
     char      *tls_cipher;
     int        redirects;

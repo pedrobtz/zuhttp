@@ -52,7 +52,7 @@ static zuh_code run_body(const zuh_mock_step *steps, size_t nsteps,
 
     rc = zuh_body_pipe_init(&p, sink, h, no_decode, max_body, err);
     if (rc == ZUH_OK)
-        rc = zuh_body_read(s, &fr, &p, NULL, 0, max_body, forever(), err);
+        rc = zuh_body_read(s, &fr, &p, NULL, 0, forever(), err);
     zuh_body_pipe_free(&p);
     zuh_stream_free(s);
     return rc;
@@ -323,6 +323,54 @@ void suite_body(void) {
         zuh_buf_free(&src);
     }
 
+    ZUH_CASE("#212: max_body caps decoded bytes under chunked framing too");
+    {
+        /* gzip of 5 zeros is ~23 bytes. With max_body = 5 the decoded body
+         * fits exactly, and must arrive under either framing: the chunk
+         * decoder used to be given max_body as its own cap, which it applied
+         * to the de-chunked but still COMPRESSED payload, so the chunked
+         * response failed where the Content-Length one succeeded. */
+        zuh_buffer src, wire, b; zuh_sink sink; zuh_mock_step step;
+        char hdr[32];
+        int k;
+        ZUH_CHECK(zuh_buf_init(&src, 64, (size_t)-1));
+        ZUH_CHECK(gzip_zeros(&src, 5));
+        ZUH_CHECK(src.len > 5);
+        ZUH_CHECK(zuh_buf_init(&wire, 128, (size_t)-1));
+        snprintf(hdr, sizeof hdr, "%lx\r\n", (unsigned long)src.len);
+        ZUH_CHECK(zuh_buf_append(&wire, hdr, strlen(hdr)));
+        ZUH_CHECK(zuh_buf_append(&wire, src.data, src.len));
+        ZUH_CHECK(zuh_buf_append(&wire, "\r\n0\r\n\r\n", 7));
+        for (k = 0; k < 2; k++) {
+            const zuh_buffer *body = k ? &wire : &src;
+            ZUH_CHECK(zuh_buf_init(&b, 16, (size_t)-1));
+            zuh_sink_memory_init(&sink, &b);
+            zuh_headers_init(&h);
+            ZUH_CHECK(zuh_headers_add_str(&h, "Content-Encoding", "gzip") == ZUH_OK);
+            step.kind = ZUH_MOCK_DATA; step.data = body->data; step.len = body->len;
+            step.code = ZUH_OK;
+            zuh_error_clear(&e);
+            ZUH_CHECK_EQ_INT(run_body(&step, 1, k ? ZUH_FRAME_CHUNKED : ZUH_FRAME_LENGTH,
+                                     body->len, &sink, &h, 0, 5, &e), ZUH_OK);
+            ZUH_CHECK_EQ_INT((int)b.len, 5);
+            zuh_headers_free(&h);
+            zuh_buf_free(&b);
+        }
+        /* The cap still binds the decoded bytes: one byte less fails. */
+        ZUH_CHECK(zuh_buf_init(&b, 16, (size_t)-1));
+        zuh_sink_memory_init(&sink, &b);
+        zuh_headers_init(&h);
+        ZUH_CHECK(zuh_headers_add_str(&h, "Content-Encoding", "gzip") == ZUH_OK);
+        step.kind = ZUH_MOCK_DATA; step.data = wire.data; step.len = wire.len; step.code = ZUH_OK;
+        ZUH_CHECK_EQ_INT(run_body(&step, 1, ZUH_FRAME_CHUNKED, wire.len, &sink, &h, 0, 4, &e),
+                         ZUH_ERR_BODY_LIMIT);
+        ZUH_CHECK(b.len <= 4);
+        zuh_headers_free(&h);
+        zuh_buf_free(&b);
+        zuh_buf_free(&wire);
+        zuh_buf_free(&src);
+    }
+
     /* --- framing through the pipe ------------------------------------- */
 
     ZUH_CASE("a Content-Length body stops at the length, whatever else arrived");
@@ -386,6 +434,70 @@ void suite_body(void) {
         zuh_sink_abort(f);
         zuh_sink_free(f);
         ZUH_CHECK(fopen(path, "rb") == NULL);
+        zuh_headers_free(&h);
+    }
+
+    ZUH_CASE("#210: malformed chunk framing raises, and the sink was handed no framing bytes");
+    {
+        /* What the caller got before the error is the test. A decoder error
+         * left `len` at its input value, the wire length, and the reader fed
+         * that much to the sink before looking at the result: a callback saw
+         * the raw `X\r\nATTACK...` bytes, then the request raised. In one
+         * read the decoded prefix is discarded too, since after an error no
+         * output bytes of that call are valid; split across two reads, the
+         * valid chunk was delivered by a call that succeeded and stays. */
+        static const char bad[] = "X\r\nATTACK\r\n0\r\n\r\n";
+        static const char lead[] = "3\r\nabc\r\nX\r\nATTACK\r\n0\r\n\r\n";
+        static const zuh_mock_step one[]  = { { ZUH_MOCK_DATA, bad, sizeof bad - 1, ZUH_OK } };
+        static const zuh_mock_step both[] = { { ZUH_MOCK_DATA, lead, sizeof lead - 1, ZUH_OK } };
+        static const zuh_mock_step split[] = {
+            { ZUH_MOCK_DATA, "3\r\nabc\r\n", 8, ZUH_OK },
+            { ZUH_MOCK_DATA, bad, sizeof bad - 1, ZUH_OK } };
+        const zuh_mock_step *sc[3] = { one, both, split };
+        const size_t ns[3] = { 1, 1, 2 };
+        const size_t want[3] = { 0, 0, 3 };
+        int k;
+        for (k = 0; k < 3; k++) {
+            zuh_buffer b; zuh_sink sink;
+            ZUH_CHECK(zuh_buf_init(&b, 8, 1 << 20));
+            zuh_sink_memory_init(&sink, &b);
+            zuh_headers_init(&h);
+            zuh_error_clear(&e);
+            ZUH_CHECK_EQ_INT(run_body(sc[k], ns[k], ZUH_FRAME_CHUNKED, 0, &sink, &h, 1,
+                                     1u << 20, &e), ZUH_ERR_PARSE);
+            ZUH_CHECK_EQ_INT((int)b.len, (int)want[k]);
+            if (want[k]) ZUH_CHECK(memcmp(b.data, "abc", 3) == 0);
+            zuh_headers_free(&h);
+            zuh_buf_free(&b);
+        }
+    }
+
+    ZUH_CASE("#211: repeated Content-Encoding fields are a stacked encoding, refused");
+    {
+        /* Two fields mean the body was encoded twice (RFC 9110 §8.4). The
+         * pipe used to read the first field only, inflate once and then
+         * remove both headers, handing back still-compressed bytes with the
+         * evidence gone. One field still decodes; two are refused before any
+         * byte is read, and the headers are left as the server sent them. */
+        zuh_body_pipe p;
+        zuh_headers_init(&h);
+        ZUH_CHECK(zuh_headers_add_str(&h, "Content-Encoding", "gzip") == ZUH_OK);
+        zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(zuh_body_pipe_init(&p, NULL, &h, 0, 0, &e), ZUH_OK);
+        zuh_body_pipe_free(&p);
+        zuh_headers_free(&h);
+
+        zuh_headers_init(&h);
+        ZUH_CHECK(zuh_headers_add_str(&h, "Content-Encoding", "gzip") == ZUH_OK);
+        ZUH_CHECK(zuh_headers_add_str(&h, "content-encoding", "gzip") == ZUH_OK);
+        zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(zuh_body_pipe_init(&p, NULL, &h, 0, 0, &e), ZUH_ERR_BODY_DECODE);
+        ZUH_CHECK_EQ_INT((int)zuh_headers_count(&h, "Content-Encoding"), 2);
+        zuh_body_pipe_free(&p);
+        /* decode = FALSE asks for the wire bytes, which need no decoding. */
+        zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(zuh_body_pipe_init(&p, NULL, &h, 1, 0, &e), ZUH_OK);
+        zuh_body_pipe_free(&p);
         zuh_headers_free(&h);
     }
 

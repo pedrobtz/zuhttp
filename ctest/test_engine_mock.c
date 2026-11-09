@@ -17,6 +17,10 @@
 #include "zuh_alloc.h"
 #include "zuh_sink.h"
 #include <zlib.h>
+#if defined(ZUH_POSIX)
+#  include <unistd.h>
+#  include <sys/wait.h>
+#endif
 
 void suite_engine_mock(void);
 
@@ -224,8 +228,10 @@ static size_t framed(char *out, size_t cap, int how, const char *coding,
 
 /* §65.7: a request-body source over a NULL-terminated list of strings. */
 static const char **h1_gen_pieces;
-static zuh_code h1_gen_next(void *ctx, const void **data, size_t *len, zuh_error *err) {
+static zuh_code h1_gen_next(void *ctx, const void **data, size_t *len, zuh_deadline dl,
+                            zuh_error *err) {
     struct { int i, released; } *g = ctx;
+    (void)dl;
     const char *p = h1_gen_pieces[g->i];
     if (!p) { *len = 0; return ZUH_OK; }
     if (strcmp(p, "FAIL") == 0) {                 /* #153: the function fails */
@@ -972,6 +978,49 @@ void suite_engine_mock(void) {
         }
     }
 
+    ZUH_CASE("#208: an upload goes out exactly once at every size across the 64 KiB combine");
+    {
+        /* The wire is the oracle: what follows the header block must be the
+         * body, once, and as long as Content-Length says. The case above
+         * checked only the tail, which a body sent twice also satisfies.
+         * Sizes straddle half the buffer (where the doubled window opened),
+         * and every size within 300 bytes of the combine limit, so the exact
+         * header length does not matter. */
+        static unsigned char big[70000];
+        size_t sizes[400], ns = 0, k;
+        zuh_req_spec spec;
+        sizes[ns++] = 1; sizes[ns++] = 30000; sizes[ns++] = 32767;
+        sizes[ns++] = 32768; sizes[ns++] = 32769; sizes[ns++] = 40000;
+        sizes[ns++] = 60000; sizes[ns++] = 70000;
+        for (k = 65536 - 300; k <= 65536; k++) sizes[ns++] = k;
+        for (k = 0; k < sizeof big; k++) big[k] = (unsigned char)(k * 13 + 1);
+        for (k = 0; k < ns; k++) {
+            conn_script sc[] = {{ "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok", 0, 0, 0, NULL }};
+            const unsigned char *w, *eoh;
+            char cl[48];
+            size_t hl;
+            int once;
+            memset(&spec, 0, sizeof spec);
+            spec.method = "POST"; spec.body = big; spec.body_len = sizes[k];
+            dialer_init(&d, sc, 1); opts_for(&o, &d);
+            rc = zuh_engine_perform(&r, "http://example.test/up", &spec, &o, &e);
+            w = d.sent[0].data;
+            eoh = NULL;
+            for (hl = 0; w && hl + 4 <= d.sent[0].len; hl++)
+                if (memcmp(w + hl, "\r\n\r\n", 4) == 0) { eoh = w + hl + 4; break; }
+            snprintf(cl, sizeof cl, "\r\nContent-Length: %lu\r\n", (unsigned long)sizes[k]);
+            once = rc == ZUH_OK && eoh &&
+                   (size_t)(w + d.sent[0].len - eoh) == sizes[k] &&
+                   memcmp(eoh, big, sizes[k]) == 0 &&
+                   d.sent[0].len < 65536 + sizes[k] && has(sent(&d, 0), cl);
+            if (!once) fprintf(stderr, "    upload of %lu bytes: %lu on the wire\n",
+                               (unsigned long)sizes[k], (unsigned long)d.sent[0].len);
+            ZUH_CHECK(once);
+            if (rc == ZUH_OK) zuh_result_free(&r);
+            dialer_free(&d);
+        }
+    }
+
     ZUH_CASE("engine: HEAD and 304 keep their representation headers and decode nothing (RFC 9112 §6.3)");
     {
         zuh_req_spec spec;
@@ -1710,6 +1759,126 @@ void suite_engine_mock(void) {
         zuh_pool_free(pool);
         dialer_free(&d);
     }
+
+    ZUH_CASE("§65.4: an abort after the wire ended still withholds what the caller has not read (#213)");
+    {
+        /* The whole 5-byte body arrives in the first read, so the wire has
+         * ended while 4 bytes are still staged. Aborting must cancel those:
+         * the abort returned early on `ended`, and the next read served
+         * "ello" instead of raising. A body read to the end has nothing
+         * left to withhold, so aborting it changes nothing. */
+        conn_script s[] = {{ "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello", 0, 0, 1, NULL }};
+        zuh_buffer got;
+        int k;
+        for (k = 0; k < 2; k++) {
+            dialer_init(&d, s, 1); opts_for(&o, &d); o.stream_body = 1;
+            rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            if (rc == ZUH_OK) {
+                zuh_buf_init(&got, 0, (size_t)-1);
+                ZUH_CHECK_EQ_INT(zuh_open_body_read(r.open, &got, k ? 5u : 1u, &e), ZUH_OK);
+                ZUH_CHECK_EQ_INT((int)got.len, (k ? 5 : 1));
+                zuh_open_body_abort(r.open);
+                ZUH_CHECK(zuh_open_body_done(r.open));
+                zuh_error_clear(&e);
+                ZUH_CHECK_EQ_INT(zuh_open_body_read(r.open, &got, 100, &e),
+                                 (k ? ZUH_OK : ZUH_ERR_CANCELLED));
+                ZUH_CHECK_EQ_INT((int)got.len, (k ? 5 : 1));
+                ZUH_CHECK_EQ_INT(zuh_open_body_ended_clean(r.open), k);
+                zuh_buf_free(&got);
+                zuh_result_free(&r);
+            }
+            dialer_free(&d);
+        }
+    }
+
+    ZUH_CASE("§65.4: peeked bytes stay the body's until consumed, and are served again (#214)");
+    {
+        /* The R glue copies a read into an R vector, and that allocation can
+         * longjmp. A read into a buffer the glue owned leaked it on the jump
+         * and lost its bytes; a peek leaves them in the body, which its
+         * finalizer frees, and an unconsumed peek is simply read again. */
+        conn_script s[] = {{ "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello", 0, 0, 1, NULL }};
+        const void *p = NULL;
+        size_t len = 0;
+        zuh_buffer got;
+        dialer_init(&d, s, 1); opts_for(&o, &d); o.stream_body = 1;
+        rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            ZUH_CHECK_EQ_INT(zuh_open_body_peek(r.open, 3, &p, &len, 0, &e), ZUH_OK);
+            ZUH_CHECK(len == 3 && memcmp(p, "hel", 3) == 0);
+            /* Not consumed: the unwind case. The same bytes come back. */
+            ZUH_CHECK_EQ_INT(zuh_open_body_peek(r.open, 100, &p, &len, 0, &e), ZUH_OK);
+            ZUH_CHECK(len == 5 && memcmp(p, "hello", 5) == 0);
+            zuh_open_body_consume(r.open, 2);
+            zuh_buf_init(&got, 0, (size_t)-1);
+            while (zuh_open_body_read(r.open, &got, 100, &e) == ZUH_OK &&
+                   !zuh_open_body_done(r.open)) { }
+            ZUH_CHECK(got.len == 3 && memcmp(got.data, "llo", 3) == 0);
+            ZUH_CHECK_EQ_INT(zuh_open_body_peek(r.open, 100, &p, &len, 0, &e), ZUH_OK);
+            ZUH_CHECK_EQ_INT((int)len, 0);
+            zuh_buf_free(&got);
+            zuh_result_free(&r);
+        }
+        dialer_free(&d);
+    }
+
+#if defined(ZUH_POSIX)
+    ZUH_CASE("§26.4: a forked child can neither read nor close the parent's streamed body (#209)");
+    {
+        /* One byte per read, so the body is still on the wire when the
+         * response comes back. The child inherits the open body: a read
+         * there consumed the parent's bytes and its free closed the parent's
+         * connection, because nothing on the body said who owned it. Now
+         * the child's read raises ZUH_ERR_FORK, and its abort and free leave
+         * the connection alone. The child reports the index of the first
+         * failed check in its exit status, as test_pool.c's fork case does. */
+        conn_script s[] = {{ "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello", 0, 1, 1, NULL }};
+        zuh_buffer got;
+        pid_t kid;
+        dialer_init(&d, s, 1); opts_for(&o, &d); o.stream_body = 1;
+        rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            ZUH_CHECK(!zuh_open_body_done(r.open));
+            kid = fork();
+            if (kid == 0) {
+                int step = 0;
+                long closes = zuh_mock_stream_closes_total();
+                zuh_buffer cg;
+                zuh_error ce;
+                zuh_buf_init(&cg, 0, (size_t)-1);
+                zuh_error_clear(&ce);
+                if (zuh_open_body_read(r.open, &cg, 100, &ce) != ZUH_ERR_FORK) step = 1;
+                else if (cg.len != 0) step = 2;
+                zuh_open_body_abort(r.open);
+                if (!step && zuh_mock_stream_closes_total() != closes) step = 3;
+                zuh_result_free(&r);
+                if (!step && zuh_mock_stream_closes_total() != closes) step = 4;
+                zuh_buf_free(&cg);
+                dialer_free(&d);
+                _exit(step);
+            }
+            ZUH_CHECK(kid > 0);
+            if (kid > 0) {
+                int status = -1;
+                ZUH_CHECK(waitpid(kid, &status, 0) == kid);
+                ZUH_CHECK(WIFEXITED(status));
+                ZUH_CHECK_EQ_INT(WIFEXITED(status) ? WEXITSTATUS(status) : -1, 0);
+            }
+            /* The parent's body is intact. */
+            zuh_buf_init(&got, 0, (size_t)-1);
+            while (zuh_open_body_read(r.open, &got, 100, &e) == ZUH_OK &&
+                   !zuh_open_body_done(r.open)) { }
+            ZUH_CHECK_EQ_INT((int)got.len, 5);
+            ZUH_CHECK(got.len == 5 && memcmp(got.data, "hello", 5) == 0);
+            zuh_buf_free(&got);
+            zuh_result_free(&r);
+        }
+        dialer_free(&d);
+    }
+#endif
 
     /* #188: the allocation-failure sweep, once per scenario. Each scenario
      * runs clean first to count its allocations, then once per allocation
