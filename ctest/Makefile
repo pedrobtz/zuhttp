@@ -129,12 +129,26 @@ TLSSRC := $(SRC)/zuh_alloc.c $(SRC)/zuh_buffer.c $(SRC)/zuh_error.c \
           $(SRC)/zuh_tls.c $(SRC)/zuh_tls_openssl.c \
           $(SRC)/zuh_trace.c $(SRC)/zuh_redact.c $(SRC)/zuh_headers.c
 
+# ASan + UBSan for the live binaries (#231). A live backend is code the
+# offline suite cannot reach, and #215 survived because none of them ran
+# instrumented. -fno-sanitize-recover makes a UBSan report fail the run.
+SANFLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined
+SANENV   := ASAN_OPTIONS=detect_stack_use_after_return=1:detect_leaks=0:abort_on_error=1 \
+            UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
+
 zuh_tlstest: $(TLSSRC) test_tls.c
 	$(CC) $(CFLAGS) $(OPENSSL_CFLAGS) -o $@ $(TLSSRC) test_tls.c \
 	      $(OPENSSL_LIBS) $(NETLIBS)
 
 tls: zuh_tlstest
 	./zuh_tlstest
+
+zuh_tlstest_asan: $(TLSSRC) test_tls.c
+	$(CC) $(CFLAGS) $(SANFLAGS) $(OPENSSL_CFLAGS) -o $@ $(TLSSRC) test_tls.c \
+	      $(OPENSSL_LIBS) $(NETLIBS)
+
+tls-asan: zuh_tlstest_asan
+	$(SANENV) ./zuh_tlstest_asan
 
 # --- 63.2 vertical slice ------------------------------------------------
 # Also network-dependent, and also a separate binary for the same reason.
@@ -158,6 +172,13 @@ zuh_engtest: $(ENGSRC) test_engine.c
 engine: zuh_engtest
 	./zuh_engtest
 
+zuh_engtest_asan: $(ENGSRC) test_engine.c
+	$(CC) $(ENGBASE) $(SANFLAGS) $(URIFLAGS) $(OPENSSL_CFLAGS) -o $@ $(ENGSRC) test_engine.c \
+	      $(OPENSSL_LIBS) -lz $(NETLIBS)
+
+engine-asan: zuh_engtest_asan
+	$(SANENV) ./zuh_engtest_asan
+
 # The same slice on the macOS system TLS stack (§13.2, D-63): Network.framework
 # for the protocol, SecTrust for trust, nothing bundled. The backend dials
 # HTTPS itself (D-71), so this also runs the engine's dialled path.
@@ -170,6 +191,13 @@ zuh_engtest_nw: $(NWSRC) test_engine.c
 
 engine-nw: zuh_engtest_nw
 	./zuh_engtest_nw
+
+zuh_engtest_nw_asan: $(NWSRC) test_engine.c
+	$(CC) $(ENGBASE) $(SANFLAGS) $(URIFLAGS) $(NW_FLAGS) -o $@ $(NWSRC) test_engine.c \
+	      -framework Network -framework Security -framework CoreFoundation -lz $(NETLIBS)
+
+engine-nw-asan: zuh_engtest_nw_asan
+	$(SANENV) ./zuh_engtest_nw_asan
 
 # The same slice on the Windows system stack (§13.4, D-5). Exists so a crash
 # in the Schannel backend reports a C location instead of taking an R process
@@ -196,16 +224,15 @@ tls-eof: zuh_tlseof
 
 # The same, under ASan + UBSan: #215 was a stack-use-after-return in the
 # verify callback on renegotiation, which reads garbage silently without it.
-SANFLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer
 zuh_tlseof_asan: $(ENGSRC) tls_eof/drive.c
 	$(CC) $(ENGBASE) $(SANFLAGS) $(URIFLAGS) $(OPENSSL_CFLAGS) -o $@ $(ENGSRC) tls_eof/drive.c \
 	      $(OPENSSL_LIBS) -lz $(NETLIBS)
 
 tls-eof-asan: zuh_tlseof_asan
-	ASAN_OPTIONS=detect_stack_use_after_return=1:detect_leaks=0:abort_on_error=1 \
-	  UBSAN_OPTIONS=halt_on_error=1 DRIVE=$(CURDIR)/zuh_tlseof_asan tls_eof/run.sh
+	$(SANENV) DRIVE=$(CURDIR)/zuh_tlseof_asan tls_eof/run.sh
 
 clean:
-	rm -rf zuh_ctest zuh_ctest_asan zuh_tlstest zuh_engtest zuh_engtest_nw zuh_engtest_sch zuh_tlseof zuh_tlseof_asan *.dSYM build build-asan *.o
+	rm -rf zuh_ctest zuh_ctest_asan zuh_tlstest zuh_engtest zuh_engtest_nw zuh_engtest_sch zuh_tlseof zuh_tlseof_asan \
+	      zuh_tlstest_asan zuh_engtest_asan zuh_engtest_nw_asan *.dSYM build build-asan *.o
 
-.PHONY: all run strict asan clean tls tls-eof tls-eof-asan engine engine-nw engine-sch
+.PHONY: all run strict asan clean tls tls-asan tls-eof tls-eof-asan engine engine-asan engine-nw-asan engine-nw engine-sch

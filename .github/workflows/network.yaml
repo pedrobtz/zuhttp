@@ -195,6 +195,14 @@ jobs:
           PKG_CONFIG_PATH: /opt/homebrew/opt/openssl@3/lib/pkgconfig:/usr/local/opt/openssl@3/lib/pkgconfig
         run: make tls
 
+      # #231: the same, under ASan + UBSan. A live backend is code the
+      # offline suite cannot reach, and #215 survived uninstrumented.
+      - name: The TLS engine tests under ASan + UBSan
+        working-directory: ctest
+        env:
+          PKG_CONFIG_PATH: /opt/homebrew/opt/openssl@3/lib/pkgconfig:/usr/local/opt/openssl@3/lib/pkgconfig
+        run: make tls-asan
+
   # ---------------------------------------------------------------
   # S7 preflight — Linux: are the system TLS/zlib dev packages there?
   #      The Linux engine does not exist yet; this checks its premise.
@@ -364,6 +372,13 @@ jobs:
           PKG_CONFIG_PATH: /opt/homebrew/opt/openssl@3/lib/pkgconfig:/usr/local/opt/openssl@3/lib/pkgconfig
         run: make engine
 
+      - name: The same slice under ASan + UBSan (#231)
+        timeout-minutes: 10
+        working-directory: ctest
+        env:
+          PKG_CONFIG_PATH: /opt/homebrew/opt/openssl@3/lib/pkgconfig:/usr/local/opt/openssl@3/lib/pkgconfig
+        run: make engine-asan
+
       # D-86, offline: a TLS server that closes without close_notify, and one
       # that sends close_notify behind the body. Both broke the OpenSSL
       # backend at 237bf96 (#99, #100) and passed every other suite. Since
@@ -396,6 +411,11 @@ jobs:
         timeout-minutes: 10
         working-directory: ctest
         run: make engine-nw
+
+      - name: The same slice under ASan + UBSan (#231)
+        timeout-minutes: 10
+        working-directory: ctest
+        run: make engine-nw-asan
 
       # macOS 11-13 have no Network.framework API for HTTP CONNECT. The
       # refusal they get is built in by forcing the availability check off,

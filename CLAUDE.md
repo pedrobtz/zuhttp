@@ -53,6 +53,8 @@ make -C ctest tls             # OpenSSL backend only (network)
 make -C ctest tls-eof         # OpenSSL vs a loopback TLS server that closes badly
                               #   (needs python3 and the openssl CLI; D-86)
 make -C ctest tls-eof-asan    # the same under ASan: a renegotiating server (#215)
+make -C ctest engine-asan      # engine-nw-asan, tls-asan: the live binaries under
+                              #   ASan + UBSan (#231); CI runs all four
 
 # Fuzzing — 12 targets (engine and h2 are the whole request path; pull is the
 # streamed-body API as a state machine), each built two ways
