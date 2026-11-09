@@ -34,7 +34,7 @@
 #' @param attempt_timeout Optional per-attempt bound in seconds. The `total`
 #'   timeout still bounds the whole call (§24.3); this bounds one try.
 #' @param on Extra HTTP statuses to treat as retryable, beyond §33.2's
-#'   408, 429, 500, 502, 503 and 504.
+#'   408, 429, 500, 502, 503 and 504: whole numbers from 100 to 599.
 #' @return A `zu_retry_policy`, for `zu_client(retry = )` or
 #'   [zu_req_retry()].
 #' @seealso [zu_req_retry()] for per-request opt-in, including the
@@ -55,21 +55,15 @@ zu_retry <- function(
   on = NULL
 ) {
   backoff <- match.arg(backoff)
-  # The upper bound as zu_pool() has it: as.integer() of anything above
-  # .Machine$integer.max is NA, and the retry loop's `if` on it failed
-  # every request made with this policy (#222).
-  if (
-    !is.numeric(attempts) ||
-      length(attempts) != 1L ||
-      !is.finite(attempts) ||
-      attempts < 1 ||
-      attempts > .Machine$integer.max
-  ) {
-    stop(
-      "`attempts` must be a single number of at least 1 ",
-      "(1 means no retrying), and at most .Machine$integer.max",
-      call. = FALSE
-    )
+  # #222: an NA here failed every request made with this policy.
+  attempts <- check_whole(
+    attempts,
+    "attempts",
+    min = 1,
+    note = "(1 means no retrying)"
+  )
+  if (!is.null(on)) {
+    on <- check_whole(on, "on", min = 100, max = 599, n = NA)
   }
   pos <- function(x, nm) {
     if (!is.numeric(x) || length(x) != 1L || is.na(x) || x < 0) {
@@ -79,7 +73,7 @@ zu_retry <- function(
   }
   structure(
     list(
-      attempts = as.integer(attempts),
+      attempts = attempts,
       backoff = backoff,
       base = pos(base, "base"),
       max_delay = pos(max_delay, "max_delay"),
@@ -91,7 +85,7 @@ zu_retry <- function(
       } else {
         pos(attempt_timeout, "attempt_timeout")
       },
-      on = if (is.null(on)) integer() else as.integer(on)
+      on = if (is.null(on)) integer() else on
     ),
     class = "zu_retry_policy"
   )
