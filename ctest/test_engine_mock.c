@@ -972,6 +972,49 @@ void suite_engine_mock(void) {
         }
     }
 
+    ZUH_CASE("#208: an upload goes out exactly once at every size across the 64 KiB combine");
+    {
+        /* The wire is the oracle: what follows the header block must be the
+         * body, once, and as long as Content-Length says. The case above
+         * checked only the tail, which a body sent twice also satisfies.
+         * Sizes straddle half the buffer (where the doubled window opened),
+         * and every size within 300 bytes of the combine limit, so the exact
+         * header length does not matter. */
+        static unsigned char big[70000];
+        size_t sizes[400], ns = 0, k;
+        zuh_req_spec spec;
+        sizes[ns++] = 1; sizes[ns++] = 30000; sizes[ns++] = 32767;
+        sizes[ns++] = 32768; sizes[ns++] = 32769; sizes[ns++] = 40000;
+        sizes[ns++] = 60000; sizes[ns++] = 70000;
+        for (k = 65536 - 300; k <= 65536; k++) sizes[ns++] = k;
+        for (k = 0; k < sizeof big; k++) big[k] = (unsigned char)(k * 13 + 1);
+        for (k = 0; k < ns; k++) {
+            conn_script sc[] = {{ "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok", 0, 0, 0, NULL }};
+            const unsigned char *w, *eoh;
+            char cl[48];
+            size_t hl;
+            int once;
+            memset(&spec, 0, sizeof spec);
+            spec.method = "POST"; spec.body = big; spec.body_len = sizes[k];
+            dialer_init(&d, sc, 1); opts_for(&o, &d);
+            rc = zuh_engine_perform(&r, "http://example.test/up", &spec, &o, &e);
+            w = d.sent[0].data;
+            eoh = NULL;
+            for (hl = 0; w && hl + 4 <= d.sent[0].len; hl++)
+                if (memcmp(w + hl, "\r\n\r\n", 4) == 0) { eoh = w + hl + 4; break; }
+            snprintf(cl, sizeof cl, "\r\nContent-Length: %lu\r\n", (unsigned long)sizes[k]);
+            once = rc == ZUH_OK && eoh &&
+                   (size_t)(w + d.sent[0].len - eoh) == sizes[k] &&
+                   memcmp(eoh, big, sizes[k]) == 0 &&
+                   d.sent[0].len < 65536 + sizes[k] && has(sent(&d, 0), cl);
+            if (!once) fprintf(stderr, "    upload of %lu bytes: %lu on the wire\n",
+                               (unsigned long)sizes[k], (unsigned long)d.sent[0].len);
+            ZUH_CHECK(once);
+            if (rc == ZUH_OK) zuh_result_free(&r);
+            dialer_free(&d);
+        }
+    }
+
     ZUH_CASE("engine: HEAD and 304 keep their representation headers and decode nothing (RFC 9112 §6.3)");
     {
         zuh_req_spec spec;

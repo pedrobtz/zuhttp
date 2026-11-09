@@ -990,6 +990,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
         zuh_sink *hop_sink = NULL;
         size_t consumed = 0;
         size_t sent_bytes = 0;
+        int combine = 0;            /* the body rides in the header write */
         int may_follow = 0;
 
         int use_h2 = 0;
@@ -1179,12 +1180,17 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
              * write means one TCP segment for a small request. A larger one is
              * written after them, under the same deadline. It used to be appended
              * regardless, so the header cap limited every upload to 64 KiB. */
+            /* Decided once, on the header block alone: the append grows
+             * wire.len, so testing the room again afterwards sent a body
+             * that had just been combined a second time (#208). */
             sent_bytes = wire.len + body_len;
-            if (rc == ZUH_OK && body_len > 0 && body_len <= wire.max - wire.len &&
-                !zuh_buf_append(&wire, body, body_len)) {
-                zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_NONE, "out of memory");
-                rc = ZUH_ERR_NOMEM;
-            } else if (rc == ZUH_OK && body_len > 0 && body_len > wire.max - wire.len) {
+            combine = body_len > 0 && body_len <= wire.max - wire.len;
+            if (rc == ZUH_OK && combine) {
+                if (!zuh_buf_append(&wire, body, body_len)) {
+                    zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_NONE, "out of memory");
+                    rc = ZUH_ERR_NOMEM;
+                }
+            } else if (rc == ZUH_OK && body_len > 0) {
                 if (!zuh_stream_write_all(s, wire.data, wire.len, total, err))
                     rc = err->code ? err->code : ZUH_ERR_IO;
                 else
