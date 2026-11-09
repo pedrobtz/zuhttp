@@ -59,6 +59,7 @@ make -C ctest tls-eof-asan    # the same under ASan: a renegotiating server (#21
 make -C fuzz replay-run       # corpus replay, needs no clang; a regression suite
 make -C fuzz replay-asan      # the same corpus under ASan + UBSan
 make -C fuzz fuzz-run         # libFuzzer, needs clang
+tools/coverage/fuzz-lcov.sh fuzz.lcov   # fuzz reach: what the corpus runs (#230)
 make -C fuzz mutate-asan      # 33,000 deterministic mutants of the seeds under ASan + UBSan;
                               #   MUT_SEED=1 for a fresh set. A soak, not a bug-finder: see below
 

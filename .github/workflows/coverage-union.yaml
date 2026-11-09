@@ -52,6 +52,13 @@ jobs:
       - name: C suite coverage
         run: tools/coverage/ctest-lcov.sh ctest.lcov
 
+      # #230: what the fuzz targets reach, on the committed corpus. Not merged
+      # into the floors below: a fuzzed line ran, nothing checked it.
+      - name: Fuzz reach
+        run: |
+          floor=$(sed -n 's/^fuzz_reach: //p' tools/coverage/floor.dcf)
+          tools/coverage/fuzz-lcov.sh fuzz.lcov corpus "$floor"
+
       # §65.8: the HTTP/2 and gRPC servers test-http2.R drives, as
       # network.yaml starts them. The pulled body's R entry points in init.c
       # and the driver's live paths are reachable only against a server, so

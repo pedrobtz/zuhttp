@@ -115,8 +115,13 @@ def main():
             "", "g?y#s", "../../.."]
     for i, l in enumerate(locs, 1):
         w("redirect/seed%02d" % i, l)
+    # #230: the same input is also a header set for the §19.2 strip.
+    w("redirect/headers-credentials",
+      "Authorization: Bearer t\nCookie: a=b\nX-Keep: 1\nproxy-authorization: Basic x\n"
+      "Accept: */*\nAUTHORIZATION: again")
+    w("redirect/headers-none", "Accept: */*\nX-Trace: 1")
 
-    # --- proxy: first byte selects no_proxy / URL / full resolution ---------
+    # --- proxy: first byte selects no_proxy / URL / resolution / CONNECT ----
     w("proxy/np_simple", b"\x00example.com\x00api.example.com")
     w("proxy/np_star", b"\x00*\x00anything.com")
     w("proxy/np_port", b"\x00example.com:8080\x00example.com")
@@ -134,6 +139,18 @@ def main():
     w("proxy/res_empty", b"\x02\x00")
     w("proxy/regress-ipvfuture",
       b"\x01http://[veee.0;;;;***UU;;;;;;;;;;;;;:]//;m=")
+    # #230: case 3 builds a CONNECT for the target URL before the NUL through
+    # a proxy with credentials, then parses the reply after it.
+    w("proxy/connect-200", b"\x03https://target.example:8443/x\x00"
+      b"HTTP/1.1 200 Connection established\r\n\r\n")
+    w("proxy/connect-407", b"\x03https://target.example/\x00HTTP/1.1 407 Proxy Auth\r\n"
+      b"Proxy-Authenticate: Basic realm=x\r\nContent-Length: 0\r\n\r\n")
+    w("proxy/connect-403", b"\x03https://[::1]:443/\x00HTTP/1.1 403 Forbidden\r\n\r\n")
+    w("proxy/connect-garbage", b"\x03https://t.example/\x00HTTP/1.1 2000 OK\r\n\r\n")
+    w("proxy/connect-cut", b"\x03https://t.example/\x00HTTP/1.1 200 OK\r\nX: y")
+    # A CONNECT request that exactly fills its buffer: the harness searched it
+    # with strstr(), which ran off the end (found by the libFuzzer smoke).
+    w("proxy/regress-230-full-buffer", b'\x03https://tPro\x00HTTP/1.1 414 tps:// .1 407 Proxy Auth\r\nProx!y-TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT\xa6TTTTTTTTTTTTTTTTTTTTTTTTTT\x00\x00TTTTTTTTTTTAuhttSSSSSSSSSSSSSSSSS_______________________SSSSSSSSSSSWSSSSSSSSSSSS.icate`: Ba]sic r0\r\n\r\n')
 
     # --- redact: URLs and form bodies, mostly credential-bearing ------------
     w("redact/userinfo", "https://user:pw@api.example.com/v1/x")

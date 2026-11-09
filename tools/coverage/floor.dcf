@@ -4,6 +4,10 @@ Comment: Coverage floors for tools/coverage/measure.R, per OS because each
  arrived without them. Until 2026-11-04 measure.R matched the pre-W2 zu_
  prefix, so the own_c floors were set on init.c alone; the whole C core,
  measured with the HTTP/2 and gRPC servers running, clears them as set.
+ fuzz_reach is tools/coverage/fuzz-lcov.sh over the committed corpus: how
+ much of the C core some fuzz target runs on hostile input, kept apart from
+ the floors above because a fuzzed line is not a checked one (#230).
+fuzz_reach: 64
 own_c_macos: 91.5
 r_macos: 90
 own_c_linux: 89
