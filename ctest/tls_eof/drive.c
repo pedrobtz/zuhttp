@@ -9,7 +9,8 @@
  *                           leave an error that poisons the next read
  *   drive one URL CA        one request, which must come back 200 with the
  *                           body "ok": for the server that renegotiates
- *                           mid-response (#215, run under ASan)
+ *                           mid-response (#215, run under ASan) and for a
+ *                           certificate that names only an IP address (#216)
  *
  * Exits 0 when the engine behaved, 1 otherwise, saying which. */
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)

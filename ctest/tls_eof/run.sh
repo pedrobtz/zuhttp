@@ -1,6 +1,6 @@
 #!/bin/sh
 # make tls-eof: run drive against server.py in every mode (D-86), and against
-# reneg.py (#215). DRIVE names the driver
+# reneg.py (#215) and an IP-only certificate (#216). DRIVE names the driver
 # binary: make tls-eof-asan runs the same script against an ASan build.
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
@@ -13,6 +13,10 @@ openssl=${OPENSSL:-openssl}
 # A second self-signed certificate: trusting it instead fails the handshake.
 "$openssl" req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=other \
   -keyout "$tmp/other-key.pem" -out "$tmp/other.pem" >/dev/null 2>&1
+# A certificate whose only name is an IP address (#216).
+"$openssl" req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=ip-only \
+  -addext "subjectAltName=IP:127.0.0.1" \
+  -keyout "$tmp/ip-key.pem" -out "$tmp/ip.pem" >/dev/null 2>&1
 drive=${DRIVE:-$here/../zuh_tlseof}
 free_port() {
   python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])'
@@ -33,6 +37,14 @@ for mode in noclose together keepalive; do
   fi
   kill $srv 2>/dev/null || true; wait $srv 2>/dev/null || true
 done
+
+# #216: verified by IP address, against a certificate that names only that.
+port=$(free_port)
+python3 "$here/server.py" keepalive "$port" "$tmp/ip.pem" "$tmp/ip-key.pem" >"$tmp/srv.log" 2>&1 &
+srv=$!
+wait_ready
+"$drive" one "https://127.0.0.1:$port/" "$tmp/ip.pem" || status=1
+kill $srv 2>/dev/null || true; wait $srv 2>/dev/null || true
 
 # #215: a renegotiation runs the verify callback after the dial returned.
 port=$(free_port)

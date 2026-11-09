@@ -414,14 +414,24 @@ zuh_code zuh_tls_connect(zuh_stream **out, zuh_stream *inner, const char *hostna
     SSL_set_connect_state(t->ssl);
 
     /* SNI, and hostname verification driven by the name WE asked for — never
-     * a name taken from the certificate. */
-    SSL_set_tlsext_host_name(t->ssl, t->hostname);
-    if (cfg->verify_peer && cfg->verify_hostname) {
-        X509_VERIFY_PARAM *p = SSL_get0_param(t->ssl);
-        X509_VERIFY_PARAM_set_hostflags(p, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
-        if (X509_VERIFY_PARAM_set1_host(p, t->hostname, 0) != 1) {
-            zuh_error_set(err, ZUH_ERR_TLS, ZUH_PHASE_TLS, "cannot set the verification host");
-            goto fail;
+     * a name taken from the certificate. An IP literal is neither a DNS name
+     * nor allowed in SNI (RFC 6066 §3): set1_host() matches dNSName entries
+     * only, so https://127.0.0.1/ never verified against IP:127.0.0.1; an
+     * address goes through set1_ip_asc(), which matches iPAddress (#216). */
+    {
+        ASN1_OCTET_STRING *ip = a2i_IPADDRESS(t->hostname);   /* NULL: a name */
+        int is_ip = ip != NULL;
+        ASN1_OCTET_STRING_free(ip);
+        ERR_clear_error();          /* a name is not an error worth keeping */
+        if (!is_ip) SSL_set_tlsext_host_name(t->ssl, t->hostname);
+        if (cfg->verify_peer && cfg->verify_hostname) {
+            X509_VERIFY_PARAM *p = SSL_get0_param(t->ssl);
+            X509_VERIFY_PARAM_set_hostflags(p, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+            if ((is_ip ? X509_VERIFY_PARAM_set1_ip_asc(p, t->hostname)
+                       : X509_VERIFY_PARAM_set1_host(p, t->hostname, 0)) != 1) {
+                zuh_error_set(err, ZUH_ERR_TLS, ZUH_PHASE_TLS, "cannot set the verification host");
+                goto fail;
+            }
         }
     }
 
