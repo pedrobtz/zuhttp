@@ -127,8 +127,37 @@ clean-bin:
 clean: clean-bin
 	rm -f crash-* leak-* timeout-*
 
+# --- deterministic mutants -------------------------------------------------
+# mutate-corpus.py derives MUT_N mutants per target from the curated seeds,
+# reproducibly (same MUT_SEED, same bytes on every platform), and the replay
+# driver runs them: a cheap, clang-free soak that a reviewer can re-run and
+# name a finding from. mut/ is ignored by git; a mutant that finds something
+# is promoted into corpus/ through seed-corpus.py.
+MUT      := mut
+MUT_N    ?= 3000
+MUT_SEED ?= 0
+
+mutate:
+	python3 mutate-corpus.py --n $(MUT_N) --seed $(MUT_SEED) --out $(MUT)
+
+mutate-run: replay mutate
+	@for t in $(TARGETS); do \
+	  n=$$(find $(MUT)/$$t -type f 2>/dev/null | wc -l | tr -d ' '); \
+	  if [ "$$n" = "0" ]; then echo "no mutants for $$t" >&2; exit 1; fi; \
+	  echo "=== $$t ($$n mutants) ==="; \
+	  find $(MUT)/$$t -type f -print0 | sort -z | xargs -0 -n 500 ./replay_$$t || exit 1; \
+	done
+
+mutate-asan: REPLAY_FLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer \
+                             -fno-sanitize-recover=undefined
+mutate-asan: clean-bin mutate-run
+
 # Restore the curated seeds, discarding anything a local fuzz run added.
 reseed:
 	./seed-corpus.sh
 
-.PHONY: fuzz fuzz-run replay replay-run replay-asan clean clean-bin reseed
+clean-mut:
+	rm -rf $(MUT)
+
+.PHONY: fuzz fuzz-run replay replay-run replay-asan clean clean-bin reseed \
+        mutate mutate-run mutate-asan clean-mut
