@@ -46,6 +46,11 @@
 
 <p>A minimal HTTP/1.1 and HTTP/2 client for R that uses <strong>each platform’s own TLS stack and trust store</strong> — Schannel on Windows, Network.framework + SecTrust on macOS, system OpenSSL elsewhere — rather than bundling cryptography or a CA bundle. One hard R dependency, the sibling <code>zujson</code> (D-88); <code>zuxml</code> and <code>zuhtml</code> are Suggests.</p>
 <div class="section level2">
+<h2 id="shared-conventions">Shared conventions<a class="anchor" aria-label="anchor" href="#shared-conventions"></a></h2>
+<p>The portfolio’s shared rules are synced into <code>.claude/shared/</code> from <code>pedrobtz/packages:claude/shared/</code>. Never edit them here. Where this file and a shared file disagree, this file wins for this package.</p>
+<p>@.claude/shared/workflow.md @.claude/shared/r-package.md @.claude/shared/ci.md @.claude/shared/native-code.md @.claude/shared/correctness.md</p>
+</div>
+<div class="section level2">
 <h2 id="the-two-documents-that-govern-this-repo">The two documents that govern this repo<a class="anchor" aria-label="anchor" href="#the-two-documents-that-govern-this-repo"></a></h2>
 <p>Both live in <a href=".agents/"><code>.agents/</code></a> and are excluded from the R package build:</p>
 <table class="table"><colgroup><col width="33%"><col width="33%"><col width="33%"></colgroup><thead><tr><th>File</th>
