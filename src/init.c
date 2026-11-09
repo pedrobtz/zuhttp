@@ -1317,7 +1317,8 @@ static SEXP C_zu_build_info(void) {
 static SEXP C_zu_stream_read(SEXP ptr, SEXP n, SEXP url, SEXP timeout_ms) {
     zuh_open_body *b = stream_ptr_get(ptr);
     tick_ctx tick = { NULL };
-    zuh_buffer got;
+    const void *got = NULL;
+    size_t got_len = 0;
     zuh_error e;
     zuh_code rc;
     double want = Rf_asReal(n);
@@ -1343,19 +1344,17 @@ static SEXP C_zu_stream_read(SEXP ptr, SEXP n, SEXP url, SEXP timeout_ms) {
     }
     if (!(want >= 1)) want = 1;
     if (want > 64.0 * 1024 * 1024) want = 64.0 * 1024 * 1024;
-    if (!zuh_buf_init(&got, 0, (size_t)-1)) Rf_error("out of memory");
     zuh_error_clear(&e);
     {
         tick_ctx *prev = g_tick_current;
         g_tick_current = &tick;
         /* #173: this call's bound, when the caller gave one; 0 otherwise. */
-        rc = zuh_open_body_read_within(b, &got, (size_t)want,
-                                       (long)Rf_asInteger(timeout_ms), &e);
+        rc = zuh_open_body_peek(b, (size_t)want, &got, &got_len,
+                                (long)Rf_asInteger(timeout_ms), &e);
         g_tick_current = prev;
     }
     if (rc != ZUH_OK) {
         src_ctx *sc = (src_ctx *)zuh_open_body_source_ctx(b);
-        zuh_buf_free(&got);
         /* §65.7: the request body function, still running under a full
          * duplex stream, did not return: its jump is the one to resume. The
          * token stays in sc->keep, preserved, until the body is freed, and
@@ -1392,10 +1391,12 @@ static SEXP C_zu_stream_read(SEXP ptr, SEXP n, SEXP url, SEXP timeout_ms) {
     }
     tick_release(&tick);
     /* The copy into R comes last and is the only allocation that can
-     * longjmp; `got` is freed on both sides of it. */
-    out = Rf_allocVector(RAWSXP, (R_xlen_t)got.len);
-    if (got.len) memcpy(RAW(out), got.data, got.len);
-    zuh_buf_free(&got);
+     * longjmp. The bytes are still the body's, which `ptr` keeps alive and
+     * its finalizer frees, so a jump here owns nothing and loses nothing:
+     * they are consumed only once copied (#214). */
+    out = Rf_allocVector(RAWSXP, (R_xlen_t)got_len);
+    if (got_len) memcpy(RAW(out), got, got_len);
+    zuh_open_body_consume(b, got_len);
     return out;
 }
 

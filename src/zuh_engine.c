@@ -815,8 +815,9 @@ zuh_code zuh_open_body_read(zuh_open_body *b, zuh_buffer *out, size_t n,
     return zuh_open_body_read_within(b, out, n, 0, err);
 }
 
-zuh_code zuh_open_body_read_within(zuh_open_body *b, zuh_buffer *out, size_t n,
-                                   long timeout_ms, zuh_error *err) {
+/* Stage the next decoded bytes unless some are staged already, or the body
+ * has ended. */
+static zuh_code open_body_fill(zuh_open_body *b, long timeout_ms, zuh_error *err) {
     zuh_deadline dl;
     if (!b || b->failed) {
         zuh_error_set(err, ZUH_ERR_IO, ZUH_PHASE_READ, "the response body failed earlier");
@@ -859,15 +860,40 @@ zuh_code zuh_open_body_read_within(zuh_open_body *b, zuh_buffer *out, size_t n,
             open_body_release(b, r);
         }
     }
-    {
-        size_t avail = b->staged.len - b->staged_off;
-        if (n > avail) n = avail;
-        if (n && !zuh_buf_append(out, b->staged.data + b->staged_off, n)) {
-            zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_READ, "out of memory");
-            return ZUH_ERR_NOMEM;
-        }
-        b->staged_off += n;
+    return ZUH_OK;
+}
+
+zuh_code zuh_open_body_peek(zuh_open_body *b, size_t n, const void **data, size_t *len,
+                            long timeout_ms, zuh_error *err) {
+    size_t avail;
+    zuh_code rc = open_body_fill(b, timeout_ms, err);
+    *data = NULL;
+    *len = 0;
+    if (rc != ZUH_OK) return rc;
+    avail = b->staged.len - b->staged_off;
+    *len = n < avail ? n : avail;
+    if (*len) *data = b->staged.data + b->staged_off;
+    return ZUH_OK;
+}
+
+void zuh_open_body_consume(zuh_open_body *b, size_t n) {
+    size_t avail;
+    if (!b) return;
+    avail = b->staged.len - b->staged_off;
+    b->staged_off += n < avail ? n : avail;
+}
+
+zuh_code zuh_open_body_read_within(zuh_open_body *b, zuh_buffer *out, size_t n,
+                                   long timeout_ms, zuh_error *err) {
+    const void *p;
+    size_t len;
+    zuh_code rc = zuh_open_body_peek(b, n, &p, &len, timeout_ms, err);
+    if (rc != ZUH_OK) return rc;
+    if (len && !zuh_buf_append(out, p, len)) {
+        zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_READ, "out of memory");
+        return ZUH_ERR_NOMEM;
     }
+    zuh_open_body_consume(b, len);
     return ZUH_OK;
 }
 

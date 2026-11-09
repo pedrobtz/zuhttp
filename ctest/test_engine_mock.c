@@ -1790,6 +1790,38 @@ void suite_engine_mock(void) {
         }
     }
 
+    ZUH_CASE("§65.4: peeked bytes stay the body's until consumed, and are served again (#214)");
+    {
+        /* The R glue copies a read into an R vector, and that allocation can
+         * longjmp. A read into a buffer the glue owned leaked it on the jump
+         * and lost its bytes; a peek leaves them in the body, which its
+         * finalizer frees, and an unconsumed peek is simply read again. */
+        conn_script s[] = {{ "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello", 0, 0, 1, NULL }};
+        const void *p = NULL;
+        size_t len = 0;
+        zuh_buffer got;
+        dialer_init(&d, s, 1); opts_for(&o, &d); o.stream_body = 1;
+        rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            ZUH_CHECK_EQ_INT(zuh_open_body_peek(r.open, 3, &p, &len, 0, &e), ZUH_OK);
+            ZUH_CHECK(len == 3 && memcmp(p, "hel", 3) == 0);
+            /* Not consumed: the unwind case. The same bytes come back. */
+            ZUH_CHECK_EQ_INT(zuh_open_body_peek(r.open, 100, &p, &len, 0, &e), ZUH_OK);
+            ZUH_CHECK(len == 5 && memcmp(p, "hello", 5) == 0);
+            zuh_open_body_consume(r.open, 2);
+            zuh_buf_init(&got, 0, (size_t)-1);
+            while (zuh_open_body_read(r.open, &got, 100, &e) == ZUH_OK &&
+                   !zuh_open_body_done(r.open)) { }
+            ZUH_CHECK(got.len == 3 && memcmp(got.data, "llo", 3) == 0);
+            ZUH_CHECK_EQ_INT(zuh_open_body_peek(r.open, 100, &p, &len, 0, &e), ZUH_OK);
+            ZUH_CHECK_EQ_INT((int)len, 0);
+            zuh_buf_free(&got);
+            zuh_result_free(&r);
+        }
+        dialer_free(&d);
+    }
+
 #if defined(ZUH_POSIX)
     ZUH_CASE("§26.4: a forked child can neither read nor close the parent's streamed body (#209)");
     {
