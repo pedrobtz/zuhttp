@@ -480,6 +480,26 @@ test_that("a body function returning raw() many times does not grow the C stack 
   expect_identical(n, 100002L) # every piece asked for, then the end
 })
 
+test_that("a body function returning only empty pieces is bound by the timeout (#217)", {
+  web <- local_httpbin("keep-alive", keep_alive = TRUE)
+  # Empty pieces never write, and the engine only looked at the deadline on
+  # a write, so 150 pieces 10 ms apart ran 1.5 s past a 0.2 s timeout.
+  n <- 0L
+  f <- function() {
+    n <<- n + 1L
+    Sys.sleep(0.01)
+    if (n <= 150L) raw() else NULL
+  }
+  req <- zu_req_timeout(
+    zu_body_stream(zu_request("POST", web$url("/post")), f),
+    0.2
+  )
+  t0 <- Sys.time()
+  expect_error(zu_perform(req), class = "zu_timeout_error")
+  expect_lt(as.numeric(difftime(Sys.time(), t0, units = "secs")), 1)
+  expect_lt(n, 100L)
+})
+
 test_that("a request body function cannot use its own client (#155, §27.4)", {
   web <- local_httpbin("keep-alive", keep_alive = TRUE)
   api <- zu_client(base_url = web$url())

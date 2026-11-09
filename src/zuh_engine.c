@@ -1263,7 +1263,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
                 const void *d = NULL;
                 size_t l = 0;
                 char hex[24];
-                rc = src->next(src->ctx, &d, &l, err);
+                rc = src->next(src->ctx, &d, &l, total, err);
                 if (rc != ZUH_OK) break;
                 snprintf(hex, sizeof hex, "%lx\r\n", (unsigned long)l);
                 if (!zuh_stream_write_all(s, hex, strlen(hex), total, err) ||

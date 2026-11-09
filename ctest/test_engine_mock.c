@@ -228,8 +228,10 @@ static size_t framed(char *out, size_t cap, int how, const char *coding,
 
 /* §65.7: a request-body source over a NULL-terminated list of strings. */
 static const char **h1_gen_pieces;
-static zuh_code h1_gen_next(void *ctx, const void **data, size_t *len, zuh_error *err) {
+static zuh_code h1_gen_next(void *ctx, const void **data, size_t *len, zuh_deadline dl,
+                            zuh_error *err) {
     struct { int i, released; } *g = ctx;
+    (void)dl;
     const char *p = h1_gen_pieces[g->i];
     if (!p) { *len = 0; return ZUH_OK; }
     if (strcmp(p, "FAIL") == 0) {                 /* #153: the function fails */

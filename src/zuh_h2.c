@@ -73,6 +73,7 @@ typedef struct {
     size_t       src_len, src_off;
     int          src_end, src_failed;
     int          in_source;     /* inside src.next(): nghttp2 is mid-call */
+    zuh_deadline send_dl;       /* the flush() that called it, for src.next() */
     zuh_error    src_err;
 } h2_impl;
 
@@ -230,7 +231,7 @@ static nghttp2_ssize body_source(nghttp2_session *s, int32_t sid, uint8_t *buf,
              * is not re-entrant: zuh_h2_in_source() lets the R layer refuse
              * a read or abort of this same response from inside it. */
             h->in_source = 1;
-            rc = h->src.next(h->src.ctx, &d, &l, &h->src_err);
+            rc = h->src.next(h->src.ctx, &d, &l, h->send_dl, &h->src_err);
             h->in_source = 0;
             if (rc != ZUH_OK) {
                 h->src_failed = 1;
@@ -265,6 +266,7 @@ static zuh_code fail(h2_impl *h, zuh_error *err, zuh_code code, zuh_phase ph,
 }
 
 static zuh_code flush(h2_impl *h, zuh_deadline dl, zuh_error *err) {
+    h->send_dl = dl;          /* body_source() runs inside the send below */
     for (;;) {
         const uint8_t *p = NULL;
         nghttp2_ssize n = nghttp2_session_mem_send2(h->sess, &p);

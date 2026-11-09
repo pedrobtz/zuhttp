@@ -72,8 +72,13 @@ zuh_code zuh_body_pipe_finish(zuh_body_pipe *p, zuh_error *err);
  * frees `ctx`, and is called exactly once, by whoever owns the source last:
  * the engine, or the pulled body it was handed to (§65.4). A source is not
  * rewindable, so it is never replayed (§28.2). */
+/* `dl` is the deadline of the wait `next` is called under: the attempt's
+ * over HTTP/1.1, the send's over HTTP/2. Empty pieces write nothing, so a
+ * source that loops past them is the only thing that can see time pass, and
+ * it stops at `dl` with ZUH_ERR_TIMEOUT (#217). */
 typedef struct {
-    zuh_code (*next)(void *ctx, const void **data, size_t *len, zuh_error *err);
+    zuh_code (*next)(void *ctx, const void **data, size_t *len, zuh_deadline dl,
+                     zuh_error *err);
     void     (*release)(void *ctx);
     void      *ctx;
 } zuh_body_source;

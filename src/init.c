@@ -135,7 +135,8 @@ static SEXP src_body(void *data) {
     return res;
 }
 
-static zuh_code src_next(void *ctx, const void **data, size_t *len, zuh_error *err) {
+static zuh_code src_next(void *ctx, const void **data, size_t *len, zuh_deadline dl,
+                         zuh_error *err) {
     src_ctx *c = (src_ctx *)ctx;
     for (;;) {
         SEXP res = guard_eval(&c->g, src_body, c);
@@ -163,7 +164,14 @@ static zuh_code src_next(void *ctx, const void **data, size_t *len, zuh_error *e
         /* An empty raw vector is a piece of nothing, not the end: ask again,
          * in a loop rather than by recursion, which grew the C stack once per
          * empty piece (review #157). A function that only ever returns raw()
-         * is still interruptible. */
+         * is still interruptible, and still bound by the timeout: an empty
+         * piece writes nothing, so no write can notice the deadline (#217). */
+        if (zuh_deadline_expired(dl)) {
+            zuh_error_set(err, ZUH_ERR_TIMEOUT, ZUH_PHASE_WRITE,
+                          "request timed out: the request body function returned "
+                          "only empty pieces");
+            return ZUH_ERR_TIMEOUT;
+        }
         (void)guard_eval(&c->g, interrupt_body, NULL);
     }
 }
