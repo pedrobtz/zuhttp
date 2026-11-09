@@ -24,6 +24,14 @@ zuh_code zuh_body_pipe_init(zuh_body_pipe *p, zuh_sink *sink, zuh_headers *h,
     p->max_body = max_body;
     zuh_headers_init(&p->trailers);
 
+    /* Two fields are a stacked encoding (RFC 9110 §8.4), refused as a
+     * "gzip, br" value is (§21.4): decoding the first and dropping both
+     * would hand back still-encoded bytes with the evidence gone (#211). */
+    if (!no_decode && zuh_headers_count(h, "Content-Encoding") > 1) {
+        zuh_error_set(err, ZUH_ERR_BODY_DECODE, ZUH_PHASE_DECODE,
+                     "repeated Content-Encoding fields (a stacked encoding) are not supported");
+        return ZUH_ERR_BODY_DECODE;
+    }
     kind = no_decode ? ZUH_ENC_IDENTITY
                      : zuh_encoding_parse(zuh_headers_get(h, "Content-Encoding"));
     if (kind == ZUH_ENC_IDENTITY) return ZUH_OK;

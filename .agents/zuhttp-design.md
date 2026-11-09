@@ -977,7 +977,9 @@ Enforced during inflation, not after: `max_body` caps decoded output
 just under deflate's ceiling of about 1030:1. Either raises
 `zu_body_limit_error`, naming the cap that was binding, and closes the
 connection. The absolute cap bounds a bomb in megabytes; the ratio makes it
-fail after kilobytes. `Transfer-Encoding: gzip` is rejected (§18.1).
+fail after kilobytes. `Transfer-Encoding: gzip` is rejected (§18.1). A stacked
+encoding is refused rather than half-decoded: a `gzip, br` value and two
+`Content-Encoding` fields alike raise `zu_body_decode_error` (#211).
 
 #### 21.5 Completeness (D-76)
 

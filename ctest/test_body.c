@@ -424,6 +424,35 @@ void suite_body(void) {
         }
     }
 
+    ZUH_CASE("#211: repeated Content-Encoding fields are a stacked encoding, refused");
+    {
+        /* Two fields mean the body was encoded twice (RFC 9110 §8.4). The
+         * pipe used to read the first field only, inflate once and then
+         * remove both headers, handing back still-compressed bytes with the
+         * evidence gone. One field still decodes; two are refused before any
+         * byte is read, and the headers are left as the server sent them. */
+        zuh_body_pipe p;
+        zuh_headers_init(&h);
+        ZUH_CHECK(zuh_headers_add_str(&h, "Content-Encoding", "gzip") == ZUH_OK);
+        zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(zuh_body_pipe_init(&p, NULL, &h, 0, 0, &e), ZUH_OK);
+        zuh_body_pipe_free(&p);
+        zuh_headers_free(&h);
+
+        zuh_headers_init(&h);
+        ZUH_CHECK(zuh_headers_add_str(&h, "Content-Encoding", "gzip") == ZUH_OK);
+        ZUH_CHECK(zuh_headers_add_str(&h, "content-encoding", "gzip") == ZUH_OK);
+        zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(zuh_body_pipe_init(&p, NULL, &h, 0, 0, &e), ZUH_ERR_BODY_DECODE);
+        ZUH_CHECK_EQ_INT((int)zuh_headers_count(&h, "Content-Encoding"), 2);
+        zuh_body_pipe_free(&p);
+        /* decode = FALSE asks for the wire bytes, which need no decoding. */
+        zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(zuh_body_pipe_init(&p, NULL, &h, 1, 0, &e), ZUH_OK);
+        zuh_body_pipe_free(&p);
+        zuh_headers_free(&h);
+    }
+
     /* --- §40: the cap is a BOUND, not a thing noticed afterwards ------- */
 
     ZUH_CASE("§40: the sink is never handed a byte past max_body");
