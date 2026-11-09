@@ -126,8 +126,7 @@ zuh_code zuh_body_pipe_finish(zuh_body_pipe *p, zuh_error *err) {
  * runs, so a pulled body cannot be framed differently from a buffered one. */
 
 zuh_code zuh_body_reader_init(zuh_body_reader *r, const zuh_framing *fr,
-                              const char *seed, size_t seed_len,
-                              uint64_t max_body, zuh_error *err) {
+                              const char *seed, size_t seed_len, zuh_error *err) {
     memset(r, 0, sizeof *r);
     r->fr = *fr;
     r->work = (char *)zuh_alloc(ZUH_READ_CHUNK);
@@ -138,7 +137,7 @@ zuh_code zuh_body_reader_init(zuh_body_reader *r, const zuh_framing *fr,
         return ZUH_ERR_NOMEM;
     }
     if (fr->kind == ZUH_FRAME_CHUNKED) {
-        zuh_code rc = zuh_chunked_init(&r->dec, 0, max_body);
+        zuh_code rc = zuh_chunked_init(&r->dec, 0, 0);
         if (rc != ZUH_OK) {
             zuh_body_reader_free(r);
             zuh_error_set(err, rc, ZUH_PHASE_READ, "out of memory");
@@ -267,9 +266,9 @@ zuh_code zuh_body_reader_step(zuh_body_reader *r, zuh_stream *s, zuh_body_pipe *
 
 zuh_code zuh_body_read(zuh_stream *s, const zuh_framing *fr, zuh_body_pipe *p,
                          const char *seed, size_t seed_len,
-                         uint64_t max_body, zuh_deadline dl, zuh_error *err) {
+                         zuh_deadline dl, zuh_error *err) {
     zuh_body_reader r;
-    zuh_code rc = zuh_body_reader_init(&r, fr, seed, seed_len, max_body, err);
+    zuh_code rc = zuh_body_reader_init(&r, fr, seed, seed_len, err);
     while (rc == ZUH_OK && !r.done) rc = zuh_body_reader_step(&r, s, p, dl, err);
     zuh_body_reader_free(&r);
     return rc;

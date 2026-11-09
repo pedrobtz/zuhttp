@@ -72,7 +72,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     if (!sink) { zuh_stream_free(s); zuh_headers_free(&h); return 0; }
 
     if (zuh_body_pipe_init(&p, sink, &h, no_decode, MAX_BODY, &e) == ZUH_OK) {
-        (void)zuh_body_read(s, &fr, &p, NULL, 0, MAX_BODY, zuh_deadline_in(1000), &e);
+        (void)zuh_body_read(s, &fr, &p, NULL, 0, zuh_deadline_in(1000), &e);
 
         /* §40. Not "eventually noticed": a sink must never be handed a byte
          * past the cap, because the cap is what a caller sized a buffer or a

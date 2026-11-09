@@ -780,7 +780,7 @@ static zuh_code open_body_new(zuh_open_body **out, zuh_stream *s, int h2,
     zuh_sink_memory_init(&b->sink, &b->staged);
     rc = zuh_body_pipe_init(&b->pipe, &b->sink, h, no_decode, cap, err);
     if (rc == ZUH_OK && !h2) {
-        rc = zuh_body_reader_init(&b->rd, fr, seed, seed_len, cap, err);
+        rc = zuh_body_reader_init(&b->rd, fr, seed, seed_len, err);
         if (rc != ZUH_OK) zuh_body_pipe_free(&b->pipe);
     }
     if (rc != ZUH_OK) { zuh_buf_free(&b->staged); zuh_free(b); return rc; }
@@ -1360,7 +1360,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
             else if (rc == ZUH_OK)
                 rc = zuh_body_read(s, &fr, &pipe,
                                (const char *)raw.data + consumed, raw.len - consumed,
-                               cap, total, err);
+                               total, err);
             if (!may_follow && !streamed) {
                 /* §65.3: the trailers belong to the caller's response. */
                 zuh_headers_free(&out->trailers);

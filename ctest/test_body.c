@@ -52,7 +52,7 @@ static zuh_code run_body(const zuh_mock_step *steps, size_t nsteps,
 
     rc = zuh_body_pipe_init(&p, sink, h, no_decode, max_body, err);
     if (rc == ZUH_OK)
-        rc = zuh_body_read(s, &fr, &p, NULL, 0, max_body, forever(), err);
+        rc = zuh_body_read(s, &fr, &p, NULL, 0, forever(), err);
     zuh_body_pipe_free(&p);
     zuh_stream_free(s);
     return rc;
@@ -320,6 +320,54 @@ void suite_body(void) {
         ZUH_CHECK(b.len < 1024 * 1024);
         zuh_headers_free(&h);
         zuh_buf_free(&b);
+        zuh_buf_free(&src);
+    }
+
+    ZUH_CASE("#212: max_body caps decoded bytes under chunked framing too");
+    {
+        /* gzip of 5 zeros is ~23 bytes. With max_body = 5 the decoded body
+         * fits exactly, and must arrive under either framing: the chunk
+         * decoder used to be given max_body as its own cap, which it applied
+         * to the de-chunked but still COMPRESSED payload, so the chunked
+         * response failed where the Content-Length one succeeded. */
+        zuh_buffer src, wire, b; zuh_sink sink; zuh_mock_step step;
+        char hdr[32];
+        int k;
+        ZUH_CHECK(zuh_buf_init(&src, 64, (size_t)-1));
+        ZUH_CHECK(gzip_zeros(&src, 5));
+        ZUH_CHECK(src.len > 5);
+        ZUH_CHECK(zuh_buf_init(&wire, 128, (size_t)-1));
+        snprintf(hdr, sizeof hdr, "%lx\r\n", (unsigned long)src.len);
+        ZUH_CHECK(zuh_buf_append(&wire, hdr, strlen(hdr)));
+        ZUH_CHECK(zuh_buf_append(&wire, src.data, src.len));
+        ZUH_CHECK(zuh_buf_append(&wire, "\r\n0\r\n\r\n", 7));
+        for (k = 0; k < 2; k++) {
+            const zuh_buffer *body = k ? &wire : &src;
+            ZUH_CHECK(zuh_buf_init(&b, 16, (size_t)-1));
+            zuh_sink_memory_init(&sink, &b);
+            zuh_headers_init(&h);
+            ZUH_CHECK(zuh_headers_add_str(&h, "Content-Encoding", "gzip") == ZUH_OK);
+            step.kind = ZUH_MOCK_DATA; step.data = body->data; step.len = body->len;
+            step.code = ZUH_OK;
+            zuh_error_clear(&e);
+            ZUH_CHECK_EQ_INT(run_body(&step, 1, k ? ZUH_FRAME_CHUNKED : ZUH_FRAME_LENGTH,
+                                     body->len, &sink, &h, 0, 5, &e), ZUH_OK);
+            ZUH_CHECK_EQ_INT((int)b.len, 5);
+            zuh_headers_free(&h);
+            zuh_buf_free(&b);
+        }
+        /* The cap still binds the decoded bytes: one byte less fails. */
+        ZUH_CHECK(zuh_buf_init(&b, 16, (size_t)-1));
+        zuh_sink_memory_init(&sink, &b);
+        zuh_headers_init(&h);
+        ZUH_CHECK(zuh_headers_add_str(&h, "Content-Encoding", "gzip") == ZUH_OK);
+        step.kind = ZUH_MOCK_DATA; step.data = wire.data; step.len = wire.len; step.code = ZUH_OK;
+        ZUH_CHECK_EQ_INT(run_body(&step, 1, ZUH_FRAME_CHUNKED, wire.len, &sink, &h, 0, 4, &e),
+                         ZUH_ERR_BODY_LIMIT);
+        ZUH_CHECK(b.len <= 4);
+        zuh_headers_free(&h);
+        zuh_buf_free(&b);
+        zuh_buf_free(&wire);
         zuh_buf_free(&src);
     }
 
