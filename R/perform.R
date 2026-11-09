@@ -441,8 +441,9 @@ zu_perform <- function(req, client = zu_default_client(), stream = FALSE) {
   }
 
   # Fields the transport should not have to fill in, and that a mock would
-  # otherwise have to fake to keep the accessors honest.
-  resp$method <- r$method
+  # otherwise have to fake to keep the accessors honest. The native
+  # transport reports the method it sent, which a 303 rewrites (#220).
+  resp$method <- resp$method %||% r$method
   # §65.4: a transport that did not stream (a mock, a cassette) holds the
   # whole body; zu_resp_read() serves it in pieces from this cursor.
   if (isTRUE(r$stream) && is.null(resp$stream)) {

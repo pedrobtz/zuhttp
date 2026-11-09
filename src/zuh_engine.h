@@ -201,6 +201,10 @@ typedef struct {
      * is the field's contract, not a side effect of how it is built — it used
      * to be the latter, and a token in the query came back out of it. */
     char      *final_url;
+    /* The method the final hop sent: a 303 rewrites it to GET (§19.1), and
+     * a response that reported the request's method instead said POST for
+     * a GET it never sent (#220). */
+    char      *final_method;
     char      *tls_version;      /* NULL for http:// */
     char      *tls_cipher;
     int        redirects;

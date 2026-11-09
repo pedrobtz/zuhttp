@@ -1125,8 +1125,8 @@ static SEXP build_response(void *data) {
     /* §35.2's connection metadata rides on the response rather than being a
      * second call, because it describes the connection THIS response came
      * over — asking again later would answer about a different one. */
-    out = PROTECT(Rf_allocVector(VECSXP, 17));
-    nms = PROTECT(Rf_allocVector(STRSXP, 17));
+    out = PROTECT(Rf_allocVector(VECSXP, 18));
+    nms = PROTECT(Rf_allocVector(STRSXP, 18));
     SET_VECTOR_ELT(out, 0, Rf_ScalarInteger(r.status));
     SET_STRING_ELT(nms, 0, Rf_mkChar("status"));
     SET_VECTOR_ELT(out, 1, headers_to_r(&r.headers));
@@ -1159,6 +1159,8 @@ static SEXP build_response(void *data) {
     SET_STRING_ELT(nms, 14, Rf_mkChar("http_major"));
     SET_VECTOR_ELT(out, 15, headers_to_r(&r.trailers));
     SET_STRING_ELT(nms, 15, Rf_mkChar("trailers"));
+    SET_VECTOR_ELT(out, 17, r.final_method ? Rf_mkString(r.final_method) : R_NilValue);
+    SET_STRING_ELT(nms, 17, Rf_mkChar("method"));
     SET_STRING_ELT(nms, 16, Rf_mkChar("stream"));
     if (rp->open) {
         /* Ownership moves to the pointer before anything else can longjmp:

@@ -51,6 +51,7 @@ void zuh_result_free(zuh_result *r) {
     zuh_open_body_free(r->open);
     zuh_buf_free(&r->body);
     zuh_free(r->final_url);
+    zuh_free(r->final_method);
     zuh_free(r->tls_version);
     zuh_free(r->tls_cipher);
     zuh_free(r->remote_ip);
@@ -1611,8 +1612,13 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
     zuh_trace_add(o->trace, ZUH_EV_REQUEST_DONE, NULL, (uint64_t)out->status);
 
     out->final_url = redacted_url_of(&cur, o->redact);
+    out->final_method = dup_str(method);
     zuh_uri_free(&cur);
-    if (!out->final_url) { zuh_result_free(out); return ZUH_ERR_NOMEM; }
+    if (!out->final_url || !out->final_method) {
+        zuh_result_free(out);
+        zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_NONE, "out of memory");
+        return ZUH_ERR_NOMEM;
+    }
     return ZUH_OK;
 }
 

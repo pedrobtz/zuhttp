@@ -97,6 +97,8 @@ test_that("303 turns POST into a bodiless GET; 307 keeps method and body (§19.1
     redirects = 1
   )
   expect_identical(toupper(zu_resp_json(r)$method), "GET")
+  # #220: the response reports the method actually sent, not the request's.
+  expect_identical(zu_resp_method(r), "GET")
   expect_length(zu_resp_json(r)$data, 0) # httpbin echoes no body as list()
   r <- zu_post(
     redirect_to(a, a$url("/anything"), status_code = 307),
@@ -104,5 +106,6 @@ test_that("303 turns POST into a bodiless GET; 307 keeps method and body (§19.1
     redirects = 1
   )
   expect_identical(toupper(zu_resp_json(r)$method), "POST")
+  expect_identical(zu_resp_method(r), "POST")
   expect_identical(zu_resp_json(r)$data, "payload")
 })
