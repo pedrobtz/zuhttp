@@ -1699,7 +1699,7 @@ without a canary arm is a defect.
 
 ### 43. Fuzzing
 
-**Status:** Partial — ten targets, corpus replay on three OSes in CI; the
+**Status:** Partial — twelve targets, corpus replay on three OSes in CI; the
 24 h soak per target (§61.8) is W17.
 
 Targets: response parser, chunked decoder, headers, URI, redirect, proxy
@@ -1708,10 +1708,20 @@ whole request path through the D-72 seam, with termination, the `max_body`
 bound and per-input allocation balance as oracles (9.1M executions in its
 first 10-minute soak, clean). W9 adds the DER walker as the eleventh, and W20
 the HTTP/2 session fed hostile frame input through the D-72 seam as the
-twelfth (§65.8). Each harness builds against libFuzzer and against a plain
+twelfth (§65.8), and the pulled body's API, a fuzzed sequence of reads,
+peeks, aborts and done checks against a model, as the thirteenth (§65.4,
+#229). Each harness builds against libFuzzer and against a plain
 replay driver, so the corpus is a regression suite everywhere, Windows
 included.
 Only curated seeds are committed.
+
+A sanitizer only reports a crash, and a wrong byte count, an inconsistent
+limit or a readable aborted stream crash nothing; the review of 2026-11-09
+found 16 such bugs in code every target reached. So the targets that can
+carry an oracle on their results do: the body path compares whole and
+one-byte reads and three framings of one payload (#227), the engine checks
+that every request it wrote is framed by its Content-Length (#228), and the
+pull target checks every result against its model (#229).
 
 ### 44. Static Analysis
 

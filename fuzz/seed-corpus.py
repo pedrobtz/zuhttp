@@ -8,7 +8,7 @@ import shutil
 import zlib
 
 TARGETS = ("response", "chunked", "headers", "uri", "redirect", "inflate",
-           "proxy", "redact", "body", "h2")
+           "proxy", "redact", "body", "h2", "pull")
 
 README = """\
 Curated fuzz seeds (design §43, §50.3).
@@ -275,6 +275,25 @@ def main():
     w("h2/streamed-body", bytes([0x0E]) + pre + ok1 + ok3)
     w("h2/streamed-body-fails", bytes([0x0D]) + pre + ok1 + b"\x00ZU\x00" + pre + ok1)
     w("h2/streamed-body-pulled", bytes([0x8E]) + pre + ok1 + ok3)
+
+    # --- pull (#229): the pulled body's API against a model ----------------
+    # byte 0 framing (0 length, 1 chunked, 2 close, 3 length read a byte at
+    # a time; bit 2 7-byte reads), byte 1 the payload length, the payload,
+    # then one byte per operation: low bits 0 read, 1 peek+consume, 2 abort,
+    # 3 done?; the rest is the size less one.
+    def op(kind, k=1):
+        return bytes([((k - 1) << 2) | kind])
+    hello = b"hello"
+    # #213: the whole body arrives in the first read, so the wire has ended;
+    # read 1 byte, abort, read: the rest must be cancelled, not served.
+    w("pull/regress-213-abort-after-end", bytes([0, 5]) + hello + op(0, 1) + op(2) + op(0, 4))
+    w("pull/read-all-length", bytes([0, 5]) + hello + op(0, 64) + op(0, 64) + op(3))
+    w("pull/read-all-chunked", bytes([1, 12]) + b"hello, world" + op(0, 3) * 6 + op(3))
+    w("pull/read-all-close", bytes([2, 5]) + hello + op(0, 2) * 4 + op(3))
+    w("pull/peek-consume", bytes([4, 12]) + b"hello, world" + op(1, 4) * 6 + op(0, 64) + op(3))
+    w("pull/abort-mid-bytewise", bytes([3, 12]) + b"hello, world" + op(0, 2) + op(2) +
+      op(1, 3) + op(0, 3) + op(3))
+    w("pull/empty", bytes([0, 0]) + op(0, 8) + op(3) + op(2) + op(0, 8))
 
     with open(os.path.join("corpus", "README"), "w") as f:
         f.write(README)
