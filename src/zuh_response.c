@@ -103,7 +103,7 @@ zuh_code zuh_response_decide_framing(zuh_response *r, int method_is_head, zuh_er
 
 /* ---------------- chunked ---------------- */
 
-zuh_code zuh_chunked_init(zuh_chunked *c, uint64_t max_chunk, uint64_t max_total) {
+zuh_code zuh_chunked_init(zuh_chunked *c) {
     struct phr_chunked_decoder *d;
     if (!c) return ZUH_ERR_PARSE;
     memset(c, 0, sizeof *c);
@@ -119,8 +119,6 @@ zuh_code zuh_chunked_init(zuh_chunked *c, uint64_t max_chunk, uint64_t max_total
         c->state = NULL;
         return ZUH_ERR_NOMEM;
     }
-    c->max_chunk = max_chunk;
-    c->max_total = max_total;
     return ZUH_OK;
 }
 
@@ -211,34 +209,10 @@ zuh_code zuh_chunked_decode(zuh_chunked *c, char *buf, size_t *len, zuh_error *e
         return ZUH_ERR_PARSE;
     }
 
-    *len = n;   /* decoded bytes now at the front of buf */
-
-    /* §40: bound the decoded total. phr_decode_chunked itself has no limit,
-     * so an unbounded chunked body would otherwise grow without end.
-     *
-     * Compute the remaining budget rather than `total > max_total - n`: that
-     * form underflows when n exceeds the budget, wrapping to a huge value and
-     * silently DISABLING the limit. This is precisely the unsigned-overflow
-     * class §40 exists to prevent, and it shipped here until a test caught it. */
-    if (c->max_total) {
-        uint64_t remaining = c->max_total >= c->total ? c->max_total - c->total : 0;
-        if ((uint64_t)n > remaining) {
-            *len = 0;
-            zuh_error_set(err, ZUH_ERR_BODY_LIMIT, ZUH_PHASE_READ,
-                         "response body exceeds the configured limit");
-            return ZUH_ERR_BODY_LIMIT;
-        }
-    }
-    c->total += (uint64_t)n;
-
-    /* A single chunk larger than max_chunk is rejected. bytes_left_in_chunk
-     * is the decoder's view of the current chunk's remaining size. */
-    if (c->max_chunk && d->bytes_left_in_chunk > c->max_chunk) {
-        *len = 0;
-        zuh_error_set(err, ZUH_ERR_BODY_LIMIT, ZUH_PHASE_READ,
-                     "chunk size exceeds the configured limit");
-        return ZUH_ERR_BODY_LIMIT;
-    }
+    /* Decoded bytes now at the front of buf. They are not bounded here:
+     * the body pipe bounds what reaches the sink, after any inflation
+     * (§40, #212). */
+    *len = n;
 
     if (rc >= 0) {                      /* final chunk seen */
         /* consume_trailer is off, so the rc bytes after the decoded data

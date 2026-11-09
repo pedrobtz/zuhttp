@@ -131,7 +131,7 @@ void suite_response(void) {
         char buf[256];
         const char *body = "5\r\nhello\r\n6\r\n world\r\n0\r\nX-Trailer: v\r\n\r\n";
         zuh_error_clear(&e);
-        ZUH_CHECK_EQ_INT(zuh_chunked_init(&c, 0, 0), ZUH_OK);
+        ZUH_CHECK_EQ_INT(zuh_chunked_init(&c), ZUH_OK);
         len = strlen(body);
         memcpy(buf, body, len);
         rc = zuh_chunked_decode(&c, buf, &len, &e);
@@ -148,7 +148,7 @@ void suite_response(void) {
         char buf[] = "3\r\nabc\r\n0\r\nGrpc-Status: 0\r\nGrpc-Message: done\r\n\r\nNEXT";
         size_t len = sizeof buf - 1;
         const char *nm, *v;
-        ZUH_CHECK_EQ_INT(zuh_chunked_init(&c, 0, 0), ZUH_OK);
+        ZUH_CHECK_EQ_INT(zuh_chunked_init(&c), ZUH_OK);
         ZUH_CHECK_EQ_INT(zuh_chunked_decode(&c, buf, &len, &e), ZUH_OK);
         ZUH_CHECK_EQ_INT(len, 3);
         ZUH_CHECK_EQ_INT(zuh_headers_total(&c.trailers), 2);
@@ -164,7 +164,7 @@ void suite_response(void) {
         char b[] = "railer: 1\r";
         char d[] = "\n\r\n";
         size_t len;
-        zuh_chunked_init(&c, 0, 0);
+        zuh_chunked_init(&c);
         len = sizeof a - 1;
         ZUH_CHECK_EQ_INT(zuh_chunked_decode(&c, a, &len, &e), ZUH_ERR_WOULDBLOCK);
         ZUH_CHECK_EQ_INT(len, 2);
@@ -183,7 +183,7 @@ void suite_response(void) {
         char a[] = "0\r\n";
         char b[] = "\r\n";
         size_t len;
-        zuh_chunked_init(&c, 0, 0);
+        zuh_chunked_init(&c);
         len = sizeof a - 1;
         ZUH_CHECK_EQ_INT(zuh_chunked_decode(&c, a, &len, &e), ZUH_ERR_WOULDBLOCK);
         len = sizeof b - 1;
@@ -205,7 +205,7 @@ void suite_response(void) {
             char buf[128];
             size_t len = strlen(bad[i]);
             memcpy(buf, bad[i], len);
-            zuh_chunked_init(&c, 0, 0);
+            zuh_chunked_init(&c);
             zuh_error_clear(&e);
             ZUH_CHECK_EQ_INT(zuh_chunked_decode(&c, buf, &len, &e), ZUH_ERR_PARSE);
             /* #210: after an error, no output bytes are valid. */
@@ -220,7 +220,7 @@ void suite_response(void) {
             size_t len, fed = 0;
             zuh_code rc = ZUH_ERR_WOULDBLOCK;
             memset(piece, 'x', sizeof piece);
-            zuh_chunked_init(&c, 0, 0);
+            zuh_chunked_init(&c);
             len = sizeof head - 1;
             zuh_chunked_decode(&c, head, &len, &e);
             while (rc == ZUH_ERR_WOULDBLOCK && fed < 200000) {
@@ -242,7 +242,7 @@ void suite_response(void) {
         zuh_chunked c; zuh_error e; size_t len; char buf[64];
         const char *partial = "5\r\nhel";
         zuh_error_clear(&e);
-        zuh_chunked_init(&c, 0, 0);
+        zuh_chunked_init(&c);
         len = strlen(partial);
         memcpy(buf, partial, len);
         ZUH_CHECK_EQ_INT(zuh_chunked_decode(&c, buf, &len, &e), ZUH_ERR_WOULDBLOCK);
@@ -256,41 +256,12 @@ void suite_response(void) {
         for (i = 0; i < sizeof bad / sizeof bad[0]; i++) {
             zuh_chunked c; zuh_error e; size_t len; char buf[64];
             zuh_error_clear(&e);
-            zuh_chunked_init(&c, 0, 0);
+            zuh_chunked_init(&c);
             len = strlen(bad[i]);
             memcpy(buf, bad[i], len);
             ZUH_CHECK_EQ_INT(zuh_chunked_decode(&c, buf, &len, &e), ZUH_ERR_PARSE);
             zuh_chunked_free(&c);
         }
-    }
-
-    ZUH_CASE("§40: the decoded body total is bounded");
-    {
-        zuh_chunked c; zuh_error e; size_t len; char buf[64];
-        const char *body = "5\r\nhello\r\n0\r\n\r\n";
-        zuh_error_clear(&e);
-        zuh_chunked_init(&c, 0, 3);          /* max_total = 3 bytes */
-        len = strlen(body);
-        memcpy(buf, body, len);
-        ZUH_CHECK_EQ_INT(zuh_chunked_decode(&c, buf, &len, &e), ZUH_ERR_BODY_LIMIT);
-        zuh_chunked_free(&c);
-    }
-
-    ZUH_CASE("§18.1: a chunk larger than max_chunk is refused while it arrives");
-    {
-        /* The engine passes 0 (no per-chunk cap) today, so only a direct test
-         * reaches this branch. The cap is checked against what is left of the
-         * current chunk when a feed ends inside it — which a chunk larger
-         * than the cap by more than one read always does. */
-        zuh_chunked c; zuh_error e; size_t len; char buf[64];
-        const char *body = "a\r\n01";      /* a 10-byte chunk, 2 bytes in */
-        zuh_error_clear(&e);
-        zuh_chunked_init(&c, 4, 0);          /* max_chunk = 4, no total cap */
-        len = strlen(body);
-        memcpy(buf, body, len);
-        ZUH_CHECK_EQ_INT(zuh_chunked_decode(&c, buf, &len, &e), ZUH_ERR_BODY_LIMIT);
-        ZUH_CHECK(strstr(e.message, "chunk size exceeds") != NULL);
-        zuh_chunked_free(&c);
     }
 
     ZUH_CASE("no leaks across the suite");

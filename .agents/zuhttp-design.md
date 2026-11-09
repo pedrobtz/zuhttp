@@ -826,7 +826,7 @@ Strict, not permissive (D-15):
 | both `Transfer-Encoding` and `Content-Length` | reject |
 | more than one `Content-Length`, equal or not | reject |
 | `Content-Length` not plain decimal or overflowing `uint64` | reject |
-| chunk size invalid hex, overflowing, or above `max_chunk_size` (when set; checked as the chunk arrives, so exact to one read; the engine sets none, and `max_body` bounds the total) | reject |
+| chunk size invalid hex or overflowing (no per-chunk size cap: `max_body` bounds the decoded total, #223) | reject |
 | neither header, body possible | read to close; not poolable |
 | `obs-fold` | reject |
 | malformed status line, status not three digits | reject |

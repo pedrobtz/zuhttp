@@ -137,7 +137,7 @@ zuh_code zuh_body_reader_init(zuh_body_reader *r, const zuh_framing *fr,
         return ZUH_ERR_NOMEM;
     }
     if (fr->kind == ZUH_FRAME_CHUNKED) {
-        zuh_code rc = zuh_chunked_init(&r->dec, 0, 0);
+        zuh_code rc = zuh_chunked_init(&r->dec);
         if (rc != ZUH_OK) {
             zuh_body_reader_free(r);
             zuh_error_set(err, rc, ZUH_PHASE_READ, "out of memory");
