@@ -529,11 +529,6 @@ attempt_with_retries <- function(r, client, hooks, deadline_at) {
     if (!isTRUE(v$retry)) {
       break
     }
-    # §65.4: a streamed response that is about to be retried is never read.
-    if (!is.null(resp$stream)) {
-      zu_resp_abort(resp)
-    }
-
     delay <- backoff_delay(policy, attempt, v$after)
     # §33.3: check the budget BEFORE sleeping and fail now rather than sleep
     # past the deadline. Without this, `timeout = 30` with three retries is a
@@ -541,6 +536,12 @@ attempt_with_retries <- function(r, client, hooks, deadline_at) {
     left <- deadline_at - proc.time()[["elapsed"]]
     if (left <= 0 || delay >= left) {
       break
+    }
+    # §65.4: a streamed response that is about to be retried is never read.
+    # Only now is it certain to be: aborted before the budget check, the
+    # response the loop then returned had lost its body (#218).
+    if (!is.null(resp$stream)) {
+      zu_resp_abort(resp)
     }
 
     fire_hook(
