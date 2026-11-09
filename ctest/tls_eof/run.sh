@@ -1,5 +1,7 @@
 #!/bin/sh
-# make tls-eof: run drive against server.py in both modes (D-86).
+# make tls-eof: run drive against server.py in every mode (D-86), and against
+# reneg.py (#215). DRIVE names the driver
+# binary: make tls-eof-asan runs the same script against an ASan build.
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d)
@@ -11,17 +13,32 @@ openssl=${OPENSSL:-openssl}
 # A second self-signed certificate: trusting it instead fails the handshake.
 "$openssl" req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=other \
   -keyout "$tmp/other-key.pem" -out "$tmp/other.pem" >/dev/null 2>&1
+drive=${DRIVE:-$here/../zuh_tlseof}
+free_port() {
+  python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])'
+}
+wait_ready() {
+  i=0; until grep -q ready "$tmp/srv.log" 2>/dev/null || [ $i -ge 50 ]; do sleep 0.1; i=$((i + 1)); done
+}
 status=0
 for mode in noclose together keepalive; do
-  port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
+  port=$(free_port)
   python3 "$here/server.py" "$mode" "$port" "$tmp/cert.pem" "$tmp/key.pem" >"$tmp/srv.log" 2>&1 &
   srv=$!
-  i=0; until grep -q ready "$tmp/srv.log" 2>/dev/null || [ $i -ge 50 ]; do sleep 0.1; i=$((i + 1)); done
+  wait_ready
   if [ "$mode" = keepalive ]; then
-    "$here/../zuh_tlseof" stale "https://localhost:$port/" "$tmp/cert.pem" "$tmp/other.pem" || status=1
+    "$drive" stale "https://localhost:$port/" "$tmp/cert.pem" "$tmp/other.pem" || status=1
   else
-    "$here/../zuh_tlseof" "$mode" "https://localhost:$port/" "$tmp/cert.pem" || status=1
+    "$drive" "$mode" "https://localhost:$port/" "$tmp/cert.pem" || status=1
   fi
   kill $srv 2>/dev/null || true; wait $srv 2>/dev/null || true
 done
+
+# #215: a renegotiation runs the verify callback after the dial returned.
+port=$(free_port)
+OPENSSL="$openssl" python3 "$here/reneg.py" "$port" "$tmp/cert.pem" "$tmp/key.pem" >"$tmp/srv.log" 2>&1 &
+srv=$!
+wait_ready
+"$drive" one "https://localhost:$port/" "$tmp/cert.pem" || status=1
+kill $srv 2>/dev/null || true; wait $srv 2>/dev/null || true
 exit $status

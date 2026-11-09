@@ -194,7 +194,18 @@ zuh_tlseof: $(ENGSRC) tls_eof/drive.c
 tls-eof: zuh_tlseof
 	tls_eof/run.sh
 
-clean:
-	rm -rf zuh_ctest zuh_ctest_asan zuh_tlstest zuh_engtest zuh_engtest_nw zuh_engtest_sch zuh_tlseof *.dSYM build build-asan *.o
+# The same, under ASan + UBSan: #215 was a stack-use-after-return in the
+# verify callback on renegotiation, which reads garbage silently without it.
+SANFLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer
+zuh_tlseof_asan: $(ENGSRC) tls_eof/drive.c
+	$(CC) $(ENGBASE) $(SANFLAGS) $(URIFLAGS) $(OPENSSL_CFLAGS) -o $@ $(ENGSRC) tls_eof/drive.c \
+	      $(OPENSSL_LIBS) -lz $(NETLIBS)
 
-.PHONY: all run strict asan clean tls tls-eof engine engine-nw engine-sch
+tls-eof-asan: zuh_tlseof_asan
+	ASAN_OPTIONS=detect_stack_use_after_return=1:detect_leaks=0:abort_on_error=1 \
+	  UBSAN_OPTIONS=halt_on_error=1 DRIVE=$(CURDIR)/zuh_tlseof_asan tls_eof/run.sh
+
+clean:
+	rm -rf zuh_ctest zuh_ctest_asan zuh_tlstest zuh_engtest zuh_engtest_nw zuh_engtest_sch zuh_tlseof zuh_tlseof_asan *.dSYM build build-asan *.o
+
+.PHONY: all run strict asan clean tls tls-eof tls-eof-asan engine engine-nw engine-sch
