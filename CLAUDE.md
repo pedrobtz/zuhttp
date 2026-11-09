@@ -47,6 +47,8 @@ make -C ctest tls-eof         # OpenSSL vs a loopback TLS server that closes bad
 make -C fuzz replay-run       # corpus replay, needs no clang; a regression suite
 make -C fuzz replay-asan      # the same corpus under ASan + UBSan
 make -C fuzz fuzz-run         # libFuzzer, needs clang
+make -C fuzz mutate-asan      # 33,000 deterministic mutants of the seeds under ASan + UBSan;
+                              #   MUT_SEED=1 for a fresh set. A soak, not a bug-finder: see below
 
 # R
 R CMD INSTALL --preclean .    # --preclean: an in-tree build reuses stale src/*.o,
@@ -157,6 +159,38 @@ check depend on example.com and badssl.com.
   shuffle and will not show it.
 - Comments explain *why*, and cite the design section. The codebase
   assumes a reader who wants the reasoning, not a narration of the code.
+
+## What the 2026-11-09 reviews found here
+
+The four bug families and the tests they call for are portfolio rules
+now (`.claude/shared/correctness.md`); they were written from this
+package. Three outside reviews (`.agents/reviews/2026-11-09-fable.md`
+consolidates them) found 16 valid bugs, \#208–#223, in code that passed
+2,526 C checks, the full R suite and 33,000 sanitised fuzz inputs. What
+is specific to zuhttp:
+
+- **The wire is the oracle.** No test counted what a server received for
+  an HTTP/1.1 upload, and no in-memory upload between 32 KiB and 64 KiB
+  was tested, so a 40 KB body went out twice (#208) for months. Upload
+  tests use `helper-rawserver.R` and assert the bytes that arrived, at
+  sizes straddling the 64 KiB header-plus-body combine.
+- **`max_body` is decoded bytes, everywhere.** The chunk decoder billed
+  compressed bytes against it (#212). Equivalent payloads under
+  Content-Length and chunked framing are tested as a pair.
+- **Open bodies are long-lived objects.** W21’s streams had no fork
+  guard (#209) and an abort that ignored undelivered bytes (#213); the
+  pool and the Network.framework backend already had the guards.
+  Anything that outlives `C_zu_perform` gets the PID, unwind and
+  lifetime checks they have.
+- **The OpenSSL backend is only tested where it is built.** This machine
+  and the ASan ctest never compile it, so a stack-use-after-return on
+  renegotiation (#215) and IP-literal verification (#216) were reachable
+  only by a reviewer who built it by hand. The Ubuntu network job builds
+  it under ASan, and server-initiated TLS behaviour comes from a
+  scripted loopback server.
+- **`make -C fuzz mutate-asan`** is the reviewers’ 33,000-mutant soak,
+  made reproducible. It passed clean on the tree that carried all 16
+  bugs: it is a crash oracle, not evidence of correctness.
 
 ## The `zu*` family
 

@@ -36,7 +36,7 @@ url <- function(path) srv$url(path)
 dest <- tempfile(fileext = ".bin")
 r <- zu_get(url("/bytes/10000"), path = dest)
 zu_resp_path(r)
-#> [1] "/tmp/RtmpmeHski/file1e7530aa15a9.bin"
+#> [1] "/tmp/RtmpeKKcrF/file1f25d11305.bin"
 file.size(dest)
 #> [1] 10000
 length(zu_resp_raw(r))   # nothing was kept in memory
@@ -62,7 +62,7 @@ class(e)[1]
 readLines(dest)            # the old file is still intact
 #> [1] "the previous version"
 list.files(dirname(dest), pattern = basename(dest))   # and no partial file
-#> [1] "file1e7530aa15a9.bin"
+#> [1] "file1f25d11305.bin"
 ```
 
 One thing a file sink does not do is judge the status code. A 404 page
@@ -87,7 +87,7 @@ r <- zu_get(url("/drip?numbytes=5&duration=2"), callback = function(chunk) {
 length(seen)      # one call per chunk
 #> [1] 5
 seen
-#> [1] "07:57:37.8" "07:57:38.2" "07:57:38.6" "07:57:39.0" "07:57:39.4"
+#> [1] "16:14:21.9" "16:14:22.3" "16:14:22.7" "16:14:23.1" "16:14:23.5"
 ```
 
 That makes line-oriented streams easy to process incrementally — for
