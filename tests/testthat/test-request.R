@@ -242,3 +242,23 @@ test_that("query parameters go before a URL's fragment, not into it (#219)", {
     )
   )
 })
+
+test_that("`redirects` beyond an integer is refused, not read as no redirects (#221)", {
+  # as.integer(1e10) is NA, which C read as INT_MIN: every redirect test
+  # failed and the 3xx came back with only a coercion warning.
+  cli <- zu_client(transport = zu_mock_transport(function(req) zu_response()))
+  for (bad in list(1e10, .Machine$integer.max + 1, Inf)) {
+    expect_error(
+      zu_get("http://h.test/", redirects = bad, client = cli),
+      "`redirects` must be"
+    )
+  }
+  expect_identical(
+    zu_resp_status(zu_get(
+      "http://h.test/",
+      redirects = .Machine$integer.max,
+      client = cli
+    )),
+    200L
+  )
+})
