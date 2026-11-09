@@ -1754,6 +1754,38 @@ void suite_engine_mock(void) {
         dialer_free(&d);
     }
 
+    ZUH_CASE("§65.4: an abort after the wire ended still withholds what the caller has not read (#213)");
+    {
+        /* The whole 5-byte body arrives in the first read, so the wire has
+         * ended while 4 bytes are still staged. Aborting must cancel those:
+         * the abort returned early on `ended`, and the next read served
+         * "ello" instead of raising. A body read to the end has nothing
+         * left to withhold, so aborting it changes nothing. */
+        conn_script s[] = {{ "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello", 0, 0, 1, NULL }};
+        zuh_buffer got;
+        int k;
+        for (k = 0; k < 2; k++) {
+            dialer_init(&d, s, 1); opts_for(&o, &d); o.stream_body = 1;
+            rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            if (rc == ZUH_OK) {
+                zuh_buf_init(&got, 0, (size_t)-1);
+                ZUH_CHECK_EQ_INT(zuh_open_body_read(r.open, &got, k ? 5u : 1u, &e), ZUH_OK);
+                ZUH_CHECK_EQ_INT((int)got.len, (k ? 5 : 1));
+                zuh_open_body_abort(r.open);
+                ZUH_CHECK(zuh_open_body_done(r.open));
+                zuh_error_clear(&e);
+                ZUH_CHECK_EQ_INT(zuh_open_body_read(r.open, &got, 100, &e),
+                                 (k ? ZUH_OK : ZUH_ERR_CANCELLED));
+                ZUH_CHECK_EQ_INT((int)got.len, (k ? 5 : 1));
+                ZUH_CHECK_EQ_INT(zuh_open_body_ended_clean(r.open), k);
+                zuh_buf_free(&got);
+                zuh_result_free(&r);
+            }
+            dialer_free(&d);
+        }
+    }
+
     /* #188: the allocation-failure sweep, once per scenario. Each scenario
      * runs clean first to count its allocations, then once per allocation
      * with that one failing: every run must end with the scenario's own

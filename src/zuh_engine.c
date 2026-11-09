@@ -859,7 +859,14 @@ zuh_code zuh_open_body_read_within(zuh_open_body *b, zuh_buffer *out, size_t n,
 }
 
 void zuh_open_body_abort(zuh_open_body *b) {
-    if (!b || b->ended || b->aborted || b->failed) return;
+    if (!b || b->aborted || b->failed) return;
+    /* Ended is not done (#213): the wire can be over with bytes still
+     * staged, and an abort withholds those too. The connection went back
+     * when the wire ended, so there is nothing more to release. */
+    if (b->ended) {
+        if (b->staged_off != b->staged.len) b->aborted = 1;
+        return;
+    }
     b->aborted = 1;
     if (b->h2 && b->s) {
         zuh_h2_cancel(b->s, zuh_deadline_in(1000));
