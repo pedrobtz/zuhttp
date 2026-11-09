@@ -45,6 +45,8 @@ make -C ctest tls-eof         # OpenSSL vs a loopback TLS server that closes bad
 make -C fuzz replay-run       # corpus replay, needs no clang; a regression suite
 make -C fuzz replay-asan      # the same corpus under ASan + UBSan
 make -C fuzz fuzz-run         # libFuzzer, needs clang
+make -C fuzz mutate-asan      # 33,000 deterministic mutants of the seeds under ASan + UBSan;
+                              #   MUT_SEED=1 for a fresh set. A soak, not a bug-finder: see below
 
 # R
 R CMD INSTALL --preclean .    # --preclean: an in-tree build reuses stale src/*.o,
@@ -153,6 +155,70 @@ tools/          update-uriparser, update-picohttpparser, update-nghttp2,
   pushing; `test_local()` does not shuffle and will not show it.
 - Comments explain *why*, and cite the design section. The codebase assumes a
   reader who wants the reasoning, not a narration of the code.
+
+## Blind spots the 2026-11-09 reviews exposed
+
+Three outside reviews (`.agents/reviews/2026-11-09-fable.md` consolidates them) found 16 valid
+bugs in code that passed 2,526 C checks, the full R suite, and 33,000
+sanitised fuzz inputs. None was upstream. They fall into four families, and
+each family names a test the suite did not have. Write that test first.
+
+- **Assert the server's bytes, not the client's view.** A 40 KB HTTP/1.1
+  upload went out twice for months; every server read `Content-Length` and
+  ignored the rest, so no client-side assertion could see it. For anything
+  that writes to the wire, the test counts what arrived
+  (`helper-rawserver.R`), and sizes straddle every threshold the code has:
+  the 64 KiB header-plus-body combine, the 8 KiB field cap, `max_body` ± 1.
+- **Fuzzing proves "no crash", never "right answer".** 13 of the 16 were
+  wrong results with no memory error, invisible to ASan by construction.
+  A limit, a count or a state needs an oracle: a byte count, a
+  *differential* (the same payload under Content-Length and chunked framing
+  must behave identically), or a state-transition sequence (read 1, abort,
+  read again). `make -C fuzz mutate-asan` is a cheap soak, not evidence of
+  correctness.
+- **One variable, two meanings.** The upload, chunk-error, `max_body` and
+  abort bugs were each a value read after something else redefined it:
+  `wire.len` before vs after an append, `len` as wire vs decoded bytes after
+  a decoder error, `max_body` as decoded bytes in the pipe but compressed
+  bytes in the chunk decoder, `ended` ("received") where "delivered" was
+  meant. No side effects inside an `if` condition; when a helper fails,
+  state what its out-parameters mean afterwards, and check the result
+  before using them.
+- **A thing that outlives its owner needs a guard at every owner.** The pool
+  has a fork guard, the Network.framework backend records its PID,
+  `build_response` has an unwind cleanup, and the pool's key is built while
+  the options are in scope — yet an open streamed body had no PID, the
+  OpenSSL backend kept a pointer to a stack-local `zuh_tls_config`
+  (stack-use-after-return on renegotiation), `C_zu_stream_read` could leak
+  on an R longjmp, and the body source never saw the deadline. Every pointer
+  or handle a connection, body or callback retains states who owns it and
+  how long it lives; a new long-lived object (W21's streams, a backend) gets
+  the fork, unwind and lifetime guards the existing ones have, in the same
+  PR.
+- **Fix the class, not the instance.** `zu_pool()` guards
+  `x > .Machine$integer.max` with a comment explaining why; `redirects` and
+  `zu_retry(attempts)` had the identical hole. When a bug is fixed, grep
+  for its siblings in the same commit, and the R layer validates whatever
+  the C layer will coerce.
+- **The second case in the spec.** Two `Content-Encoding` fields, an IP
+  literal where OpenSSL wants `set1_ip` not `set1_host`, a fragment in a
+  URL handed `query =`, a 303 that rewrote the method. When the simple case
+  is handled, the test suite carries the spec's next case as a raw-bytes
+  seed, and §21.4's rule applies: refuse what is not supported, never
+  under-decode and strip the evidence.
+- **Sanitise every backend you ship.** The dev machine builds
+  Network.framework, the ASan ctest links `tls_none.c`, and the Ubuntu job
+  runs OpenSSL without sanitisers, so the OpenSSL use-after-return was
+  reachable only by a reviewer who built it under ASan by hand. The
+  per-backend job builds its backend under ASan at least on Linux; server-
+  initiated behaviour (renegotiation, 1xx, early close) comes from a
+  scripted loopback server, since no real test server does it.
+- **A code-reading review is not an adversarial one.** The 2026-10-30
+  review (#91–#123) was thorough on style, docs and CI and missed every one
+  of these, three of which were in code it predated (W21 landed five days
+  later). A review of a work package that touches the wire or a lifetime
+  runs a byte-scripted server against it; "the tests pass" is the starting
+  point, not the finding.
 
 ## The `zu*` family
 

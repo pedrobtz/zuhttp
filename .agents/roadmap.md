@@ -116,6 +116,13 @@ feature and not a defect.
       `zu_resp_xml()`/`zu_resp_html()` join 0.1.0 (#124, D-88). Full profile
       green on #124 (`f09eff4`), and every workflow green on `main` after
       #121 and #122 (`fbb1775`).
+- [ ] Fix the 16 findings of the 2026-11-09 consolidation of three outside
+      reviews of `90832db` (#208–#223; `.agents/reviews/2026-11-09-fable.md`),
+      each with a test that failed first. #208, #209 and #215 are release
+      blockers: a 32–64 KiB HTTP/1.1 upload is sent twice, an open streamed
+      body is not fork-guarded, and the OpenSSL backend keeps a pointer to a
+      stack-local `zuh_tls_config`. The OpenSSL backend runs under ASan in CI
+      before this is ticked.
 - [x] Close the edition 1 stage issues #41–#51 as superseded (2026-09-26).
 - [x] One issue per work package (#60–#71), and the trackers re-scoped to
       D-82: #21 is M0, #72 is M1, #22 is the path to 1.0.
@@ -1247,3 +1254,29 @@ changed the plan or the design.
     2^30 streams on one connection or on a server session; recorded at the
     branch rather than tested.
 
+- **2026-11-09 — three outside reviews of `90832db`, consolidated (#208–#223).**
+  Two Codex rounds, one Mistral Vibe pass, re-verified one by one against the
+  tree (`.agents/reviews/`): 16 of 16 claims valid, 13 reproduced here with
+  byte-scripted loopback servers, 3 by inspection (the two OpenSSL items, which
+  this machine cannot build, and an unwind leak that needs an injected R
+  allocation failure). What the re-verification measured, beyond the reports:
+  - The double-sent upload (#208) is older than the `zuh_` rename and sits in
+    a window (`wire.len + body_len <= 64 KiB < wire.len + 2*body_len`) no test
+    covers: the only 32 KiB bodies in the suite are HTTP/2 streams, and no
+    test counts what a server received. webfakes and httpbin read
+    `Content-Length` and discard the rest, so the client side cannot see it.
+  - 13 of the 16 are wrong results with no memory error. The 33,000-mutant
+    ASan/UBSan soak the Vibe review ran (now reproducible as
+    `make -C fuzz mutate-asan`, 11 targets, seed 0) passes clean on the same
+    tree, which is the expected outcome, not a contradiction: limits, counts
+    and states need an oracle, and the harnesses have none.
+  - The Vibe report marks the malformed-chunk finding (#210) as fixed; it
+    reproduces with both its triggers. `zuh_chunked_decode()` returns before
+    `*len = n` on a parse error, so the caller feeds the wire bytes.
+  - Four findings (#208, #210, #212, #213) share one shape, a value read
+    after something else redefined it; four (#209, #214, #215, #217) share
+    another, a resource outliving its owner where a sibling path already has
+    the guard. #221 and #222 are the `zu_pool()` integer-range guard (#96)
+    not propagated. CLAUDE.md now carries the rules these imply.
+  - Also found while tidying: `fuzz/corpus/body 2` and `chunked 2`, empty
+    Finder duplicates from 2026-09-08, untracked; removed.
