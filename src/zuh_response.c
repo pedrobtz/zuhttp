@@ -163,7 +163,10 @@ static zuh_code trailer_parse(zuh_chunked *c, zuh_error *err) {
             return ZUH_ERR_PARSE;
         }
         a = zuh_headers_add(&c->trailers, h[i].name, h[i].name_len, h[i].value, h[i].value_len);
-        if (a == ZUH_ERR_NOMEM) return a;
+        if (a == ZUH_ERR_NOMEM) {
+            zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_READ, "out of memory");
+            return a;
+        }
         if (a != ZUH_OK) {
             zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_READ,
                           "chunked trailer field is invalid or over a limit");
@@ -191,6 +194,8 @@ zuh_code zuh_chunked_decode(zuh_chunked *c, char *buf, size_t *len, zuh_error *e
                               "chunked trailer section exceeds the header size limit");
                 return ZUH_ERR_PARSE;
             }
+            *len = 0;
+            zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_READ, "out of memory");
             return ZUH_ERR_NOMEM;
         }
         return trailer_parse(c, err);
@@ -199,6 +204,9 @@ zuh_code zuh_chunked_decode(zuh_chunked *c, char *buf, size_t *len, zuh_error *e
     rc = phr_decode_chunked(d, buf, &n);
 
     if (rc == -1) {
+        /* #210: `n` was not updated, so leaving *len alone would report the
+         * wire length as decoded output. After an error nothing is valid. */
+        *len = 0;
         zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_READ, "malformed chunked encoding");
         return ZUH_ERR_PARSE;
     }
@@ -215,6 +223,7 @@ zuh_code zuh_chunked_decode(zuh_chunked *c, char *buf, size_t *len, zuh_error *e
     if (c->max_total) {
         uint64_t remaining = c->max_total >= c->total ? c->max_total - c->total : 0;
         if ((uint64_t)n > remaining) {
+            *len = 0;
             zuh_error_set(err, ZUH_ERR_BODY_LIMIT, ZUH_PHASE_READ,
                          "response body exceeds the configured limit");
             return ZUH_ERR_BODY_LIMIT;
@@ -225,6 +234,7 @@ zuh_code zuh_chunked_decode(zuh_chunked *c, char *buf, size_t *len, zuh_error *e
     /* A single chunk larger than max_chunk is rejected. bytes_left_in_chunk
      * is the decoder's view of the current chunk's remaining size. */
     if (c->max_chunk && d->bytes_left_in_chunk > c->max_chunk) {
+        *len = 0;
         zuh_error_set(err, ZUH_ERR_BODY_LIMIT, ZUH_PHASE_READ,
                      "chunk size exceeds the configured limit");
         return ZUH_ERR_BODY_LIMIT;
@@ -236,13 +246,20 @@ zuh_code zuh_chunked_decode(zuh_chunked *c, char *buf, size_t *len, zuh_error *e
         c->in_trailer = 1;
         if (rc > 0 && !zuh_buf_append(&c->tbuf, buf + n, (size_t)rc)) {
             if (zuh_buf_hit_limit(&c->tbuf)) {
+                *len = 0;
                 zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_READ,
                               "chunked trailer section exceeds the header size limit");
                 return ZUH_ERR_PARSE;
             }
+            *len = 0;
+            zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_READ, "out of memory");
             return ZUH_ERR_NOMEM;
         }
-        return trailer_parse(c, err);
+        {
+            zuh_code t = trailer_parse(c, err);
+            if (t != ZUH_OK && t != ZUH_ERR_WOULDBLOCK) *len = 0;
+            return t;
+        }
     }
     return ZUH_ERR_WOULDBLOCK;           /* rc == -2: need more input */
 }

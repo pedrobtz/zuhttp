@@ -84,6 +84,9 @@ void    zuh_chunked_free(zuh_chunked *c);
  *   ZUH_ERR_WOULDBLOCK  more input needed
  *   ZUH_ERR_PARSE       malformed chunk framing
  *   ZUH_ERR_BODY_LIMIT  a §40 limit was exceeded
+ *
+ * On any result but ZUH_OK and ZUH_ERR_WOULDBLOCK, *len is 0: no output byte
+ * of a failed call is valid, so none can reach a sink (#210).
  */
 zuh_code zuh_chunked_decode(zuh_chunked *c, char *buf, size_t *len, zuh_error *err);
 

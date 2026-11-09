@@ -389,6 +389,41 @@ void suite_body(void) {
         zuh_headers_free(&h);
     }
 
+    ZUH_CASE("#210: malformed chunk framing raises, and the sink was handed no framing bytes");
+    {
+        /* What the caller got before the error is the test. A decoder error
+         * left `len` at its input value, the wire length, and the reader fed
+         * that much to the sink before looking at the result: a callback saw
+         * the raw `X\r\nATTACK...` bytes, then the request raised. In one
+         * read the decoded prefix is discarded too, since after an error no
+         * output bytes of that call are valid; split across two reads, the
+         * valid chunk was delivered by a call that succeeded and stays. */
+        static const char bad[] = "X\r\nATTACK\r\n0\r\n\r\n";
+        static const char lead[] = "3\r\nabc\r\nX\r\nATTACK\r\n0\r\n\r\n";
+        static const zuh_mock_step one[]  = { { ZUH_MOCK_DATA, bad, sizeof bad - 1, ZUH_OK } };
+        static const zuh_mock_step both[] = { { ZUH_MOCK_DATA, lead, sizeof lead - 1, ZUH_OK } };
+        static const zuh_mock_step split[] = {
+            { ZUH_MOCK_DATA, "3\r\nabc\r\n", 8, ZUH_OK },
+            { ZUH_MOCK_DATA, bad, sizeof bad - 1, ZUH_OK } };
+        const zuh_mock_step *sc[3] = { one, both, split };
+        const size_t ns[3] = { 1, 1, 2 };
+        const size_t want[3] = { 0, 0, 3 };
+        int k;
+        for (k = 0; k < 3; k++) {
+            zuh_buffer b; zuh_sink sink;
+            ZUH_CHECK(zuh_buf_init(&b, 8, 1 << 20));
+            zuh_sink_memory_init(&sink, &b);
+            zuh_headers_init(&h);
+            zuh_error_clear(&e);
+            ZUH_CHECK_EQ_INT(run_body(sc[k], ns[k], ZUH_FRAME_CHUNKED, 0, &sink, &h, 1,
+                                     1u << 20, &e), ZUH_ERR_PARSE);
+            ZUH_CHECK_EQ_INT((int)b.len, (int)want[k]);
+            if (want[k]) ZUH_CHECK(memcmp(b.data, "abc", 3) == 0);
+            zuh_headers_free(&h);
+            zuh_buf_free(&b);
+        }
+    }
+
     /* --- §40: the cap is a BOUND, not a thing noticed afterwards ------- */
 
     ZUH_CASE("§40: the sink is never handed a byte past max_body");

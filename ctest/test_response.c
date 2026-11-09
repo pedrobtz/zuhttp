@@ -208,6 +208,8 @@ void suite_response(void) {
             zuh_chunked_init(&c, 0, 0);
             zuh_error_clear(&e);
             ZUH_CHECK_EQ_INT(zuh_chunked_decode(&c, buf, &len, &e), ZUH_ERR_PARSE);
+            /* #210: after an error, no output bytes are valid. */
+            ZUH_CHECK_EQ_INT((int)len, 0);
             zuh_chunked_free(&c);
         }
         {

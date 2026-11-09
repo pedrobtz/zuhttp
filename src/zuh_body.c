@@ -206,12 +206,13 @@ static zuh_code step_framed(zuh_body_reader *r, zuh_stream *s, zuh_body_pipe *p,
          * someone comparing the two numbers wants to see. */
         p->raw_seen += (uint64_t)n;
         rc = zuh_chunked_decode(&r->dec, r->work, &len, err);
+        /* The result first: a failed decode delivers nothing (#210). */
+        if (rc != ZUH_OK && rc != ZUH_ERR_WOULDBLOCK) return rc;
         if (len) {
             w = zuh_body_pipe_feed(p, r->work, len, err);
             if (w != ZUH_OK) return w;
         }
         if (rc == ZUH_ERR_WOULDBLOCK) return ZUH_OK;
-        if (rc != ZUH_OK) return rc;
         /* The last chunk and its trailers are in, and with them the end of
          * the message: whatever followed it, in this read or still held from
          * the headers, belongs to no response we asked for. */
