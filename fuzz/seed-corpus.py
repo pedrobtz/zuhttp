@@ -198,6 +198,21 @@ def main():
     w("body/chunked-huge-size", bytes([IDENT_CHUNK]) + b"ffffffffffffffff\r\nx")
     w("body/chunked-trailer", bytes([IDENT_CHUNK]) + b"3\r\nabc\r\n0\r\nX-T: 1\r\n\r\n")
     w("body/chunked-truncated", bytes([IDENT_CHUNK]) + b"5\r\nab")
+    # #227: the read-size and framing differentials. Bit 5 is a cap of 8
+    # bytes. #210 handed the sink a malformed chunk's raw bytes before the
+    # parse error; #212 refused under chunked framing a gzip body that fits
+    # max_body decoded (5 bytes) but not compressed (25 bytes).
+    w("body/regress-210-bad-chunk", bytes([IDENT_CHUNK]) + b"X\r\nATTACK\r\n0\r\n\r\n")
+    w("body/regress-210-good-then-bad",
+      bytes([IDENT_CHUNK]) + b"3\r\nabc\r\nX\r\nATTACK\r\n0\r\n\r\n")
+    gz = zlib.compressobj(9, zlib.DEFLATED, 31)
+    w("body/regress-212-gzip-small-cap", bytes([0x20]) + gz.compress(b"hello") + gz.flush())
+    # Two faults, a bad gzip stream in bad chunk framing: read whole, the
+    # framing fails first; byte by byte, the inflater does. Both are right,
+    # and an oracle that compared the error codes aborted on it.
+    w("body/regress-227-two-faults",
+      bytes([0x42]) + b"B\r\nabc\r\n0\xfd\nX-" + b"\x90" * 6 + b"\xff" + b"\x90" * 5 +
+      b"1\r\n\r\n")
 
 
     # --- h2: server frames for target 12 (§65.8) -----------------------------

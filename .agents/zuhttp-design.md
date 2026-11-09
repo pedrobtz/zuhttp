@@ -827,6 +827,7 @@ Strict, not permissive (D-15):
 | more than one `Content-Length`, equal or not | reject |
 | `Content-Length` not plain decimal or overflowing `uint64` | reject |
 | chunk size invalid hex or overflowing (no per-chunk size cap: `max_body` bounds the decoded total, #223) | reject |
+| chunk framing above 80% of the bytes once it passes 100 KB (picohttpparser's guard against framing-overhead floods; found by fuzz_body's framing differential, #227) | reject |
 | neither header, body possible | read to close; not poolable |
 | `obs-fold` | reject |
 | malformed status line, status not three digits | reject |
