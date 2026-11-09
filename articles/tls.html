@@ -179,7 +179,7 @@ fails. The printed configuration spells out which one you have:</p>
 <div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/zu_tls.html">zu_tls</a></span><span class="op">(</span>ca_extra <span class="op">=</span> <span class="va">ca</span><span class="op">)</span></span>
 <span><span class="co">#&gt; &lt;zu_tls_config&gt;</span></span>
-<span><span class="co">#&gt;   ca_extra: /tmp/Rtmp9YNCy1/zuhttp-tls-1fb576643597/ca.pem (adds to system trust)</span></span>
+<span><span class="co">#&gt;   ca_extra: /tmp/RtmpMsvhIV/zuhttp-tls-2007584dbdc8/ca.pem (adds to system trust)</span></span>
 <span><span class="co">#&gt;   revocation: off</span></span></code></pre></div>
 <p>Put the setting on a client to apply it to every request:</p>
 <div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
@@ -214,10 +214,10 @@ so, with the command that converts it:</p>
 <span><span class="fu">ssl</span><span class="op">(</span><span class="st">"x509"</span>, <span class="st">"-in"</span>, <span class="va">ca</span>, <span class="st">"-outform"</span>, <span class="st">"der"</span>, <span class="st">"-out"</span>, <span class="va">der</span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="va">site</span>, tls <span class="op">=</span> <span class="fu"><a href="../reference/zu_tls.html">zu_tls</a></span><span class="op">(</span>ca_extra <span class="op">=</span> <span class="va">der</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #BBBB00; font-weight: bold;">Error</span><span style="font-weight: bold;">:</span></span></span>
-<span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> `ca_extra` has no PEM certificate in it: /tmp/Rtmp9YNCy1/zuhttp-tls-1fb576643597/corporate-root-der.crt</span></span>
+<span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> `ca_extra` has no PEM certificate in it: /tmp/RtmpMsvhIV/zuhttp-tls-2007584dbdc8/corporate-root-der.crt</span></span>
 <span><span class="co">#&gt;   It looks like a DER (binary) certificate. zuhttp reads PEM, the text</span></span>
 <span><span class="co">#&gt;   form starting '-----BEGIN CERTIFICATE-----'. Convert it with:</span></span>
-<span><span class="co">#&gt;     openssl x509 -inform der -in /tmp/Rtmp9YNCy1/zuhttp-tls-1fb576643597/corporate-root-der.crt -out cert.pem</span></span></code></pre></div>
+<span><span class="co">#&gt;     openssl x509 -inform der -in /tmp/RtmpMsvhIV/zuhttp-tls-2007584dbdc8/corporate-root-der.crt -out cert.pem</span></span></code></pre></div>
 </div>
 </div>
 <div class="section level2">
@@ -231,7 +231,7 @@ this one:</p>
 <code class="sourceCode R"><span><span class="va">by_ip</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/sprintf.html" class="external-link">sprintf</a></span><span class="op">(</span><span class="st">"https://127.0.0.1:%d/get"</span>, <span class="va">port</span><span class="op">)</span></span>
 <span><span class="va">e</span> <span class="op">&lt;-</span> <span class="kw"><a href="https://rdrr.io/r/base/conditions.html" class="external-link">tryCatch</a></span><span class="op">(</span><span class="fu"><a href="../reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="va">by_ip</span>, tls <span class="op">=</span> <span class="fu"><a href="../reference/zu_tls.html">zu_tls</a></span><span class="op">(</span>ca_extra <span class="op">=</span> <span class="va">ca</span><span class="op">)</span><span class="op">)</span>, error <span class="op">=</span> <span class="kw">function</span><span class="op">(</span><span class="va">e</span><span class="op">)</span> <span class="va">e</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/class.html" class="external-link">class</a></span><span class="op">(</span><span class="va">e</span><span class="op">)</span><span class="op">[</span><span class="fl">1</span><span class="op">]</span></span>
-<span><span class="co">#&gt; [1] "zu_tls_hostname_error"</span></span></code></pre></div>
+<span><span class="co">#&gt; [1] "zu_tls_handshake_error"</span></span></code></pre></div>
 </div>
 <div class="section level2">
 <h2 id="what-was-negotiated">What was negotiated<a class="anchor" aria-label="anchor" href="#what-was-negotiated"></a>
