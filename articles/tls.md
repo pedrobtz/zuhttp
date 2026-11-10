@@ -126,7 +126,7 @@ printed configuration spells out which one you have:
 
 zu_tls(ca_extra = ca)
 #> <zu_tls_config>
-#>   ca_extra: /tmp/RtmpyUKJ0y/zuhttp-tls-1f1e73f74df9/ca.pem (adds to system trust)
+#>   ca_extra: /tmp/Rtmpbnp1T4/zuhttp-tls-1f0b54eec702/ca.pem (adds to system trust)
 #>   revocation: off
 ```
 
@@ -172,10 +172,10 @@ der <- f("corporate-root-der.crt")
 ssl("x509", "-in", ca, "-outform", "der", "-out", der)
 zu_get(site, tls = zu_tls(ca_extra = der))
 #> Error:
-#> ! `ca_extra` has no PEM certificate in it: /tmp/RtmpyUKJ0y/zuhttp-tls-1f1e73f74df9/corporate-root-der.crt
+#> ! `ca_extra` has no PEM certificate in it: /tmp/Rtmpbnp1T4/zuhttp-tls-1f0b54eec702/corporate-root-der.crt
 #>   It looks like a DER (binary) certificate. zuhttp reads PEM, the text
 #>   form starting '-----BEGIN CERTIFICATE-----'. Convert it with:
-#>     openssl x509 -inform der -in /tmp/RtmpyUKJ0y/zuhttp-tls-1f1e73f74df9/corporate-root-der.crt -out cert.pem
+#>     openssl x509 -inform der -in /tmp/Rtmpbnp1T4/zuhttp-tls-1f0b54eec702/corporate-root-der.crt -out cert.pem
 ```
 
 ## The name must match
