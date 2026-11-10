@@ -150,4 +150,51 @@ void suite_trace(void) {
         zuh_trace_add(NULL, ZUH_EV_REQUEST_START, "x", 0);
         ZUH_CHECK(1);
     }
+
+    /* #275: zuh_trace_add_at() was never run in ctest. Its clamps, each
+     * against a clock pinned by moving t0 back: an event lands at `at`
+     * when that lies between the previous event and now, at the previous
+     * event when `at` is earlier, at 0 for the first event, and never
+     * later than now. */
+    ZUH_CASE("#275: zuh_trace_add_at clamps between the previous event and now");
+    {
+        static zuh_trace t;
+        zuh_trace_init(&t);
+        t.t0 = zuh_now_ms() - 10000;
+        zuh_trace_add_at(&t, ZUH_EV_DNS_START, NULL, 0, t.t0 - 50);    /* before t0 */
+        ZUH_CHECK_EQ_INT(t.ev[0].at_ms, 0);
+        zuh_trace_add_at(&t, ZUH_EV_DNS_DONE, NULL, 0, t.t0 + 4000);   /* in range */
+        ZUH_CHECK_EQ_INT(t.ev[1].at_ms, 4000);
+        zuh_trace_add_at(&t, ZUH_EV_CONNECT_START, NULL, 0, t.t0 + 3000); /* earlier */
+        ZUH_CHECK_EQ_INT(t.ev[2].at_ms, 4000);
+        zuh_trace_add_at(&t, ZUH_EV_CONNECT_DONE, NULL, 0, t.t0 + 4001);
+        ZUH_CHECK_EQ_INT(t.ev[3].at_ms, 4001);
+        zuh_trace_add_at(&t, ZUH_EV_TLS_START, NULL, 0, t.t0 + 999999); /* future */
+        ZUH_CHECK(t.ev[4].at_ms >= 10000 && t.ev[4].at_ms < 999999);
+        ZUH_CHECK_EQ_INT(t.n, 5);
+    }
+
+    /* Full, and one past: the event is counted as dropped and nothing that
+     * is already in the log changes, whatever its type. An add_at of the
+     * same type as the last event used to move the last event's time. */
+    ZUH_CASE("#275: a full trace drops the next add_at without touching the last event");
+    {
+        static zuh_trace t;
+        size_t i;
+        zuh_trace_init(&t);
+        t.t0 = zuh_now_ms() - 10000;
+        for (i = 0; i < ZUH_TRACE_MAX; i++)
+            zuh_trace_add_at(&t, ZUH_EV_BODY_CHUNK, NULL, i, t.t0 + 1000 + 10 * (zuh_millis)i);
+        ZUH_CHECK_EQ_INT(t.n, ZUH_TRACE_MAX);
+        ZUH_CHECK_EQ_INT(t.dropped, 0);
+        ZUH_CHECK_EQ_INT(t.ev[ZUH_TRACE_MAX - 1].at_ms, 1000 + 10 * (ZUH_TRACE_MAX - 1));
+        zuh_trace_add_at(&t, ZUH_EV_BODY_CHUNK, NULL, 999,
+                         t.t0 + 1000 + 10 * (ZUH_TRACE_MAX - 1) - 5);
+        ZUH_CHECK_EQ_INT(t.n, ZUH_TRACE_MAX);
+        ZUH_CHECK_EQ_INT(t.dropped, 1);
+        ZUH_CHECK_EQ_INT(t.ev[ZUH_TRACE_MAX - 1].at_ms, 1000 + 10 * (ZUH_TRACE_MAX - 1));
+        ZUH_CHECK_EQ_INT(t.ev[ZUH_TRACE_MAX - 1].n, ZUH_TRACE_MAX - 1);
+        zuh_trace_add_at(&t, ZUH_EV_DNS_DONE, NULL, 0, t.t0);
+        ZUH_CHECK_EQ_INT(t.dropped, 2);
+    }
 }
