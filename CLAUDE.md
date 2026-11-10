@@ -91,6 +91,10 @@ ZU_H2_TEST_SERVER=http://127.0.0.1:18080 ZU_H2_TEST_TLS=https://localhost:18443 
 # The R glue (init.c) under valgrind: Linux only; CI runs it on every PR (#164)
 tools/ci-valgrind-glue.sh
 
+# The R glue with each allocation failed in turn, R's included (#237): weekly
+# in alloc-failure.yaml; tools/alloc/exercise.R is the workload
+Rscript tools/alloc/exercise.R
+
 # What CI actually runs for the R suite — reproduce THIS before claiming green,
 # because it differs from R CMD check in ways that have bitten before.
 Rscript tools/ci-run-tests.R

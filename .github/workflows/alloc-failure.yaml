@@ -1,0 +1,49 @@
+# Allocation-failure injection over the R glue (#237; r-actions
+# alloc-failure.yml). Fails each allocation in turn, R's own included, while
+# tools/alloc/exercise.R makes a buffered, a streamed and an upload request
+# against a loopback server. ctest's zuh_alloc_fail_after() sweeps already
+# cover the C core; this is the one check that fails R's allocator under
+# C_zu_perform and C_zu_stream_read, where #214 held native memory across an
+# allocation that could longjmp.
+#
+# The sweep restarts R once per allocation, so it runs weekly and on demand,
+# and on a pull request that changes the workload or this file.
+on:
+  schedule:
+    - cron: "23 5 * * 0"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - tools/alloc/**
+      - .github/workflows/alloc-failure.yaml
+
+name: alloc-failure
+
+permissions:
+  contents: read
+
+jobs:
+  alloc-failure:
+    uses: pedrobtz/r-actions/.github/workflows/alloc-failure.yml@v1
+    with:
+      # R_ENABLE_JIT=0: the byte compiler's own regex calls were 16 of the
+      # first sweep's crashes, all in base R.
+      run: R_ENABLE_JIT=0 Rscript tools/alloc/exercise.R
+      # Up to the first request: R's startup, the package and the server.
+      baseline-run: R_ENABLE_JIT=0 Rscript tools/alloc/exercise.R --baseline
+      # A request that fails must say so with a condition: zuhttp's classes,
+      # or one of R's out-of-memory errors, which come in several wordings.
+      # A wrong result exits 3 and matches none, so the sweep reports it.
+      expect-pattern: "zu_[a-z_]+_error|cannot allocate|could not allocate|memory exhausted|[Oo]ut of memory|out of virtual memory|allocation (error|of .* failed)"
+      # Base R segfaults when the TRE regex compiler or gzfile() gets a failed
+      # allocation (an R bug, not ours; #282). A crash whose top R frame is one
+      # of those is listed apart; one under .Call into zuhttp still fails.
+      ignore-crash-pattern: "^ 1: (grepl?|sub|gsub|regexpr|gregexpr|strsplit|gzfile)\\("
+      # Injected failures that reached zuhttp's own allocator.
+      target-pattern: "zu_memory_error"
+      # 131 of 1409 did in the first clean sweep (run 42806184948's
+      # successor, 2026-11-10). A floor under that fails a sweep that stops
+      # reaching zuhttp's allocator, rather than passing on nothing.
+      min-target-hits: 100
+      max-allocations: 4000
+      timeout-minutes: 120
