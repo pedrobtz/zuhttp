@@ -32,7 +32,7 @@ zu_request <- function(method, url) {
   if (!is.character(url) || length(url) != 1L || is.na(url)) {
     stop("`url` must be a single string", call. = FALSE)
   }
-  if (!grepl("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$", method)) {
+  if (!is_token(method)) {
     stop("`", method, "` is not a valid HTTP method token", call. = FALSE)
   }
   structure(

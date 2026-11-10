@@ -1,0 +1,17 @@
+# Holds .agents/assurance.md to the portfolio standard
+# (pedrobtz/packages claude/shared/assurance.md). Seconds; runs on every
+# change, because the file it checks is Markdown the docs gate would skip.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+name: assurance
+
+permissions:
+  contents: read
+
+jobs:
+  assurance:
+    uses: pedrobtz/r-actions/.github/workflows/assurance.yml@v1

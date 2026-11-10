@@ -2,7 +2,41 @@
 # §8) — this is only what has to happen before a URL can be handed over: the
 # base_url join and query-string encoding.
 
-is_absolute_url <- function(x) grepl("^[A-Za-z][A-Za-z0-9+.-]*://", x)
+# Both checks below run on every request, and both were once regexes. Under
+# memory pressure R's TRE regex engine can report "no match" with only a
+# warning, or crash (#282): a valid `GET` was refused as an invalid method,
+# and an absolute URL read as relative would be joined onto base_url. They
+# are character-set checks, so they need no regex. tests/testthat/test-url.R
+# holds them to the regexes they replace.
+is_absolute_url <- function(x) {
+  vapply(x, is_absolute_url1, logical(1), USE.NAMES = FALSE)
+}
+
+is_absolute_url1 <- function(s) {
+  if (is.na(s)) {
+    return(FALSE)
+  }
+  at <- regexpr("://", s, fixed = TRUE)
+  if (at < 2L) {
+    return(FALSE)
+  }
+  cp <- utf8ToInt(substr(s, 1L, at - 1L))
+  # RFC 3986 §3.1: scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
+  !anyNA(cp) && cp[1L] %in% ascii_alpha && all(cp %in% scheme_chars)
+}
+
+# RFC 9110 §5.6.2: token = 1*tchar.
+is_token <- function(s) {
+  if (is.na(s) || !nzchar(s)) {
+    return(FALSE)
+  }
+  cp <- utf8ToInt(s)
+  !anyNA(cp) && all(cp %in% tchar)
+}
+
+ascii_alpha <- c(65:90, 97:122)
+scheme_chars <- c(ascii_alpha, 48:57, utf8ToInt("+-."))
+tchar <- c(ascii_alpha, 48:57, utf8ToInt("!#$%&'*+-.^_`|~"))
 
 # §31.3's base_url. Textual join, not RFC 3986 resolution — see the note in
 # zu_client(): resolution would drop the "/v1" from a versioned base URL,
