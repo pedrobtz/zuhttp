@@ -13,9 +13,6 @@
  * H2_READ_CHUNK bytes of frames, so the buffer never holds more than that;
  * the cap is a backstop, not a tuning knob. */
 #define H2_DATA_MAX   (1024u * 1024u)
-/* HPACK's accounting (RFC 9113 §6.5.2): each field costs its name, its value
- * and 32 bytes, which is what SETTINGS_MAX_HEADER_LIST_SIZE advertises. */
-#define H2_FIELD_OVERHEAD 32u
 
 const char *zuh_h2_alpn_for(zuh_h2_mode m) {
     /* REQUIRED offers http/1.1 too. Offering h2 alone would let a server
@@ -41,7 +38,6 @@ typedef struct {
     zuh_headers *hdrs;          /* the caller's: the final response block */
     zuh_headers  trailers;      /* §65.3 exposes them (W21); kept, bounded */
     int          in_trailers;   /* the block being received is the trailers */
-    size_t       block_bytes;   /* of the block being received */
     int          headers_done;  /* the final response block is complete */
     int          ended_on_headers;
     int          closed;
@@ -95,6 +91,14 @@ static void *mem_realloc(void *p, size_t n, void *ud) { (void)ud; return zuh_rea
 
 /* --- callbacks --- */
 
+/* A block's headers object, holding the limit this session advertised in
+ * SETTINGS_MAX_HEADER_LIST_SIZE: the one counter of D-101, so the value the
+ * server is told and the value enforced are the same variable. */
+static void h2_headers_init(h2_impl *h, zuh_headers *hd) {
+    zuh_headers_init(hd);
+    hd->max_bytes = h->max_header_bytes;
+}
+
 static int cb_fail(h2_impl *h, zuh_code code, const char *msg) {
     if (h->cb_code == ZUH_OK) {
         h->cb_code = code;
@@ -108,7 +112,6 @@ static int on_begin_headers(nghttp2_session *s, const nghttp2_frame *f, void *ud
     h2_impl *h = (h2_impl *)ud;
     (void)s;
     if (f->hd.type != NGHTTP2_HEADERS || f->hd.stream_id != h->sid) return 0;
-    h->block_bytes = 0;
     if (h->headers_done) {
         /* A second block after the final response is the trailers. */
         h->in_trailers = 1;
@@ -118,7 +121,7 @@ static int on_begin_headers(nghttp2_session *s, const nghttp2_frame *f, void *ud
         if (!h->hdrs)
             return cb_fail(h, ZUH_ERR_PARSE, "HTTP/2 response headers arrived outside a request");
         zuh_headers_free(h->hdrs);
-        zuh_headers_init(h->hdrs);
+        h2_headers_init(h, h->hdrs);
         h->status = 0;
     }
     return 0;
@@ -132,13 +135,6 @@ static int on_header(nghttp2_session *s, const nghttp2_frame *f,
     (void)s; (void)flags;
     if (f->hd.type != NGHTTP2_HEADERS || f->hd.stream_id != h->sid) return 0;
 
-    /* §40 for each block on its own (§65.3), counted as HPACK counts. */
-    h->block_bytes += nlen + vlen + H2_FIELD_OVERHEAD;
-    if (h->block_bytes > h->max_header_bytes)
-        return cb_fail(h, ZUH_ERR_PARSE, h->in_trailers
-                       ? "HTTP/2 trailer block exceeds the header size limit"
-                       : "HTTP/2 response header block exceeds the header size limit");
-
     if (nlen > 0 && name[0] == ':') {
         /* nghttp2 has validated the pseudo-headers (RFC 9113 §8.3.2): only
          * :status reaches a client, once, as three digits. */
@@ -148,11 +144,18 @@ static int on_header(nghttp2_session *s, const nghttp2_frame *f,
     }
     if (!h->in_trailers && !h->hdrs)
         return cb_fail(h, ZUH_ERR_PARSE, "HTTP/2 response headers arrived outside a request");
+    /* §40 for each block on its own (§65.3), by D-101's one rule: the
+     * headers object charges name + value + 32 a field against the block's
+     * limit, pseudo-header fields excluded, exactly as on HTTP/1.1. */
     rc = zuh_headers_add(h->in_trailers ? &h->trailers : h->hdrs,
                          (const char *)name, nlen, (const char *)value, vlen);
     if (rc == ZUH_ERR_NOMEM) return cb_fail(h, rc, "out of memory");
+    if (rc == ZUH_ERR_BODY_LIMIT)
+        return cb_fail(h, ZUH_ERR_PARSE, h->in_trailers
+                       ? "HTTP/2 trailer block exceeds a header limit"
+                       : "HTTP/2 response header block exceeds a header limit");
     if (rc != ZUH_OK)
-        return cb_fail(h, ZUH_ERR_PARSE, "HTTP/2 response header is invalid or over a limit");
+        return cb_fail(h, ZUH_ERR_PARSE, "HTTP/2 response header is invalid");
     return 0;
 }
 
@@ -177,7 +180,7 @@ static int on_frame_recv(nghttp2_session *s, const nghttp2_frame *f, void *ud) {
             if (!h->hdrs)
                 return cb_fail(h, ZUH_ERR_PARSE, "HTTP/2 response headers arrived outside a request");
             zuh_headers_free(h->hdrs);
-            zuh_headers_init(h->hdrs);
+            h2_headers_init(h, h->hdrs);
             h->status = 0;
             break;
         }
@@ -466,7 +469,7 @@ zuh_code zuh_h2_begin(zuh_stream *conn, const zuh_h2_request *rq,
     h->closed = 0; h->close_code = 0; h->peer_reset = 0; h->cancelled = 0;
     h->cb_code = ZUH_OK; h->cb_msg[0] = '\0';
     zuh_headers_free(&h->trailers);
-    zuh_headers_init(&h->trailers);
+    h2_headers_init(h, &h->trailers);
     zuh_buf_reset(&h->data);
     zuh_free(h->body_owned);
     h->body_owned = NULL;
@@ -566,7 +569,7 @@ zuh_code zuh_h2_body_step(zuh_stream *conn, zuh_body_pipe *pipe, int *done,
     if (rc != ZUH_OK) return rc;
     zuh_headers_free(&pipe->trailers);
     pipe->trailers = h->trailers;               /* ownership moves */
-    zuh_headers_init(&h->trailers);
+    h2_headers_init(h, &h->trailers);
     *done = 1;
     /* WINDOW_UPDATE and SETTINGS ACK frames the last read produced go out
      * now rather than with the next request, which may be a while. */
@@ -744,8 +747,8 @@ zuh_code zuh_h2_wrap(zuh_stream **out, zuh_stream *inner,
         zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_CONNECT, "out of memory");
         return ZUH_ERR_NOMEM;
     }
-    zuh_headers_init(&h->trailers);
     h->max_header_bytes = max_header_bytes ? max_header_bytes : ZUH_DEFAULT_MAX_HEADER_BYTES;
+    h2_headers_init(h, &h->trailers);
 
     mem.mem_user_data = NULL;
     mem.malloc = mem_malloc; mem.free = mem_free;

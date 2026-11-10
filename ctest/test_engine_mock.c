@@ -24,7 +24,8 @@
 
 void suite_engine_mock(void);
 
-#define MAXC 8
+/* 16: #254 follows a chain of 11 redirects, a connection a hop. */
+#define MAXC 16
 
 typedef struct {
     const char *bytes;
@@ -59,6 +60,9 @@ typedef struct {
     /* After connection i's bytes, a peer gone silent: reads last until
      * their deadline (#181). */
     int         block_after[MAXC];
+    /* Writes that carried bytes, per connection: one when the body rides
+     * in the header write, two when it follows it (#208, PR #261). */
+    int         writes[MAXC];
 } dialer;
 
 typedef struct { zuh_stream *inner; dialer *d; size_t idx; } tap_impl;
@@ -82,7 +86,7 @@ static zuh_ssize tap_write(zuh_stream *s, const void *b, size_t n, zuh_deadline 
         return -1;
     }
     w = zuh_stream_write(t->inner, b, n, dl, e);
-    if (w > 0) zuh_buf_append(&t->d->sent[t->idx], b, (size_t)w);
+    if (w > 0) { zuh_buf_append(&t->d->sent[t->idx], b, (size_t)w); t->d->writes[t->idx]++; }
     return w;
 }
 static void tap_close(zuh_stream *s) { zuh_stream_close(((tap_impl *)s->impl)->inner); }
@@ -224,6 +228,37 @@ static size_t framed(char *out, size_t cap, int how, const char *coding,
                          "Connection: close\r\n\r\n", coding);
     memcpy(out + h, body, n);
     return h + n;
+}
+
+/* §40: a head of exactly `wire` bytes, status line to blank line. The reason
+ * phrase takes whatever `fields` (each CRLF-terminated) leave, so the head's
+ * wire size moves while its fields stay the same. 0 if it cannot be built. */
+static size_t head_of(char *out, size_t cap, const char *status, const char *fields,
+                      size_t wire) {
+    size_t sl = strlen(status), fl = strlen(fields);
+    size_t fixed = 9 + sl + 1 + 2 + fl + 2;      /* "HTTP/1.1 " st " " CRLF f CRLF */
+    size_t n = 0;
+    if (wire <= fixed || wire > cap) return 0;
+    memcpy(out, "HTTP/1.1 ", 9); n = 9;
+    memcpy(out + n, status, sl); n += sl;
+    out[n++] = ' ';
+    memset(out + n, 'r', wire - fixed); n += wire - fixed;
+    memcpy(out + n, "\r\n", 2); n += 2;
+    memcpy(out + n, fields, fl); n += fl;
+    memcpy(out + n, "\r\n", 2); n += 2;
+    return n;
+}
+
+/* `count` fields "X-NN: " + `vlen` bytes, then `tail`. Returns the length. */
+static size_t pad_fields(char *out, size_t cap, size_t count, size_t vlen, const char *tail) {
+    size_t i, n = 0;
+    for (i = 0; i < count && n + vlen + 16 < cap; i++) {
+        n += (size_t)snprintf(out + n, cap - n, "X-%02lu: ", (unsigned long)i);
+        memset(out + n, 'v', vlen); n += vlen;
+        out[n++] = '\r'; out[n++] = '\n';
+    }
+    n += (size_t)snprintf(out + n, cap - n, "%s", tail);
+    return n;
 }
 
 /* §65.7: a request-body source over a NULL-terminated list of strings. */
@@ -396,6 +431,259 @@ static void sweep_engine(const char *name, eng_scenario scn, zuh_code expect) {
     ZUH_CHECK(failed > 0);
     ZUH_CHECK_EQ_INT(bad, 0);
     ZUH_CHECK_EQ_INT(leaked, 0);
+}
+
+/* §40 at its edges: every limit at limit - 1, limit and limit + 1, at read
+ * sizes that put a boundary inside the window (#252-#259). */
+static void limits_cases(void) {
+    static char buf[90000];
+    zuh_get_opts o;
+    zuh_result r;
+    zuh_error e;
+    dialer d;
+    size_t k;
+    /* One-shot (16 KiB reads, aligned to 64 KiB), 1000 and 4093 bytes. */
+    static const size_t reads[] = { 0, 1000, 4093 };
+
+    ZUH_CASE("limits: a CONNECT reply head is refused past 64 KiB at every read size (#257)");
+    for (k = 0; k < sizeof reads / sizeof reads[0]; k++) {
+        static const struct { size_t wire; zuh_code want; } cases[] = {
+            { 65535, ZUH_ERR_TLS }, { 65536, ZUH_ERR_TLS }, { 65537, ZUH_ERR_PROXY },
+            { 70000, ZUH_ERR_PROXY } };
+        size_t j;
+        for (j = 0; j < sizeof cases / sizeof cases[0]; j++) {
+            conn_script sc[1];
+            size_t n = head_of(buf, sizeof buf, "200", "Via: test\r\n", cases[j].wire);
+            ZUH_CHECK_EQ_INT(n, cases[j].wire);
+            memset(sc, 0, sizeof sc);
+            sc[0].bytes = buf; sc[0].len = n; sc[0].max_read = reads[k];
+            dialer_init(&d, sc, 1); opts_for(&o, &d); o.proxy = "http://proxy.test:3128";
+            zuh_error_clear(&e);
+            /* Under the cap the tunnel opens and reaches TLS, which this build
+             * lacks; over it, the proxy error says why, never "out of memory". */
+            ZUH_CHECK_EQ_INT(zuh_engine_get(&r, "https://origin.test/", &o, &e), cases[j].want);
+            ZUH_CHECK_EQ_INT(e.code, cases[j].want);
+            if (cases[j].want == ZUH_ERR_PROXY) ZUH_CHECK(has(e.message, "too large"));
+            dialer_free(&d);
+        }
+    }
+
+    /* #258: 58 fields of 1000 bytes stay inside every field budget, so the
+     * head's wire size alone decides, through its reason phrase. 69000
+     * bytes completed in the read after a 4093-byte split that ended under
+     * 64 KiB, and was accepted there while one-shot reads refused it. */
+    ZUH_CASE("limits: a response head over 64 KiB on the wire is refused at every read size (#258)");
+    {
+        static char fields[70000];
+        static const size_t rd[] = { 0, 1, 4093 };
+        static const struct { size_t wire; zuh_code want; } cases[] = {
+            { 65535, ZUH_OK }, { 65536, ZUH_OK }, { 65537, ZUH_ERR_PARSE },
+            { 69000, ZUH_ERR_PARSE }, { 70000, ZUH_ERR_PARSE } };
+        size_t j;
+        pad_fields(fields, sizeof fields, 58, 1000, "Content-Length: 2\r\n");
+        for (k = 0; k < sizeof rd / sizeof rd[0]; k++) {
+            for (j = 0; j < sizeof cases / sizeof cases[0]; j++) {
+                conn_script sc[1];
+                zuh_code rc;
+                size_t n = head_of(buf, sizeof buf, "200", fields, cases[j].wire);
+                ZUH_CHECK_EQ_INT(n, cases[j].wire);
+                memcpy(buf + n, "ok", 2); n += 2;
+                memset(sc, 0, sizeof sc);
+                sc[0].bytes = buf; sc[0].len = n; sc[0].max_read = rd[k];
+                dialer_init(&d, sc, 1); opts_for(&o, &d);
+                zuh_error_clear(&e);
+                rc = zuh_engine_get(&r, "http://example.test/", &o, &e);
+                ZUH_CHECK_EQ_INT(rc, cases[j].want);
+                if (rc == ZUH_OK) {
+                    ZUH_CHECK(r.body.len == 2 && memcmp(r.body.data, "ok", 2) == 0);
+                    ZUH_CHECK_EQ_INT(zuh_headers_total(&r.headers), 59);
+                    zuh_result_free(&r);
+                } else {
+                    ZUH_CHECK_EQ_INT(e.code, cases[j].want);
+                    ZUH_CHECK(has(e.message, "header block exceeds"));
+                }
+                dialer_free(&d);
+            }
+        }
+    }
+
+    /* PR #261's survivor: #208's threshold exactly. A body that fills the
+     * 64 KiB header buffer to its last byte rides in the header write; one
+     * byte more goes in a write of its own. The bytes on the wire are the
+     * same either way, so the write count is the oracle. The header length
+     * comes from a 60000-byte upload, whose Content-Length has as many
+     * digits as the ones straddling the edge. */
+    ZUH_CASE("limits: a body exactly filling the 64 KiB header write rides in it; one byte more does not (#208)");
+    {
+        static unsigned char up[70000];
+        zuh_req_spec spec;
+        size_t hl = 0, j;
+        conn_script sc[] = {{ "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok", 0, 0, 0, NULL }};
+        for (j = 0; j < sizeof up; j++) up[j] = (unsigned char)(j * 7 + 3);
+        for (j = 0; j < 5; j++) {
+            /* 60000 to measure, then the edge - 1, edge, edge + 1, then 0. */
+            size_t len = j == 0 ? 60000 : j == 4 ? 0 : 65536 - hl - 2 + j;
+            zuh_code rc;
+            memset(&spec, 0, sizeof spec);
+            spec.method = "POST"; spec.body = up; spec.body_len = len;
+            dialer_init(&d, sc, 1); opts_for(&o, &d);
+            zuh_error_clear(&e);
+            rc = zuh_engine_perform(&r, "http://example.test/up", &spec, &o, &e);
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            if (rc == ZUH_OK) zuh_result_free(&r);
+            ZUH_CHECK(d.sent[0].len >= len &&
+                      memcmp(d.sent[0].data + d.sent[0].len - len, up, len) == 0);
+            if (j == 0) hl = d.sent[0].len - len;
+            ZUH_CHECK_EQ_INT(d.sent[0].len, hl + len - (j == 4 ? 4 : 0));
+            ZUH_CHECK_EQ_INT(d.writes[0], j == 3 ? 2 : 1);
+            dialer_free(&d);
+        }
+    }
+
+    /* #254, §19.5: a redirect body within ZUH_MAX_REDIRECT_BODY is drained
+     * and its connection carries the next hop; one byte more costs the
+     * connection, never the request. Under Content-Length and chunked, at
+     * one-shot and 4093-byte reads. */
+    ZUH_CASE("limits: a redirect body of 65535 or 65536 bytes is drained and the connection reused; 65537 is not (#254)");
+    {
+        static const size_t rd[] = { 0, 4093 };
+        size_t j, chunked;
+        for (chunked = 0; chunked < 2; chunked++)
+        for (k = 0; k < sizeof rd / sizeof rd[0]; k++)
+        for (j = 65535; j <= 65537; j++) {
+            zuh_pool *pool = zuh_pool_new(NULL);
+            conn_script sc[2];
+            size_t n;
+            zuh_code rc;
+            if (chunked) {
+                n = (size_t)snprintf(buf, sizeof buf, "HTTP/1.1 302 Found\r\nLocation: /ok\r\n"
+                                     "Transfer-Encoding: chunked\r\n\r\n%lx\r\n", (unsigned long)j);
+                memset(buf + n, 'x', j); n += j;
+                memcpy(buf + n, "\r\n0\r\n\r\n", 7); n += 7;
+            } else {
+                n = (size_t)snprintf(buf, sizeof buf, "HTTP/1.1 302 Found\r\nLocation: /ok\r\n"
+                                     "Content-Length: %lu\r\n\r\n", (unsigned long)j);
+                memset(buf + n, 'x', j); n += j;
+            }
+            memset(sc, 0, sizeof sc);
+            sc[0].bytes = buf; sc[0].len = n; sc[0].max_read = rd[k]; sc[0].not_readable = 1;
+            sc[0].next = OK200(2) "ok";
+            sc[1].bytes = OK200(2) "ok"; sc[1].not_readable = 1;
+            dialer_init(&d, sc, 2); opts_for(&o, &d); o.pool = pool;
+            zuh_error_clear(&e);
+            rc = zuh_engine_get(&r, "http://example.test/start", &o, &e);
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            if (rc == ZUH_OK) {
+                ZUH_CHECK_EQ_INT(r.redirects, 1);
+                ZUH_CHECK(r.body.len == 2 && memcmp(r.body.data, "ok", 2) == 0);
+                zuh_result_free(&r);
+            }
+            ZUH_CHECK_EQ_INT(d.next, j <= 65536 ? 1 : 2);
+            dialer_free(&d); zuh_pool_free(pool);
+        }
+    }
+
+    /* #254: 253 bytes is the longest host name (RFC 1035) and dials; 254
+     * is zu_url_error before any connection, on the first hop and on a
+     * redirect's. */
+    ZUH_CASE("limits: a 252- or 253-byte host dials; 254 bytes is zu_url_error, on any hop (#254)");
+    {
+        size_t len, hop;
+        for (hop = 0; hop < 2; hop++)
+        for (len = 252; len <= 254; len++) {
+            static char host[300], url[400], loc[512];
+            conn_script sc[2];
+            zuh_code rc;
+            memset(host, 'h', len - 5); memcpy(host + len - 5, ".test", 6);
+            snprintf(url, sizeof url, "http://%s/", hop ? "example.test" : host);
+            snprintf(loc, sizeof loc, "HTTP/1.1 302 Found\r\nLocation: http://%s/\r\n"
+                     "Content-Length: 0\r\nConnection: close\r\n\r\n", host);
+            memset(sc, 0, sizeof sc);
+            sc[0].bytes = hop ? loc : OK200(2) "ok";
+            sc[1].bytes = OK200(2) "ok";
+            dialer_init(&d, sc, 2); opts_for(&o, &d);
+            zuh_error_clear(&e);
+            rc = zuh_engine_get(&r, url, &o, &e);
+            ZUH_CHECK_EQ_INT(rc, len <= 253 ? ZUH_OK : ZUH_ERR_URL);
+            ZUH_CHECK_EQ_INT(d.next, (len <= 253 ? 1 : 0) + hop);
+            if (rc == ZUH_OK) zuh_result_free(&r);
+            else ZUH_CHECK(has(e.message, "host name"));
+            dialer_free(&d);
+        }
+    }
+
+    /* #254, §19.4: at the default of 10, a chain of 9 or 10 redirects is
+     * followed to its end and 11 is zu_too_many_redirects. */
+    ZUH_CASE("limits: 9 and 10 redirects are followed; the 11th is too many (#254)");
+    {
+        static char hops[12][128];
+        size_t chain, i;
+        for (chain = 9; chain <= 11; chain++) {
+            conn_script sc[12];
+            zuh_code rc;
+            memset(sc, 0, sizeof sc);
+            for (i = 0; i < chain; i++) {
+                snprintf(hops[i], sizeof hops[i], "HTTP/1.1 302 Found\r\nLocation: /h%lu\r\n"
+                         "Content-Length: 0\r\nConnection: close\r\n\r\n", (unsigned long)i + 1);
+                sc[i].bytes = hops[i];
+            }
+            sc[chain].bytes = OK200(2) "ok";
+            dialer_init(&d, sc, chain + 1); opts_for(&o, &d);
+            ZUH_CHECK_EQ_INT(o.max_redirects, 10);
+            zuh_error_clear(&e);
+            rc = zuh_engine_get(&r, "http://example.test/", &o, &e);
+            ZUH_CHECK_EQ_INT(rc, chain <= 10 ? ZUH_OK : ZUH_ERR_TOO_MANY_REDIRECTS);
+            if (rc == ZUH_OK) {
+                ZUH_CHECK_EQ_INT(r.redirects, chain);
+                ZUH_CHECK(r.body.len == 2 && memcmp(r.body.data, "ok", 2) == 0);
+                zuh_result_free(&r);
+            }
+            /* The refused hop is never dialled. */
+            ZUH_CHECK_EQ_INT(d.next, chain <= 10 ? chain + 1 : 11);
+            dialer_free(&d);
+        }
+    }
+
+    /* D-101: a trailer section has the head's wire bound too. Whitespace
+     * before a value is wire bytes and no field bytes, so one field padded
+     * with it puts the wire bound alone at stake. The section was refused
+     * when one append crossed the cap, and accepted when the bytes came in
+     * smaller pieces that ended under it. */
+    ZUH_CASE("limits: a trailer section over 64 KiB on the wire is refused at every read size (D-101)");
+    {
+        static const size_t rd[] = { 0, 1, 4093 };
+        static const struct { size_t wire; zuh_code want; } cases[] = {
+            { 65535, ZUH_OK }, { 65536, ZUH_OK }, { 65537, ZUH_ERR_PARSE }, { 70000, ZUH_ERR_PARSE } };
+        static const char pre[] = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nok\r\n0\r\n";
+        size_t j;
+        for (k = 0; k < sizeof rd / sizeof rd[0]; k++) {
+            for (j = 0; j < sizeof cases / sizeof cases[0]; j++) {
+                conn_script sc[1];
+                zuh_code rc;
+                size_t n = sizeof pre - 1, sp = cases[j].wire - 11;   /* "x-ows:" sp "v" CRLF CRLF */
+                memcpy(buf, pre, n);
+                memcpy(buf + n, "x-ows:", 6); n += 6;
+                memset(buf + n, ' ', sp); n += sp;
+                memcpy(buf + n, "v\r\n\r\n", 5); n += 5;
+                ZUH_CHECK_EQ_INT(n - (sizeof pre - 1), cases[j].wire);
+                memset(sc, 0, sizeof sc);
+                sc[0].bytes = buf; sc[0].len = n; sc[0].max_read = rd[k];
+                dialer_init(&d, sc, 1); opts_for(&o, &d);
+                zuh_error_clear(&e);
+                rc = zuh_engine_get(&r, "http://example.test/", &o, &e);
+                ZUH_CHECK_EQ_INT(rc, cases[j].want);
+                if (rc == ZUH_OK) {
+                    ZUH_CHECK(zuh_headers_get(&r.trailers, "x-ows") &&
+                              strcmp(zuh_headers_get(&r.trailers, "x-ows"), "v") == 0);
+                    zuh_result_free(&r);
+                } else {
+                    ZUH_CHECK_EQ_INT(e.code, cases[j].want);
+                    ZUH_CHECK(has(e.message, "trailer section exceeds"));
+                }
+                dialer_free(&d);
+            }
+        }
+    }
 }
 
 void suite_engine_mock(void) {
@@ -1375,7 +1663,7 @@ void suite_engine_mock(void) {
         dialer_free(&d); zuh_pool_free(pool);
     }
 
-    ZUH_CASE("engine: a response header block over 64 KiB is refused (§40)");
+    ZUH_CASE("engine: a response header block over 64 KiB is zu_http_parse_error (§40, D-101)");
     {
         static char big[80000];
         size_t k, n = 0;
@@ -1390,7 +1678,7 @@ void suite_engine_mock(void) {
         memset(sc, 0, sizeof sc); sc[0].bytes = big; sc[0].len = n;
         dialer_init(&d, sc, 1); opts_for(&o, &d);
         zuh_error_clear(&e);
-        ZUH_CHECK_EQ_INT(zuh_engine_get(&r, "http://example.test/", &o, &e), ZUH_ERR_BODY_LIMIT);
+        ZUH_CHECK_EQ_INT(zuh_engine_get(&r, "http://example.test/", &o, &e), ZUH_ERR_PARSE);
         ZUH_CHECK(has(e.message, "header block exceeds"));
         dialer_free(&d);
     }
@@ -1899,4 +2187,5 @@ void suite_engine_mock(void) {
     sweep_engine("engine: every allocation failure while a header block outgrows the first read fails cleanly (#188, #197)",
                  scn_big_headers, ZUH_OK);
 
+    limits_cases();
 }
