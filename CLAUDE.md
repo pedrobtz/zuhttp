@@ -54,11 +54,14 @@ make -C ctest tls             # OpenSSL backend only (network)
 make -C ctest tls-eof         # OpenSSL vs a loopback TLS server that closes badly
                               #   (needs python3 and the openssl CLI; D-86)
 make -C ctest tls-eof-asan    # the same under ASan: a renegotiating server (#215)
+make -C ctest tls-fork-nw     # tls-eof's fork case on Network.framework (#249);
+                              #   tls-fork-nw-asan under ASan + UBSan
 make -C ctest engine-asan      # engine-nw-asan, tls-asan: the live binaries under
                               #   ASan + UBSan (#231); CI runs all four
 
-# Fuzzing — 12 targets (engine and h2 are the whole request path; pull is the
-# streamed-body API as a state machine), each built two ways
+# Fuzzing — 13 targets (engine and h2 are the whole request path; pull is the
+# streamed-body API as a state machine; pool is the connection pool against a
+# model), each built two ways
 make -C fuzz replay-run       # corpus replay, needs no clang; a regression suite
 make -C fuzz replay-asan      # the same corpus under ASan + UBSan
 make -C fuzz fuzz-run         # libFuzzer, needs clang
