@@ -1001,6 +1001,24 @@ static int field_list_make(field_list *f, size_t n, size_t pad, size_t cost) {
     }
     return 1;
 }
+/* `n` fields with names of exactly `nlen` bytes ("x-NNN" padded with 'n',
+ * nlen >= 5) and values of exactly `vlen`. */
+static int field_list_sized(field_list *f, size_t n, size_t nlen, size_t vlen) {
+    size_t i;
+    memset(f, 0, sizeof *f);
+    if (n > LF_MAX || nlen < 5 || nlen >= sizeof f->name[0]) return 0;
+    f->n = n;
+    for (i = 0; i < n; i++) {
+        snprintf(f->name[i], sizeof f->name[i], "x-%03lu", (unsigned long)i);
+        memset(f->name[i] + 5, 'n', nlen - 5); f->name[i][nlen] = '\0';
+        f->np[i] = f->name[i];
+        f->value[i] = (char *)malloc(vlen + 1);
+        if (!f->value[i]) return 0;
+        memset(f->value[i], 'v', vlen); f->value[i][vlen] = '\0';
+        f->vp[i] = f->value[i];
+    }
+    return 1;
+}
 static void field_list_free(field_list *f) {
     size_t i;
     for (i = 0; i < f->n; i++) free(f->value[i]);
@@ -1090,6 +1108,33 @@ static void cases_limits(void) {
                                (unsigned long)cases[j].cost, (unsigned long)splits[k], (int)rc);
                     ZUH_CHECK_EQ_INT(rc, cases[j].want);
                     if (rc == ZUH_OK) ZUH_CHECK_EQ_INT(got, 8);
+                }
+            }
+            field_list_free(&f);
+        }
+    }
+
+    /* #253: the shipped defaults, not toy limits, on the wire. HTTP/1.1
+     * meets the count in picohttpparser's array, HTTP/2 in the headers
+     * object; both must say the same at 100 and at 101. */
+    ZUH_CASE("limits: 100 fields, 256-byte names and 8 KiB values pass and one more is refused, everywhere (#253)");
+    {
+        static const struct { size_t n, nlen, vlen; zuh_code want; } cases[] = {
+            {  99,   5,    10, ZUH_OK }, { 100,   5,    10, ZUH_OK }, { 101,   5,    10, ZUH_ERR_PARSE },
+            {   1, 255,     1, ZUH_OK }, {   1, 256,     1, ZUH_OK }, {   1, 257,     1, ZUH_ERR_PARSE },
+            {   1,   5,  8191, ZUH_OK }, {   1,   5,  8192, ZUH_OK }, {   1,   5,  8193, ZUH_ERR_PARSE } };
+        size_t j;
+        for (j = 0; j < sizeof cases / sizeof cases[0]; j++) {
+            ZUH_CHECK(field_list_sized(&f, cases[j].n, cases[j].nlen, cases[j].vlen));
+            for (at = 0; at < AT_COUNT; at++) {
+                for (k = 0; k < sizeof splits / sizeof splits[0]; k++) {
+                    zuh_code rc = serve_fields((int)at, &f, splits[k], &got);
+                    if (rc != cases[j].want)
+                        printf("    %s, %lu fields, name %lu, value %lu, reads of %lu: code %d\n",
+                               k_at[at], (unsigned long)cases[j].n, (unsigned long)cases[j].nlen,
+                               (unsigned long)cases[j].vlen, (unsigned long)splits[k], (int)rc);
+                    ZUH_CHECK_EQ_INT(rc, cases[j].want);
+                    if (rc == ZUH_OK) ZUH_CHECK_EQ_INT(got, cases[j].n);
                 }
             }
             field_list_free(&f);
