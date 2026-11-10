@@ -1173,7 +1173,16 @@ Two hazards, one mechanism (`zu_fork.{h,c}`):
    clusters and `multisession` do, because they exec.
 
 `tools/ci-fork-guard.R` runs the second hazard in CI and fails on a skip as
-well as a failure.
+well as a failure. The first is tested on live connections as well as mock
+streams (#249): `ctest/tls_eof/fork.sh` holds a pulled body and an idle
+pooled connection to a scripted TLS server, forks, has the child free both,
+and reads from the server's log that neither connection received anything
+from the child, over OpenSSL (`tls-eof`, `tls-eof-asan`) and
+Network.framework (`tls-fork-nw`, `tls-fork-nw-asan`); `ctest/test_h2.c`
+does the same for two HTTP/2 sessions. OpenSSL's drop is silent because
+`tls_destroy()`'s `SSL_shutdown()` writes its close_notify into a memory BIO
+that nothing flushes; a backend whose destroy writes is caught by that log.
+Windows has no `fork()`, so Schannel has no counterpart.
 
 #### 26.5 Serialization and session lifetime (D-23, D-36)
 

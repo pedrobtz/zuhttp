@@ -1,7 +1,8 @@
 #!/bin/sh
 # make tls-eof: run drive against server.py in every mode (D-86), and against
-# reneg.py (#215) and an IP-only certificate (#216). DRIVE names the driver
-# binary: make tls-eof-asan runs the same script against an ASan build.
+# reneg.py (#215) and an IP-only certificate (#216), then fork.sh (#249).
+# DRIVE names the driver binary: make tls-eof-asan runs the same script
+# against an ASan build.
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d)
@@ -53,4 +54,7 @@ srv=$!
 wait_ready
 "$drive" one "https://localhost:$port/" "$tmp/cert.pem" || status=1
 kill $srv 2>/dev/null || true; wait $srv 2>/dev/null || true
+
+# #249: connections a forked child inherited, dropped without a byte.
+OPENSSL="$openssl" DRIVE="$drive" "$here/fork.sh" || status=1
 exit $status

@@ -382,7 +382,8 @@ jobs:
       # D-86, offline: a TLS server that closes without close_notify, and one
       # that sends close_notify behind the body. Both broke the OpenSSL
       # backend at 237bf96 (#99, #100) and passed every other suite. Since
-      # #215 also one that renegotiates, run again under ASan.
+      # #215 also one that renegotiates, and since #249 a forked child that
+      # inherits pooled connections, run again under ASan.
       - name: OpenSSL end of stream and pool liveness
         timeout-minutes: 5
         working-directory: ctest
@@ -396,6 +397,19 @@ jobs:
           # #215: the renegotiation case is a memory error, visible only
           # under ASan; the same script, against an instrumented driver.
           make tls-eof-asan
+
+      # #249: the fork case of the script above (tls_eof/fork.sh) on the
+      # macOS system stack, plain and under ASan + UBSan. tls-eof already ran
+      # it on OpenSSL; Network.framework is the other backend a fork can
+      # reach, and this leg has the openssl CLI the certificate needs.
+      - name: Network.framework fork drop (#249)
+        if: runner.os == 'macOS'
+        timeout-minutes: 10
+        working-directory: ctest
+        run: |
+          export OPENSSL="$(brew --prefix openssl@3)/bin/openssl"
+          make tls-fork-nw
+          make tls-fork-nw-asan
 
   # The macOS system stack: Network.framework engine + SecTrust trust (D-63,
   # W13). Needs no OpenSSL at all, which is the point (§2). The slice covers

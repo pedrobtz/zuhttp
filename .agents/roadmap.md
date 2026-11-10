@@ -1294,3 +1294,22 @@ changed the plan or the design.
   time, to show the target is not vacuous: the per-host cap skipped, a
   `body_incomplete` release pooled, the fork drop made graceful, and the
   idle timeout compared with `>`. Each aborts on its own `regress-*` seed.
+
+- **2026-11-10 — inherited connections tested live (#249); #278.** The pool's
+  fork drop had been tested on mock streams and plain TCP. `tls_eof/fork.sh`
+  now forks with a pulled body and an idle pooled connection open to a
+  scripted TLS server and reads the server's log, on OpenSSL and on
+  Network.framework, plain and under ASan; `test_h2.c` does it for HTTP/2.
+  What it showed:
+  - OpenSSL's drop does not skip `SSL_shutdown()`: `tls_destroy()` calls
+    `tls_close()`, so the child runs it. It stays off the wire only because
+    the close_notify goes to a memory BIO that is never flushed. Flushing it
+    by hand makes the server log both connections closed by the client
+    after one request, and the parent's next request fail with ECONNRESET.
+  - The first sanitised run with a `ca_file` on Network.framework stopped
+    on #278: `b64_decode()` shifted a signed int without masking it, which
+    is undefined behaviour on every PEM anchor read on macOS.
+    `engine-nw-asan` had only ever run on system trust.
+  - Removing Network.framework's PID check in `nw_impl_free()` kills the
+    child with a signal (libdispatch after fork, F-19), which the driver
+    reports as a failed child.

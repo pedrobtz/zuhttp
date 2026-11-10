@@ -19,6 +19,10 @@
 #include "zuh_mock_stream.h"
 #include <nghttp2/nghttp2.h>
 #include <zlib.h>
+#if defined(ZUH_POSIX)
+#  include <unistd.h>
+#  include <sys/wait.h>
+#endif
 
 void suite_h2(void);
 static void cases_w21(void);
@@ -73,6 +77,7 @@ typedef struct {
     int fail_writes;             /* every client write fails from now on */
     size_t written;              /* bytes the client wrote on this connection */
     int reads, wouldblocks;      /* client reads, and how many blocked first */
+    int closes;                  /* zuh_stream_close() on this connection (#249) */
 } srv;
 
 typedef struct {
@@ -298,7 +303,7 @@ static zuh_ssize lb_write(zuh_stream *st, const void *b, size_t n, zuh_deadline 
     return (zuh_ssize)n;
 }
 
-static void lb_close(zuh_stream *st) { (void)st; }
+static void lb_close(zuh_stream *st) { ((srv *)st->impl)->closes++; }
 static void lb_destroy(zuh_stream *st) { zuh_free(st); }
 static int lb_readable(zuh_stream *st, int ms) {
     srv *v = (srv *)st->impl;
@@ -1317,6 +1322,90 @@ static void cases_w21(void) {
         zuh_pool_free(pool);
         dialer_free(&dd);
     }
+
+#if defined(ZUH_POSIX)
+    /* #249: the pool's fork drop was tested on mock streams and plain TCP;
+     * these are live HTTP/2 sessions, one checked out into a pulled body
+     * and one idle in the pool. The loopback server is in this process, so
+     * a child writes only to its own copy of it: the child checks that copy
+     * and reports in its exit status, and the parent checks it can go on
+     * with both connections. */
+    ZUH_CASE("§26.4, #249: a child drops inherited HTTP/2 connections without a frame or a close");
+    {
+        zuh_result ra, r1, r2;
+        zuh_buffer got;
+        pid_t kid;
+        int status = -1;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.body = big; c.body_len = 300000;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd);
+        pool = zuh_pool_new(NULL); o.pool = pool;
+        zuh_buf_init(&got, 0, (size_t)-1);
+        zuh_error_clear(&e);
+        o.stream_body = 1;
+        rc = zuh_engine_perform(&ra, "http://example.test/big", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            ZUH_CHECK_EQ_INT(zuh_open_body_read(ra.open, &got, 1000, &e), ZUH_OK);
+            o.stream_body = 0;
+            rc = zuh_engine_perform(&r1, "http://example.test/small", NULL, &o, &e);
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            if (rc == ZUH_OK) zuh_result_free(&r1);
+            ZUH_CHECK_EQ_INT(dd.dials, 2);
+            ZUH_CHECK_EQ_INT(zuh_pool_idle_count(pool), 1);
+            kid = fork();
+            if (kid == 0) {
+                size_t w0 = dd.conns[0].written, w1 = dd.conns[1].written;
+                zuh_buffer cgot;
+                int step = 0;
+                zuh_buf_init(&cgot, 0, (size_t)-1);
+                if (zuh_open_body_read(ra.open, &cgot, 1000, &e) != ZUH_ERR_FORK || cgot.len)
+                    step = 1;
+                zuh_open_body_abort(ra.open);   /* must not write RST_STREAM */
+                zuh_result_free(&ra);           /* the finalizer's path */
+                zuh_pool_free(pool);            /* and the pool's */
+                if (!step && dd.conns[0].written != w0) step = 2;
+                if (!step && dd.conns[1].written != w1) step = 3;
+                if (!step && (dd.conns[0].closes || dd.conns[1].closes)) step = 4;
+                zuh_buf_free(&cgot);
+                zuh_buf_free(&got);
+                dialer_free(&dd);
+                _exit(step);
+            }
+            ZUH_CHECK(kid > 0);
+            if (kid > 0) {
+                ZUH_CHECK(waitpid(kid, &status, 0) == kid);
+                ZUH_CHECK(WIFEXITED(status));
+                ZUH_CHECK_EQ_INT(WIFEXITED(status) ? WEXITSTATUS(status) : -1, 0);
+            }
+            /* The parent's body is whole, and both connections are reused. */
+            for (;;) {
+                size_t before = got.len;
+                rc = zuh_open_body_read(ra.open, &got, 65536, &e);
+                if (rc != ZUH_OK || got.len == before) break;
+            }
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            ZUH_CHECK(got.len == 300000 && memcmp(got.data, big, 300000) == 0);
+            zuh_result_free(&ra);
+            o.stream_body = 1;
+            rc = zuh_engine_perform(&r1, "http://example.test/4", NULL, &o, &e);
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            if (rc == ZUH_OK) {
+                rc = zuh_engine_perform(&r2, "http://example.test/5", NULL, &o, &e);
+                ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+                if (rc == ZUH_OK) {
+                    ZUH_CHECK_EQ_INT(r1.reused_connection + r2.reused_connection, 2);
+                    zuh_result_free(&r2);
+                }
+                zuh_result_free(&r1);
+            }
+            ZUH_CHECK_EQ_INT(dd.dials, 2);
+        }
+        zuh_buf_free(&got);
+        zuh_pool_free(pool);
+        dialer_free(&dd);
+    }
+#endif
 
     ZUH_CASE("§65.4 over HTTP/1.1: a pulled body, and abort closes the connection");
     {
