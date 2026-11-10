@@ -12,6 +12,8 @@ test_that("only a failure to reach the host counts as unreachable", {
   # The network never answered.
   expect_true(badssl_unreachable(cond("zu_connect_error", backend_code = 61L)))
   expect_true(badssl_unreachable(cond("zu_io_error", backend_code = 54L)))
+  # OpenSSL on Linux: "read failed (104)", a reset, with no backend_code.
+  expect_true(badssl_unreachable(cond("zu_io_error")))
   expect_true(badssl_unreachable(cond("zu_timeout_error")))
   # zuhttp's own verdicts, reached over a working connection.
   expect_false(badssl_unreachable(cond("zu_connect_error")))

@@ -162,17 +162,19 @@ skip_under_gctorture <- function() {
   }
 }
 
-# Whether a condition means the host was never reached: a timeout, or a
-# connect or I/O error that carries the operating system's error code
-# (`backend_code`: ECONNRESET, ECONNREFUSED, WSAETIMEDOUT). A zu_connect_error
-# without one is zuhttp's own verdict after the connection worked, such as
-# "HTTP/2 is required, but badssl.com did not negotiate it" (§65.1), and must
-# reach the test: an earlier version keyed on the class alone, and skipped
-# test-http2.R's refusal test on the refusal it exists to see.
+# Whether a condition means the host was never reached: a timeout, any I/O
+# error, or a connect error that carries the operating system's error code
+# (`backend_code`: ECONNRESET, ECONNREFUSED, WSAETIMEDOUT). zuhttp raises none
+# of its verdicts as zu_io_error, and OpenSSL's "read failed (104)" (a reset
+# on Linux) carries no backend_code, so an I/O error counts as it is. A
+# zu_connect_error without a code is zuhttp's own verdict after the
+# connection worked, such as "HTTP/2 is required, but badssl.com did not
+# negotiate it" (§65.1), and must reach the test: an earlier version keyed
+# on the class alone and skipped test-http2.R's refusal test on the refusal
+# it exists to see.
 badssl_unreachable <- function(e) {
-  inherits(e, "zu_timeout_error") ||
-    (inherits(e, c("zu_connect_error", "zu_io_error")) &&
-      !is.null(e$backend_code))
+  inherits(e, c("zu_timeout_error", "zu_io_error")) ||
+    (inherits(e, "zu_connect_error") && !is.null(e$backend_code))
 }
 
 # zu_get() against badssl.com, which resets connections from CI runners now
