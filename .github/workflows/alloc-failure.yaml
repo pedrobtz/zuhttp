@@ -1,0 +1,39 @@
+# Allocation-failure injection over the R glue (#237; r-actions
+# alloc-failure.yml). Fails each allocation in turn, R's own included, while
+# tools/alloc/exercise.R makes a buffered, a streamed and an upload request
+# against a loopback server. ctest's zuh_alloc_fail_after() sweeps already
+# cover the C core; this is the one check that fails R's allocator under
+# C_zu_perform and C_zu_stream_read, where #214 held native memory across an
+# allocation that could longjmp.
+#
+# The sweep restarts R once per allocation, so it runs weekly and on demand,
+# and on a pull request that changes the workload or this file.
+on:
+  schedule:
+    - cron: "23 5 * * 0"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - tools/alloc/**
+      - .github/workflows/alloc-failure.yaml
+
+name: alloc-failure
+
+permissions:
+  contents: read
+
+jobs:
+  alloc-failure:
+    uses: pedrobtz/r-actions/.github/workflows/alloc-failure.yml@v1
+    with:
+      run: Rscript tools/alloc/exercise.R
+      # Up to the first request: R's startup, the package and the server.
+      baseline-run: Rscript tools/alloc/exercise.R --baseline
+      # A request that fails must say so with a condition: zuhttp's classes,
+      # or R's own out-of-memory error. A wrong result exits 3 and matches
+      # neither, so the sweep reports it.
+      expect-pattern: "zu_[a-z_]+_error|cannot allocate|memory exhausted"
+      # Injected failures that reached zuhttp's own allocator.
+      target-pattern: "zu_memory_error"
+      max-allocations: 4000
+      timeout-minutes: 120
