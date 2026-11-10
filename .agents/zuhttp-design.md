@@ -1700,8 +1700,9 @@ without a canary arm is a defect.
 
 ### 43. Fuzzing
 
-**Status:** Partial — twelve targets, corpus replay on three OSes in CI; the
-24 h soak per target (§61.8) is W17.
+**Status:** Partial — twelve targets, all with oracles on their results
+(#239); corpus replay on three OSes in CI; the 24 h soak per target (§61.8)
+is W17.
 
 Targets: response parser, chunked decoder, headers, URI, redirect, proxy
 environment, inflate limits, body path, redaction, and the **engine** — the
@@ -1718,11 +1719,43 @@ Only curated seeds are committed.
 
 A sanitizer only reports a crash, and a wrong byte count, an inconsistent
 limit or a readable aborted stream crash nothing; the review of 2026-11-09
-found 16 such bugs in code every target reached. So the targets that can
-carry an oracle on their results do: the body path compares whole and
+found 16 such bugs in code every target reached. So every target that can
+carry an oracle on its results does: the body path compares whole and
 one-byte reads and three framings of one payload (#227), the engine checks
 that every request it wrote is framed by its Content-Length (#228), and the
 pull target checks every result against its model (#229).
+
+The response, chunked and headers targets are checked against a second
+reading of the grammar (#239). `fuzz/http_grammar.h` writes RFC 9110's
+token and field-value, RFC 9112's status line, field block and chunked
+coding out again, sharing no code with `src/`. It applies only the
+leniencies RFC 9112 lets a recipient choose and the §40 limits, and each
+place where it is less strict than the ABNF says which choice zuhttp made:
+
+- **response:** the head parsed whole agrees with the grammar on the
+  verdict, the status, version, reason, field list and `consumed`. The
+  same bytes offered a byte at a time with the `last_len` hint are accepted
+  exactly when the whole parse accepts them. An accepted head written back
+  out parses to itself. `zuh_response_decide_framing()` agrees with the
+  §18.1 table and RFC 9112 §6, for GET and for HEAD. That model found #268.
+- **chunked:** the input decoded whole, at a chosen split, a byte per call,
+  and at every split of a short input agrees with an independent RFC 9112
+  §7.1 decoder. Once done, the payload, trailers and surplus agree. While
+  more is needed, every payload byte that has arrived has been delivered.
+  After a refusal the caller holds a prefix of the payload and nothing
+  from the failed call. picohttpparser skips a chunk extension without
+  parsing it. zuhttp is held to that reading exactly, and the reading to
+  accepting everything the strict ABNF accepts. An accepted body
+  re-encoded in other chunk sizes decodes to itself.
+- **headers:** both validators agree with the grammar, and
+  `zuh_headers_add()` agrees with them and the §40 limits. An accepted
+  field is written as exactly `name: value` CRLF. Parsed back, it is the
+  same field less its OWS.
+
+Each oracle was shown to fail. A bare CR taken as a line end, an
+off-by-two `last_len` hint, a byte dropped at a chunk boundary, #210's fix
+reverted, a CR let through the value validator: each aborts the replay on
+a `regress-239-*` seed.
 
 ### 44. Static Analysis
 

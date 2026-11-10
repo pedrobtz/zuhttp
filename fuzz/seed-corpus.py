@@ -122,6 +122,16 @@ def main():
     w("headers/high_bytes", b"X-A\x00\xff\xfe\x80")
     w("headers/tab_value", b"X-A\x00\tvalue\t")
     w("headers/long_name", b"A" * 2000 + b"\x00v")
+    # #239: one per oracle. A bare CR, a control byte and a ':' in the name
+    # are each refused (the grammar); a name at the §40 limit is taken, one
+    # past it is not; OWS around a value is stripped by the re-parse and
+    # nothing else is (round trip).
+    w("headers/regress-239-bare-cr-value", b"X-A\x00a\rb")
+    w("headers/regress-239-ctl-value", b"X-A\x00a\x01b")
+    w("headers/regress-239-colon-in-name", b"X:A\x00v")
+    w("headers/regress-239-name-at-limit", b"A" * 256 + b"\x00v")
+    w("headers/regress-239-name-over-limit", b"A" * 257 + b"\x00v")
+    w("headers/regress-239-ows-value", b"X-A\x00 \t v v \t ")
 
     # --- uri -----------------------------------------------------------------
     uris = [

@@ -1280,3 +1280,26 @@ changed the plan or the design.
     not propagated. CLAUDE.md now carries the rules these imply.
   - Also found while tidying: `fuzz/corpus/body 2` and `chunked 2`, empty
     Finder duplicates from 2026-09-08, untracked; removed.
+
+- **2026-11-10 — oracles for fuzz_response, fuzz_chunked and fuzz_headers
+  (#239).** The three targets compared nothing but "no crash"; they now
+  compare against `fuzz/http_grammar.h`, an independent reading of RFC 9110
+  and RFC 9112 (design §43). Measured on the way:
+  - The framing model found #268 at once: an HTTP/1.0 response with
+    `Transfer-Encoding: chunked` and `Connection: keep-alive` went back to
+    the pool, where RFC 9112 §6.1 has it read and then closed. Fixed in
+    `zuh_response_decide_framing()`, with a ctest and a `regress-268` seed.
+  - picohttpparser leaves two judgements until later than the grammar does.
+    It waits for 9 bytes and for 4 from the status code before refusing.
+    It refuses "garbage after the status code" ("2000") only at the end of
+    the line. With the `last_len` hint it looks for nothing but a blank
+    line. The harness allows those deferrals and no others: none is an
+    acceptance.
+  - picohttpparser does not parse chunk extensions (`5 junk` and `5;` pass).
+    That is kept, not filed: RFC 9112 §7.1.1 has a recipient ignore
+    extensions, and the one thing in an extension that could move the
+    framing, a line terminator, is still refused.
+  - Every oracle was broken once and the replay aborted on a seed: 6 in the
+    response target, 7 in chunked, 7 in headers. Locally, 6M, 3M and 1M
+    inputs from a scratch in-process mutator ran clean after #268, for
+    response, chunked and headers.
