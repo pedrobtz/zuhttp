@@ -26,13 +26,18 @@ jobs:
   alloc-failure:
     uses: pedrobtz/r-actions/.github/workflows/alloc-failure.yml@v1
     with:
-      run: Rscript tools/alloc/exercise.R
+      # R_ENABLE_JIT=0: the byte compiler's own regex calls were 16 of the
+      # first sweep's crashes, all in base R.
+      run: R_ENABLE_JIT=0 Rscript tools/alloc/exercise.R
       # Up to the first request: R's startup, the package and the server.
-      baseline-run: Rscript tools/alloc/exercise.R --baseline
+      baseline-run: R_ENABLE_JIT=0 Rscript tools/alloc/exercise.R --baseline
       # A request that fails must say so with a condition: zuhttp's classes,
-      # or R's own out-of-memory error. A wrong result exits 3 and matches
-      # neither, so the sweep reports it.
-      expect-pattern: "zu_[a-z_]+_error|cannot allocate|memory exhausted"
+      # or one of R's out-of-memory errors, which come in several wordings.
+      # A wrong result exits 3 and matches none, so the sweep reports it.
+      expect-pattern: "zu_[a-z_]+_error|cannot allocate|memory exhausted|[Oo]ut of memory|out of virtual memory|allocation (error|of .* failed)"
+      # Base R segfaults when the TRE regex compiler or gzfile() gets a failed
+      # allocation (an R bug, not ours). pedrobtz/r-actions#92 adds
+      # ignore-crash-pattern to list those apart; it goes here once v1 has it.
       # Injected failures that reached zuhttp's own allocator.
       target-pattern: "zu_memory_error"
       max-allocations: 4000

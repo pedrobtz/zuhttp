@@ -17,6 +17,10 @@
 #   Rscript tools/alloc/exercise.R             # the workload
 #   Rscript tools/alloc/exercise.R --baseline  # everything up to the first request
 suppressPackageStartupMessages(library(zuhttp))
+# Everything the run needs after the first request is loaded before it, so a
+# failure lands in zuhttp's work and not in loading `tools` for pskill() at
+# the end; the first sweep's 190 "ok"-then-failed runs were that.
+invisible(loadNamespace("tools"))
 baseline <- "--baseline" %in% commandArgs(TRUE)
 
 # The server must not run under the interposer: a failure there is not ours.
