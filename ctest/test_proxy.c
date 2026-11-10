@@ -8,6 +8,7 @@
 #include "zuh_proxy.h"
 #include "zuh_alloc.h"
 #include <string.h>
+#include <stdio.h>
 
 void suite_proxy(void);
 
@@ -454,6 +455,79 @@ void suite_proxy(void) {
         size_t used = 0; int st = 0;
         ZUH_CHECK_EQ_INT(zuh_proxy_connect_response(partial, sizeof partial - 1, &used, &st, &e),
                         ZUH_ERR_WOULDBLOCK);
+    }
+
+    /* #272: every hex digit class at both of its ends, as the digits of an
+     * escape (%30 %39, %6a %6f, %4A %4F), and an escape whose high digit is
+     * 0. */
+    ZUH_CASE("#272: percent-escapes in credentials decode at every hex digit boundary");
+    {
+        zuh_proxy p;
+        ZUH_CHECK_EQ_INT(zuh_proxy_parse(&p, "http://%30%39%6a%6f%4A%4F:%2F%09x@px:3128", &e), ZUH_OK);
+        ZUH_CHECK(streq(p.username, "09joJO"));
+        ZUH_CHECK(streq(p.password, "/\tx"));
+        zuh_proxy_free(&p);
+        /* Just outside each class: not an escape. */
+        ZUH_CHECK_EQ_INT(zuh_proxy_parse(&p, "http://u:%3G@px:3128", &e), ZUH_ERR_PROXY);
+        ZUH_CHECK_EQ_INT(zuh_proxy_parse(&p, "http://u:%3g@px:3128", &e), ZUH_ERR_PROXY);
+        ZUH_CHECK_EQ_INT(zuh_proxy_parse(&p, "http://u:%3/@px:3128", &e), ZUH_ERR_PROXY);
+        ZUH_CHECK_EQ_INT(zuh_proxy_parse(&p, "http://u:%3:@px:3128", &e), ZUH_ERR_PROXY);
+    }
+
+    ZUH_CASE("#272: an empty proxy username is a username, not an error");
+    {
+        zuh_proxy p;
+        ZUH_CHECK_EQ_INT(zuh_proxy_parse(&p, "http://:pw@px:3128", &e), ZUH_OK);
+        ZUH_CHECK(streq(p.username, ""));
+        ZUH_CHECK(streq(p.password, "pw"));
+        zuh_proxy_free(&p);
+    }
+
+    /* An all-9s entry is an address and matches only exactly: a five-part
+     * host ending in it is not that address (#266's rule, at the digit 9). */
+    ZUH_CASE("#272: an IP entry of 9s matches exactly, never by suffix");
+    ZUH_CHECK_EQ_INT(zuh_no_proxy_matches("9.9.9.9", "9.9.9.9", 80), 1);
+    ZUH_CHECK_EQ_INT(zuh_no_proxy_matches("9.9.9.9", "1.9.9.9.9", 80), 0);
+    ZUH_CHECK_EQ_INT(zuh_no_proxy_matches("0.0.0.0", "1.0.0.0.0", 80), 0);
+
+    /* A list ending in ", " leaves an empty entry after blanks: trimming it
+     * must stop at its start, not walk back into the separator. */
+    ZUH_CASE("#272: a NO_PROXY list ending in a separator and blanks");
+    ZUH_CHECK_EQ_INT(zuh_no_proxy_matches("example.org, ", "example.com", 80), 0);
+    ZUH_CHECK_EQ_INT(zuh_no_proxy_matches("example.org,\t ", "example.org", 80), 1);
+    ZUH_CHECK_EQ_INT(zuh_no_proxy_matches(" , example.com", "example.com", 80), 1);
+
+    ZUH_CASE("#272: a CONNECT answered 300 is not a tunnel");
+    {
+        static const char mc[] = "HTTP/1.1 300 Multiple Choices\r\nContent-Length: 0\r\n\r\n";
+        static const char last[] = "HTTP/1.1 299 OK\r\n\r\n";
+        size_t used = 0; int st = 0;
+        ZUH_CHECK_EQ_INT(zuh_proxy_connect_response(mc, sizeof mc - 1, &used, &st, &e), ZUH_ERR_PROXY);
+        ZUH_CHECK_EQ_INT(st, 300);
+        ZUH_CHECK_EQ_INT(zuh_proxy_connect_response(last, sizeof last - 1, &used, &st, &e), ZUH_OK);
+    }
+
+    /* The CONNECT target is built in 300 bytes: "host:443" of 299 fits, and
+     * one of 300 is refused rather than sent cut short. */
+    ZUH_CASE("#272: a CONNECT target at the 300-byte limit");
+    {
+        zuh_proxy p; zuh_uri t;
+        char url[400], host[300];
+        size_t hl;
+        ZUH_CHECK_EQ_INT(zuh_proxy_parse(&p, "http://px:3128", &e), ZUH_OK);
+        for (hl = 295; hl <= 296; hl++) {
+            size_t i;
+            zuh_code rc;
+            for (i = 0; i < hl; i++) host[i] = (i % 50 == 49) ? '.' : 'a';
+            host[hl] = '\0';
+            snprintf(url, sizeof url, "https://%s/", host);
+            ZUH_CHECK_EQ_INT(parse_uri(&t, url), ZUH_OK);
+            ZUH_CHECK(zuh_buf_init(&b, 128, 8192));
+            rc = zuh_proxy_connect_request(&p, &t, &b, &e);
+            ZUH_CHECK_EQ_INT(rc, hl == 295 ? ZUH_OK : ZUH_ERR_PROXY);
+            zuh_buf_free(&b); zuh_uri_free(&t);
+        }
+        zuh_proxy_free(&p);
     }
 
     ZUH_CASE("no leaks across the suite");
