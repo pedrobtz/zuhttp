@@ -90,32 +90,34 @@
 <span id="cb1-18"><a href="#cb1-18" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> fuzz replay-asan      <span class="co"># the same corpus under ASan + UBSan</span></span>
 <span id="cb1-19"><a href="#cb1-19" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> fuzz fuzz-run         <span class="co"># libFuzzer, needs clang</span></span>
 <span id="cb1-20"><a href="#cb1-20" tabindex="-1"></a><span class="ex">tools/coverage/fuzz-lcov.sh</span> fuzz.lcov   <span class="co"># fuzz reach: what the corpus runs (#230)</span></span>
-<span id="cb1-21"><a href="#cb1-21" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> fuzz mutate-asan      <span class="co"># 33,000 deterministic mutants of the seeds under ASan + UBSan;</span></span>
-<span id="cb1-22"><a href="#cb1-22" tabindex="-1"></a>                              <span class="co">#   MUT_SEED=1 for a fresh set. A soak, not a bug-finder: see below</span></span>
-<span id="cb1-23"><a href="#cb1-23" tabindex="-1"></a></span>
-<span id="cb1-24"><a href="#cb1-24" tabindex="-1"></a><span class="co"># R</span></span>
-<span id="cb1-25"><a href="#cb1-25" tabindex="-1"></a><span class="ex">R</span> CMD INSTALL <span class="at">--preclean</span> .    <span class="co"># --preclean: an in-tree build reuses stale src/*.o,</span></span>
-<span id="cb1-26"><a href="#cb1-26" tabindex="-1"></a>                              <span class="co">#   which once linked in pre-visibility vendored objects</span></span>
-<span id="cb1-27"><a href="#cb1-27" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'testthat::test_local()'</span>                     <span class="co"># offline</span></span>
-<span id="cb1-28"><a href="#cb1-28" tabindex="-1"></a><span class="va">ZU_TEST_NETWORK</span><span class="op">=</span>1 <span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'testthat::test_local()'</span>   <span class="co"># + the network suite</span></span>
-<span id="cb1-29"><a href="#cb1-29" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'roxygen2::roxygenise()'</span>                     <span class="co"># after touching roxygen blocks</span></span>
-<span id="cb1-30"><a href="#cb1-30" tabindex="-1"></a><span class="ex">air</span> format R tests <span class="kw">&amp;&amp;</span> <span class="ex">air</span> format <span class="at">--check</span> .              <span class="co"># before every push that touches R;</span></span>
-<span id="cb1-31"><a href="#cb1-31" tabindex="-1"></a>                                                        <span class="co">#   the conventions job fails otherwise</span></span>
-<span id="cb1-32"><a href="#cb1-32" tabindex="-1"></a><span class="ex">./tools/check-vendor-licenses</span>                           <span class="co"># after a re-vendor</span></span>
-<span id="cb1-33"><a href="#cb1-33" tabindex="-1"></a><span class="ex">tools/make-tls-fixture</span>                                  <span class="co"># the §50.5 certificates; 397-day leaves,</span></span>
-<span id="cb1-34"><a href="#cb1-34" tabindex="-1"></a>                                                        <span class="co">#   test-certs.R says when (fixtures/README.md)</span></span>
-<span id="cb1-35"><a href="#cb1-35" tabindex="-1"></a></span>
-<span id="cb1-36"><a href="#cb1-36" tabindex="-1"></a><span class="co"># HTTP/2 live tests (test-http2.R): a local server whose HTTP/2 is not nghttp2's</span></span>
-<span id="cb1-37"><a href="#cb1-37" tabindex="-1"></a><span class="ex">tools/h2-test-cert.sh</span> /tmp/h2 <span class="kw">&amp;&amp;</span> <span class="ex">python3</span> tools/h2-test-server.py 18080 18443 /tmp/h2/cert.pem /tmp/h2/key.pem <span class="kw">&amp;</span></span>
-<span id="cb1-38"><a href="#cb1-38" tabindex="-1"></a><span class="va">ZU_H2_TEST_SERVER</span><span class="op">=</span>http://127.0.0.1:18080 <span class="va">ZU_H2_TEST_TLS</span><span class="op">=</span>https://localhost:18443 <span class="dt">\</span></span>
-<span id="cb1-39"><a href="#cb1-39" tabindex="-1"></a>  <span class="va">ZU_H2_TEST_CA</span><span class="op">=</span>/tmp/h2/ca.pem <span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'testthat::test_local(filter = "http2")'</span></span>
-<span id="cb1-40"><a href="#cb1-40" tabindex="-1"></a></span>
-<span id="cb1-41"><a href="#cb1-41" tabindex="-1"></a><span class="co"># The R glue (init.c) under valgrind: Linux only; CI runs it on every PR (#164)</span></span>
-<span id="cb1-42"><a href="#cb1-42" tabindex="-1"></a><span class="ex">tools/ci-valgrind-glue.sh</span></span>
-<span id="cb1-43"><a href="#cb1-43" tabindex="-1"></a></span>
-<span id="cb1-44"><a href="#cb1-44" tabindex="-1"></a><span class="co"># What CI actually runs for the R suite — reproduce THIS before claiming green,</span></span>
-<span id="cb1-45"><a href="#cb1-45" tabindex="-1"></a><span class="co"># because it differs from R CMD check in ways that have bitten before.</span></span>
-<span id="cb1-46"><a href="#cb1-46" tabindex="-1"></a><span class="ex">Rscript</span> tools/ci-run-tests.R</span></code></pre></div>
+<span id="cb1-21"><a href="#cb1-21" tabindex="-1"></a><span class="ex">tools/coverage/fuzz-gaps.sh</span> fuzz.lcov ctest.lcov   <span class="co"># what it misses: unentered functions,</span></span>
+<span id="cb1-22"><a href="#cb1-22" tabindex="-1"></a>                              <span class="co">#   one-sided conditions, lines only ctest reaches</span></span>
+<span id="cb1-23"><a href="#cb1-23" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> fuzz mutate-asan      <span class="co"># 33,000 deterministic mutants of the seeds under ASan + UBSan;</span></span>
+<span id="cb1-24"><a href="#cb1-24" tabindex="-1"></a>                              <span class="co">#   MUT_SEED=1 for a fresh set. A soak, not a bug-finder: see below</span></span>
+<span id="cb1-25"><a href="#cb1-25" tabindex="-1"></a></span>
+<span id="cb1-26"><a href="#cb1-26" tabindex="-1"></a><span class="co"># R</span></span>
+<span id="cb1-27"><a href="#cb1-27" tabindex="-1"></a><span class="ex">R</span> CMD INSTALL <span class="at">--preclean</span> .    <span class="co"># --preclean: an in-tree build reuses stale src/*.o,</span></span>
+<span id="cb1-28"><a href="#cb1-28" tabindex="-1"></a>                              <span class="co">#   which once linked in pre-visibility vendored objects</span></span>
+<span id="cb1-29"><a href="#cb1-29" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'testthat::test_local()'</span>                     <span class="co"># offline</span></span>
+<span id="cb1-30"><a href="#cb1-30" tabindex="-1"></a><span class="va">ZU_TEST_NETWORK</span><span class="op">=</span>1 <span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'testthat::test_local()'</span>   <span class="co"># + the network suite</span></span>
+<span id="cb1-31"><a href="#cb1-31" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'roxygen2::roxygenise()'</span>                     <span class="co"># after touching roxygen blocks</span></span>
+<span id="cb1-32"><a href="#cb1-32" tabindex="-1"></a><span class="ex">air</span> format R tests <span class="kw">&amp;&amp;</span> <span class="ex">air</span> format <span class="at">--check</span> .              <span class="co"># before every push that touches R;</span></span>
+<span id="cb1-33"><a href="#cb1-33" tabindex="-1"></a>                                                        <span class="co">#   the conventions job fails otherwise</span></span>
+<span id="cb1-34"><a href="#cb1-34" tabindex="-1"></a><span class="ex">./tools/check-vendor-licenses</span>                           <span class="co"># after a re-vendor</span></span>
+<span id="cb1-35"><a href="#cb1-35" tabindex="-1"></a><span class="ex">tools/make-tls-fixture</span>                                  <span class="co"># the §50.5 certificates; 397-day leaves,</span></span>
+<span id="cb1-36"><a href="#cb1-36" tabindex="-1"></a>                                                        <span class="co">#   test-certs.R says when (fixtures/README.md)</span></span>
+<span id="cb1-37"><a href="#cb1-37" tabindex="-1"></a></span>
+<span id="cb1-38"><a href="#cb1-38" tabindex="-1"></a><span class="co"># HTTP/2 live tests (test-http2.R): a local server whose HTTP/2 is not nghttp2's</span></span>
+<span id="cb1-39"><a href="#cb1-39" tabindex="-1"></a><span class="ex">tools/h2-test-cert.sh</span> /tmp/h2 <span class="kw">&amp;&amp;</span> <span class="ex">python3</span> tools/h2-test-server.py 18080 18443 /tmp/h2/cert.pem /tmp/h2/key.pem <span class="kw">&amp;</span></span>
+<span id="cb1-40"><a href="#cb1-40" tabindex="-1"></a><span class="va">ZU_H2_TEST_SERVER</span><span class="op">=</span>http://127.0.0.1:18080 <span class="va">ZU_H2_TEST_TLS</span><span class="op">=</span>https://localhost:18443 <span class="dt">\</span></span>
+<span id="cb1-41"><a href="#cb1-41" tabindex="-1"></a>  <span class="va">ZU_H2_TEST_CA</span><span class="op">=</span>/tmp/h2/ca.pem <span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'testthat::test_local(filter = "http2")'</span></span>
+<span id="cb1-42"><a href="#cb1-42" tabindex="-1"></a></span>
+<span id="cb1-43"><a href="#cb1-43" tabindex="-1"></a><span class="co"># The R glue (init.c) under valgrind: Linux only; CI runs it on every PR (#164)</span></span>
+<span id="cb1-44"><a href="#cb1-44" tabindex="-1"></a><span class="ex">tools/ci-valgrind-glue.sh</span></span>
+<span id="cb1-45"><a href="#cb1-45" tabindex="-1"></a></span>
+<span id="cb1-46"><a href="#cb1-46" tabindex="-1"></a><span class="co"># What CI actually runs for the R suite — reproduce THIS before claiming green,</span></span>
+<span id="cb1-47"><a href="#cb1-47" tabindex="-1"></a><span class="co"># because it differs from R CMD check in ways that have bitten before.</span></span>
+<span id="cb1-48"><a href="#cb1-48" tabindex="-1"></a><span class="ex">Rscript</span> tools/ci-run-tests.R</span></code></pre></div>
 <p><strong>Every pull request runs CI</strong> (W1). R-CMD-check, native-checks and the r-actions jobs run a quick profile on a pull request and the full one on <code>main</code>. Work-package pull requests merge on the quick profile; the <code>full-ci</code> label, which runs the full profile on a pull request, goes only on the pull request that closes a milestone (the maintainer’s rule, 2026-10-29). One memory check runs on every pull request regardless: the R glue under valgrind (2026-11-05, #164). Every merge still runs the full profile on <code>main</code>: read it before opening the next pull request, and fix what it finds there.</p>
 <div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="ex">tools/vendor/verify</span>            <span class="co"># src/vendor/ is byte-for-byte what was recorded</span></span>
 <span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a><span class="ex">tools/vendor/record</span>            <span class="co"># after tools/update-*, never after a hand edit</span></span>

@@ -62,6 +62,8 @@ make -C fuzz replay-run       # corpus replay, needs no clang; a regression suit
 make -C fuzz replay-asan      # the same corpus under ASan + UBSan
 make -C fuzz fuzz-run         # libFuzzer, needs clang
 tools/coverage/fuzz-lcov.sh fuzz.lcov   # fuzz reach: what the corpus runs (#230)
+tools/coverage/fuzz-gaps.sh fuzz.lcov ctest.lcov   # what it misses: unentered functions,
+                              #   one-sided conditions, lines only ctest reaches
 make -C fuzz mutate-asan      # 33,000 deterministic mutants of the seeds under ASan + UBSan;
                               #   MUT_SEED=1 for a fresh set. A soak, not a bug-finder: see below
 
