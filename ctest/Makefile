@@ -15,11 +15,16 @@ CC      ?= cc
 SRC     := ../src
 VENDOR  := $(SRC)/vendor/picohttpparser
 URIDIR  := $(SRC)/vendor/uriparser
-# Vendored objects are cached, so the directory is keyed on the build flavour.
-# Without this, `make asan` left ASan-instrumented picohttpparser.o behind and
-# the next plain `make zuh_ctest` reused it, failing to link with an obscure
-# "___asan_init not found".
-BUILD   := build$(BUILD_SUFFIX)
+# Vendored objects are cached, so each build flavour has its own directory:
+# build/ for plain, build-asan/ for `asan`. Shared, `make asan` reused plain
+# vendored objects and ran picohttpparser, uriparser and nghttp2 unsanitised
+# with nothing failing; the other order failed to link ("___asan_init not
+# found"). The directory used to be keyed on a target-specific BUILD_SUFFIX,
+# which comes too late to change a `:=` variable, so it never was (#262).
+# ctest/check-flavours.sh holds both orders.
+BUILD   := build
+ABUILD  := build-asan
+ASANFLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer
 
 NGDIR   := $(SRC)/vendor/nghttp2
 INC     := -I$(SRC) -I$(VENDOR) -I$(URIDIR) -I$(NGDIR) -I.
@@ -90,6 +95,23 @@ $(BUILD)/%.o: $(URIDIR)/%.c | $(BUILD)
 $(BUILD)/ng_%.o: $(NGDIR)/%.c | $(BUILD)
 	$(CC) $(NGFLAGS) -c -o $@ $<
 
+# The same objects, instrumented, for zuh_ctest_asan. The flags are in the
+# rules rather than target-specific, so building zuh_ctest_asan directly
+# instruments them too.
+AVOBJ := $(patsubst $(BUILD)/%,$(ABUILD)/%,$(VOBJ))
+
+$(ABUILD):
+	mkdir -p $(ABUILD)
+
+$(ABUILD)/picohttpparser.o: $(VENDOR)/picohttpparser.c | $(ABUILD)
+	$(CC) $(VCFLAGS) $(ASANFLAGS) -c -o $@ $<
+
+$(ABUILD)/%.o: $(URIDIR)/%.c | $(ABUILD)
+	$(CC) $(VCFLAGS) $(ASANFLAGS) -c -o $@ $<
+
+$(ABUILD)/ng_%.o: $(NGDIR)/%.c | $(ABUILD)
+	$(CC) $(NGFLAGS) $(ASANFLAGS) -c -o $@ $<
+
 # One object per source, each from a compile command of its own, with header
 # dependencies (-MMD). Mutation testing needs this: Mull re-parses every file
 # from its recorded command line, and one command compiling 46 files cannot
@@ -137,15 +159,11 @@ strict: CFLAGS += -Werror
 strict: clean zuh_ctest
 	./zuh_ctest
 
-asan: BUILD_SUFFIX := -asan
-asan: CFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
-asan: VCFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
-asan: NGFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
 asan: zuh_ctest_asan
 	./zuh_ctest_asan
 
-zuh_ctest_asan: $(OWN) $(TESTS) $(VOBJ)
-	$(CC) $(CFLAGS) -o $@ $(OWN) $(TESTS) $(VOBJ) -lz $(NETLIBS)
+zuh_ctest_asan: $(OWN) $(TESTS) $(AVOBJ)
+	$(CC) $(CFLAGS) $(ASANFLAGS) -o $@ $(OWN) $(TESTS) $(AVOBJ) -lz $(NETLIBS)
 
 # --- S7 TLS engine tests -------------------------------------------------
 # A SEPARATE binary: these need a real TLS peer and therefore the network,
