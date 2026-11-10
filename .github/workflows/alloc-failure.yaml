@@ -41,5 +41,9 @@ jobs:
       ignore-crash-pattern: "^ 1: (grepl?|sub|gsub|regexpr|gregexpr|strsplit|gzfile)\\("
       # Injected failures that reached zuhttp's own allocator.
       target-pattern: "zu_memory_error"
+      # 131 of 1409 did in the first clean sweep (run 42806184948's
+      # successor, 2026-11-10). A floor under that fails a sweep that stops
+      # reaching zuhttp's allocator, rather than passing on nothing.
+      min-target-hits: 100
       max-allocations: 4000
       timeout-minutes: 120
