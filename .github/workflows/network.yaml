@@ -571,9 +571,8 @@ jobs:
           # whose host never answered is skipped and says so. A verdict, right
           # or wrong, still decides; the rule is tests/testthat/helper-net.R's.
           unreachable <- function(e) {
-            inherits(e, "zu_timeout_error") ||
-              (inherits(e, c("zu_connect_error", "zu_io_error")) &&
-                 !is.null(e$backend_code))
+            inherits(e, c("zu_timeout_error", "zu_io_error")) ||
+              (inherits(e, "zu_connect_error") && !is.null(e$backend_code))
           }
           badssl <- function(url) {
             for (attempt in 1:3) {
