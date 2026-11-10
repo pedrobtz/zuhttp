@@ -58,6 +58,44 @@ static zuh_code run_body(const zuh_mock_step *steps, size_t nsteps,
     return rc;
 }
 
+/* run_body() with every read cut to at most `max_read` bytes (0: none). */
+static zuh_code run_body_split(const zuh_mock_step *steps, size_t nsteps,
+                               zuh_frame_kind kind, uint64_t length, size_t max_read,
+                               zuh_sink *sink, zuh_headers *h, uint64_t max_body,
+                               zuh_error *err) {
+    zuh_stream *s = zuh_mock_stream_new(steps, nsteps, max_read, 0);
+    zuh_body_pipe p;
+    zuh_framing fr;
+    zuh_code rc;
+    if (!s) return ZUH_ERR_NOMEM;
+    fr.kind = kind; fr.length = length; fr.poolable = 1;
+    rc = zuh_body_pipe_init(&p, sink, h, 0, max_body, err);
+    if (rc == ZUH_OK) rc = zuh_body_read(s, &fr, &p, NULL, 0, forever(), err);
+    zuh_body_pipe_free(&p);
+    zuh_stream_free(s);
+    return rc;
+}
+
+/* gzip of `n` bytes of `src`, appended to `out`. */
+static int gzip_bytes(zuh_buffer *out, const void *src, size_t n) {
+    unsigned char tmp[8192];
+    z_stream s;
+    int rc;
+    memset(&s, 0, sizeof s);
+    if (deflateInit2(&s, 9, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK) return 0;
+    s.next_in = (Bytef *)(uintptr_t)src; s.avail_in = (uInt)n;
+    do {
+        s.next_out = tmp; s.avail_out = sizeof tmp;
+        rc = deflate(&s, Z_FINISH);
+        if (rc == Z_STREAM_ERROR || !zuh_buf_append(out, tmp, sizeof tmp - s.avail_out)) {
+            deflateEnd(&s);
+            return 0;
+        }
+    } while (rc != Z_STREAM_END);
+    deflateEnd(&s);
+    return 1;
+}
+
 /* gzip of `n` zero bytes, streamed through deflate so the input is never held:
  * 100 MB of zeros is about 100 KB, a ratio near deflate's ceiling of ~1030:1. */
 static int gzip_zeros(zuh_buffer *out, uint64_t n) {
@@ -89,6 +127,7 @@ static int gzip_zeros(zuh_buffer *out, uint64_t n) {
 void suite_body(void) {
     zuh_error e;
     zuh_headers h;
+    size_t pl;
 
     /* --- the sinks themselves ---------------------------------------- */
 
@@ -784,6 +823,84 @@ void suite_body(void) {
             ZUH_CHECK(t->ev[0].n == 200);
         }
         zuh_free(t);
+    }
+
+    /* #252: max_body is decoded bytes on every framing and encoding, so one
+     * payload is accepted or refused alike under each, at the cap's edges
+     * and at reads that split the framing and the gzip stream. #212 billed
+     * compressed bytes under chunked framing; reverting it fails here. */
+    ZUH_CASE("limits: max_body straddled under Content-Length, chunked and close, identity and gzip (#252)");
+    for (pl = 0; pl < 2; pl++) {
+        /* A compressible payload, and one gzip makes larger than itself: on
+         * that one, billing compressed bytes refuses a body at the cap. */
+        enum { N = 3000 };
+        static unsigned char payload[N];
+        static const zuh_frame_kind kinds[] = { ZUH_FRAME_LENGTH, ZUH_FRAME_CHUNKED, ZUH_FRAME_UNTIL_CLOSE };
+        static const size_t splits[] = { 0, 1, 7 };
+        zuh_buffer gz, wire, got;
+        size_t i, enc, fk, sp, c;
+        uint32_t x = 2463534242u;
+        for (i = 0; i < N; i++) {
+            x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+            payload[i] = pl ? (unsigned char)(x >> 24) : (unsigned char)(97u + i % 10u + (i / 100u) % 7u);
+        }
+        ZUH_CHECK(zuh_buf_init(&gz, 256, (size_t)-1));
+        ZUH_CHECK(gzip_bytes(&gz, payload, N));
+        ZUH_CHECK(gz.len > 32 && (pl ? gz.len > N : gz.len < N));
+        for (enc = 0; enc < 2; enc++) {
+            const unsigned char *body = enc ? gz.data : payload;
+            size_t blen = enc ? gz.len : (size_t)N;
+            for (fk = 0; fk < 3; fk++) {
+                ZUH_CHECK(zuh_buf_init(&wire, 256, (size_t)-1));
+                if (kinds[fk] == ZUH_FRAME_CHUNKED) {
+                    /* Three chunks, so chunk boundaries fall inside the stream. */
+                    size_t off = 0, part = blen / 3 + 1;
+                    while (off < blen) {
+                        char line[32];
+                        size_t l = blen - off < part ? blen - off : part;
+                        snprintf(line, sizeof line, "%lx\r\n", (unsigned long)l);
+                        zuh_buf_append(&wire, line, strlen(line));
+                        zuh_buf_append(&wire, body + off, l);
+                        zuh_buf_append(&wire, "\r\n", 2);
+                        off += l;
+                    }
+                    zuh_buf_append(&wire, "0\r\n\r\n", 5);
+                } else {
+                    zuh_buf_append(&wire, body, blen);
+                }
+                for (sp = 0; sp < sizeof splits / sizeof splits[0]; sp++) {
+                    for (c = N - 1; c <= N + 1; c++) {
+                        zuh_sink sink;
+                        zuh_mock_step step;
+                        zuh_code rc;
+                        ZUH_CHECK(zuh_buf_init(&got, 256, (size_t)-1));
+                        zuh_sink_memory_init(&sink, &got);
+                        zuh_headers_init(&h);
+                        if (enc) zuh_headers_add_str(&h, "Content-Encoding", "gzip");
+                        step.kind = ZUH_MOCK_DATA; step.data = wire.data; step.len = wire.len;
+                        step.code = ZUH_OK;
+                        zuh_error_clear(&e);
+                        rc = run_body_split(&step, 1, kinds[fk], blen, splits[sp], &sink, &h,
+                                            (uint64_t)c, &e);
+                        if (rc != (c < N ? ZUH_ERR_BODY_LIMIT : ZUH_OK))
+                            printf("    %s, framing %lu, reads of %lu, cap %lu: code %d\n",
+                                   enc ? "gzip" : "identity", (unsigned long)fk,
+                                   (unsigned long)splits[sp], (unsigned long)c, (int)rc);
+                        ZUH_CHECK_EQ_INT(rc, c < N ? ZUH_ERR_BODY_LIMIT : ZUH_OK);
+                        /* What the sink got: never past the cap, always the
+                         * payload's own first bytes, all of it on success. */
+                        ZUH_CHECK(got.len <= c);
+                        ZUH_CHECK(got.len == 0 || memcmp(got.data, payload, got.len) == 0);
+                        if (rc == ZUH_OK) ZUH_CHECK_EQ_INT(got.len, N);
+                        else ZUH_CHECK_EQ_INT(e.code, ZUH_ERR_BODY_LIMIT);
+                        zuh_headers_free(&h);
+                        zuh_buf_free(&got);
+                    }
+                }
+                zuh_buf_free(&wire);
+            }
+        }
+        zuh_buf_free(&gz);
     }
 
     ZUH_CASE("no leaks across the suite");

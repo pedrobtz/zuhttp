@@ -1084,6 +1084,68 @@ static zuh_code serve_fields(int at, const field_list *f, size_t max_read, size_
     return rc;
 }
 
+/* #252: one body to the caller, over HTTP/1.1 (0 Content-Length, 1 chunked,
+ * 2 close) or HTTP/2 (3), buffered or pulled. `wire` is the body as sent,
+ * gzip when `gz`; what reached the caller is appended to `got`. */
+static zuh_code serve_body(int how, const unsigned char *wire, size_t wlen, int gz,
+                           size_t max_read, uint64_t max_body, int pulled, zuh_buffer *got) {
+    static char resp[1u << 16];
+    zuh_get_opts o;
+    zuh_result r;
+    zuh_error e;
+    zuh_code rc;
+    srv_dialer dd;
+    srv_cfg c;
+    h1_wire w;
+    zuh_error_clear(&e);
+    if (how < 3) {
+        size_t n = (size_t)snprintf(resp, sizeof resp, "HTTP/1.1 200 OK\r\n%s",
+                                    gz ? "Content-Encoding: gzip\r\n" : "");
+        if (how == 0) {
+            n += (size_t)snprintf(resp + n, sizeof resp - n, "Content-Length: %lu\r\n\r\n",
+                                  (unsigned long)wlen);
+            memcpy(resp + n, wire, wlen); n += wlen;
+        } else if (how == 1) {
+            size_t half = wlen / 2;
+            n += (size_t)snprintf(resp + n, sizeof resp - n,
+                                  "Transfer-Encoding: chunked\r\n\r\n%lx\r\n", (unsigned long)half);
+            memcpy(resp + n, wire, half); n += half;
+            n += (size_t)snprintf(resp + n, sizeof resp - n, "\r\n%lx\r\n",
+                                  (unsigned long)(wlen - half));
+            memcpy(resp + n, wire + half, wlen - half); n += wlen - half;
+            n += (size_t)snprintf(resp + n, sizeof resp - n, "\r\n0\r\n\r\n");
+        } else {
+            n += (size_t)snprintf(resp + n, sizeof resp - n, "\r\n");
+            memcpy(resp + n, wire, wlen); n += wlen;
+        }
+        w.bytes = resp; w.len = n; w.max_read = max_read;
+        zuh_get_opts_init(&o);
+        o.dial = h1_dial; o.dial_ctx = &w; o.proxy_set = 1; o.http2 = ZUH_H2_OFF;
+    } else {
+        memset(&c, 0, sizeof c);
+        if (gz) { c.hname[0] = "content-encoding"; c.hvalue[0] = "gzip"; }
+        c.body = wire; c.body_len = wlen; c.read_max = max_read;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd);
+    }
+    o.max_body = max_body; o.stream_body = pulled;
+    rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+    if (rc == ZUH_OK) {
+        if (pulled) {
+            size_t before;
+            do {
+                before = got->len;
+                rc = zuh_open_body_read(r.open, got, 1000, &e);
+            } while (rc == ZUH_OK && got->len > before);
+        } else {
+            zuh_buf_append(got, r.body.data, r.body.len);
+        }
+        zuh_result_free(&r);
+    }
+    if (rc != ZUH_OK && e.code != rc) rc = ZUH_CODE_COUNT;
+    if (how == 3) dialer_free(&dd);
+    return rc;
+}
+
 static void cases_limits(void) {
     field_list f;
     size_t at, k, got;
@@ -1111,6 +1173,45 @@ static void cases_limits(void) {
                 }
             }
             field_list_free(&f);
+        }
+    }
+
+    /* #252: max_body is decoded bytes on each path, so 2999, 3000 and 3001
+     * bytes against a cap of 3000 give the same answer everywhere. */
+    ZUH_CASE("limits: max_body straddled over HTTP/1.1 and HTTP/2, buffered and pulled, identity and gzip (#252)");
+    {
+        static const char *const how_name[] = { "Content-Length", "chunked", "close", "HTTP/2" };
+        static unsigned char payload[3001];
+        unsigned char gzb[4096];
+        size_t i, len, how, gz, pulled;
+        for (i = 0; i < sizeof payload; i++) payload[i] = (unsigned char)(97u + i % 13u + (i / 50u) % 5u);
+        for (len = 2999; len <= 3001; len++) {
+            size_t glen;
+            z_stream zs;
+            memset(&zs, 0, sizeof zs);
+            deflateInit2(&zs, 9, Z_DEFLATED, 31, 8, Z_DEFAULT_STRATEGY);
+            zs.next_in = payload; zs.avail_in = (uInt)len;
+            zs.next_out = gzb; zs.avail_out = sizeof gzb;
+            deflate(&zs, Z_FINISH);
+            glen = sizeof gzb - zs.avail_out;
+            deflateEnd(&zs);
+            for (how = 0; how < 4; how++) for (gz = 0; gz < 2; gz++) for (pulled = 0; pulled < 2; pulled++)
+            for (k = 0; k < sizeof splits / sizeof splits[0]; k++) {
+                zuh_buffer seen;
+                zuh_code want = len > 3000 ? ZUH_ERR_BODY_LIMIT : ZUH_OK, rc;
+                zuh_buf_init(&seen, 0, (size_t)-1);
+                rc = serve_body((int)how, gz ? gzb : payload, gz ? glen : len, (int)gz,
+                                splits[k], 3000, (int)pulled, &seen);
+                if (rc != want)
+                    printf("    %s, %s, %s, %lu bytes, reads of %lu: code %d\n", how_name[how],
+                           gz ? "gzip" : "identity", pulled ? "pulled" : "buffered",
+                           (unsigned long)len, (unsigned long)splits[k], (int)rc);
+                ZUH_CHECK_EQ_INT(rc, want);
+                ZUH_CHECK(seen.len <= 3000);
+                ZUH_CHECK(seen.len == 0 || memcmp(seen.data, payload, seen.len) == 0);
+                if (rc == ZUH_OK) ZUH_CHECK_EQ_INT(seen.len, len);
+                zuh_buf_free(&seen);
+            }
         }
     }
 
