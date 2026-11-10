@@ -103,8 +103,42 @@ static void same_trailers(const zuh_headers *h, const g_fields *t) {
     }
 }
 
+/* D-101 parses a trailer section once it is complete, or past §40's 64 KiB,
+ * as picohttpparser does a response head. So a trailer line that can already
+ * never be valid ("0\r\nhSll@o": no field name holds '@') is refused at the
+ * end of the line, not at its first bad byte, and zuhttp still wants more
+ * where the grammar has refused. That deferral is allowed, and only that one:
+ * the decoder is in the trailer section, it has delivered exactly the
+ * grammar's payload, and the same bytes with the line and the section closed
+ * are refused, delivering nothing more. A deferral that ended in acceptance
+ * would be a real bug, and still aborts. */
+static int deferred_trailer_refusal(const run_t *r, const g_chunked *m,
+                                    const unsigned char *mout,
+                                    const uint8_t *w, size_t n) {
+    run_t closed;
+    uint8_t *wc;
+    int ok;
+    if (!(r->klass == G_MORE && m->rc == G_BAD && r->c.in_trailer)) return 0;
+    G_CHECK(r->out.len == m->outlen);
+    G_CHECK(r->out.len == 0 || memcmp(r->out.data, mout, r->out.len) == 0);
+    wc = (uint8_t *)malloc(n + 4);
+    if (!wc) return 1;
+    memcpy(wc, w, n);
+    memcpy(wc + n, "\r\n\r\n", 4);
+    ok = run(wc, n + 4, 0, 0, &closed);
+    free(wc);
+    if (ok) {
+        G_CHECK(closed.klass == G_BAD);
+        G_CHECK(closed.out.len <= m->outlen);
+    }
+    free_run(&closed);
+    return 1;
+}
+
 /* One run against the grammar's verdict and payload. */
-static void check_run(const run_t *r, const g_chunked *m, const unsigned char *mout) {
+static void check_run(const run_t *r, const g_chunked *m, const unsigned char *mout,
+                      const uint8_t *w, size_t n) {
+    if (deferred_trailer_refusal(r, m, mout, w, n)) return;
     G_CHECK(r->klass == m->rc);
     if (r->klass == G_BAD) {
         G_CHECK(r->out.len <= m->outlen);
@@ -187,7 +221,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
     /* Whole, then the re-encoding of what it accepted. */
     if (run(data, size, 0, 0, &r)) {
-        check_run(&r, lax, lout);
+        check_run(&r, lax, lout, data, size);
         if (r.klass == G_OK) {
             piece = pieces[(sel >> 6) & 3];
             /* Five bytes of framing per 1-byte chunk is 83%, which
@@ -198,15 +232,15 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     }
     free_run(&r);
 
-    if (run(data, size, split, 0, &r)) check_run(&r, lax, lout);
+    if (run(data, size, split, 0, &r)) check_run(&r, lax, lout, data, size);
     free_run(&r);
 
-    if (size <= BYTEWISE_MAX && run(data, size, 0, 1, &r)) check_run(&r, lax, lout);
+    if (size <= BYTEWISE_MAX && run(data, size, 0, 1, &r)) check_run(&r, lax, lout, data, size);
     free_run(&r);
 
     if (size <= EVERY_SPLIT_MAX) {
         for (s = 1; s < size; s++) {
-            if (run(data, size, s, 0, &r)) check_run(&r, lax, lout);
+            if (run(data, size, s, 0, &r)) check_run(&r, lax, lout, data, size);
             free_run(&r);
         }
     }

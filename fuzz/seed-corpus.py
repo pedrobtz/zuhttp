@@ -109,6 +109,11 @@ def main():
     w("chunked/regress-239-ext-lax", b"\x00" + b"5 junk\r\nhello\r\n3;\r\nabc\r\n0\r\n\r\n")
     w("chunked/regress-239-bare-lf", b"\x00" + b"5\nhello\r\n0\r\n\r\n")
     w("chunked/regress-239-17-digits", b"\x00" + b"00000000000000005\r\nhello\r\n0\r\n\r\n")
+    # D-101 (#280) parses a trailer section once it is complete, so a trailer
+    # line that can never be valid is refused at its end: the harness allows
+    # that deferral only when closing the line makes zuhttp refuse. Found by
+    # the libFuzzer smoke on the merge of main into #279.
+    w("chunked/regress-280-trailer-deferred", b"\x00" + b"0\r\nhSll@o")
 
     # --- headers: NAME \0 VALUE ---------------------------------------------
     w("headers/simple", b"Content-Type\x00application/json")
