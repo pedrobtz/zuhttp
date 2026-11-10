@@ -5,8 +5,15 @@ library(zuhttp)
 stopifnot(identical(zu_tls_backend(), "schannel"))
 
 r <- zu_get("https://example.com")
-cat("status", zu_resp_status(r), "tls", r$tls_version,
-    "bytes", length(zu_resp_raw(r)), "\n")
+cat(
+  "status",
+  zu_resp_status(r),
+  "tls",
+  r$tls_version,
+  "bytes",
+  length(zu_resp_raw(r)),
+  "\n"
+)
 stopifnot(zu_resp_status(r) == 200L)
 stopifnot(grepl("Example Domain", zu_resp_text(r), fixed = TRUE))
 stopifnot(identical(r$tls_version, "TLSv1.2"))
@@ -29,11 +36,18 @@ unreachable <- function(e) {
 badssl <- function(url) {
   for (attempt in 1:3) {
     e <- tryCatch(zu_get(url), error = function(e) e)
-    if (!(inherits(e, "error") && unreachable(e))) return(e)
+    if (!(inherits(e, "error") && unreachable(e))) {
+      return(e)
+    }
     Sys.sleep(c(1, 3, 0)[attempt])
   }
-  cat("SKIP", url, ": badssl.com unreachable after 3 attempts (#63):",
-      conditionMessage(e), "\n")
+  cat(
+    "SKIP",
+    url,
+    ": badssl.com unreachable after 3 attempts (#63):",
+    conditionMessage(e),
+    "\n"
+  )
   NULL
 }
 e <- badssl("https://expired.badssl.com/")
