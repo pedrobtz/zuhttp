@@ -339,6 +339,37 @@ void suite_pool(void) {
     }
     zuh_pool_clear(p);
 
+    /* #254: each cap at cap - 1, cap and cap + 1 releases. Under the cap
+     * every connection is kept; at it nothing is evicted; past it the oldest
+     * goes, and is counted. */
+    ZUH_CASE("max_per_host and max_idle keep cap - 1 and cap, and evict at cap + 1 (#254)");
+    {
+        size_t which, n;
+        for (which = 0; which < 2; which++) {
+            size_t cap = which ? cfg.max_idle : cfg.max_per_host;
+            for (n = cap - 1; n <= cap + 1; n++) {
+                zuh_pool_stats before, after;
+                size_t i;
+                zuh_pool_clear(p);
+                zuh_pool_stats_get(p, &before);
+                for (i = 0; i < n; i++) {
+                    zuh_pool_key k;
+                    char host[32];
+                    /* One host for max_per_host; distinct ones for max_idle. */
+                    snprintf(host, sizeof host, "h%02u.example", which ? (unsigned)i : 0u);
+                    basic_key(&k, host, 443);
+                    zuh_pool_release(p, &k, idle_stream(), ZUH_REUSE_OK);
+                    zuh_pool_key_free(&k);
+                }
+                zuh_pool_stats_get(p, &after);
+                ZUH_CHECK_EQ_INT(zuh_pool_idle_count(p), n <= cap ? n : cap);
+                ZUH_CHECK_EQ_INT(after.discarded_capacity - before.discarded_capacity,
+                                 n <= cap ? 0 : n - cap);
+            }
+        }
+    }
+    zuh_pool_clear(p);
+
     ZUH_CASE("max_idle of 0 disables pooling entirely");
     {
         zuh_pool_config off;

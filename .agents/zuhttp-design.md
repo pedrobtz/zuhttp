@@ -152,6 +152,7 @@ accepted when that work package's PR merges.
 | D-99 | **R callbacks (body callback, request body function) run under `R_UnwindProtect`**, whose cleanup longjmps back to the calling C frame; the engine unwinds normally, then the `.Call` resumes the jump with `R_ContinueUnwind()`. Replaces `R_tryCatch` on `error`/`interrupt`, which let a warning under an exiting handler, a restart or a `return()` jump through nghttp2 (review #141) | Accepted 2026-11-05 | 27.3, 65.7 | review |
 | D-97 | **The project-owned C budget is 10,000 code lines**, raised from 8,000; the abort threshold stays at 12,000. HTTP/2 (D-96) brought the 8,000 into 0.1.0 with W20 at 7,989 and W21, W22 and M1 still to add: about 500 lines for the HTTP/2 accessors, keepalive and the streaming body (W20 cost about 200 around a 450-line driver), and the §51.3 estimate of 900 for W7–W14, so about 9,400. 10,000 holds that with a margin; raising it to 12,000 would remove the warning R-4 exists to give. The budget is a trigger to cut, not a target to fill | Accepted (maintainer, 2026-11-04) | 51.3, 61, B (R-4) | W20 |
 | D-100 | **A bodiless `POST`, `PUT` or `PATCH` sends `Content-Length: 0` over HTTP/1.1** (RFC 9110 §8.6), as curl and Go do; some servers answer its absence with 411. `GET`, `DELETE` and the other methods send no framing header for no body, and over HTTP/2 the end-of-stream flag says it. Amends D-78 for the empty body, which it had not addressed | Accepted 2026-11-07 (#179) | 17.4 | review |
+| D-101 | **One header-size rule and one class for every response block.** A field costs its name, its value and 32 bytes (RFC 9113 §6.5.2), and a block — an HTTP/1.1 head, an interim 1xx, chunked trailers, an HTTP/2 HEADERS or trailer block — is refused past `max_header_bytes` of them; HTTP/2 pseudo-header fields cost nothing, so one field list costs the same on both protocols. HTTP/1.1 also bounds a head or trailer section, and a CONNECT reply, at `max_header_bytes` of wire bytes, since the status line and whitespace are not fields and the parser needs the block contiguous (§8.1); only those first bytes are parsed, so the outcome never depends on where reads split. Every response header limit (size, count, name, value, wire) is `zu_http_parse_error`; the CONNECT wire bound stays `zu_proxy_error` (§20.3). Replaces HTTP/1.1 heads charging 4 bytes a field, excluding the status line and raising `zu_body_limit_error`, and HTTP/2 counting `:status` against the limit it advertised. Being looser than the advertised `SETTINGS_MAX_HEADER_LIST_SIZE` by the pseudo-headers is harmless: the server is never refused what it was told it could send | Accepted 2026-11-10 (#257, #258, #259) | 40, 18.4, 65.2, 65.3 | review |
 
 ---
 
@@ -835,6 +836,13 @@ Strict, not permissive (D-15):
 Rejections raise `zu_http_parse_error`, and the connection is closed, never
 pooled (§26.3).
 
+Three rows are stricter than RFC 9112 asks, and `test-h11.R` (#240) holds
+them as the expected differences from h11: an `obs-fold`, which §5.2 has a
+user agent replace with SP; and an equal `Content-Length` repeated as two
+fields or as a list, which RFC 9110 §8.6 lets a recipient collapse. h11 is
+the stricter on BWS before a chunk extension's `;`, which RFC 9112 §7.1.1
+allows and zuhttp accepts.
+
 #### 18.2 Chunked trailers
 
 **Status:** Built (W21, 2026-11-04).
@@ -855,7 +863,9 @@ valid UTF-8 and Latin-1 otherwise (D-84).
 #### 18.4 Header limits
 
 Every §40 header limit is enforced before bytes reach the parser, as the
-buffer grows.
+buffer grows: the parser is shown at most `max_header_bytes` of a head or
+trailer section, and a block still incomplete at that size is refused
+(D-101).
 
 ### 19. Redirect Handling
 
@@ -921,9 +931,13 @@ An explicit `proxy =` wins; `proxy = FALSE` disables proxying (D-48), and
 
 #### 20.2 `NO_PROXY` matching
 
-Comma-separated; `*` matches everything; a leading dot is ignored; matching is
-on label boundaries, case-insensitive; an entry may carry a port; IP literals
-match exactly; CIDR is not supported.
+Comma-separated; `*` matches everything; a leading dot is ignored, and so is
+a root dot, as it is on the host (§8.2); matching is on label boundaries,
+case-insensitive; an entry may carry a port, and an IPv6 entry is written in
+brackets to do so (`[::1]:8080`, brackets optional without one); an IP
+literal on either side matches exactly, never as a suffix; CIDR is not
+supported. libcurl differs on brackets, ports and CIDR, and agrees on the
+rest (`test-proxy.R`, #244).
 
 #### 20.3 Request forms
 
@@ -1642,6 +1656,17 @@ for pasting into bug reports.
 | `max_redirect_body` | 64 KiB |
 | `max_retry_after` | 60 s |
 
+`max_header_bytes`, `max_header_count` and the name and value limits apply
+to each response block on its own: the HTTP/1.1 head, an interim 1xx,
+chunked trailers, and HTTP/2's HEADERS and trailer blocks (D-101). A field
+costs its name, its value and 32 bytes, as RFC 9113 §6.5.2 sizes a header
+list, on both protocols; HTTP/2 pseudo-header fields cost nothing. On
+HTTP/1.1 a head, a trailer section and a CONNECT reply are also bounded at
+`max_header_bytes` of wire bytes, status line and whitespace included, and
+only those bytes are ever parsed, so where the reads split cannot change
+the outcome. Every one of these limits is `zu_http_parse_error`, except
+the CONNECT reply's wire bound, which is `zu_proxy_error` (§20.3).
+
 Plus: checked integer arithmetic, no network-sized stack allocation, no CRLF
 injection, strict framing, verification on by default, credentials stripped
 across origins, proxy credentials confined to the proxy.
@@ -2285,7 +2310,8 @@ the caller reads; it bounds how far an unread server runs ahead, which is
 the cost 4 MiB was weighed against. nghttp2's own limits on the HPACK dynamic table and on
 `RST_STREAM` rate are kept at their defaults. The header limit is enforced
 by the driver on each block, counted as HPACK counts (name, value and 32
-bytes per field), so it does not rely on the server honouring the setting.
+bytes per field) but without the pseudo-header fields, the same rule as
+HTTP/1.1 (D-101), so it does not rely on the server honouring the setting.
 
 The HTTP/2 connection is itself a `zuh_stream`, a wrapper that owns the
 transport and the session, so the §26 pool stores, evicts and frees it

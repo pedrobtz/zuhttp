@@ -110,6 +110,26 @@ void suite_proxy(void) {
     ZUH_CHECK_EQ_INT(zuh_no_proxy_matches("1.2.3.4", "10.1.2.3.4", 80), 0);
     ZUH_CHECK_EQ_INT(zuh_no_proxy_matches("::1", "::1", 80), 1);
 
+    ZUH_CASE("an IP-literal host matches exactly, never by suffix (#266)");
+    /* The guard above was on the entry only, so an entry that is not a full
+     * address, such as "0.0.1", matched 127.0.0.1 on a "label" boundary
+     * (libcurl proxies both: #244). An address has no labels. */
+    ZUH_CHECK_EQ_INT(zuh_no_proxy_matches("0.0.1", "127.0.0.1", 80), 0);
+    ZUH_CHECK_EQ_INT(zuh_no_proxy_matches("1", "127.0.0.1", 80), 0);
+    ZUH_CHECK_EQ_INT(zuh_no_proxy_matches("0.1", "10.0.0.1", 80), 0);
+    ZUH_CHECK_EQ_INT(zuh_no_proxy_matches("127.0.0.1", "127.0.0.1", 80), 1);
+    ZUH_CHECK_EQ_INT(zuh_no_proxy_matches(".127.0.0.1", "127.0.0.1", 80), 1);
+
+    ZUH_CASE("an entry's root dot is stripped, as the host's is (#267)");
+    /* §8.2 strips the host's root dot; an entry written as an absolute name
+     * names the same domain (RFC 1034 §3.1) and never matched. */
+    ZUH_CHECK_EQ_INT(zuh_no_proxy_matches("example.com.", "api.example.com", 443), 1);
+    ZUH_CHECK_EQ_INT(zuh_no_proxy_matches("example.com.", "example.com", 443), 1);
+    ZUH_CHECK_EQ_INT(zuh_no_proxy_matches(".example.com.", "example.com", 443), 1);
+    ZUH_CHECK_EQ_INT(zuh_no_proxy_matches("example.com.:8080", "example.com", 8080), 1);
+    ZUH_CHECK_EQ_INT(zuh_no_proxy_matches("example.com.", "notexample.com", 443), 0);
+    ZUH_CHECK_EQ_INT(zuh_no_proxy_matches(".", "example.com", 443), 0);
+
     ZUH_CASE("CIDR is not supported and must not match by accident (§20.2)");
     /* Documented gap: an entry like this matches nothing rather than a range. */
     ZUH_CHECK_EQ_INT(zuh_no_proxy_matches("10.0.0.0/8", "10.1.2.3", 80), 0);

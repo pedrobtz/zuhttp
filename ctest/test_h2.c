@@ -47,6 +47,13 @@ typedef struct {
     /* Hostile mode: no server session at all; these bytes are the "server". */
     const unsigned char *raw;
     size_t      raw_len;
+    /* §40 at its edges (#253, #259): any number of extra header fields and
+     * trailer fields, and client reads of at most read_max bytes. */
+    const char *const *xname, *const *xvalue;
+    size_t      nx;
+    const char *const *tname, *const *tvalue;
+    size_t      nt;
+    size_t      read_max;
 } srv_cfg;
 
 #define SRV_MAX_CONN 4
@@ -178,6 +185,19 @@ static nghttp2_ssize s_body(nghttp2_session *s, int32_t sid, uint8_t *buf, size_
             tr.valuelen = strlen(v->cfg->trailer_value);
             tr.flags = NGHTTP2_NV_FLAG_NONE;
             nghttp2_submit_trailer(s, sid, &tr, 1);
+        } else if (v->cfg->nt) {
+            /* nghttp2 copies the list before submit returns. */
+            nghttp2_nv *tr = (nghttp2_nv *)calloc(v->cfg->nt, sizeof *tr);
+            size_t i;
+            *flags |= NGHTTP2_DATA_FLAG_NO_END_STREAM;
+            for (i = 0; tr && i < v->cfg->nt; i++) {
+                tr[i].name = (uint8_t *)(uintptr_t)v->cfg->tname[i];
+                tr[i].namelen = strlen(v->cfg->tname[i]);
+                tr[i].value = (uint8_t *)(uintptr_t)v->cfg->tvalue[i];
+                tr[i].valuelen = strlen(v->cfg->tvalue[i]);
+            }
+            if (tr) nghttp2_submit_trailer(s, sid, tr, v->cfg->nt);
+            free(tr);
         }
     }
     return (nghttp2_ssize)n;
@@ -185,7 +205,7 @@ static nghttp2_ssize s_body(nghttp2_session *s, int32_t sid, uint8_t *buf, size_
 
 static void respond(srv *v, int32_t sid) {
     const srv_cfg *c = v->cfg;
-    nghttp2_nv nv[6];
+    nghttp2_nv nv[6], *all;
     char st[8];
     size_t n = 0, i;
     nghttp2_data_provider2 prd;
@@ -221,7 +241,18 @@ static void respond(srv *v, int32_t sid) {
     }
     prd.source.ptr = NULL;
     prd.read_callback = s_body;
-    nghttp2_submit_response2(v->srv, sid, nv, n, c->body_len ? &prd : NULL);
+    /* The extra fields follow the fixed ones; nghttp2 copies the list. */
+    all = (nghttp2_nv *)calloc(n + c->nx, sizeof *all);
+    if (!all) return;
+    memcpy(all, nv, n * sizeof *nv);
+    for (i = 0; i < c->nx; i++) {
+        all[n + i].name = (uint8_t *)(uintptr_t)c->xname[i];
+        all[n + i].namelen = strlen(c->xname[i]);
+        all[n + i].value = (uint8_t *)(uintptr_t)c->xvalue[i];
+        all[n + i].valuelen = strlen(c->xvalue[i]);
+    }
+    nghttp2_submit_response2(v->srv, sid, all, n + c->nx, c->body_len ? &prd : NULL);
+    free(all);
     if (c->goaway_after)
         nghttp2_submit_goaway(v->srv, NGHTTP2_FLAG_NONE, sid, NGHTTP2_NO_ERROR, NULL, 0);
 }
@@ -277,6 +308,7 @@ static zuh_ssize lb_read(zuh_stream *st, void *b, size_t n, zuh_deadline d, zuh_
         return -1;
     }
     if (n > have) n = have;
+    if (v->cfg->read_max && n > v->cfg->read_max) n = v->cfg->read_max;
     memcpy(b, v->out + v->out_off, n);
     v->out_off += n;
     return (zuh_ssize)n;
@@ -920,6 +952,319 @@ static void cases_alloc(void) {
           scn_own_body);
 }
 
+/* --- §40 at its edges, HTTP/1.1 and HTTP/2 side by side (#253, #259) ---- */
+
+/* HTTP/1.1 through the same engine: one connection whose bytes are `bytes`,
+ * at most `max_read` a read. */
+typedef struct { const char *bytes; size_t len, max_read; } h1_wire;
+static zuh_code h1_dial(void *ctx, const char *host, uint16_t port,
+                        zuh_stream **out, zuh_error *err) {
+    h1_wire *w = (h1_wire *)ctx;
+    (void)host; (void)port;
+    *out = zuh_mock_stream_from_bytes(w->bytes, w->len, w->max_read);
+    if (*out) return ZUH_OK;
+    zuh_error_set(err, ZUH_ERR_NOMEM, ZUH_PHASE_CONNECT, "out of memory");
+    return ZUH_ERR_NOMEM;
+}
+
+/* A field list, the same for every protocol: `n` fields named `name`
+ * followed by a two-digit index (which may be widened by `pad` bytes of
+ * 'n'), whose values make the list cost exactly `cost` by D-101's rule
+ * (name + value + 32 a field). Values are spread evenly and the remainder
+ * goes to the first. 0 if `cost` cannot be met. */
+#define LF_MAX 128
+typedef struct {
+    char name[LF_MAX][300];
+    char *value[LF_MAX];
+    const char *np[LF_MAX], *vp[LF_MAX];
+    size_t n;
+} field_list;
+static int field_list_make(field_list *f, size_t n, size_t pad, size_t cost) {
+    size_t i, names = 0, each, extra;
+    memset(f, 0, sizeof *f);
+    if (n > LF_MAX || pad > 250) return 0;
+    f->n = n;
+    for (i = 0; i < n; i++) {
+        size_t l = (size_t)snprintf(f->name[i], sizeof f->name[i], "x-%02lu", (unsigned long)i);
+        memset(f->name[i] + l, 'n', pad); f->name[i][l + pad] = '\0';
+        names += l + pad + 32;
+        f->np[i] = f->name[i];
+    }
+    if (cost < names + n) return 0;
+    each = (cost - names) / n; extra = (cost - names) % n;
+    for (i = 0; i < n; i++) {
+        size_t vl = each + (i == 0 ? extra : 0);
+        f->value[i] = (char *)malloc(vl + 1);
+        if (!f->value[i]) return 0;
+        memset(f->value[i], 'v', vl); f->value[i][vl] = '\0';
+        f->vp[i] = f->value[i];
+    }
+    return 1;
+}
+/* `n` fields with names of exactly `nlen` bytes ("x-NNN" padded with 'n',
+ * nlen >= 5) and values of exactly `vlen`. */
+static int field_list_sized(field_list *f, size_t n, size_t nlen, size_t vlen) {
+    size_t i;
+    memset(f, 0, sizeof *f);
+    if (n > LF_MAX || nlen < 5 || nlen >= sizeof f->name[0]) return 0;
+    f->n = n;
+    for (i = 0; i < n; i++) {
+        snprintf(f->name[i], sizeof f->name[i], "x-%03lu", (unsigned long)i);
+        memset(f->name[i] + 5, 'n', nlen - 5); f->name[i][nlen] = '\0';
+        f->np[i] = f->name[i];
+        f->value[i] = (char *)malloc(vlen + 1);
+        if (!f->value[i]) return 0;
+        memset(f->value[i], 'v', vlen); f->value[i][vlen] = '\0';
+        f->vp[i] = f->value[i];
+    }
+    return 1;
+}
+static void field_list_free(field_list *f) {
+    size_t i;
+    for (i = 0; i < f->n; i++) free(f->value[i]);
+}
+/* The list as HTTP/1.1 field lines. */
+static size_t field_lines(const field_list *f, char *out, size_t cap) {
+    size_t i, n = 0;
+    for (i = 0; i < f->n; i++)
+        n += (size_t)snprintf(out + n, cap - n, "%s: %s\r\n", f->np[i], f->vp[i]);
+    return n;
+}
+
+/* One field list over the four places a response carries one: the HTTP/1.1
+ * head, HTTP/1.1 chunked trailers, the HTTP/2 HEADERS and HTTP/2 trailers.
+ * Each returns the engine's code; `got` is the number of fields that arrived
+ * in the block under test, on success. */
+enum { AT_H1_HEAD, AT_H1_TRAILERS, AT_H2_HEAD, AT_H2_TRAILERS, AT_COUNT };
+static const char *const k_at[AT_COUNT] = {
+    "HTTP/1.1 head", "HTTP/1.1 trailers", "HTTP/2 head", "HTTP/2 trailers" };
+static zuh_code serve_fields(int at, const field_list *f, size_t max_read, size_t *got) {
+    static char wire[1u << 20];
+    zuh_get_opts o;
+    zuh_result r;
+    zuh_error e;
+    zuh_code rc;
+    zuh_error_clear(&e);
+    *got = 0;
+    if (at == AT_H1_HEAD || at == AT_H1_TRAILERS) {
+        h1_wire w;
+        size_t n;
+        if (at == AT_H1_HEAD) {
+            /* Close-delimited, so no framing field joins the list. */
+            n = (size_t)snprintf(wire, sizeof wire, "HTTP/1.1 200 OK\r\n");
+            n += field_lines(f, wire + n, sizeof wire - n);
+            n += (size_t)snprintf(wire + n, sizeof wire - n, "\r\nok");
+        } else {
+            n = (size_t)snprintf(wire, sizeof wire, "HTTP/1.1 200 OK\r\n"
+                                 "Transfer-Encoding: chunked\r\n\r\n2\r\nok\r\n0\r\n");
+            n += field_lines(f, wire + n, sizeof wire - n);
+            n += (size_t)snprintf(wire + n, sizeof wire - n, "\r\n");
+        }
+        w.bytes = wire; w.len = n; w.max_read = max_read;
+        zuh_get_opts_init(&o);
+        o.dial = h1_dial; o.dial_ctx = &w; o.proxy_set = 1; o.http2 = ZUH_H2_OFF;
+        rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+    } else {
+        srv_dialer dd;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.body = "ok"; c.body_len = 2; c.read_max = max_read;
+        if (at == AT_H2_HEAD) { c.xname = f->np; c.xvalue = f->vp; c.nx = f->n; }
+        else                  { c.tname = f->np; c.tvalue = f->vp; c.nt = f->n; }
+        dialer_init(&dd, &c); h2c_opts(&o, &dd);
+        rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+        dialer_free(&dd);
+    }
+    if (rc == ZUH_OK) {
+        *got = zuh_headers_total(at == AT_H1_HEAD || at == AT_H2_HEAD ? &r.headers : &r.trailers);
+        if (!(r.body.len == 2 && memcmp(r.body.data, "ok", 2) == 0)) rc = ZUH_ERR_IO;
+        zuh_result_free(&r);
+    } else if (e.code != rc) {
+        rc = ZUH_CODE_COUNT;        /* the error and the code disagree */
+    }
+    return rc;
+}
+
+/* #252: one body to the caller, over HTTP/1.1 (0 Content-Length, 1 chunked,
+ * 2 close) or HTTP/2 (3), buffered or pulled. `wire` is the body as sent,
+ * gzip when `gz`; what reached the caller is appended to `got`. */
+static zuh_code serve_body(int how, const unsigned char *wire, size_t wlen, int gz,
+                           size_t max_read, uint64_t max_body, int pulled, zuh_buffer *got) {
+    static char resp[1u << 16];
+    zuh_get_opts o;
+    zuh_result r;
+    zuh_error e;
+    zuh_code rc;
+    srv_dialer dd;
+    srv_cfg c;
+    h1_wire w;
+    zuh_error_clear(&e);
+    if (how < 3) {
+        size_t n = (size_t)snprintf(resp, sizeof resp, "HTTP/1.1 200 OK\r\n%s",
+                                    gz ? "Content-Encoding: gzip\r\n" : "");
+        if (how == 0) {
+            n += (size_t)snprintf(resp + n, sizeof resp - n, "Content-Length: %lu\r\n\r\n",
+                                  (unsigned long)wlen);
+            memcpy(resp + n, wire, wlen); n += wlen;
+        } else if (how == 1) {
+            size_t half = wlen / 2;
+            n += (size_t)snprintf(resp + n, sizeof resp - n,
+                                  "Transfer-Encoding: chunked\r\n\r\n%lx\r\n", (unsigned long)half);
+            memcpy(resp + n, wire, half); n += half;
+            n += (size_t)snprintf(resp + n, sizeof resp - n, "\r\n%lx\r\n",
+                                  (unsigned long)(wlen - half));
+            memcpy(resp + n, wire + half, wlen - half); n += wlen - half;
+            n += (size_t)snprintf(resp + n, sizeof resp - n, "\r\n0\r\n\r\n");
+        } else {
+            n += (size_t)snprintf(resp + n, sizeof resp - n, "\r\n");
+            memcpy(resp + n, wire, wlen); n += wlen;
+        }
+        w.bytes = resp; w.len = n; w.max_read = max_read;
+        zuh_get_opts_init(&o);
+        o.dial = h1_dial; o.dial_ctx = &w; o.proxy_set = 1; o.http2 = ZUH_H2_OFF;
+    } else {
+        memset(&c, 0, sizeof c);
+        if (gz) { c.hname[0] = "content-encoding"; c.hvalue[0] = "gzip"; }
+        c.body = wire; c.body_len = wlen; c.read_max = max_read;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd);
+    }
+    o.max_body = max_body; o.stream_body = pulled;
+    rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+    if (rc == ZUH_OK) {
+        if (pulled) {
+            size_t before;
+            do {
+                before = got->len;
+                rc = zuh_open_body_read(r.open, got, 1000, &e);
+            } while (rc == ZUH_OK && got->len > before);
+        } else {
+            zuh_buf_append(got, r.body.data, r.body.len);
+        }
+        zuh_result_free(&r);
+    }
+    if (rc != ZUH_OK && e.code != rc) rc = ZUH_CODE_COUNT;
+    if (how == 3) dialer_free(&dd);
+    return rc;
+}
+
+static void cases_limits(void) {
+    field_list f;
+    size_t at, k, got;
+    static const size_t splits[] = { 0, 1 };
+
+    /* #259, D-101: one rule and one class. 8 fields straddle 64 KiB by the
+     * field-section rule; their wire bytes stay under the HTTP/1.1 cap, so
+     * the rule alone decides. Before D-101, HTTP/1.1 heads charged 4 bytes
+     * a field and raised zu_body_limit_error, and HTTP/2 counted :status. */
+    ZUH_CASE("limits: one field list is accepted or refused alike in every block, as D-101 counts it (#259)");
+    {
+        static const struct { size_t cost; zuh_code want; } cases[] = {
+            { 65535, ZUH_OK }, { 65536, ZUH_OK }, { 65537, ZUH_ERR_PARSE } };
+        size_t j;
+        for (j = 0; j < sizeof cases / sizeof cases[0]; j++) {
+            ZUH_CHECK(field_list_make(&f, 8, 0, cases[j].cost));
+            for (at = 0; at < AT_COUNT; at++) {
+                for (k = 0; k < sizeof splits / sizeof splits[0]; k++) {
+                    zuh_code rc = serve_fields((int)at, &f, splits[k], &got);
+                    if (rc != cases[j].want)
+                        printf("    %s, cost %lu, reads of %lu: code %d\n", k_at[at],
+                               (unsigned long)cases[j].cost, (unsigned long)splits[k], (int)rc);
+                    ZUH_CHECK_EQ_INT(rc, cases[j].want);
+                    if (rc == ZUH_OK) ZUH_CHECK_EQ_INT(got, 8);
+                }
+            }
+            field_list_free(&f);
+        }
+    }
+
+    /* PR #261's survivor: the driver builds :status from its three digits;
+     * only 200 and a few common codes were ever asserted. */
+    ZUH_CASE("§65.2: every digit of :status reaches the response");
+    {
+        static const int st[] = { 207, 299, 418, 503, 599 };
+        size_t j;
+        for (j = 0; j < sizeof st / sizeof st[0]; j++) {
+            srv_dialer dd;
+            zuh_get_opts o;
+            zuh_result r;
+            zuh_error e;
+            zuh_code rc;
+            srv_cfg c; memset(&c, 0, sizeof c);
+            c.status = st[j];
+            dialer_init(&dd, &c); h2c_opts(&o, &dd); zuh_error_clear(&e);
+            rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            if (rc == ZUH_OK) { ZUH_CHECK_EQ_INT(r.status, st[j]); zuh_result_free(&r); }
+            dialer_free(&dd);
+        }
+    }
+
+    /* #252: max_body is decoded bytes on each path, so 2999, 3000 and 3001
+     * bytes against a cap of 3000 give the same answer everywhere. */
+    ZUH_CASE("limits: max_body straddled over HTTP/1.1 and HTTP/2, buffered and pulled, identity and gzip (#252)");
+    {
+        static const char *const how_name[] = { "Content-Length", "chunked", "close", "HTTP/2" };
+        static unsigned char payload[3001];
+        unsigned char gzb[4096];
+        size_t i, len, how, gz, pulled;
+        for (i = 0; i < sizeof payload; i++) payload[i] = (unsigned char)(97u + i % 13u + (i / 50u) % 5u);
+        for (len = 2999; len <= 3001; len++) {
+            size_t glen;
+            z_stream zs;
+            memset(&zs, 0, sizeof zs);
+            deflateInit2(&zs, 9, Z_DEFLATED, 31, 8, Z_DEFAULT_STRATEGY);
+            zs.next_in = payload; zs.avail_in = (uInt)len;
+            zs.next_out = gzb; zs.avail_out = sizeof gzb;
+            deflate(&zs, Z_FINISH);
+            glen = sizeof gzb - zs.avail_out;
+            deflateEnd(&zs);
+            for (how = 0; how < 4; how++) for (gz = 0; gz < 2; gz++) for (pulled = 0; pulled < 2; pulled++)
+            for (k = 0; k < sizeof splits / sizeof splits[0]; k++) {
+                zuh_buffer seen;
+                zuh_code want = len > 3000 ? ZUH_ERR_BODY_LIMIT : ZUH_OK, rc;
+                zuh_buf_init(&seen, 0, (size_t)-1);
+                rc = serve_body((int)how, gz ? gzb : payload, gz ? glen : len, (int)gz,
+                                splits[k], 3000, (int)pulled, &seen);
+                if (rc != want)
+                    printf("    %s, %s, %s, %lu bytes, reads of %lu: code %d\n", how_name[how],
+                           gz ? "gzip" : "identity", pulled ? "pulled" : "buffered",
+                           (unsigned long)len, (unsigned long)splits[k], (int)rc);
+                ZUH_CHECK_EQ_INT(rc, want);
+                ZUH_CHECK(seen.len <= 3000);
+                ZUH_CHECK(seen.len == 0 || memcmp(seen.data, payload, seen.len) == 0);
+                if (rc == ZUH_OK) ZUH_CHECK_EQ_INT(seen.len, len);
+                zuh_buf_free(&seen);
+            }
+        }
+    }
+
+    /* #253: the shipped defaults, not toy limits, on the wire. HTTP/1.1
+     * meets the count in picohttpparser's array, HTTP/2 in the headers
+     * object; both must say the same at 100 and at 101. */
+    ZUH_CASE("limits: 100 fields, 256-byte names and 8 KiB values pass and one more is refused, everywhere (#253)");
+    {
+        static const struct { size_t n, nlen, vlen; zuh_code want; } cases[] = {
+            {  99,   5,    10, ZUH_OK }, { 100,   5,    10, ZUH_OK }, { 101,   5,    10, ZUH_ERR_PARSE },
+            {   1, 255,     1, ZUH_OK }, {   1, 256,     1, ZUH_OK }, {   1, 257,     1, ZUH_ERR_PARSE },
+            {   1,   5,  8191, ZUH_OK }, {   1,   5,  8192, ZUH_OK }, {   1,   5,  8193, ZUH_ERR_PARSE } };
+        size_t j;
+        for (j = 0; j < sizeof cases / sizeof cases[0]; j++) {
+            ZUH_CHECK(field_list_sized(&f, cases[j].n, cases[j].nlen, cases[j].vlen));
+            for (at = 0; at < AT_COUNT; at++) {
+                for (k = 0; k < sizeof splits / sizeof splits[0]; k++) {
+                    zuh_code rc = serve_fields((int)at, &f, splits[k], &got);
+                    if (rc != cases[j].want)
+                        printf("    %s, %lu fields, name %lu, value %lu, reads of %lu: code %d\n",
+                               k_at[at], (unsigned long)cases[j].n, (unsigned long)cases[j].nlen,
+                               (unsigned long)cases[j].vlen, (unsigned long)splits[k], (int)rc);
+                    ZUH_CHECK_EQ_INT(rc, cases[j].want);
+                    if (rc == ZUH_OK) ZUH_CHECK_EQ_INT(got, cases[j].n);
+                }
+            }
+            field_list_free(&f);
+        }
+    }
+}
+
 void suite_h2(void) {
     cases_unit();
     cases_exchange();
@@ -929,6 +1274,7 @@ void suite_h2(void) {
     cases_w21();
     cases_w22();
     cases_review();
+    cases_limits();
 }
 
 
