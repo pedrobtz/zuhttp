@@ -36,7 +36,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     zuh_error e;
     if (size < 2 || size > 8 * 1024) return 0;
 
-    switch (data[0] % 3) {
+    switch (data[0] % 4) {
     case 0: {   /* NO_PROXY matching against a host from the same input */
         const uint8_t *sep = (const uint8_t *)memchr(data + 1, 0, size - 1);
         char *list = dupz(data + 1, sep ? (size_t)(sep - data - 1) : size - 1);
@@ -74,6 +74,67 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
             }
         }
         if (url) zuh_proxy_free(&p), free(url);
+        break;
+    }
+    case 3: {   /* #230: CONNECT through a proxy with credentials, and its reply */
+        /* Before the first NUL, the target URL; after it, the proxy's reply,
+         * which a hostile proxy controls. No other target reached either. */
+        const uint8_t *sep = (const uint8_t *)memchr(data + 1, 0, size - 1);
+        size_t tlen = sep ? (size_t)(sep - data - 1) : size - 1;
+        const char *reply = sep ? (const char *)sep + 1 : "";
+        size_t rlen = sep ? (size_t)(data + size - sep - 1) : 0;
+        char *turl = dupz(data + 1, tlen);
+        zuh_proxy p;
+        zuh_uri t;
+        zuh_buffer b;
+        size_t consumed = 0;
+        int status = -1;
+        zuh_code rc;
+        memset(&p, 0, sizeof p);
+        if (turl && zuh_proxy_parse(&p, "http://us%3Aer:p%40ss@px.example:3128", &e) == ZUH_OK &&
+            zuh_uri_parse(&t, turl, turl + tlen) == ZUH_OK) {
+            if (t.host && zuh_buf_init(&b, 64, 1 << 20)) {
+                if (zuh_proxy_connect_request(&p, &t, &b, &e) == ZUH_OK) {
+                    const char *req = (const char *)b.data;
+                    size_t k;
+                    /* One header block, ending the request: a target can
+                     * never smuggle a line, or a second request, into it. */
+                    if (b.len < 12 || memcmp(req, "CONNECT ", 8) != 0 ||
+                        memcmp(req + b.len - 4, "\r\n\r\n", 4) != 0) abort();
+                    for (k = 0; k + 4 < b.len; k++)
+                        if (memcmp(req + k, "\r\n\r\n", 4) == 0) abort();
+                    for (k = 0; k < b.len; k++)
+                        if ((req[k] == '\n' && (k == 0 || req[k - 1] != '\r')) ||
+                            (req[k] == '\r' && (k + 1 >= b.len || req[k + 1] != '\n')))
+                            abort();
+                    /* §20.4: the credentials go in Proxy-Authorization, so
+                     * the request line never carries them. Searched within
+                     * b.len: a zuh_buffer is not NUL-terminated, and strstr()
+                     * ran off the end of one the request filled exactly. */
+                    {
+                        static const char want[] = "\r\nProxy-Authorization: Basic ";
+                        size_t wl = sizeof want - 1;
+                        int found = 0;
+                        for (k = 0; !found && k + wl <= b.len; k++)
+                            found = memcmp(req + k, want, wl) == 0;
+                        if (!found) abort();
+                    }
+                    for (k = 0; k < b.len && req[k] != '\r'; k++)
+                        if (req[k] == '@') abort();
+                }
+                zuh_buf_free(&b);
+            }
+            zuh_uri_free(&t);
+        }
+        zuh_proxy_free(&p);
+        free(turl);
+        /* The reply: tunnel only on a 2xx, a 407 is its own class, and the
+         * parser never claims more bytes than it was given. */
+        rc = zuh_proxy_connect_response(reply, rlen, &consumed, &status, &e);
+        if (consumed > rlen) abort();
+        if (rc == ZUH_OK && (status < 200 || status > 299)) abort();
+        if (rc == ZUH_ERR_PROXY_AUTH && status != 407) abort();
+        if (rc == ZUH_ERR_PROXY && (status == 407 || (status >= 200 && status <= 299))) abort();
         break;
     }
     default: {  /* full resolution: env -> proxy decision */

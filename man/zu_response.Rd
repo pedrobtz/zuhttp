@@ -15,7 +15,7 @@ zu_response(
 )
 }
 \arguments{
-\item{status}{Integer HTTP status.}
+\item{status}{HTTP status, a whole number from 100 to 599.}
 
 \item{headers}{Named character vector. Repeated names are allowed and are
 preserved (§18.3).}

@@ -39,7 +39,7 @@ misconfigured server must not be able to pin an R session for hours.}
 timeout still bounds the whole call (§24.3); this bounds one try.}
 
 \item{on}{Extra HTTP statuses to treat as retryable, beyond §33.2's
-408, 429, 500, 502, 503 and 504.}
+408, 429, 500, 502, 503 and 504: whole numbers from 100 to 599.}
 }
 \value{
 A \code{zu_retry_policy}, for \code{zu_client(retry = )} or

@@ -56,25 +56,6 @@ zu_pool <- function(
   keepalive_time = NULL,
   keepalive_timeout = NULL
 ) {
-  # Finite: as.integer(Inf) is NA, which C read as "the default", so a count
-  # of Inf would silently become the default count.
-  check_count <- function(x, nm) {
-    if (
-      !is.numeric(x) ||
-        length(x) != 1L ||
-        !is.finite(x) ||
-        x < 1 ||
-        x > .Machine$integer.max
-    ) {
-      stop(
-        "`",
-        nm,
-        "` must be a single whole number of at least 1",
-        call. = FALSE
-      )
-    }
-    as.integer(x)
-  }
   check_secs <- function(x, nm) {
     if (is.null(x)) {
       return(0L)
@@ -102,8 +83,8 @@ zu_pool <- function(
   }
   structure(
     list(
-      max_idle = check_count(max_idle, "max_idle"),
-      max_per_host = check_count(max_per_host, "max_per_host"),
+      max_idle = check_whole(max_idle, "max_idle", min = 1),
+      max_per_host = check_whole(max_per_host, "max_per_host", min = 1),
       # Inf, or anything past what an int of milliseconds holds, is the most
       # the C side can express, as for `timeout` (timeout_ms()).
       idle_timeout_ms = timeout_ms(idle_timeout),

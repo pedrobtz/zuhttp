@@ -306,21 +306,9 @@ resolve_request <- function(req, client) {
   ) {
     stop("`timeout` must be a positive number of seconds", call. = FALSE)
   }
-  # The bound as zu_pool() has it: the transport sends `redirects` to C as
-  # an integer, and as.integer() of anything above .Machine$integer.max is
-  # NA, which C read as INT_MIN and so as "follow none" (#221).
-  if (
-    !is.numeric(policy$redirects) ||
-      length(policy$redirects) != 1L ||
-      !is.finite(policy$redirects) ||
-      policy$redirects < 0 ||
-      policy$redirects > .Machine$integer.max
-  ) {
-    stop(
-      "`redirects` must be 0 or more, and at most .Machine$integer.max",
-      call. = FALSE
-    )
-  }
+  # The transport sends it to C as an integer; NA read as INT_MIN, and so
+  # as "follow none" (#221).
+  check_whole(policy$redirects, "redirects", min = 0)
   # Not merely a range check: the C side reads max_body == 0 as "use the
   # default", so a caller writing max_body = 0 to mean "refuse any body"
   # would silently get 16 MB. Refuse the value rather than honour the

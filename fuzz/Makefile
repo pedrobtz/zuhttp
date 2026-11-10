@@ -44,7 +44,7 @@ CORE := $(SRC)/zuh_alloc.c $(SRC)/zuh_buffer.c $(SRC)/zuh_error.c \
         $(URIDIR)/UriRecompose.c $(URIDIR)/UriCommon.c $(URIDIR)/UriMemory.c \
         $(URIDIR)/UriIp4.c $(URIDIR)/UriIp4Base.c
 
-TARGETS := response chunked headers uri redirect inflate proxy redact body engine h2
+TARGETS := response chunked headers uri redirect inflate proxy redact body engine h2 pull
 
 # The engine target links the whole request path. zuh_net.c is compiled but
 # never dialled (the harness supplies connections through the §50.1 seam), and
@@ -77,6 +77,10 @@ fuzz_engine: fuzz_engine.c $(CORE) $(ENGINE_EXTRA)
 fuzz_h2: fuzz_h2.c $(CORE) $(ENGINE_EXTRA)
 	$(FUZZ_CC) $(BASE) $(FUZZ_FLAGS) -o $@ $< $(CORE) $(ENGINE_EXTRA) -lz $(NETLIBS)
 
+# Target thirteen (#229): the pulled body's API as a state machine.
+fuzz_pull: fuzz_pull.c $(CORE) $(ENGINE_EXTRA)
+	$(FUZZ_CC) $(BASE) $(FUZZ_FLAGS) -o $@ $< $(CORE) $(ENGINE_EXTRA) -lz $(NETLIBS)
+
 # One short run of every target. `make fuzz-run SECS=3600` for a longer soak;
 # S18's exit criterion is 24 h per target, which is a scheduled job, not CI.
 SECS ?= 60
@@ -101,6 +105,9 @@ replay_engine: fuzz_engine.c replay_main.c $(CORE) $(ENGINE_EXTRA)
 	$(CC) $(BASE) $(REPLAY_FLAGS) -o $@ $< replay_main.c $(CORE) $(ENGINE_EXTRA) -lz $(NETLIBS)
 
 replay_h2: fuzz_h2.c replay_main.c $(CORE) $(ENGINE_EXTRA)
+	$(CC) $(BASE) $(REPLAY_FLAGS) -o $@ $< replay_main.c $(CORE) $(ENGINE_EXTRA) -lz $(NETLIBS)
+
+replay_pull: fuzz_pull.c replay_main.c $(CORE) $(ENGINE_EXTRA)
 	$(CC) $(BASE) $(REPLAY_FLAGS) -o $@ $< replay_main.c $(CORE) $(ENGINE_EXTRA) -lz $(NETLIBS)
 
 # Replay every seed. Two things this must get right:

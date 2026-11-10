@@ -15,7 +15,7 @@
 #' run without a network, and may still change before 1.0; the request
 #' functions, response accessors and conditions are the stable API.
 #'
-#' @param status Integer HTTP status.
+#' @param status HTTP status, a whole number from 100 to 599.
 #' @param headers Named character vector. Repeated names are allowed and are
 #'   preserved (§18.3).
 #' @param body A raw vector, or a string (encoded as UTF-8).
@@ -44,12 +44,12 @@ zu_response <- function(
   }
   structure(
     list(
-      status = as.integer(status),
+      status = check_whole(status, "status", min = 100, max = 599),
       headers = as_header_vec(headers),
       body = body,
       url = url,
       tls_version = tls_version,
-      redirects = as.integer(redirects),
+      redirects = check_whole(redirects, "redirects", min = 0),
       method = NULL,
       timings = c(total = NA_real_),
       request = NULL,

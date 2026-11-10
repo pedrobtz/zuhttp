@@ -8,7 +8,7 @@ import shutil
 import zlib
 
 TARGETS = ("response", "chunked", "headers", "uri", "redirect", "inflate",
-           "proxy", "redact", "body", "h2")
+           "proxy", "redact", "body", "h2", "pull")
 
 README = """\
 Curated fuzz seeds (design §43, §50.3).
@@ -115,8 +115,13 @@ def main():
             "", "g?y#s", "../../.."]
     for i, l in enumerate(locs, 1):
         w("redirect/seed%02d" % i, l)
+    # #230: the same input is also a header set for the §19.2 strip.
+    w("redirect/headers-credentials",
+      "Authorization: Bearer t\nCookie: a=b\nX-Keep: 1\nproxy-authorization: Basic x\n"
+      "Accept: */*\nAUTHORIZATION: again")
+    w("redirect/headers-none", "Accept: */*\nX-Trace: 1")
 
-    # --- proxy: first byte selects no_proxy / URL / full resolution ---------
+    # --- proxy: first byte selects no_proxy / URL / resolution / CONNECT ----
     w("proxy/np_simple", b"\x00example.com\x00api.example.com")
     w("proxy/np_star", b"\x00*\x00anything.com")
     w("proxy/np_port", b"\x00example.com:8080\x00example.com")
@@ -134,6 +139,18 @@ def main():
     w("proxy/res_empty", b"\x02\x00")
     w("proxy/regress-ipvfuture",
       b"\x01http://[veee.0;;;;***UU;;;;;;;;;;;;;:]//;m=")
+    # #230: case 3 builds a CONNECT for the target URL before the NUL through
+    # a proxy with credentials, then parses the reply after it.
+    w("proxy/connect-200", b"\x03https://target.example:8443/x\x00"
+      b"HTTP/1.1 200 Connection established\r\n\r\n")
+    w("proxy/connect-407", b"\x03https://target.example/\x00HTTP/1.1 407 Proxy Auth\r\n"
+      b"Proxy-Authenticate: Basic realm=x\r\nContent-Length: 0\r\n\r\n")
+    w("proxy/connect-403", b"\x03https://[::1]:443/\x00HTTP/1.1 403 Forbidden\r\n\r\n")
+    w("proxy/connect-garbage", b"\x03https://t.example/\x00HTTP/1.1 2000 OK\r\n\r\n")
+    w("proxy/connect-cut", b"\x03https://t.example/\x00HTTP/1.1 200 OK\r\nX: y")
+    # A CONNECT request that exactly fills its buffer: the harness searched it
+    # with strstr(), which ran off the end (found by the libFuzzer smoke).
+    w("proxy/regress-230-full-buffer", b'\x03https://tPro\x00HTTP/1.1 414 tps:// .1 407 Proxy Auth\r\nProx!y-TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT\xa6TTTTTTTTTTTTTTTTTTTTTTTTTT\x00\x00TTTTTTTTTTTAuhttSSSSSSSSSSSSSSSSS_______________________SSSSSSSSSSSWSSSSSSSSSSSS.icate`: Ba]sic r0\r\n\r\n')
 
     # --- redact: URLs and form bodies, mostly credential-bearing ------------
     w("redact/userinfo", "https://user:pw@api.example.com/v1/x")
@@ -198,6 +215,21 @@ def main():
     w("body/chunked-huge-size", bytes([IDENT_CHUNK]) + b"ffffffffffffffff\r\nx")
     w("body/chunked-trailer", bytes([IDENT_CHUNK]) + b"3\r\nabc\r\n0\r\nX-T: 1\r\n\r\n")
     w("body/chunked-truncated", bytes([IDENT_CHUNK]) + b"5\r\nab")
+    # #227: the read-size and framing differentials. Bit 5 is a cap of 8
+    # bytes. #210 handed the sink a malformed chunk's raw bytes before the
+    # parse error; #212 refused under chunked framing a gzip body that fits
+    # max_body decoded (5 bytes) but not compressed (25 bytes).
+    w("body/regress-210-bad-chunk", bytes([IDENT_CHUNK]) + b"X\r\nATTACK\r\n0\r\n\r\n")
+    w("body/regress-210-good-then-bad",
+      bytes([IDENT_CHUNK]) + b"3\r\nabc\r\nX\r\nATTACK\r\n0\r\n\r\n")
+    gz = zlib.compressobj(9, zlib.DEFLATED, 31)
+    w("body/regress-212-gzip-small-cap", bytes([0x20]) + gz.compress(b"hello") + gz.flush())
+    # Two faults, a bad gzip stream in bad chunk framing: read whole, the
+    # framing fails first; byte by byte, the inflater does. Both are right,
+    # and an oracle that compared the error codes aborted on it.
+    w("body/regress-227-two-faults",
+      bytes([0x42]) + b"B\r\nabc\r\n0\xfd\nX-" + b"\x90" * 6 + b"\xff" + b"\x90" * 5 +
+      b"1\r\n\r\n")
 
 
     # --- h2: server frames for target 12 (§65.8) -----------------------------
@@ -260,6 +292,25 @@ def main():
     w("h2/streamed-body", bytes([0x0E]) + pre + ok1 + ok3)
     w("h2/streamed-body-fails", bytes([0x0D]) + pre + ok1 + b"\x00ZU\x00" + pre + ok1)
     w("h2/streamed-body-pulled", bytes([0x8E]) + pre + ok1 + ok3)
+
+    # --- pull (#229): the pulled body's API against a model ----------------
+    # byte 0 framing (0 length, 1 chunked, 2 close, 3 length read a byte at
+    # a time; bit 2 7-byte reads), byte 1 the payload length, the payload,
+    # then one byte per operation: low bits 0 read, 1 peek+consume, 2 abort,
+    # 3 done?; the rest is the size less one.
+    def op(kind, k=1):
+        return bytes([((k - 1) << 2) | kind])
+    hello = b"hello"
+    # #213: the whole body arrives in the first read, so the wire has ended;
+    # read 1 byte, abort, read: the rest must be cancelled, not served.
+    w("pull/regress-213-abort-after-end", bytes([0, 5]) + hello + op(0, 1) + op(2) + op(0, 4))
+    w("pull/read-all-length", bytes([0, 5]) + hello + op(0, 64) + op(0, 64) + op(3))
+    w("pull/read-all-chunked", bytes([1, 12]) + b"hello, world" + op(0, 3) * 6 + op(3))
+    w("pull/read-all-close", bytes([2, 5]) + hello + op(0, 2) * 4 + op(3))
+    w("pull/peek-consume", bytes([4, 12]) + b"hello, world" + op(1, 4) * 6 + op(0, 64) + op(3))
+    w("pull/abort-mid-bytewise", bytes([3, 12]) + b"hello, world" + op(0, 2) + op(2) +
+      op(1, 3) + op(0, 3) + op(3))
+    w("pull/empty", bytes([0, 0]) + op(0, 8) + op(3) + op(2) + op(0, 8))
 
     with open(os.path.join("corpus", "README"), "w") as f:
         f.write(README)

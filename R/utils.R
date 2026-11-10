@@ -18,6 +18,43 @@ check_client <- function(client, arg = "client") {
   invisible(client)
 }
 
+# One check for every argument that reaches as.integer() (#232). That
+# conversion turns anything past .Machine$integer.max, and Inf, into NA with
+# only a warning, and a fraction into its floor without one; C then reads NA
+# as INT_MIN. #221 and #222 were this twice, so no integer argument gets its
+# own check. `n = 1` is a scalar; `n = NA` any length, element by element.
+check_whole <- function(
+  x,
+  arg,
+  min,
+  max = .Machine$integer.max,
+  n = 1L,
+  note = NULL
+) {
+  ok <- is.numeric(x) &&
+    (is.na(n) || length(x) == n) &&
+    all(is.finite(x)) &&
+    all(x == trunc(x)) &&
+    all(x >= min) &&
+    all(x <= max)
+  if (!isTRUE(ok)) {
+    hi <- if (max == .Machine$integer.max) ".Machine$integer.max" else max
+    stop(
+      "`",
+      arg,
+      "` must be ",
+      if (is.na(n)) "whole numbers" else "a single whole number",
+      ", at least ",
+      min,
+      " and at most ",
+      hi,
+      if (!is.null(note)) paste0(" ", note),
+      call. = FALSE
+    )
+  }
+  as.integer(x)
+}
+
 # Remove every header named `name`, case-insensitively, as HTTP field names
 # are (§18.3), so a request's c(Accept=) replaces a client's c(accept=)
 # rather than sitting beside it.
