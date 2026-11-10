@@ -67,6 +67,8 @@ tools/coverage/fuzz-gaps.sh fuzz.lcov ctest.lcov   # what it misses: unentered f
                               #   one-sided conditions, lines only ctest reaches
 make -C fuzz mutate-asan      # 33,000 deterministic mutants of the seeds under ASan + UBSan;
                               #   MUT_SEED=1 for a fresh set. A soak, not a bug-finder: see below
+gh workflow run mutation.yaml # Mull over src/zuh_*.c against zuh_ctest (#238): the
+                              #   mutants no check kills, listed in the job summary
 
 # R
 R CMD INSTALL --preclean .    # --preclean: an in-tree build reuses stale src/*.o,
@@ -87,6 +89,10 @@ ZU_H2_TEST_SERVER=http://127.0.0.1:18080 ZU_H2_TEST_TLS=https://localhost:18443 
 
 # The R glue (init.c) under valgrind: Linux only; CI runs it on every PR (#164)
 tools/ci-valgrind-glue.sh
+
+# The R glue with each allocation failed in turn, R's included (#237): weekly
+# in alloc-failure.yaml; tools/alloc/exercise.R is the workload
+Rscript tools/alloc/exercise.R
 
 # What CI actually runs for the R suite — reproduce THIS before claiming green,
 # because it differs from R CMD check in ways that have bitten before.
