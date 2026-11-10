@@ -29,6 +29,9 @@
 #include <setjmp.h>
 #include <string.h>
 
+/* Defined below; the pool constructor raises through it too. */
+static void raise_zu_error(const zuh_error *e, const char *url);
+
 /* Anything a caller could make arbitrarily large is bounded here rather than
  * in the R layer, so the bound cannot be bypassed by a different caller. */
 #define ZUH_R_TEXT_MAX (1u << 20)
@@ -287,7 +290,15 @@ static SEXP C_zu_pool_new(SEXP max_idle, SEXP max_per_host, SEXP idle_timeout_ms
         cfg.keepalive_timeout_ms = (long)Rf_asInteger(keepalive_timeout_ms);
 
     p = zuh_pool_new(&cfg);
-    if (!p) Rf_error("could not allocate a connection pool");
+    if (!p) {
+        /* zu_memory_error, as every other allocation failure is (§34.1). A
+         * bare Rf_error() here was the one unclassed out-of-memory error the
+         * allocation-failure sweep found (#282). */
+        zuh_error e;
+        zuh_error_clear(&e);
+        zuh_error_set(&e, ZUH_ERR_NOMEM, ZUH_PHASE_NONE, "could not allocate a connection pool");
+        raise_zu_error(&e, NULL);
+    }
 
     ptr = PROTECT(R_MakeExternalPtr(p, zuh_pool_tag, R_NilValue));
     R_RegisterCFinalizerEx(ptr, pool_finalizer, TRUE);
