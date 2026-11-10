@@ -161,6 +161,101 @@ void suite_inflate(void) {
         }
     }
 
+    /* #242: RFC 1952 §2.2 makes a gzip body of two members equivalent to one
+     * member of their concatenation, which is what `gzip -dc` prints. The
+     * oracle is the plaintext: three deflate()-made members, one of them
+     * empty, must decode to the first and third joined, read whole, split
+     * at every byte and fed a byte at a time. The caps count the body, not
+     * a member: max_out at the joined length passes and one less fails. */
+    ZUH_CASE("#242: a multi-member gzip body decodes as the concatenation of its members");
+    {
+        const char *a = "the first member, the first member, ";
+        const char *b = "and the third, after an empty second";
+        char joined[128];
+        unsigned char comp[1024];
+        size_t na = strlen(a), nb = strlen(b), nj, clen = 0, c, split, i;
+        nj = na + nb;
+        memcpy(joined, a, na);
+        memcpy(joined + na, b, nb);
+        c = compress_with(15 + 16, a, na, comp, sizeof comp, 6);
+        ZUH_CHECK(c > 0); clen += c;
+        c = compress_with(15 + 16, "", 0, comp + clen, sizeof comp - clen, 6);
+        ZUH_CHECK(c > 0); clen += c;
+        c = compress_with(15 + 16, b, nb, comp + clen, sizeof comp - clen, 6);
+        ZUH_CHECK(c > 0); clen += c;
+
+        for (split = 0; split <= clen; split++) {
+            zuh_inflate z; zuh_buffer out; zuh_error e;
+            zuh_code r1, r2;
+            zuh_error_clear(&e);
+            zuh_buf_init(&out, 0, 0);
+            zuh_inflate_init(&z, ZUH_ENC_GZIP, 0, 0);
+            r1 = zuh_inflate_run(&z, comp, split, &out, &e);
+            r2 = zuh_inflate_run(&z, comp + split, clen - split, &out, &e);
+            ZUH_CHECK(r1 == ZUH_ERR_WOULDBLOCK || r1 == ZUH_OK);
+            ZUH_CHECK(r2 == ZUH_ERR_WOULDBLOCK || r2 == ZUH_OK);
+            ZUH_CHECK_EQ_INT(zuh_inflate_run(&z, NULL, 0, &out, &e), ZUH_OK);
+            ZUH_CHECK_EQ_INT(out.len, nj);
+            ZUH_CHECK(out.len == nj && memcmp(out.data, joined, nj) == 0);
+            zuh_inflate_free(&z); zuh_buf_free(&out);
+        }
+        {
+            zuh_inflate z; zuh_buffer out; zuh_error e;
+            int ok = 1;
+            zuh_error_clear(&e);
+            zuh_buf_init(&out, 0, 0);
+            zuh_inflate_init(&z, ZUH_ENC_GZIP, 0, 0);
+            for (i = 0; i < clen; i++) {
+                zuh_code r = zuh_inflate_run(&z, comp + i, 1, &out, &e);
+                if (r != ZUH_OK && r != ZUH_ERR_WOULDBLOCK) ok = 0;
+            }
+            ZUH_CHECK(ok);
+            ZUH_CHECK_EQ_INT(zuh_inflate_run(&z, NULL, 0, &out, &e), ZUH_OK);
+            ZUH_CHECK(out.len == nj && memcmp(out.data, joined, nj) == 0);
+            zuh_inflate_free(&z); zuh_buf_free(&out);
+        }
+        {
+            size_t cap;
+            for (cap = nj - 1; cap <= nj + 1; cap++) {
+                zuh_inflate z; zuh_buffer out; zuh_error e; zuh_code r;
+                zuh_error_clear(&e);
+                zuh_buf_init(&out, 0, 0);
+                zuh_inflate_init(&z, ZUH_ENC_GZIP, (uint64_t)cap, 0);
+                r = zuh_inflate_run(&z, comp, clen, &out, &e);
+                if (cap < nj) {
+                    ZUH_CHECK_EQ_INT(r, ZUH_ERR_BODY_LIMIT);
+                    ZUH_CHECK(out.len <= cap);
+                } else {
+                    ZUH_CHECK(r == ZUH_OK || r == ZUH_ERR_WOULDBLOCK);
+                    ZUH_CHECK_EQ_INT(zuh_inflate_run(&z, NULL, 0, &out, &e), ZUH_OK);
+                    ZUH_CHECK_EQ_INT(out.len, nj);
+                }
+                zuh_inflate_free(&z); zuh_buf_free(&out);
+            }
+        }
+    }
+
+    ZUH_CASE("#242: a second gzip member cut short fails at the end of the body");
+    {
+        const char *a = "a complete first member";
+        unsigned char comp[512];
+        size_t na = strlen(a), c1, c2, cut;
+        c1 = compress_with(15 + 16, a, na, comp, sizeof comp, 6);
+        c2 = compress_with(15 + 16, a, na, comp + c1, sizeof comp - c1, 6);
+        ZUH_CHECK(c1 > 0 && c2 > 0);
+        for (cut = 1; cut < c2; cut++) {
+            zuh_inflate z; zuh_buffer out; zuh_error e; zuh_code r;
+            zuh_error_clear(&e);
+            zuh_buf_init(&out, 0, 0);
+            zuh_inflate_init(&z, ZUH_ENC_GZIP, 0, 0);
+            r = zuh_inflate_run(&z, comp, c1 + cut, &out, &e);
+            if (r == ZUH_OK || r == ZUH_ERR_WOULDBLOCK)
+                r = zuh_inflate_run(&z, NULL, 0, &out, &e);
+            ZUH_CHECK_EQ_INT(r, ZUH_ERR_BODY_DECODE);
+            zuh_inflate_free(&z); zuh_buf_free(&out);
+        }
+    }
+
     /* §21.4 — the reason this module has limits at all. */
     ZUH_CASE("§21.4: a decompression bomb is stopped by the OUTPUT limit");
     {
