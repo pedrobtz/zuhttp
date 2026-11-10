@@ -36,4 +36,9 @@ jobs:
         .*/src/zuh_[a-z0-9_]+\.c$
       exclude: |
         .*/vendor/.*
+      # One zuh_ctest run takes about 3 s; a mutant that turns a loop into an
+      # endless one waits for this, so it bounds the run. At Mull's default of
+      # 30 s, the merge of the limit tests (#280) got through 191 of 1358
+      # mutants in 26 minutes before the runner was shut down.
+      mutant-timeout: 10000
       timeout-minutes: 180
