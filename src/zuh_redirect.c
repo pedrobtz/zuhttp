@@ -22,28 +22,6 @@ int zuh_redirect_is_credential_header(const zuh_redact_policy *p, const char *na
     return name ? zuh_redact_is_secret_header(p, name, strlen(name)) : 0;
 }
 
-size_t zuh_redirect_strip_credentials(zuh_headers *h, const zuh_redact_policy *p) {
-    size_t i = 0, removed = 0;
-    if (!h) return 0;
-    while (i < h->n) {
-        if (zuh_redact_is_secret_header(p, h->items[i].name, h->items[i].nlen)) {
-            /* zuh_headers_remove() takes a name and removes every field so
-             * named, freeing the one we would be pointing into; copy it,
-             * then start over. */
-            char name[ZUH_DEFAULT_MAX_HEADER_NAME + 1];
-            size_t n = h->items[i].nlen < sizeof name - 1 ? h->items[i].nlen
-                                                          : sizeof name - 1;
-            memcpy(name, h->items[i].name, n);
-            name[n] = '\0';
-            removed += zuh_headers_remove(h, name);
-            i = 0;
-            continue;
-        }
-        i++;
-    }
-    return removed;
-}
-
 zuh_code zuh_redirect_decide(const zuh_redirect_policy *p, int status,
                            const char *method, const zuh_uri *from,
                            const zuh_uri *to, size_t hops_so_far,

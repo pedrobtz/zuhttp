@@ -154,22 +154,6 @@ void suite_redirect(void) {
                     ZUH_ERR_TOO_MANY_REDIRECTS);
     zuh_uri_free(&a); zuh_uri_free(&b);
 
-    ZUH_CASE("§19.2: stripping removes every credential-bearing field");
-    {
-        zuh_headers h;
-        zuh_headers_init(&h);
-        zuh_headers_add_str(&h, "Authorization", "Bearer t");
-        zuh_headers_add_str(&h, "Cookie", "a=1");
-        zuh_headers_add_str(&h, "Cookie", "b=2");
-        zuh_headers_add_str(&h, "Proxy-Authorization", "Basic x");
-        zuh_headers_add_str(&h, "Accept", "*/*");
-        ZUH_CHECK_EQ_INT(zuh_redirect_strip_credentials(&h, NULL), 4);
-        ZUH_CHECK_EQ_INT(h.n, 1);
-        ZUH_CHECK(zuh_headers_has(&h, "Accept"));
-        ZUH_CHECK(!zuh_headers_has(&h, "authorization"));
-        zuh_headers_free(&h);
-    }
-
     ZUH_CASE("§19.4: loop detection on (method, absolute URL)");
     {
         zuh_redirect_trail t;
@@ -182,6 +166,30 @@ void suite_redirect(void) {
         ZUH_CHECK_EQ_INT(zuh_redirect_trail_add(&t, "POST", &a), ZUH_OK);   /* method differs */
         zuh_redirect_trail_free(&t);
         zuh_uri_free(&a); zuh_uri_free(&b);
+    }
+
+    /* #269: the loop is found wherever the earlier hop sits in the trail,
+     * not only at its start, and the trail keeps every hop past the first
+     * growth (8 slots). */
+    ZUH_CASE("#269: loop detection finds any earlier hop, past the trail's growth");
+    {
+        zuh_redirect_trail t;
+        zuh_uri u[20];
+        char path[16];
+        int i, dup = 0;
+        zuh_redirect_trail_init(&t);
+        for (i = 0; i < 20; i++) {
+            snprintf(path, sizeof path, "/%d", i);
+            mk(&u[i], "https", "x.com", 443, path);
+            ZUH_CHECK_EQ_INT(zuh_redirect_trail_add(&t, "GET", &u[i]), ZUH_OK);
+        }
+        ZUH_CHECK_EQ_INT(t.n, 20);
+        for (i = 0; i < 20; i++)
+            dup += zuh_redirect_trail_add(&t, "GET", &u[i]) == ZUH_ERR_REDIRECT;
+        ZUH_CHECK_EQ_INT(dup, 20);
+        ZUH_CHECK_EQ_INT(t.n, 20);
+        zuh_redirect_trail_free(&t);
+        for (i = 0; i < 20; i++) zuh_uri_free(&u[i]);
     }
 
     ZUH_CASE("§42: an origin string never leaks userinfo");
