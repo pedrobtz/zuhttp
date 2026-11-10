@@ -407,8 +407,8 @@ static int is_conn_specific(const char *name) {
     return 0;
 }
 
-static void nv_set(nghttp2_nv *nv, char *name, const char *value) {
-    nv->name     = (uint8_t *)name;
+static void nv_set(nghttp2_nv *nv, const char *name, const char *value) {
+    nv->name     = (uint8_t *)(uintptr_t)name;
     nv->namelen  = strlen(name);
     nv->value    = (uint8_t *)(uintptr_t)value;
     nv->valuelen = strlen(value);
@@ -421,7 +421,6 @@ zuh_code zuh_h2_begin(zuh_stream *conn, const zuh_h2_request *rq,
     h2_impl *h;
     size_t n_hdr, i, nv_n = 0;
     nghttp2_nv *nv = NULL;
-    char **names = NULL;
     static char p_method[] = ":method", p_scheme[] = ":scheme",
                 p_authority[] = ":authority", p_path[] = ":path";
     nghttp2_data_provider2 prd;
@@ -454,23 +453,19 @@ zuh_code zuh_h2_begin(zuh_stream *conn, const zuh_h2_request *rq,
     }
 
     nv    = (nghttp2_nv *)zuh_calloc(n_hdr + 4, sizeof *nv);
-    names = (char **)zuh_calloc(n_hdr + 1, sizeof *names);
-    if (!nv || !names) { rc = ZUH_ERR_NOMEM; goto out; }
+    if (!nv) { rc = ZUH_ERR_NOMEM; goto out; }
     nv_set(&nv[nv_n++], p_method, rq->method);
     nv_set(&nv[nv_n++], p_scheme, rq->scheme);
     nv_set(&nv[nv_n++], p_authority, rq->authority);
     nv_set(&nv[nv_n++], p_path, rq->path && *rq->path ? rq->path : "/");
     for (i = 0; i < n_hdr; i++) {
         const char *nm, *v;
-        size_t k, len;
         if (!zuh_headers_at(rq->headers, i, &nm, &v) || is_conn_specific(nm)) continue;
-        /* HTTP/2 field names are lowercase on the wire (RFC 9113 §8.2.1). */
-        len = strlen(nm);
-        names[i] = (char *)zuh_alloc(len + 1);
-        if (!names[i]) { rc = ZUH_ERR_NOMEM; goto out; }
-        for (k = 0; k <= len; k++)
-            names[i][k] = (char)(nm[k] >= 'A' && nm[k] <= 'Z' ? nm[k] + 32 : nm[k]);
-        nv_set(&nv[nv_n++], names[i], v);
+        /* HTTP/2 field names are lowercase on the wire (RFC 9113 §8.2.1).
+         * nghttp2 lowercases them as it copies the list (nghttp2_nva_copy),
+         * so a copy here lowered them twice; ctest's "#270" case asserts
+         * the names as the server received them. */
+        nv_set(&nv[nv_n++], nm, v);
     }
 
     /* Per-stream state. */
@@ -535,10 +530,6 @@ out:
     h->hdrs = NULL;
     if (rc == ZUH_ERR_NOMEM && !err->code)
         zuh_error_set(err, rc, ZUH_PHASE_WRITE, "out of memory");
-    if (names) {
-        for (i = 0; i < n_hdr; i++) zuh_free(names[i]);
-        zuh_free(names);
-    }
     zuh_free(nv);
     return rc;
 }
