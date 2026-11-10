@@ -100,5 +100,37 @@ void suite_alloc(void) {
         ZUH_CHECK_EQ_INT(st.live_blocks, 0);
         ZUH_CHECK_EQ_INT(st.total_allocs, st.total_frees);
     }
+    /* #274: the peak only rises; and a size product exactly at SIZE_MAX's
+     * quotient still fits. */
+    ZUH_CASE("#274: the allocation peak never falls, through alloc and realloc");
+    {
+        zuh_alloc_stats a, b;
+        void *big, *small, *r;
+        zuh_alloc_stats_get(&a);
+        big = zuh_alloc(1u << 20);
+        ZUH_CHECK(big != NULL);
+        zuh_alloc_stats_get(&b);
+        ZUH_CHECK(b.peak_bytes >= a.live_bytes + (1u << 20));
+        zuh_free(big);
+        small = zuh_alloc(16);
+        zuh_alloc_stats_get(&a);
+        ZUH_CHECK(a.peak_bytes >= b.peak_bytes);
+        r = zuh_realloc(small, 2u << 20);
+        ZUH_CHECK(r != NULL);
+        zuh_alloc_stats_get(&b);
+        ZUH_CHECK(b.peak_bytes >= a.live_bytes + (2u << 20) - 16);
+        r = zuh_realloc(r, 8);
+        zuh_alloc_stats_get(&a);
+        ZUH_CHECK(a.peak_bytes >= b.peak_bytes);
+        zuh_free(r);
+    }
+
+    ZUH_CASE("#274: zuh_size_mul accepts the largest product that fits");
+    {
+        out = 0;
+        ZUH_CHECK(zuh_size_mul(2, SIZE_MAX / 2, &out));
+        ZUH_CHECK(out == (SIZE_MAX / 2) * 2);
+        ZUH_CHECK(!zuh_size_mul(2, SIZE_MAX / 2 + 1, &out));
+    }
     zuh_alloc_stats_reset();
 }

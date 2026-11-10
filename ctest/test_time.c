@@ -97,4 +97,18 @@ void suite_time(void) {
         ZUH_CHECK_EQ_INT(zuh_deadline_poll_ms(zuh_deadline_in(100000), 100), 100);
         ZUH_CHECK(zuh_deadline_poll_ms(zuh_deadline_in(20), 100) <= 20);
     }
+
+    /* #274: a tick of 0 or less means the 100 ms default, and any other
+     * tick is kept; a deadline of 0 ms has already passed, and one at now
+     * has expired. */
+    ZUH_CASE("#274: poll ticks, zero-length deadlines and a deadline at now");
+    {
+        zuh_deadline far = zuh_deadline_in(100000);
+        ZUH_CHECK_EQ_INT(zuh_deadline_poll_ms(far, 50), 50);
+        ZUH_CHECK_EQ_INT(zuh_deadline_poll_ms(far, 0), 100);
+        ZUH_CHECK_EQ_INT(zuh_deadline_poll_ms(far, -1), 100);
+        ZUH_CHECK(zuh_deadline_expired(zuh_deadline_in(0)));
+        ZUH_CHECK(!zuh_deadline_expired(zuh_deadline_in(-1)));    /* never */
+        ZUH_CHECK(zuh_deadline_expired(zuh_deadline_at(zuh_now_ms())));
+    }
 }

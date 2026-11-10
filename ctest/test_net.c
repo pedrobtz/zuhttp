@@ -179,6 +179,29 @@ void suite_net(void) {
         TCLOSE(ls);
     }
 
+    /* #274: zuh_stream_close() closes the socket, so the pool's probe sees
+     * a closed connection ("do not reuse") rather than an idle, open one. */
+    ZUH_CASE("#274: a closed connection reads as closed, not as idle");
+    {
+        uint16_t port = 0;
+        tsock ls = listen_on(&port);
+        tsock conn;
+        zuh_deadline cd = zuh_deadline_in(5000);
+        ZUH_CHECK(ls != TINVALID);
+        zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(zuh_net_connect(&s, "127.0.0.1", port, cd, &o, &e), ZUH_OK);
+        conn = accept_bounded(ls, 2000);
+        ZUH_CHECK(conn != TINVALID);
+        if (s) {
+            ZUH_CHECK_EQ_INT(zuh_stream_readable(s, 0), 0);   /* open and quiet */
+            zuh_stream_close(s);
+            ZUH_CHECK_EQ_INT(zuh_stream_readable(s, 0), 1);
+            zuh_net_stream_free(s); s = NULL;
+        }
+        if (conn != TINVALID) TCLOSE(conn);
+        TCLOSE(ls);
+    }
+
     ZUH_CASE("a refused connection is zu_connect_error, not a hang");
     {
         uint16_t port = 0;
@@ -265,8 +288,11 @@ void suite_net(void) {
             zuh_deadline rd = zuh_deadline_in(200);
             zuh_stream_read(s, buf, sizeof buf, rd, &e);
         }
-        /* ~200ms of waiting at a 20ms tick must yield several checkpoints. */
-        ZUH_CHECK(t.calls >= 4);
+        /* ~200ms of waiting at a 20ms tick yields about ten checkpoints;
+         * the 100 ms default, which a tick_ms the connection ignored would
+         * give, yields two to four (#274: >= 4 passed both). Six leaves
+         * room for a loaded runner. */
+        ZUH_CHECK(t.calls >= 6);
 
         zuh_net_stream_free(s); s = NULL;
         TCLOSE(conn); TCLOSE(ls);

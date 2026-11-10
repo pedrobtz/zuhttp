@@ -1028,6 +1028,41 @@ void suite_body(void) {
         zuh_buf_free(&out); zuh_headers_free(&h);
     }
 
+    /* #274: the temporary name is tried 100 times, no more: with all 100
+     * taken, the sink fails rather than writing over or past them. */
+    ZUH_CASE("#274: the file sink tries exactly 100 temporary names");
+    {
+        const char *path = "zu_test_dl_names.bin";
+        char name[300];
+        unsigned k;
+        zuh_sink *f;
+        FILE *fp;
+        for (k = 0; k < 100; k++) {
+            if (k == 0) snprintf(name, sizeof name, "%s.zudl%ld", path, zuh_pid_current());
+            else snprintf(name, sizeof name, "%s.zudl%ld.%u", path, zuh_pid_current(), k);
+            fp = fopen(name, "wb");
+            if (fp) fclose(fp);
+        }
+        zuh_error_clear(&e);
+        f = zuh_sink_file(path, &e);
+        ZUH_CHECK(f == NULL);
+        if (f) { zuh_sink_abort(f); zuh_sink_free(f); }
+        snprintf(name, sizeof name, "%s.zudl%ld.%u", path, zuh_pid_current(), 100u);
+        ZUH_CHECK((fp = fopen(name, "rb")) == NULL);
+        if (fp) fclose(fp);
+        remove(name);
+        for (k = 0; k < 100; k++) {
+            if (k == 0) snprintf(name, sizeof name, "%s.zudl%ld", path, zuh_pid_current());
+            else snprintf(name, sizeof name, "%s.zudl%ld.%u", path, zuh_pid_current(), k);
+            remove(name);
+        }
+        /* With one name free again, it is used. */
+        f = zuh_sink_file(path, &e);
+        ZUH_CHECK(f != NULL);
+        if (f) { zuh_sink_abort(f); zuh_sink_free(f); }
+        remove(path);
+    }
+
     ZUH_CASE("no leaks across the suite");
     {
         zuh_alloc_stats end;
