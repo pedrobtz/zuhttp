@@ -172,6 +172,13 @@ void suite_trace(void) {
         zuh_trace_add_at(&t, ZUH_EV_TLS_START, NULL, 0, t.t0 + 999999); /* future */
         ZUH_CHECK(t.ev[4].at_ms >= 10000 && t.ev[4].at_ms < 999999);
         ZUH_CHECK_EQ_INT(t.n, 5);
+        /* The second event is the first with a previous one to respect. */
+        zuh_trace_init(&t);
+        t.t0 = zuh_now_ms() - 10000;
+        zuh_trace_add_at(&t, ZUH_EV_DNS_START, NULL, 0, t.t0 + 2000);
+        zuh_trace_add_at(&t, ZUH_EV_DNS_DONE, NULL, 0, t.t0 + 1000);
+        ZUH_CHECK_EQ_INT(t.ev[0].at_ms, 2000);
+        ZUH_CHECK_EQ_INT(t.ev[1].at_ms, 2000);
     }
 
     /* Full, and one past: the event is counted as dropped and nothing that
