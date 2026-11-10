@@ -1710,7 +1710,9 @@ first 10-minute soak, clean). W9 adds the DER walker as the eleventh, and W20
 the HTTP/2 session fed hostile frame input through the D-72 seam as the
 twelfth (§65.8), and the pulled body's API, a fuzzed sequence of reads,
 peeks, aborts and done checks against a model, as the thirteenth (§65.4,
-#229); the fourteenth is the connection pool, a fuzzed sequence of acquires,
+#229), over HTTP/1.1 and over HTTP/2 against an in-process nghttp2 server,
+pooled or not, and through a wire that ends, resets or goes silent part-way
+through the body (#248); the fourteenth is the connection pool, a fuzzed sequence of acquires,
 releases for every §26.3 reason, a server closing an idle connection, an
 injected clock, clears and forks against a reference model of §26 (#247).
 The harness stands in for `zuh_fork.c`, so a fork is a change of process id
@@ -1725,7 +1727,9 @@ found 16 such bugs in code every target reached. So the targets that can
 carry an oracle on their results do: the body path compares whole and
 one-byte reads and three framings of one payload (#227), the engine checks
 that every request it wrote is framed by its Content-Length (#228), the
-pull target checks every result against its model (#229), and the pool
+pull target checks every result against its model (#229) and that a
+connection goes back to the pool only after a clean end or a clean HTTP/2
+cancel, then serves the next request whole (#248), and the pool
 target checks which connection every acquire returns, every counter
 `zu_pool_stats()` reports, both caps, and how often each connection was
 closed and freed: once each when the pool discards it, never closed when a

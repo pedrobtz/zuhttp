@@ -311,6 +311,43 @@ def main():
     w("pull/abort-mid-bytewise", bytes([3, 12]) + b"hello, world" + op(0, 2) + op(2) +
       op(1, 3) + op(0, 3) + op(3))
     w("pull/empty", bytes([0, 0]) + op(0, 8) + op(3) + op(2) + op(0, 8))
+    # #248: byte 0 bit 3 pools the connection, bit 4 is HTTP/2 (bits 0-1 then
+    # the DATA frame size: 1, 7, 64, 1000; bit 2 16-byte transport reads, so
+    # the stream is still on the wire when it is cut), bits 5-6 a failure (1
+    # the connection ends, 2 a reset, 3 a silent peer: a timeout); with a
+    # failure, the byte after the length is where it cuts. After the body a
+    # second request on the pool must get the whole payload.
+    POOL, H2, EOF_, RESET, SILENT = 0x08, 0x10, 0x20, 0x40, 0x60
+
+    def pl(n):
+        return bytes((i * 7 + 3) % 256 for i in range(n))
+
+    def pull(opts, n, ops, cut=None):
+        return bytes([opts, n]) + (bytes([cut]) if cut is not None else b"") + pl(n) + ops
+    w("pull/h2-read-all", pull(H2 | 1, 12, op(0, 3) * 6 + op(3)))
+    w("pull/h2-pooled-read-all", pull(H2 | POOL | 1, 40, op(0, 9) * 6 + op(3)))
+    w("pull/h2-pooled-peek", pull(H2 | POOL | 0, 30, op(1, 4) * 8 + op(0, 64) + op(3)))
+    # A clean cancel keeps the connection, and the next request reuses it.
+    w("pull/regress-h2-abort-pools", pull(H2 | POOL | 4 | 1, 200, op(0, 10) + op(2) +
+      op(0, 4) + op(3)))
+    w("pull/h2-abort-after-end", pull(H2 | POOL | 2, 200, op(0, 10) + op(2) + op(0, 4) + op(3)))
+    w("pull/regress-h2-eof-mid-body", pull(H2 | POOL | EOF_ | 4 | 1, 100, op(0, 64) * 8 + op(3),
+      40))
+    w("pull/regress-h2-reset-mid-body", pull(H2 | POOL | RESET | 0, 60, op(0, 16) * 6 + op(3), 10))
+    w("pull/regress-h2-timeout", pull(H2 | POOL | SILENT | 4 | 1, 80, op(0, 20) * 8 + op(3), 30))
+    w("pull/regress-h2-abort-before-reset", pull(H2 | POOL | RESET | 4 | 1, 90,
+      op(0, 5) + op(2) + op(0, 5) + op(3), 50))
+    w("pull/regress-h1-pooled-end", pull(POOL | 0, 12, op(0, 5) * 4 + op(3)))
+    w("pull/regress-h1-pooled-chunked", pull(POOL | 1, 23, op(0, 4) * 8 + op(3)))
+    w("pull/regress-h1-pooled-abort-bytewise", pull(POOL | 3, 50, op(0, 1) + op(2) + op(0, 3) +
+      op(3)))
+    w("pull/regress-h1-eof-mid-body", pull(POOL | EOF_ | 0, 50, op(0, 8) * 8 + op(3), 20))
+    w("pull/regress-h1-reset-chunked", pull(POOL | RESET | 1, 41, op(0, 6) * 9 + op(3), 13))
+    w("pull/regress-h1-timeout", pull(POOL | SILENT | 4, 60, op(1, 9) * 4 + op(0, 30) * 6 +
+      op(3), 25))
+    w("pull/regress-h1-close-eof-is-end", pull(POOL | EOF_ | 2, 30, op(0, 7) * 6 + op(3), 12))
+    w("pull/regress-h1-timeout-unpooled", pull(SILENT | 0, 20, op(0, 3) * 4 + op(2) + op(0, 1),
+      5))
 
     # --- pool (#247): the connection pool against its model ----------------
     # byte 0: max_idle (bits 0-2) and max_per_host (bits 3-4, 0 = no limit);
