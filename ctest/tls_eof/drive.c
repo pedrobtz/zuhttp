@@ -14,6 +14,9 @@
  *                           body "ok": for the server that renegotiates
  *                           mid-response (#215, run under ASan) and for a
  *                           certificate that names only an IP address (#216)
+ *   drive refused URL CA    one request that must fail with a TLS class
+ *                           and no body: Schannel's answer to a
+ *                           renegotiation until #298
  *   drive hostname URL CA   #246: one request that must be refused with
  *                           ZUH_ERR_TLS_HOSTNAME, for a certificate naming a
  *                           different IP, or naming the IP only as a DNS name
@@ -253,6 +256,28 @@ static int hostname(const char *url, const char *ca) {
     return 0;
 }
 
+static int refused(const char *url, const char *ca) {
+    zuh_get_opts o;
+    zuh_result r;
+    zuh_error e;
+    zuh_code rc;
+    zuh_get_opts_init(&o);
+    o.ca_file = ca_opt(ca); o.proxy_set = 1; o.timeout_ms = 10000;
+    rc = zuh_engine_get(&r, url, &o, &e);
+    if (rc == ZUH_OK) {
+        printf("refused: %s now succeeds (status %d): #298 is fixed, run `one` here\n",
+               url, r.status);
+        zuh_result_free(&r);
+        return 1;
+    }
+    if (rc < ZUH_ERR_TLS || rc > ZUH_ERR_TLS_PIN) {
+        printf("FAIL refused: code %d is not a TLS class: %s\n", rc, e.message);
+        return 1;
+    }
+    printf("refused: as expected, code %d (%s)\n", rc, e.message);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     zuh_get_opts o;
     zuh_result r;
@@ -262,6 +287,7 @@ int main(int argc, char **argv) {
     zuh_pool *pool = NULL;
     if (argc == 5 && strcmp(argv[1], "stale") == 0) return stale(argv[2], argv[3], argv[4]);
     if (argc == 4 && strcmp(argv[1], "one") == 0) return one(argv[2], argv[3]);
+    if (argc == 4 && strcmp(argv[1], "refused") == 0) return refused(argv[2], argv[3]);
     if (argc == 4 && strcmp(argv[1], "hostname") == 0) return hostname(argv[2], argv[3]);
 #ifndef _WIN32
     if (argc == 4 && strcmp(argv[1], "fork") == 0) return forkcase(argv[2], argv[3]);

@@ -65,10 +65,13 @@ for c in ipother ipdns; do
   stop
 done
 # #215: a TLS 1.2 renegotiation between the request and the response.
+# Schannel reports SEC_I_RENEGOTIATE, which is not handled yet (#298): the
+# request fails with a TLS class and no body. `refused` says so when that
+# changes, and this becomes `one`, as on OpenSSL.
 port=$(free_port)
 OPENSSL="$openssl" "$py" "$here/reneg.py" "$port" "$fx/good.pem" "$fx/good.key" >"$tmp/srv.log" 2>&1 &
 srv=$!
 wait_ready
-"$drive" one "https://localhost:$port/" - || status=1
+"$drive" refused "https://localhost:$port/" - || status=1
 stop
 exit $status

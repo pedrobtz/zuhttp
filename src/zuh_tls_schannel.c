@@ -28,6 +28,8 @@
 #include "zuh_buffer.h"
 #include "zuh_stream.h"
 
+#include <winsock2.h>      /* before windows.h; getaddrinfo, for ip_literal() */
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <wincrypt.h>
 #include <schannel.h>
@@ -103,6 +105,55 @@ static void sspi_message(SECURITY_STATUS ss, char *out, size_t cap) {
 }
 
 /* --- trust (§13.1: ours, not Schannel's) ---------------------------------- */
+
+/* The address `host` spells, if it is an IP literal (bracketed or not):
+ * 4 or 16 bytes into `addr`. AI_NUMERICHOST parses without a lookup. */
+static int ip_literal(const char *host, unsigned char *addr, size_t *alen) {
+    struct addrinfo hints, *res = NULL;
+    char buf[64];
+    size_t n = strlen(host);
+    int ok = 0;
+    if (n >= 2 && host[0] == '[' && host[n - 1] == ']') { host++; n -= 2; }
+    if (n == 0 || n >= sizeof buf) return 0;
+    memcpy(buf, host, n);
+    buf[n] = '\0';
+    memset(&hints, 0, sizeof hints);
+    hints.ai_flags = AI_NUMERICHOST;
+    hints.ai_family = AF_UNSPEC;
+    if (getaddrinfo(buf, NULL, &hints, &res) != 0 || !res) return 0;
+    if (res->ai_family == AF_INET) {
+        memcpy(addr, &((const struct sockaddr_in *)(const void *)res->ai_addr)->sin_addr, 4);
+        *alen = 4; ok = 1;
+    } else if (res->ai_family == AF_INET6) {
+        memcpy(addr, &((const struct sockaddr_in6 *)(const void *)res->ai_addr)->sin6_addr, 16);
+        *alen = 16; ok = 1;
+    }
+    freeaddrinfo(res);
+    return ok;
+}
+
+/* Whether the leaf names `addr` in an iPAddress SAN. */
+static int leaf_names_ip(PCCERT_CONTEXT leaf, const unsigned char *addr, size_t alen) {
+    PCERT_EXTENSION ext;
+    CERT_ALT_NAME_INFO *info = NULL;
+    DWORD sz = 0, i;
+    int found = 0;
+    ext = CertFindExtension(szOID_SUBJECT_ALT_NAME2, leaf->pCertInfo->cExtension,
+                            leaf->pCertInfo->rgExtension);
+    if (!ext) return 0;
+    if (!CryptDecodeObjectEx(X509_ASN_ENCODING, X509_ALTERNATE_NAME, ext->Value.pbData,
+                             ext->Value.cbData, CRYPT_DECODE_ALLOC_FLAG, NULL, &info, &sz) ||
+        !info)
+        return 0;
+    for (i = 0; i < info->cAltEntry && !found; i++) {
+        const CERT_ALT_NAME_ENTRY *e = &info->rgAltEntry[i];
+        found = e->dwAltNameChoice == CERT_ALT_NAME_IP_ADDRESS &&
+                (size_t)e->IPAddress.cbData == alen &&
+                memcmp(e->IPAddress.pbData, addr, alen) == 0;
+    }
+    LocalFree(info);
+    return found;
+}
 
 static zuh_code verify_peer(sch_impl *t, const char *hostname,
                            const zuh_tls_config *cfg, zuh_error *err) {
@@ -200,6 +251,18 @@ static zuh_code verify_peer(sch_impl *t, const char *hostname,
             rc = ZUH_ERR_TLS_CERT;
         }
         zuh_error_set_backend(err, "schannel", (int)policy_status.dwError);
+    } else if (cfg->verify_hostname && hostname) {
+        /* The SSL policy matched an IP literal against dNSName entries too,
+         * so a certificate naming DNS:127.0.0.1 passed for
+         * https://127.0.0.1/ (#297). RFC 6125 §1.7.2: an address matches
+         * iPAddress only, as OpenSSL's set1_ip_asc() does (#216). */
+        unsigned char addr[16];
+        size_t alen = 0;
+        if (ip_literal(hostname, addr, &alen) && !leaf_names_ip(leaf, addr, alen)) {
+            zuh_error_set(err, ZUH_ERR_TLS_HOSTNAME, ZUH_PHASE_TLS,
+                         "certificate is valid but names no IP address '%s'", hostname);
+            rc = ZUH_ERR_TLS_HOSTNAME;
+        }
     }
 
     zuh_free(whost);
