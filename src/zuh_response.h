@@ -65,7 +65,9 @@ typedef struct {
     /* §18.2, D-91: the trailer section, collected after the last chunk and
      * parsed as a header block bounded by §40's limits on its own. */
     int        in_trailer;
-    zuh_buffer tbuf;
+    zuh_buffer tbuf;        /* the section's first max_header_bytes, at most */
+    size_t     tlast;       /* tbuf.len at the last incomplete parse */
+    size_t     tover;       /* bytes past those, counted, never buffered */
     zuh_headers trailers;
 } zuh_chunked;
 

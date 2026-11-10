@@ -24,7 +24,7 @@ typedef struct {
     zuh_header *items;
     size_t     n;
     size_t     cap;
-    size_t     bytes;       /* running total of name+value+4 per field */
+    size_t     bytes;       /* running total of ZUH_HEADER_FIELD_COST per field */
     /* §40 limits; 0 disables an individual limit. */
     size_t     max_count;
     size_t     max_name;
@@ -37,6 +37,13 @@ typedef struct {
 #define ZUH_DEFAULT_MAX_HEADER_NAME   256
 #define ZUH_DEFAULT_MAX_HEADER_VALUE  8192
 #define ZUH_DEFAULT_MAX_HEADER_BYTES  65536
+
+/* §40, D-101: what a field costs against max_bytes, on HTTP/1.1 and HTTP/2,
+ * in heads and trailers alike: its name, its value and 32 bytes, as RFC 9113
+ * §6.5.2 sizes a header list. HTTP/2 pseudo-header fields are not stored
+ * here and cost nothing. A limit is refused as ZUH_ERR_BODY_LIMIT, which
+ * every response path raises as ZUH_ERR_PARSE (zu_http_parse_error). */
+#define ZUH_HEADER_FIELD_OVERHEAD     32u
 
 void zuh_headers_init(zuh_headers *h);
 void zuh_headers_init_limited(zuh_headers *h, size_t max_count, size_t max_name,

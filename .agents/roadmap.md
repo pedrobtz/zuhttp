@@ -1281,6 +1281,21 @@ changed the plan or the design.
   - Also found while tidying: `fuzz/corpus/body 2` and `chunked 2`, empty
     Finder duplicates from 2026-09-08, untracked; removed.
 
+- **2026-11-10 — differential tests against libcurl, h11 and RFC 3986
+  (#240, #241, #243, #244, #245).** Every comparison the assurance pass
+  listed as a gap now runs. RFC 3986 §5.4: all 42 examples agree (two are
+  refused by the §8.2 policy, as non-HTTP or authority-less). Percent-encoding
+  agrees with `curl_escape()` and `urllib.parse.quote()` over 413 strings.
+  libcurl, both directions on loopback: no difference beyond two deliberate
+  ones (`Connection: close` without a pool; a decoded body loses its
+  `Content-Encoding` and `Content-Length`). h11: 48 responses, three
+  deliberate §18.1 strictnesses and one h11 strictness (now written into
+  §18.1). Proxy selection against libcurl found two bugs in
+  `zuh_no_proxy_matches()`, fixed: a partial address matched an IP host as a
+  suffix (#266), and an entry's root dot never matched (#267); and three
+  deliberate differences, now in §20.2. The raw server that records request
+  bodies first passed with #208 reintroduced, because it read by
+  `Content-Length`; it records what arrives past the framing now, and fails.
 - **2026-11-10 — oracles for fuzz_response, fuzz_chunked and fuzz_headers
   (#239).** The three targets compared nothing but "no crash"; they now
   compare against `fuzz/http_grammar.h`, an independent reading of RFC 9110

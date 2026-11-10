@@ -290,6 +290,53 @@ void suite_response(void) {
         }
     }
 
+    /* PR #261's survivors: the status range's top, the reason buffer's
+     * edge, and a caller's lower count reaching picohttpparser's array. */
+    ZUH_CASE("599 is a status and 600 is not; 100 is and 99 is not");
+    {
+        static const struct { const char *head; zuh_code want; int status; } cases[] = {
+            { "HTTP/1.1 599 Edge\r\n\r\n", ZUH_OK, 599 },
+            { "HTTP/1.1 600 Over\r\n\r\n", ZUH_ERR_PARSE, 0 },
+            { "HTTP/1.1 100 Continue\r\n\r\n", ZUH_OK, 100 },
+            { "HTTP/1.1 099 Under\r\n\r\n", ZUH_ERR_PARSE, 0 } };
+        size_t k;
+        for (k = 0; k < sizeof cases / sizeof cases[0]; k++) {
+            zuh_response_init(&r);
+            ZUH_CHECK_EQ_INT(parse(&r, cases[k].head, &used), cases[k].want);
+            if (cases[k].want == ZUH_OK) ZUH_CHECK_EQ_INT(r.status, cases[k].status);
+            zuh_response_free(&r);
+        }
+    }
+
+    ZUH_CASE("a reason phrase is kept whole up to ZUH_REASON_MAX - 1 bytes, then cut there");
+    {
+        static char head[400];
+        size_t len;
+        for (len = ZUH_REASON_MAX - 2; len <= ZUH_REASON_MAX; len++) {
+            size_t n = (size_t)snprintf(head, sizeof head, "HTTP/1.1 200 ");
+            memset(head + n, 'q', len); n += len;
+            memcpy(head + n, "\r\n\r\n", 5);
+            zuh_response_init(&r);
+            ZUH_CHECK_EQ_INT(parse(&r, head, &used), ZUH_OK);
+            ZUH_CHECK_EQ_INT(strlen(r.reason), len < ZUH_REASON_MAX ? len : ZUH_REASON_MAX - 1);
+            ZUH_CHECK(r.reason[0] == 'q');
+            zuh_response_free(&r);
+        }
+    }
+
+    ZUH_CASE("a lower field count on the headers object bounds the parser's array too");
+    {
+        zuh_response_init(&r);
+        r.headers.max_count = 2;
+        ZUH_CHECK_EQ_INT(parse(&r, "HTTP/1.1 200 OK\r\nA: 1\r\nB: 2\r\nC: 3\r\n\r\n", &used),
+                         ZUH_ERR_PARSE);
+        zuh_response_free(&r);
+        zuh_response_init(&r);
+        r.headers.max_count = 2;
+        ZUH_CHECK_EQ_INT(parse(&r, "HTTP/1.1 200 OK\r\nA: 1\r\nB: 2\r\n\r\n", &used), ZUH_OK);
+        zuh_response_free(&r);
+    }
+
     ZUH_CASE("no leaks across the suite");
     {
         zuh_alloc_stats st;
