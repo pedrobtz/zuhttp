@@ -245,6 +245,18 @@ static size_t head_of(char *out, size_t cap, const char *status, const char *fie
     return n;
 }
 
+/* `count` fields "X-NN: " + `vlen` bytes, then `tail`. Returns the length. */
+static size_t pad_fields(char *out, size_t cap, size_t count, size_t vlen, const char *tail) {
+    size_t i, n = 0;
+    for (i = 0; i < count && n + vlen + 16 < cap; i++) {
+        n += (size_t)snprintf(out + n, cap - n, "X-%02lu: ", (unsigned long)i);
+        memset(out + n, 'v', vlen); n += vlen;
+        out[n++] = '\r'; out[n++] = '\n';
+    }
+    n += (size_t)snprintf(out + n, cap - n, "%s", tail);
+    return n;
+}
+
 /* §65.7: a request-body source over a NULL-terminated list of strings. */
 static const char **h1_gen_pieces;
 static zuh_code h1_gen_next(void *ctx, const void **data, size_t *len, zuh_deadline dl,
@@ -449,6 +461,45 @@ static void limits_cases(void) {
             ZUH_CHECK_EQ_INT(e.code, cases[j].want);
             if (cases[j].want == ZUH_ERR_PROXY) ZUH_CHECK(has(e.message, "too large"));
             dialer_free(&d);
+        }
+    }
+
+    /* #258: 58 fields of 1000 bytes stay inside every field budget, so the
+     * head's wire size alone decides, through its reason phrase. 69000
+     * bytes completed in the read after a 4093-byte split that ended under
+     * 64 KiB, and was accepted there while one-shot reads refused it. */
+    ZUH_CASE("limits: a response head over 64 KiB on the wire is refused at every read size (#258)");
+    {
+        static char fields[70000];
+        static const size_t rd[] = { 0, 1, 4093 };
+        static const struct { size_t wire; zuh_code want; } cases[] = {
+            { 65535, ZUH_OK }, { 65536, ZUH_OK }, { 65537, ZUH_ERR_BODY_LIMIT },
+            { 69000, ZUH_ERR_BODY_LIMIT }, { 70000, ZUH_ERR_BODY_LIMIT } };
+        size_t j;
+        pad_fields(fields, sizeof fields, 58, 1000, "Content-Length: 2\r\n");
+        for (k = 0; k < sizeof rd / sizeof rd[0]; k++) {
+            for (j = 0; j < sizeof cases / sizeof cases[0]; j++) {
+                conn_script sc[1];
+                zuh_code rc;
+                size_t n = head_of(buf, sizeof buf, "200", fields, cases[j].wire);
+                ZUH_CHECK_EQ_INT(n, cases[j].wire);
+                memcpy(buf + n, "ok", 2); n += 2;
+                memset(sc, 0, sizeof sc);
+                sc[0].bytes = buf; sc[0].len = n; sc[0].max_read = rd[k];
+                dialer_init(&d, sc, 1); opts_for(&o, &d);
+                zuh_error_clear(&e);
+                rc = zuh_engine_get(&r, "http://example.test/", &o, &e);
+                ZUH_CHECK_EQ_INT(rc, cases[j].want);
+                if (rc == ZUH_OK) {
+                    ZUH_CHECK(r.body.len == 2 && memcmp(r.body.data, "ok", 2) == 0);
+                    ZUH_CHECK_EQ_INT(zuh_headers_total(&r.headers), 59);
+                    zuh_result_free(&r);
+                } else {
+                    ZUH_CHECK_EQ_INT(e.code, cases[j].want);
+                    ZUH_CHECK(has(e.message, "header block exceeds"));
+                }
+                dialer_free(&d);
+            }
         }
     }
 }

@@ -551,17 +551,22 @@ static zuh_code open_stream(zuh_stream **out, const zuh_uri *u,
 }
 
 /* Read until the header block is complete. Leftover body bytes are left in
- * `raw` past `consumed`. */
+ * `raw` past `consumed`.
+ *
+ * #258: the parser sees only the head window, so a head is refused exactly
+ * when its wire bytes pass ZUH_MAX_HEADER_BYTES. It used to see the whole
+ * buffer, and a head up to a read past the cap was accepted when the read
+ * that completed it began under the cap: TCP segmentation chose the limit. */
 static zuh_code read_headers(zuh_stream *s, zuh_buffer *raw, zuh_response *resp,
                             size_t *consumed, zuh_deadline dl, zuh_error *err) {
     size_t last_len = 0;
     for (;;) {
         char chunk[ZUH_READ_CHUNK];
         zuh_ssize n;
-        zuh_code rc = zuh_response_parse(resp, (const char *)raw->data, raw->len,
-                                       last_len, consumed, err);
+        zuh_code rc = zuh_response_parse(resp, (const char *)raw->data,
+                                       head_window(raw->len), last_len, consumed, err);
         if (rc != ZUH_ERR_WOULDBLOCK) return rc;
-        last_len = raw->len;
+        last_len = head_window(raw->len);
 
         if (raw->len >= ZUH_MAX_HEADER_BYTES) {
             zuh_error_set(err, ZUH_ERR_BODY_LIMIT, ZUH_PHASE_READ,
