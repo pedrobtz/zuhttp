@@ -12,6 +12,9 @@
  *                           body "ok": for the server that renegotiates
  *                           mid-response (#215, run under ASan) and for a
  *                           certificate that names only an IP address (#216)
+ *   drive hostname URL CA   #246: one request that must be refused with
+ *                           ZUH_ERR_TLS_HOSTNAME, for a certificate naming a
+ *                           different IP, or naming the IP only as a DNS name
  *   drive fork URL CA       #249: a pulled body open on one connection and a
  *                           second connection idle in the pool, then fork();
  *                           the child must not read the body, and frees both
@@ -205,6 +208,31 @@ static int one(const char *url, const char *ca) {
     return bad;
 }
 
+/* #246: the refusals #216's acceptance needs beside it. An IP literal is
+ * matched against iPAddress SANs only (RFC 6125 §1.7.2, RFC 5280 §4.2.1.6),
+ * so neither another address nor the same address spelled as a dNSName may
+ * pass, and the failure is the hostname class, not "untrusted". */
+static int hostname(const char *url, const char *ca) {
+    zuh_get_opts o;
+    zuh_result r;
+    zuh_error e;
+    zuh_code rc;
+    zuh_get_opts_init(&o);
+    o.ca_file = ca; o.proxy_set = 1; o.timeout_ms = 10000;
+    rc = zuh_engine_get(&r, url, &o, &e);
+    if (rc == ZUH_OK) {
+        printf("FAIL hostname: %s was accepted (status %d)\n", url, r.status);
+        zuh_result_free(&r);
+        return 1;
+    }
+    if (rc != ZUH_ERR_TLS_HOSTNAME) {
+        printf("FAIL hostname: code %d, not ZUH_ERR_TLS_HOSTNAME: %s\n", rc, e.message);
+        return 1;
+    }
+    printf("hostname: refused as expected (%s)\n", e.message);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     zuh_get_opts o;
     zuh_result r;
@@ -214,8 +242,9 @@ int main(int argc, char **argv) {
     zuh_pool *pool = NULL;
     if (argc == 5 && strcmp(argv[1], "stale") == 0) return stale(argv[2], argv[3], argv[4]);
     if (argc == 4 && strcmp(argv[1], "one") == 0) return one(argv[2], argv[3]);
+    if (argc == 4 && strcmp(argv[1], "hostname") == 0) return hostname(argv[2], argv[3]);
     if (argc == 4 && strcmp(argv[1], "fork") == 0) return forkcase(argv[2], argv[3]);
-    if (argc != 4) { fprintf(stderr, "usage: drive noclose|together|one|fork URL CA | stale URL CA OTHER\n"); return 2; }
+    if (argc != 4) { fprintf(stderr, "usage: drive noclose|together|one|hostname|fork URL CA | stale URL CA OTHER\n"); return 2; }
     together = strcmp(argv[1], "together") == 0;
     zuh_get_opts_init(&o);
     o.ca_file = argv[3]; o.proxy_set = 1; o.timeout_ms = 10000;

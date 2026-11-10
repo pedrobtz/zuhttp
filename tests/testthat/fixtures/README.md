@@ -3,7 +3,8 @@
 Committed with their provenance; nothing here is generated at test time.
 
 - `tls/` — the §50.5 certificate matrix: two CAs (`ca`, `rogueca`) and
-  five leaves (`good`, `wronghost`, `untrusted`, `expired`, `notyet`), each
+  eight leaves (`good`, `wronghost`, `untrusted`, `ip`, `ipother`, `ipdns`,
+  `expired`, `notyet`), each
   a `.pem` and its `.key`. Made by `tools/make-tls-fixture`; `tls/PROVENANCE`
   records when and with which OpenSSL. The keys are test material and
   protect nothing. The CAs are valid for ten years; the live leaves for

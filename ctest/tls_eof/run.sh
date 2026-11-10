@@ -1,6 +1,6 @@
 #!/bin/sh
 # make tls-eof: run drive against server.py in every mode (D-86), and against
-# reneg.py (#215) and an IP-only certificate (#216), then fork.sh (#249).
+# reneg.py (#215) an IP-only certificate (#216) and the two it must refuse (#246), then fork.sh (#249).
 # DRIVE names the driver binary: make tls-eof-asan runs the same script
 # against an ASan build.
 set -e
@@ -18,6 +18,13 @@ openssl=${OPENSSL:-openssl}
 "$openssl" req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=ip-only \
   -addext "subjectAltName=IP:127.0.0.1" \
   -keyout "$tmp/ip-key.pem" -out "$tmp/ip.pem" >/dev/null 2>&1
+# #246: one names another address, one names this address as a DNS name.
+"$openssl" req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=ip-other \
+  -addext "subjectAltName=IP:127.0.0.2" \
+  -keyout "$tmp/ipother-key.pem" -out "$tmp/ipother.pem" >/dev/null 2>&1
+"$openssl" req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=127.0.0.1 \
+  -addext "subjectAltName=DNS:127.0.0.1" \
+  -keyout "$tmp/ipdns-key.pem" -out "$tmp/ipdns.pem" >/dev/null 2>&1
 drive=${DRIVE:-$here/../zuh_tlseof}
 free_port() {
   python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])'
@@ -46,6 +53,17 @@ srv=$!
 wait_ready
 "$drive" one "https://127.0.0.1:$port/" "$tmp/ip.pem" || status=1
 kill $srv 2>/dev/null || true; wait $srv 2>/dev/null || true
+
+# #246: and refused, as a hostname error, when the certificate names another
+# address or names this one only as a DNS name.
+for c in ipother ipdns; do
+  port=$(free_port)
+  python3 "$here/server.py" keepalive "$port" "$tmp/$c.pem" "$tmp/$c-key.pem" >"$tmp/srv.log" 2>&1 &
+  srv=$!
+  wait_ready
+  "$drive" hostname "https://127.0.0.1:$port/" "$tmp/$c.pem" || status=1
+  kill $srv 2>/dev/null || true; wait $srv 2>/dev/null || true
+done
 
 # #215: a renegotiation runs the verify callback after the dial returned.
 port=$(free_port)
