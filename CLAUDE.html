@@ -154,8 +154,10 @@ tools/          update-uriparser, update-picohttpparser, update-nghttp2,
                 check-objects-sync, check-vendor-licenses, check-code-lines,
                 ci-fork-guard.R, ci-masking.R, ci-run-tests.R, vendor/
 .github/        R-CMD-check, native-checks and assurance (pedrobtz/r-actions),
-                c-core, fuzz, network (the network and per-backend jobs),
-                vendor, conventions, coverage, coverage-union, pkgdown</code></pre>
+                c-core, fuzz, network (the Linux network and per-backend jobs),
+                platforms (every macOS and Windows check, one job per OS:
+                tools/ci/platform.sh), vendor, conventions, coverage,
+                coverage-union, pkgdown</code></pre>
 <p><code>configure</code> / <code>configure.win</code> pick the TLS backend and substitute <code>@SSL_CFLAGS@</code> / <code>@SSL_LIBS@</code> / <code>@TLS_OBJ@</code> into <code>src/Makevars{,.win}</code>.</p>
 </div>
 <div class="section level2">
