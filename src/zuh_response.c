@@ -103,8 +103,17 @@ zuh_code zuh_response_parse(zuh_response *r, const char *buf, size_t len,
 }
 
 zuh_code zuh_response_decide_framing(zuh_response *r, int method_is_head, zuh_error *err) {
+    zuh_code rc;
     if (!r) return ZUH_ERR_PARSE;
-    return zuh_framing_decide(&r->headers, r->status, method_is_head, &r->framing, err);
+    rc = zuh_framing_decide(&r->headers, r->status, method_is_head, &r->framing, err);
+    /* RFC 9112 §6.1: an HTTP/1.0 message with Transfer-Encoding is faulty
+     * framing, to be read and then closed, keep-alive or not, because a 1.0
+     * hop may have kept part of it back (§18.1, #268). zuh_framing_decide()
+     * does not see the version, so the rule is applied here. */
+    if (rc == ZUH_OK && r->minor_version == 0 &&
+        zuh_headers_count(&r->headers, "Transfer-Encoding") > 0)
+        r->framing.poolable = 0;
+    return rc;
 }
 
 /* ---------------- chunked ---------------- */
