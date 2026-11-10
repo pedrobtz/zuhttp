@@ -2,11 +2,14 @@
 #
 # Two jobs, deliberately different in cost:
 #
-#   replay  — every platform, every push. Runs the SAME harnesses against the
-#             checked-in corpus with no libFuzzer, so a crash found once on
-#             one platform can never come back on another. Cheap and total.
-#   smoke   — Linux only, short. Real libFuzzer + ASan + UBSan, to catch a
-#             regression that the corpus does not yet cover.
+#   replay  — Linux here, every push. Runs the SAME harnesses against the
+#             checked-in corpus with no libFuzzer, so a crash found once can
+#             never come back. macOS and Windows replay it at the full
+#             profile in platforms.yaml (tools/ci/platform.sh).
+#   smoke   — Linux only. Real libFuzzer + ASan + UBSan, to catch a
+#             regression that the corpus does not yet cover: 5 s a target
+#             at the quick profile, which still builds and runs every
+#             harness, and 60 s at the full one (.claude/shared/ci.md).
 #
 # The 24 h-per-target exit criterion in S18 is the `soak` job, which is
 # scheduled rather than per-push because it costs hours.
@@ -41,15 +44,23 @@ concurrency:
 # that rule was written against.
 
 jobs:
-  # The corpus as a cross-platform regression suite. No clang required, so
-  # this also runs under Rtools on Windows.
+  changes:
+    uses: pedrobtz/r-actions/.github/workflows/changes.yml@v1.35.0
+    with:
+      name: fuzz
+      profile: auto
+
+  # The corpus as a regression suite. No clang required, which is why
+  # platforms.yaml can replay it under Rtools on Windows too.
   replay:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ${{ matrix.os }}
     name: Corpus replay (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest]
     defaults:
       run:
         shell: bash
@@ -83,15 +94,19 @@ jobs:
         run: make replay-asan
 
   smoke:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
-    name: libFuzzer smoke (60s per target)
+    name: libFuzzer smoke (${{ needs.changes.outputs.profile == 'quick' && '5' || '60' }}s per target)
     steps:
       - uses: actions/checkout@v6
       - name: Install clang and zlib
         run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
       - name: Build and run
         working-directory: fuzz
-        run: make fuzz-run SECS=60 FUZZ_CC=clang
+        env:
+          SECS: ${{ needs.changes.outputs.profile == 'quick' && '5' || '60' }}
+        run: make fuzz-run SECS="$SECS" FUZZ_CC=clang
       - name: Upload any crash artifacts
         if: failure()
         uses: actions/upload-artifact@v4

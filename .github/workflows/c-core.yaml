@@ -38,7 +38,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # macOS and Windows run this suite in platforms.yaml, one job per
+        # OS (tools/ci/platform.sh); the Linux-only checks stay here.
+        os: [ubuntu-latest]
     defaults:
       run:
         shell: bash
