@@ -1,0 +1,39 @@
+# Mutation testing of the C core against the offline C suite (#238).
+#
+# Mull changes src/zuh_*.c one operator at a time and reruns ctest/zuh_ctest;
+# every mutant no check kills is a statement nothing checks, the shape 14 of
+# the 2026-11-09 review's 16 bugs had. Reported, never gated: the survivors
+# are read, and the ones that are missing oracles become issues.
+#
+# Weekly and on demand, and on a pull request that changes how zuh_ctest is
+# built or this file, so a build Mull cannot read is caught where it starts.
+on:
+  schedule:
+    - cron: "41 4 * * 6"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ctest/Makefile
+      - .github/workflows/mutation.yaml
+
+name: mutation
+
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    uses: pedrobtz/r-actions/.github/workflows/mutation.yml@v1
+    with:
+      # One object per source (ctest/Makefile); $MULL_CC is clang with the
+      # Mull plugin.
+      build: make -C ctest zuh_ctest CC="$MULL_CC"
+      tests: ctest/zuh_ctest
+      # Our own C only: not the vendored libraries, not the tests. Paths are
+      # matched as compiled, ctest/../src/zuh_x.c, so the default
+      # `.*/ctest/.*` exclusion would drop everything.
+      include: |
+        .*/src/zuh_[a-z0-9_]+\.c$
+      exclude: |
+        .*/vendor/.*
+      timeout-minutes: 180

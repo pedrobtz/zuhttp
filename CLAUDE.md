@@ -66,6 +66,8 @@ tools/coverage/fuzz-gaps.sh fuzz.lcov ctest.lcov   # what it misses: unentered f
                               #   one-sided conditions, lines only ctest reaches
 make -C fuzz mutate-asan      # 33,000 deterministic mutants of the seeds under ASan + UBSan;
                               #   MUT_SEED=1 for a fresh set. A soak, not a bug-finder: see below
+gh workflow run mutation.yaml # Mull over src/zuh_*.c against zuh_ctest (#238): the
+                              #   mutants no check kills, listed in the job summary
 
 # R
 R CMD INSTALL --preclean .    # --preclean: an in-tree build reuses stale src/*.o,
