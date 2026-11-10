@@ -83,16 +83,39 @@ void suite_headers(void) {
     ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "Ok", "0123456789abcdefghij"), ZUH_ERR_BODY_LIMIT);
     zuh_headers_free(&h);
 
-    zuh_headers_init_limited(&h, 0, 0, 0, 20);
-    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "AAAA", "bbbb"), ZUH_OK);        /* 12 bytes */
+    /* D-101: a field costs name + value + 32, so two of 40 pass 80 and not 79. */
+    zuh_headers_init_limited(&h, 0, 0, 0, 79);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "AAAA", "bbbb"), ZUH_OK);        /* 40 bytes */
     ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "CCCC", "dddd"), ZUH_ERR_BODY_LIMIT);
+    zuh_headers_free(&h);
+    zuh_headers_init_limited(&h, 0, 0, 0, 80);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "AAAA", "bbbb"), ZUH_OK);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "CCCC", "dddd"), ZUH_OK);
     zuh_headers_free(&h);
 
     ZUH_CASE("removal reclaims the byte budget");
-    zuh_headers_init_limited(&h, 0, 0, 0, 20);
+    zuh_headers_init_limited(&h, 0, 0, 0, 79);
     ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "AAAA", "bbbb"), ZUH_OK);
     ZUH_CHECK_EQ_INT(zuh_headers_remove(&h, "AAAA"), 1);
     ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "CCCC", "dddd"), ZUH_OK);
+    zuh_headers_free(&h);
+
+    /* PR #261's survivors: the count itself, after each step. Removing what
+     * was added gives back exactly its cost (D-101), so the total returns
+     * to 0 and a later add is charged from there, not from a stale sum. */
+    ZUH_CASE("the byte count follows add, remove and add exactly (D-101)");
+    zuh_headers_init_limited(&h, 0, 0, 0, 0);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "AAAA", "bbbbbb"), ZUH_OK);
+    ZUH_CHECK_EQ_INT(h.bytes, 4 + 6 + ZUH_HEADER_FIELD_OVERHEAD);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "aaaa", "c"), ZUH_OK);
+    ZUH_CHECK_EQ_INT(h.bytes, 4 + 6 + 4 + 1 + 2 * ZUH_HEADER_FIELD_OVERHEAD);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "Z", ""), ZUH_OK);
+    ZUH_CHECK_EQ_INT(zuh_headers_remove(&h, "AAAA"), 2);      /* both spellings */
+    ZUH_CHECK_EQ_INT(h.bytes, 1 + ZUH_HEADER_FIELD_OVERHEAD);
+    ZUH_CHECK_EQ_INT(zuh_headers_remove(&h, "Z"), 1);
+    ZUH_CHECK_EQ_INT(h.bytes, 0);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "Q", "r"), ZUH_OK);
+    ZUH_CHECK_EQ_INT(h.bytes, 2 + ZUH_HEADER_FIELD_OVERHEAD);
     zuh_headers_free(&h);
 
     ZUH_CASE("serialisation preserves order and original case");

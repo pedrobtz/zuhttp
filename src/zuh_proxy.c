@@ -260,6 +260,9 @@ int zuh_no_proxy_matches(const char *no_proxy, const char *host, uint16_t port) 
 
         /* A leading dot is ignored: .example.com == example.com. */
         if (elen > 0 && start[0] == '.') { start++; elen--; }
+        /* So is a root dot: "example.com." names the same domain (RFC 1034
+         * §3.1), and §8.2 has already stripped the host's (#267). */
+        if (elen > 0 && start[elen - 1] == '.') elen--;
         if (elen == 0) continue;
 
         if (elen > hlen) continue;
@@ -267,9 +270,12 @@ int zuh_no_proxy_matches(const char *no_proxy, const char *host, uint16_t port) 
 
         /* Exact match always counts. */
         if (elen == hlen) return 1;
-        /* An IP literal matches EXACTLY and never by suffix, or "1.2.3.4"
-         * would bypass the proxy for the unrelated host "10.1.2.3.4". */
-        if (is_ip_literal(start, elen)) continue;
+        /* An IP literal matches EXACTLY and never by suffix, on either side.
+         * An entry "1.2.3.4" must not bypass the proxy for the host
+         * "10.1.2.3.4"; and an address has no labels, so the entry "0.0.1"
+         * must not bypass it for 127.0.0.1 (#266), which checking only the
+         * entry allowed. */
+        if (is_ip_literal(start, elen) || is_ip_literal(host, hlen)) continue;
         /* Otherwise the match must fall on a domain-label boundary, so
          * "example.com" matches "api.example.com" but not "notexample.com". */
         if (host[hlen - elen - 1] == '.') return 1;

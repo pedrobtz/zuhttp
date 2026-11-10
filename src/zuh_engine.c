@@ -305,6 +305,14 @@ static void record_tls_info(zuh_stream *s, zuh_result *res) {
     res->trust_backend = dup_str(info.trust_backend);
 }
 
+/* §40, D-101: how much of a buffered head the parser is shown. A head is
+ * complete within the first ZUH_MAX_HEADER_BYTES or it is too large, and
+ * what lies past them is never parsed, so a byte there cannot turn "too
+ * large" into another error at one read size and not at the next. */
+static size_t head_window(size_t len) {
+    return len < ZUH_MAX_HEADER_BYTES ? len : ZUH_MAX_HEADER_BYTES;
+}
+
 /* §20.3: open the tunnel. CONNECT is written to the proxy, its response is
  * parsed with full §18 strictness, and only a 2xx yields a usable socket.
  *
@@ -327,12 +335,17 @@ static zuh_code proxy_tunnel(zuh_stream *tcp, const zuh_proxy *px,
     zuh_buf_free(&req);
     if (rc != ZUH_OK) return rc;
 
-    if (!zuh_buf_init(&raw, 1024, ZUH_MAX_HEADER_BYTES)) return ZUH_ERR_NOMEM;
+    /* #257: a read's worth of headroom past the cap, so a read that crosses
+     * it is appended and the cap, not the buffer, refuses it. The buffer
+     * used to end at the cap, and a crossing read failed as out of memory.
+     * The parser sees at most the cap's bytes, so the outcome never depends
+     * on where the reads split (§40). */
+    if (!zuh_buf_init(&raw, 1024, ZUH_MAX_HEADER_BYTES + ZUH_READ_CHUNK)) return ZUH_ERR_NOMEM;
     for (;;) {
         char chunk[ZUH_READ_CHUNK];
         zuh_ssize n;
 
-        rc = zuh_proxy_connect_response((const char *)raw.data, raw.len,
+        rc = zuh_proxy_connect_response((const char *)raw.data, head_window(raw.len),
                                        &consumed, &status, err);
         if (rc != ZUH_ERR_WOULDBLOCK) break;
         if (raw.len >= ZUH_MAX_HEADER_BYTES) {
@@ -538,23 +551,29 @@ static zuh_code open_stream(zuh_stream **out, const zuh_uri *u,
 }
 
 /* Read until the header block is complete. Leftover body bytes are left in
- * `raw` past `consumed`. */
+ * `raw` past `consumed`.
+ *
+ * #258: the parser sees only the head window, so a head is refused exactly
+ * when its wire bytes pass ZUH_MAX_HEADER_BYTES. It used to see the whole
+ * buffer, and a head up to a read past the cap was accepted when the read
+ * that completed it began under the cap: TCP segmentation chose the limit. */
 static zuh_code read_headers(zuh_stream *s, zuh_buffer *raw, zuh_response *resp,
                             size_t *consumed, zuh_deadline dl, zuh_error *err) {
     size_t last_len = 0;
     for (;;) {
         char chunk[ZUH_READ_CHUNK];
         zuh_ssize n;
-        zuh_code rc = zuh_response_parse(resp, (const char *)raw->data, raw->len,
-                                       last_len, consumed, err);
+        zuh_code rc = zuh_response_parse(resp, (const char *)raw->data,
+                                       head_window(raw->len), last_len, consumed, err);
         if (rc != ZUH_ERR_WOULDBLOCK) return rc;
-        last_len = raw->len;
+        last_len = head_window(raw->len);
 
+        /* D-101: zu_http_parse_error, as every response header limit is. */
         if (raw->len >= ZUH_MAX_HEADER_BYTES) {
-            zuh_error_set(err, ZUH_ERR_BODY_LIMIT, ZUH_PHASE_READ,
+            zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_READ,
                          "response header block exceeds %u bytes",
                          (unsigned)ZUH_MAX_HEADER_BYTES);
-            return ZUH_ERR_BODY_LIMIT;
+            return ZUH_ERR_PARSE;
         }
         n = zuh_stream_read(s, chunk, sizeof chunk, dl, err);
         if (n < 0) return err->code;
@@ -1553,12 +1572,16 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
                 rc = check_host(&cur, err);
                 if (rc == ZUH_OK) rc = zuh_redirect_trail_add(trail, method, &cur);
                 if (rc != ZUH_OK) {
+                    /* check_host() has named its own refusal; only the
+                     * trail's two outcomes are named here. Every other code
+                     * was once relabelled "out of memory", so a redirect to
+                     * a 254-byte host was zu_url_error saying that (#254). */
                     if (rc == ZUH_ERR_REDIRECT)
                         zuh_error_set(err, rc, ZUH_PHASE_NONE,
                                      "redirect loop: hop %lu returns to a URL "
                                      "this request already visited",
                                      (unsigned long)hops);
-                    else
+                    else if (rc == ZUH_ERR_NOMEM)
                         zuh_error_set(err, rc, ZUH_PHASE_NONE, "out of memory");
                     zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
                     return rc;

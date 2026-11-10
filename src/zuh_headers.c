@@ -141,9 +141,11 @@ zuh_code zuh_headers_add(zuh_headers *h, const char *name, size_t nlen,
     if (h->max_name  && nlen > h->max_name)     return ZUH_ERR_BODY_LIMIT;
     if (h->max_value && vlen > h->max_value)    return ZUH_ERR_BODY_LIMIT;
 
-    /* name + ": " + value + CRLF, as it will appear on the wire. */
+    /* D-101: the field-section size, as HTTP/2 counts it, so a field list
+     * costs the same on either protocol. It used to be the HTTP/1.1 wire
+     * length (+ 4), and HTTP/2 refused lists HTTP/1.1 accepted (#259). */
     if (!zuh_size_add(nlen, vlen, &add))     return ZUH_ERR_OVERFLOW;
-    if (!zuh_size_add(add, 4, &add))         return ZUH_ERR_OVERFLOW;
+    if (!zuh_size_add(add, ZUH_HEADER_FIELD_OVERHEAD, &add)) return ZUH_ERR_OVERFLOW;
     if (!zuh_size_add(h->bytes, add, &newbytes)) return ZUH_ERR_OVERFLOW;
     if (h->max_bytes && newbytes > h->max_bytes) return ZUH_ERR_BODY_LIMIT;
 
@@ -174,7 +176,7 @@ size_t zuh_headers_remove(zuh_headers *h, const char *name) {
     nlen = strlen(name);
     while (i < h->n) {
         if (zuh_ascii_ncasecmp(h->items[i].name, h->items[i].nlen, name, nlen) == 0) {
-            size_t sub = h->items[i].nlen + h->items[i].vlen + 4;
+            size_t sub = h->items[i].nlen + h->items[i].vlen + ZUH_HEADER_FIELD_OVERHEAD;
             zuh_free(h->items[i].name);
             zuh_free(h->items[i].value);
             memmove(&h->items[i], &h->items[i + 1], (h->n - i - 1) * sizeof *h->items);
