@@ -566,16 +566,35 @@ jobs:
           h1 <- zu_get("https://httpbingo.org/get", client = zu_client(http2 = "off"))
           stopifnot(identical(zu_resp_connection(h1)$http_version, "HTTP/1.1"))
 
-          # The whole point of D-5: Windows has trust anchors again.
-          e <- tryCatch(zu_get("https://expired.badssl.com/"),
-                        zu_tls_error = function(e) e)
-          cat("expired ->", class(e)[1], "|", conditionMessage(e), "\n")
-          stopifnot(inherits(e, "zu_tls_certificate_error"))
-
-          e2 <- tryCatch(zu_get("https://wrong.host.badssl.com/"),
-                         zu_tls_error = function(e) e)
-          cat("wrong host ->", class(e2)[1], "\n")
-          stopifnot(inherits(e2, "zu_tls_hostname_error"))
+          # The whole point of D-5: Windows has trust anchors again. badssl.com
+          # refuses runners at times (#63, #283): three attempts, then a check
+          # whose host never answered is skipped and says so. A verdict, right
+          # or wrong, still decides; the rule is tests/testthat/helper-net.R's.
+          unreachable <- function(e) {
+            inherits(e, "zu_timeout_error") ||
+              (inherits(e, c("zu_connect_error", "zu_io_error")) &&
+                 !is.null(e$backend_code))
+          }
+          badssl <- function(url) {
+            for (attempt in 1:3) {
+              e <- tryCatch(zu_get(url), error = function(e) e)
+              if (!(inherits(e, "error") && unreachable(e))) return(e)
+              Sys.sleep(c(1, 3, 0)[attempt])
+            }
+            cat("SKIP", url, ": badssl.com unreachable after 3 attempts (#63):",
+                conditionMessage(e), "\n")
+            NULL
+          }
+          e <- badssl("https://expired.badssl.com/")
+          if (!is.null(e)) {
+            cat("expired ->", class(e)[1], "|", conditionMessage(e), "\n")
+            stopifnot(inherits(e, "zu_tls_certificate_error"))
+          }
+          e2 <- badssl("https://wrong.host.badssl.com/")
+          if (!is.null(e2)) {
+            cat("wrong host ->", class(e2)[1], "\n")
+            stopifnot(inherits(e2, "zu_tls_hostname_error"))
+          }
 
           cat("S8: Windows HTTPS works, and bad certificates are rejected\n")
           RS
