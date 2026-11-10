@@ -517,6 +517,19 @@ jobs:
           ZU_TEST_TRACE: "1"
         run: make engine-sch CC="$(R CMD config CC)"
 
+      # #286: the peer-initiated TLS events OpenSSL gets from tls_eof's
+      # scripted servers (a close without close_notify, a close_notify behind
+      # the body, a renegotiation) and the IP-literal rows (#216, #246), over
+      # Schannel. The fixture CA goes into the runner's machine Root store,
+      # since Schannel has no ca_file; the script removes it.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Scripted TLS servers on Schannel
+        timeout-minutes: 10
+        working-directory: ctest
+        run: make tls-eof-sch CC="$(R CMD config CC)"
+
       # Added while diagnosing, kept because it earns its place: the package is
       # built at -O2 -std=gnu2x while ctest uses -O1 -std=c99, and a backend
       # that only works at one of those is a backend with undefined behaviour

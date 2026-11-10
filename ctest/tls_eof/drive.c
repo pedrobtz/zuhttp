@@ -1,5 +1,7 @@
 /* The engine over a TLS backend against tls_eof/server.py (D-86): OpenSSL,
- * and for the fork case Network.framework too (#249).
+ * for the fork case Network.framework too (#249), and Schannel (#286),
+ * which has no fork() and no ca_file: there CA is "-", and the certificate
+ * is in the machine's Root store instead (run-sch.sh).
  *
  *   drive noclose  URL CA   one request; the close-delimited body arrives whole
  *   drive together URL CA   two requests on one pooled client; the second must
@@ -31,8 +33,25 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include <unistd.h>
-#include <sys/wait.h>
+#ifdef _WIN32
+#  include <windows.h>
+#else
+#  include <unistd.h>
+#  include <sys/wait.h>
+#endif
+
+static void pause_ms(long ms) {
+#ifdef _WIN32
+    Sleep((DWORD)ms);
+#else
+    struct timespec ts;
+    ts.tv_sec = ms / 1000; ts.tv_nsec = (ms % 1000) * 1000000L;
+    nanosleep(&ts, NULL);
+#endif
+}
+
+/* "-" is no ca_file: the system store decides, which is how Schannel runs. */
+static const char *ca_opt(const char *ca) { return strcmp(ca, "-") == 0 ? NULL : ca; }
 
 static int stale(const char *url, const char *ca, const char *other) {
     zuh_get_opts o;
@@ -44,15 +63,15 @@ static int stale(const char *url, const char *ca, const char *other) {
     zuh_pool *pool = zuh_pool_new(NULL);
     zuh_get_opts_init(&o);
     o.proxy_set = 1; o.timeout_ms = 10000; o.pool = pool;
-    o.ca_file = ca;
+    o.ca_file = ca_opt(ca);
     rc = zuh_engine_get(&r, url, &o, &e);
     if (rc == ZUH_OK) zuh_result_free(&r);
     else { printf("FAIL stale request 1: %s\n", e.message); bad = 1; }
-    o.ca_file = other;      /* a different pool key: a new, failing handshake */
+    o.ca_file = ca_opt(other);      /* a different pool key: a new, failing handshake */
     rc = zuh_engine_get(&r, url, &o, &e);
     if (rc == ZUH_OK) { zuh_result_free(&r); printf("FAIL stale request 2 was trusted\n"); bad = 1; }
     else printf("stale request 2: refused as expected (%s)\n", e.message);
-    o.ca_file = ca;         /* back to the pooled connection, no handshake */
+    o.ca_file = ca_opt(ca);         /* back to the pooled connection, no handshake */
     rc = zuh_engine_get(&r, url, &o, &e);
     if (rc != ZUH_OK) { printf("FAIL stale request 3: code %d, %s\n", rc, e.message); bad = 1; }
     else {
@@ -65,6 +84,7 @@ static int stale(const char *url, const char *ca, const char *other) {
     return bad;
 }
 
+#ifndef _WIN32
 /* Read a pulled body to its end. */
 static zuh_code read_all(zuh_open_body *b, zuh_buffer *got, zuh_error *e) {
     for (;;) {
@@ -88,7 +108,7 @@ static int forkcase(const char *url, const char *ca) {
     zuh_pool *pool = zuh_pool_new(NULL);
     snprintf(big, sizeof big, "%sbig", url);
     zuh_get_opts_init(&o);
-    o.proxy_set = 1; o.timeout_ms = 10000; o.pool = pool; o.ca_file = ca;
+    o.proxy_set = 1; o.timeout_ms = 10000; o.pool = pool; o.ca_file = ca_opt(ca);
     zuh_buf_init(&got, 0, (size_t)-1);
 
     /* Connection 1 checked out into a pulled body, part-read; connection 2
@@ -138,8 +158,7 @@ static int forkcase(const char *url, const char *ca) {
         bad = 1;
     }
     {   /* time for anything the child sent to reach the server and be acted on */
-        struct timespec ts = { 0, 300000000L };
-        nanosleep(&ts, NULL);
+        pause_ms(300);
     }
 
     /* The parent's body is intact: every byte, in order, none consumed by
@@ -188,6 +207,7 @@ static int forkcase(const char *url, const char *ca) {
     zuh_pool_free(pool);
     return bad;
 }
+#endif
 
 static int one(const char *url, const char *ca) {
     zuh_get_opts o;
@@ -196,7 +216,7 @@ static int one(const char *url, const char *ca) {
     zuh_code rc;
     int bad = 0;
     zuh_get_opts_init(&o);
-    o.ca_file = ca; o.proxy_set = 1; o.timeout_ms = 10000;
+    o.ca_file = ca_opt(ca); o.proxy_set = 1; o.timeout_ms = 10000;
     rc = zuh_engine_get(&r, url, &o, &e);
     if (rc != ZUH_OK) { printf("FAIL one %s: code %d, %s\n", url, rc, e.message); return 1; }
     printf("one %s: status %d, %lu body bytes\n", url, r.status, (unsigned long)r.body.len);
@@ -218,7 +238,7 @@ static int hostname(const char *url, const char *ca) {
     zuh_error e;
     zuh_code rc;
     zuh_get_opts_init(&o);
-    o.ca_file = ca; o.proxy_set = 1; o.timeout_ms = 10000;
+    o.ca_file = ca_opt(ca); o.proxy_set = 1; o.timeout_ms = 10000;
     rc = zuh_engine_get(&r, url, &o, &e);
     if (rc == ZUH_OK) {
         printf("FAIL hostname: %s was accepted (status %d)\n", url, r.status);
@@ -243,11 +263,13 @@ int main(int argc, char **argv) {
     if (argc == 5 && strcmp(argv[1], "stale") == 0) return stale(argv[2], argv[3], argv[4]);
     if (argc == 4 && strcmp(argv[1], "one") == 0) return one(argv[2], argv[3]);
     if (argc == 4 && strcmp(argv[1], "hostname") == 0) return hostname(argv[2], argv[3]);
+#ifndef _WIN32
     if (argc == 4 && strcmp(argv[1], "fork") == 0) return forkcase(argv[2], argv[3]);
+#endif
     if (argc != 4) { fprintf(stderr, "usage: drive noclose|together|one|hostname|fork URL CA | stale URL CA OTHER\n"); return 2; }
     together = strcmp(argv[1], "together") == 0;
     zuh_get_opts_init(&o);
-    o.ca_file = argv[3]; o.proxy_set = 1; o.timeout_ms = 10000;
+    o.ca_file = ca_opt(argv[3]); o.proxy_set = 1; o.timeout_ms = 10000;
     if (together) { pool = zuh_pool_new(NULL); o.pool = pool; }
     for (i = 0; i < (together ? 2 : 1); i++) {
         rc = zuh_engine_get(&r, argv[2], &o, &e);
@@ -264,8 +286,7 @@ int main(int argc, char **argv) {
         }
         zuh_result_free(&r);
         if (together) {   /* let the close_notify arrive, as a real gap would */
-            struct timespec ts = { 0, 300000000L };
-            nanosleep(&ts, NULL);
+            pause_ms(300);
         }
     }
     if (pool) {

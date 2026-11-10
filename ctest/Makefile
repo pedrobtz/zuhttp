@@ -249,6 +249,15 @@ zuh_engtest_sch: $(SCHSRC) test_engine.c
 engine-sch: zuh_engtest_sch
 	./zuh_engtest_sch
 
+# #286: tls_eof's scripted servers over Schannel, on the Windows CI leg. The
+# script puts the fixture CA in the machine's Root store for the run.
+zuh_tlseof_sch: $(SCHSRC) tls_eof/drive.c
+	$(CC) $(ENGBASE) $(URIFLAGS) -o $@ $(SCHSRC) tls_eof/drive.c \
+	      -lsecur32 -lcrypt32 -lz $(NETLIBS)
+
+tls-eof-sch: zuh_tlseof_sch
+	DRIVE=$(CURDIR)/zuh_tlseof_sch tls_eof/run-sch.sh
+
 # D-86: the engine over OpenSSL against a loopback TLS server that closes
 # without close_notify, and one that sends close_notify behind the body. Needs
 # python3 and the openssl CLI; no network.
@@ -289,4 +298,4 @@ clean:
 	rm -rf zuh_ctest zuh_ctest_asan zuh_tlstest zuh_engtest zuh_engtest_nw zuh_engtest_sch zuh_tlseof zuh_tlseof_asan zuh_tlseof_nw zuh_tlseof_nw_asan \
 	      zuh_tlstest_asan zuh_engtest_asan zuh_engtest_nw_asan *.dSYM build build-asan *.o
 
-.PHONY: all run strict asan clean tls tls-asan tls-eof tls-eof-asan tls-fork-nw tls-fork-nw-asan engine engine-asan engine-nw-asan engine-nw engine-sch
+.PHONY: all run strict asan clean tls tls-asan tls-eof tls-eof-asan tls-fork-nw tls-fork-nw-asan engine engine-asan engine-nw-asan engine-nw engine-sch tls-eof-sch
