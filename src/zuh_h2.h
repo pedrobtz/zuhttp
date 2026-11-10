@@ -79,8 +79,10 @@ typedef struct {
     size_t             body_len;
     /* §65.7: when set, the body comes from here instead, a piece at a time,
      * as the peer's window allows. Borrowed until the stream ends. `body` is
-     * borrowed too, for as long as the caller's buffer lives; a pulled
-     * response that outlives it calls zuh_h2_own_body() first. */
+     * borrowed too, until the stream ends or the caller's buffer goes away,
+     * whichever is first; a pulled response that outlives the buffer calls
+     * zuh_h2_own_body() first. The connection drops both when the stream
+     * closes (#251). */
     const zuh_body_source *source;
 } zuh_h2_request;
 
@@ -139,5 +141,11 @@ long zuh_h2_idle_ms(zuh_stream *conn);
  * the last stream ended in anything but a clean close, the peer sent GOAWAY,
  * the stream ids are exhausted, or the session failed. */
 int zuh_h2_reusable(zuh_stream *conn);
+
+/* How many pointers into the caller's request the connection still holds:
+ * the response headers, the in-memory body, the streamed body source. Each
+ * is borrowed for one request, and a pooled connection outlives it (#251,
+ * correctness family 2), so this is 0 whenever no request is in flight. */
+int zuh_h2_borrowed(const zuh_stream *conn);
 
 #endif /* ZUHTTP_H2_H */

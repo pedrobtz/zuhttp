@@ -11,6 +11,7 @@
 #include "zuh_test.h"
 #include "zuh_net.h"
 #include "zuh_alloc.h"
+#include "zuh_trace.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>   /* getenv */
@@ -140,6 +141,41 @@ void suite_net(void) {
         }
 
         zuh_net_stream_free(s); s = NULL;
+        TCLOSE(ls);
+    }
+
+    /* #251: a pooled connection outlives the request that dialled it, so
+     * the trace and timings it was dialled with must not stay behind. The
+     * trace is on the heap and freed once connect returns: a later read or
+     * write that records into it is a heap-use-after-free under `make asan`. */
+    ZUH_CASE("#251: a connection keeps no pointer into the request that dialled it");
+    {
+        uint16_t port = 0;
+        tsock ls = listen_on(&port);
+        tsock conn;
+        char buf[8];
+        zuh_deadline d = zuh_deadline_in(5000);
+        zuh_net_opts to = o;
+        zuh_timings tm;
+        zuh_trace *tr = (zuh_trace *)malloc(sizeof *tr);
+        ZUH_CHECK(ls != TINVALID && tr != NULL);
+        zuh_trace_init(tr);
+        memset(&tm, 0, sizeof tm);
+        to.trace = tr;
+        to.timings = &tm;
+        zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(zuh_net_connect(&s, "127.0.0.1", port, d, &to, &e), ZUH_OK);
+        ZUH_CHECK(tr->n >= 2);                  /* connect.start and done went in */
+        ZUH_CHECK_EQ_INT(zuh_net_borrowed(s), 0);
+        free(tr);
+        conn = accept_bounded(ls, 2000);
+        ZUH_CHECK(conn != TINVALID);
+        ZUH_CHECK(zuh_stream_write_all(s, "PING", 4, d, &e));
+        ZUH_CHECK_EQ_INT((int)recv(conn, buf, 4, 0), 4);
+        send(conn, "PONG", 4, 0);
+        ZUH_CHECK_EQ_INT((int)zuh_stream_read(s, buf, sizeof buf, d, &e), 4);
+        zuh_net_stream_free(s); s = NULL;
+        TCLOSE(conn);
         TCLOSE(ls);
     }
 

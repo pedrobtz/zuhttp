@@ -203,15 +203,27 @@ static int on_data(nghttp2_session *s, uint8_t flags, int32_t sid,
     return 0;
 }
 
+/* The request body, in memory or streamed, is borrowed for the stream's
+ * life only: a pooled connection outlives the call that lent it, so once
+ * nothing more can be sent it keeps no pointer to it (#251). A copy made by
+ * zuh_h2_own_body() is the connection's and goes with it. */
+static void drop_request_body(h2_impl *h) {
+    memset(&h->src, 0, sizeof h->src);
+    h->src_data = NULL;
+    h->src_len = h->src_off = 0;
+    zuh_free(h->body_owned);
+    h->body_owned = NULL;
+    h->body = NULL;
+    h->body_len = h->body_off = 0;
+}
+
 static int on_close(nghttp2_session *s, int32_t sid, uint32_t code, void *ud) {
     h2_impl *h = (h2_impl *)ud;
     (void)s;
     if (sid != h->sid) return 0;
     h->closed = 1;
     h->close_code = code;
-    /* The body source is borrowed for the stream's life only: a pooled
-     * connection must not keep a pointer to it. */
-    memset(&h->src, 0, sizeof h->src);
+    drop_request_body(h);
     return 0;
 }
 
@@ -494,6 +506,7 @@ zuh_code zuh_h2_begin(zuh_stream *conn, const zuh_h2_request *rq,
          * reach from this driver, which is why no test does (#192). */
         rc = fail(h, err, sid == NGHTTP2_ERR_NOMEM ? ZUH_ERR_NOMEM : ZUH_ERR_IO,
                   ZUH_PHASE_WRITE, nghttp2_strerror(sid), sid);
+        drop_request_body(h);    /* no stream, so on_close will not */
         goto out;
     }
     h->sid = sid;
@@ -608,6 +621,14 @@ zuh_code zuh_h2_own_body(zuh_stream *conn, zuh_error *err) {
     h->body_len = left;
     h->body_off = 0;
     return ZUH_OK;
+}
+
+int zuh_h2_borrowed(const zuh_stream *conn) {
+    const h2_impl *h;
+    if (!zuh_h2_is(conn)) return 0;
+    h = (const h2_impl *)conn->impl;
+    return (h->hdrs != NULL) + (h->body != NULL && h->body != h->body_owned) +
+           (h->src.next != NULL);
 }
 
 uint64_t zuh_h2_body_sent(const zuh_stream *conn) {
