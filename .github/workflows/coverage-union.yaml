@@ -64,7 +64,9 @@ jobs:
       # and the function list also go to the job summary; the full report is
       # an artifact. It never fails: the floor above is the gate.
       - name: Fuzz gaps
-        run: tools/coverage/fuzz-gaps.sh fuzz.lcov ctest.lcov | tee fuzz-gaps.txt
+        run: |
+          set -o pipefail
+          tools/coverage/fuzz-gaps.sh fuzz.lcov ctest.lcov | tee fuzz-gaps.txt
 
       - uses: actions/upload-artifact@v4
         with:

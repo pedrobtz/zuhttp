@@ -62,6 +62,10 @@ awk -F'[:,]' -v summary="${GITHUB_STEP_SUMMARY:-}" '
         if ($5 != "-" && $5 > 0) taken[lk] = 1; else untaken[lk] = 1
         next
     }
+    # Callers pass values (x + 0), never a bare array element: gawk 5.2.1
+    # (Ubuntu 24.04) dies with "unexpected parameter type Node_frame" on an
+    # element that was never assigned (a header with no branches), and the
+    # pipe into tee hid it.
     function pct(h, n) { return n ? sprintf("%5.1f%%", 100 * h / n) : "    -" }
     function emit(s) { print s; if (summary != "") print s >> summary }
     END {
@@ -79,8 +83,8 @@ awk -F'[:,]' -v summary="${GITHUB_STEP_SUMMARY:-}" '
         for (i = 1; i <= nfiles; i++) {
             f = order[i]
             emit(sprintf("| %s | %s of %d | %s of %d | %d of %d |", f,
-                 pct(hl[f], nl[f]), nl[f], pct(hb[f], nb[f]), nb[f],
-                 hf[f], nf[f]))
+                 pct(hl[f] + 0, nl[f] + 0), nl[f] + 0,
+                 pct(hb[f] + 0, nb[f] + 0), nb[f] + 0, hf[f] + 0, nf[f] + 0))
             TL += nl[f]; TH += hl[f]; TB += nb[f]; TBH += hb[f]
             TF += nf[f]; TFH += hf[f]
         }
