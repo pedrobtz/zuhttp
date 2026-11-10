@@ -226,6 +226,25 @@ static size_t framed(char *out, size_t cap, int how, const char *coding,
     return h + n;
 }
 
+/* §40: a head of exactly `wire` bytes, status line to blank line. The reason
+ * phrase takes whatever `fields` (each CRLF-terminated) leave, so the head's
+ * wire size moves while its fields stay the same. 0 if it cannot be built. */
+static size_t head_of(char *out, size_t cap, const char *status, const char *fields,
+                      size_t wire) {
+    size_t sl = strlen(status), fl = strlen(fields);
+    size_t fixed = 9 + sl + 1 + 2 + fl + 2;      /* "HTTP/1.1 " st " " CRLF f CRLF */
+    size_t n = 0;
+    if (wire <= fixed || wire > cap) return 0;
+    memcpy(out, "HTTP/1.1 ", 9); n = 9;
+    memcpy(out + n, status, sl); n += sl;
+    out[n++] = ' ';
+    memset(out + n, 'r', wire - fixed); n += wire - fixed;
+    memcpy(out + n, "\r\n", 2); n += 2;
+    memcpy(out + n, fields, fl); n += fl;
+    memcpy(out + n, "\r\n", 2); n += 2;
+    return n;
+}
+
 /* §65.7: a request-body source over a NULL-terminated list of strings. */
 static const char **h1_gen_pieces;
 static zuh_code h1_gen_next(void *ctx, const void **data, size_t *len, zuh_deadline dl,
@@ -396,6 +415,42 @@ static void sweep_engine(const char *name, eng_scenario scn, zuh_code expect) {
     ZUH_CHECK(failed > 0);
     ZUH_CHECK_EQ_INT(bad, 0);
     ZUH_CHECK_EQ_INT(leaked, 0);
+}
+
+/* §40 at its edges: every limit at limit - 1, limit and limit + 1, at read
+ * sizes that put a boundary inside the window (#252-#259). */
+static void limits_cases(void) {
+    static char buf[90000];
+    zuh_get_opts o;
+    zuh_result r;
+    zuh_error e;
+    dialer d;
+    size_t k;
+    /* One-shot (16 KiB reads, aligned to 64 KiB), 1000 and 4093 bytes. */
+    static const size_t reads[] = { 0, 1000, 4093 };
+
+    ZUH_CASE("limits: a CONNECT reply head is refused past 64 KiB at every read size (#257)");
+    for (k = 0; k < sizeof reads / sizeof reads[0]; k++) {
+        static const struct { size_t wire; zuh_code want; } cases[] = {
+            { 65535, ZUH_ERR_TLS }, { 65536, ZUH_ERR_TLS }, { 65537, ZUH_ERR_PROXY },
+            { 70000, ZUH_ERR_PROXY } };
+        size_t j;
+        for (j = 0; j < sizeof cases / sizeof cases[0]; j++) {
+            conn_script sc[1];
+            size_t n = head_of(buf, sizeof buf, "200", "Via: test\r\n", cases[j].wire);
+            ZUH_CHECK_EQ_INT(n, cases[j].wire);
+            memset(sc, 0, sizeof sc);
+            sc[0].bytes = buf; sc[0].len = n; sc[0].max_read = reads[k];
+            dialer_init(&d, sc, 1); opts_for(&o, &d); o.proxy = "http://proxy.test:3128";
+            zuh_error_clear(&e);
+            /* Under the cap the tunnel opens and reaches TLS, which this build
+             * lacks; over it, the proxy error says why, never "out of memory". */
+            ZUH_CHECK_EQ_INT(zuh_engine_get(&r, "https://origin.test/", &o, &e), cases[j].want);
+            ZUH_CHECK_EQ_INT(e.code, cases[j].want);
+            if (cases[j].want == ZUH_ERR_PROXY) ZUH_CHECK(has(e.message, "too large"));
+            dialer_free(&d);
+        }
+    }
 }
 
 void suite_engine_mock(void) {
@@ -1899,4 +1954,5 @@ void suite_engine_mock(void) {
     sweep_engine("engine: every allocation failure while a header block outgrows the first read fails cleanly (#188, #197)",
                  scn_big_headers, ZUH_OK);
 
+    limits_cases();
 }

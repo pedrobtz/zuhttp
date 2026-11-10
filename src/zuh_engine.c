@@ -305,6 +305,14 @@ static void record_tls_info(zuh_stream *s, zuh_result *res) {
     res->trust_backend = dup_str(info.trust_backend);
 }
 
+/* §40: how much of a buffered head the parser is shown. A head is
+ * complete within the first ZUH_MAX_HEADER_BYTES or it is too large, and
+ * what lies past them is never parsed, so a byte there cannot turn "too
+ * large" into another error at one read size and not at the next. */
+static size_t head_window(size_t len) {
+    return len < ZUH_MAX_HEADER_BYTES ? len : ZUH_MAX_HEADER_BYTES;
+}
+
 /* §20.3: open the tunnel. CONNECT is written to the proxy, its response is
  * parsed with full §18 strictness, and only a 2xx yields a usable socket.
  *
@@ -327,12 +335,17 @@ static zuh_code proxy_tunnel(zuh_stream *tcp, const zuh_proxy *px,
     zuh_buf_free(&req);
     if (rc != ZUH_OK) return rc;
 
-    if (!zuh_buf_init(&raw, 1024, ZUH_MAX_HEADER_BYTES)) return ZUH_ERR_NOMEM;
+    /* #257: a read's worth of headroom past the cap, so a read that crosses
+     * it is appended and the cap, not the buffer, refuses it. The buffer
+     * used to end at the cap, and a crossing read failed as out of memory.
+     * The parser sees at most the cap's bytes, so the outcome never depends
+     * on where the reads split (§40). */
+    if (!zuh_buf_init(&raw, 1024, ZUH_MAX_HEADER_BYTES + ZUH_READ_CHUNK)) return ZUH_ERR_NOMEM;
     for (;;) {
         char chunk[ZUH_READ_CHUNK];
         zuh_ssize n;
 
-        rc = zuh_proxy_connect_response((const char *)raw.data, raw.len,
+        rc = zuh_proxy_connect_response((const char *)raw.data, head_window(raw.len),
                                        &consumed, &status, err);
         if (rc != ZUH_ERR_WOULDBLOCK) break;
         if (raw.len >= ZUH_MAX_HEADER_BYTES) {
