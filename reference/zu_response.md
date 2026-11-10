@@ -22,7 +22,7 @@ zu_response(
 
 - status:
 
-  Integer HTTP status.
+  HTTP status, a whole number from 100 to 599.
 
 - headers:
 

@@ -60,7 +60,7 @@ zu_retry(
 - on:
 
   Extra HTTP statuses to treat as retryable, beyond §33.2's 408, 429,
-  500, 502, 503 and 504.
+  500, 502, 503 and 504: whole numbers from 100 to 599.
 
 ## Value
 
