@@ -187,9 +187,12 @@ R suite and 33,000 sanitised fuzz inputs. What is specific to zuhttp:
 
 - **The wire is the oracle.** No test counted what a server received for an
   HTTP/1.1 upload, and no in-memory upload between 32 KiB and 64 KiB was
-  tested, so a 40 KB body went out twice (#208) for months. Upload tests
-  use `helper-rawserver.R` and assert the bytes that arrived, at sizes
-  straddling the 64 KiB header-plus-body combine.
+  tested, so a 40 KB body went out twice (#208) for months. The upload
+  check is in C: `ctest/test_engine_mock.c` records every byte the engine
+  writes and asserts each body goes out exactly once, at sizes straddling
+  the 64 KiB header-plus-body combine, and `fuzz_engine` checks the same
+  framing on fuzzed uploads. `helper-rawserver.R` records only the request
+  head, so an R test of a body's bytes needs a server that reads the body.
 - **`max_body` is decoded bytes, everywhere.** The chunk decoder billed
   compressed bytes against it (#212). Equivalent payloads under
   Content-Length and chunked framing are tested as a pair.
