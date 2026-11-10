@@ -1572,12 +1572,16 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
                 rc = check_host(&cur, err);
                 if (rc == ZUH_OK) rc = zuh_redirect_trail_add(trail, method, &cur);
                 if (rc != ZUH_OK) {
+                    /* check_host() has named its own refusal; only the
+                     * trail's two outcomes are named here. Every other code
+                     * was once relabelled "out of memory", so a redirect to
+                     * a 254-byte host was zu_url_error saying that (#254). */
                     if (rc == ZUH_ERR_REDIRECT)
                         zuh_error_set(err, rc, ZUH_PHASE_NONE,
                                      "redirect loop: hop %lu returns to a URL "
                                      "this request already visited",
                                      (unsigned long)hops);
-                    else
+                    else if (rc == ZUH_ERR_NOMEM)
                         zuh_error_set(err, rc, ZUH_PHASE_NONE, "out of memory");
                     zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
                     return rc;

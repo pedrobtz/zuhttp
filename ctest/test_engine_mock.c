@@ -24,7 +24,8 @@
 
 void suite_engine_mock(void);
 
-#define MAXC 8
+/* 16: #254 follows a chain of 11 redirects, a connection a hop. */
+#define MAXC 16
 
 typedef struct {
     const char *bytes;
@@ -500,6 +501,110 @@ static void limits_cases(void) {
                 }
                 dialer_free(&d);
             }
+        }
+    }
+
+    /* #254, §19.5: a redirect body within ZUH_MAX_REDIRECT_BODY is drained
+     * and its connection carries the next hop; one byte more costs the
+     * connection, never the request. Under Content-Length and chunked, at
+     * one-shot and 4093-byte reads. */
+    ZUH_CASE("limits: a redirect body of 65535 or 65536 bytes is drained and the connection reused; 65537 is not (#254)");
+    {
+        static const size_t rd[] = { 0, 4093 };
+        size_t j, chunked;
+        for (chunked = 0; chunked < 2; chunked++)
+        for (k = 0; k < sizeof rd / sizeof rd[0]; k++)
+        for (j = 65535; j <= 65537; j++) {
+            zuh_pool *pool = zuh_pool_new(NULL);
+            conn_script sc[2];
+            size_t n;
+            zuh_code rc;
+            if (chunked) {
+                n = (size_t)snprintf(buf, sizeof buf, "HTTP/1.1 302 Found\r\nLocation: /ok\r\n"
+                                     "Transfer-Encoding: chunked\r\n\r\n%lx\r\n", (unsigned long)j);
+                memset(buf + n, 'x', j); n += j;
+                memcpy(buf + n, "\r\n0\r\n\r\n", 7); n += 7;
+            } else {
+                n = (size_t)snprintf(buf, sizeof buf, "HTTP/1.1 302 Found\r\nLocation: /ok\r\n"
+                                     "Content-Length: %lu\r\n\r\n", (unsigned long)j);
+                memset(buf + n, 'x', j); n += j;
+            }
+            memset(sc, 0, sizeof sc);
+            sc[0].bytes = buf; sc[0].len = n; sc[0].max_read = rd[k]; sc[0].not_readable = 1;
+            sc[0].next = OK200(2) "ok";
+            sc[1].bytes = OK200(2) "ok"; sc[1].not_readable = 1;
+            dialer_init(&d, sc, 2); opts_for(&o, &d); o.pool = pool;
+            zuh_error_clear(&e);
+            rc = zuh_engine_get(&r, "http://example.test/start", &o, &e);
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            if (rc == ZUH_OK) {
+                ZUH_CHECK_EQ_INT(r.redirects, 1);
+                ZUH_CHECK(r.body.len == 2 && memcmp(r.body.data, "ok", 2) == 0);
+                zuh_result_free(&r);
+            }
+            ZUH_CHECK_EQ_INT(d.next, j <= 65536 ? 1 : 2);
+            dialer_free(&d); zuh_pool_free(pool);
+        }
+    }
+
+    /* #254: 253 bytes is the longest host name (RFC 1035) and dials; 254
+     * is zu_url_error before any connection, on the first hop and on a
+     * redirect's. */
+    ZUH_CASE("limits: a 252- or 253-byte host dials; 254 bytes is zu_url_error, on any hop (#254)");
+    {
+        size_t len, hop;
+        for (hop = 0; hop < 2; hop++)
+        for (len = 252; len <= 254; len++) {
+            static char host[300], url[400], loc[512];
+            conn_script sc[2];
+            zuh_code rc;
+            memset(host, 'h', len - 5); memcpy(host + len - 5, ".test", 6);
+            snprintf(url, sizeof url, "http://%s/", hop ? "example.test" : host);
+            snprintf(loc, sizeof loc, "HTTP/1.1 302 Found\r\nLocation: http://%s/\r\n"
+                     "Content-Length: 0\r\nConnection: close\r\n\r\n", host);
+            memset(sc, 0, sizeof sc);
+            sc[0].bytes = hop ? loc : OK200(2) "ok";
+            sc[1].bytes = OK200(2) "ok";
+            dialer_init(&d, sc, 2); opts_for(&o, &d);
+            zuh_error_clear(&e);
+            rc = zuh_engine_get(&r, url, &o, &e);
+            ZUH_CHECK_EQ_INT(rc, len <= 253 ? ZUH_OK : ZUH_ERR_URL);
+            ZUH_CHECK_EQ_INT(d.next, (len <= 253 ? 1 : 0) + hop);
+            if (rc == ZUH_OK) zuh_result_free(&r);
+            else ZUH_CHECK(has(e.message, "host name"));
+            dialer_free(&d);
+        }
+    }
+
+    /* #254, §19.4: at the default of 10, a chain of 9 or 10 redirects is
+     * followed to its end and 11 is zu_too_many_redirects. */
+    ZUH_CASE("limits: 9 and 10 redirects are followed; the 11th is too many (#254)");
+    {
+        static char hops[12][128];
+        size_t chain, i;
+        for (chain = 9; chain <= 11; chain++) {
+            conn_script sc[12];
+            zuh_code rc;
+            memset(sc, 0, sizeof sc);
+            for (i = 0; i < chain; i++) {
+                snprintf(hops[i], sizeof hops[i], "HTTP/1.1 302 Found\r\nLocation: /h%lu\r\n"
+                         "Content-Length: 0\r\nConnection: close\r\n\r\n", (unsigned long)i + 1);
+                sc[i].bytes = hops[i];
+            }
+            sc[chain].bytes = OK200(2) "ok";
+            dialer_init(&d, sc, chain + 1); opts_for(&o, &d);
+            ZUH_CHECK_EQ_INT(o.max_redirects, 10);
+            zuh_error_clear(&e);
+            rc = zuh_engine_get(&r, "http://example.test/", &o, &e);
+            ZUH_CHECK_EQ_INT(rc, chain <= 10 ? ZUH_OK : ZUH_ERR_TOO_MANY_REDIRECTS);
+            if (rc == ZUH_OK) {
+                ZUH_CHECK_EQ_INT(r.redirects, chain);
+                ZUH_CHECK(r.body.len == 2 && memcmp(r.body.data, "ok", 2) == 0);
+                zuh_result_free(&r);
+            }
+            /* The refused hop is never dialled. */
+            ZUH_CHECK_EQ_INT(d.next, chain <= 10 ? chain + 1 : 11);
+            dialer_free(&d);
         }
     }
 
