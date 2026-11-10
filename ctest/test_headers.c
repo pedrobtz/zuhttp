@@ -83,13 +83,18 @@ void suite_headers(void) {
     ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "Ok", "0123456789abcdefghij"), ZUH_ERR_BODY_LIMIT);
     zuh_headers_free(&h);
 
-    zuh_headers_init_limited(&h, 0, 0, 0, 20);
-    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "AAAA", "bbbb"), ZUH_OK);        /* 12 bytes */
+    /* D-101: a field costs name + value + 32, so two of 40 pass 80 and not 79. */
+    zuh_headers_init_limited(&h, 0, 0, 0, 79);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "AAAA", "bbbb"), ZUH_OK);        /* 40 bytes */
     ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "CCCC", "dddd"), ZUH_ERR_BODY_LIMIT);
+    zuh_headers_free(&h);
+    zuh_headers_init_limited(&h, 0, 0, 0, 80);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "AAAA", "bbbb"), ZUH_OK);
+    ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "CCCC", "dddd"), ZUH_OK);
     zuh_headers_free(&h);
 
     ZUH_CASE("removal reclaims the byte budget");
-    zuh_headers_init_limited(&h, 0, 0, 0, 20);
+    zuh_headers_init_limited(&h, 0, 0, 0, 79);
     ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "AAAA", "bbbb"), ZUH_OK);
     ZUH_CHECK_EQ_INT(zuh_headers_remove(&h, "AAAA"), 1);
     ZUH_CHECK_EQ_INT(zuh_headers_add_str(&h, "CCCC", "dddd"), ZUH_OK);

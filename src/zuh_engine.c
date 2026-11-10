@@ -305,7 +305,7 @@ static void record_tls_info(zuh_stream *s, zuh_result *res) {
     res->trust_backend = dup_str(info.trust_backend);
 }
 
-/* §40: how much of a buffered head the parser is shown. A head is
+/* §40, D-101: how much of a buffered head the parser is shown. A head is
  * complete within the first ZUH_MAX_HEADER_BYTES or it is too large, and
  * what lies past them is never parsed, so a byte there cannot turn "too
  * large" into another error at one read size and not at the next. */
@@ -568,11 +568,12 @@ static zuh_code read_headers(zuh_stream *s, zuh_buffer *raw, zuh_response *resp,
         if (rc != ZUH_ERR_WOULDBLOCK) return rc;
         last_len = head_window(raw->len);
 
+        /* D-101: zu_http_parse_error, as every response header limit is. */
         if (raw->len >= ZUH_MAX_HEADER_BYTES) {
-            zuh_error_set(err, ZUH_ERR_BODY_LIMIT, ZUH_PHASE_READ,
+            zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_READ,
                          "response header block exceeds %u bytes",
                          (unsigned)ZUH_MAX_HEADER_BYTES);
-            return ZUH_ERR_BODY_LIMIT;
+            return ZUH_ERR_PARSE;
         }
         n = zuh_stream_read(s, chunk, sizeof chunk, dl, err);
         if (n < 0) return err->code;

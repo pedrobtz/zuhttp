@@ -473,8 +473,8 @@ static void limits_cases(void) {
         static char fields[70000];
         static const size_t rd[] = { 0, 1, 4093 };
         static const struct { size_t wire; zuh_code want; } cases[] = {
-            { 65535, ZUH_OK }, { 65536, ZUH_OK }, { 65537, ZUH_ERR_BODY_LIMIT },
-            { 69000, ZUH_ERR_BODY_LIMIT }, { 70000, ZUH_ERR_BODY_LIMIT } };
+            { 65535, ZUH_OK }, { 65536, ZUH_OK }, { 65537, ZUH_ERR_PARSE },
+            { 69000, ZUH_ERR_PARSE }, { 70000, ZUH_ERR_PARSE } };
         size_t j;
         pad_fields(fields, sizeof fields, 58, 1000, "Content-Length: 2\r\n");
         for (k = 0; k < sizeof rd / sizeof rd[0]; k++) {
@@ -497,6 +497,47 @@ static void limits_cases(void) {
                 } else {
                     ZUH_CHECK_EQ_INT(e.code, cases[j].want);
                     ZUH_CHECK(has(e.message, "header block exceeds"));
+                }
+                dialer_free(&d);
+            }
+        }
+    }
+
+    /* D-101: a trailer section has the head's wire bound too. Whitespace
+     * before a value is wire bytes and no field bytes, so one field padded
+     * with it puts the wire bound alone at stake. The section was refused
+     * when one append crossed the cap, and accepted when the bytes came in
+     * smaller pieces that ended under it. */
+    ZUH_CASE("limits: a trailer section over 64 KiB on the wire is refused at every read size (D-101)");
+    {
+        static const size_t rd[] = { 0, 1, 4093 };
+        static const struct { size_t wire; zuh_code want; } cases[] = {
+            { 65535, ZUH_OK }, { 65536, ZUH_OK }, { 65537, ZUH_ERR_PARSE }, { 70000, ZUH_ERR_PARSE } };
+        static const char pre[] = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nok\r\n0\r\n";
+        size_t j;
+        for (k = 0; k < sizeof rd / sizeof rd[0]; k++) {
+            for (j = 0; j < sizeof cases / sizeof cases[0]; j++) {
+                conn_script sc[1];
+                zuh_code rc;
+                size_t n = sizeof pre - 1, sp = cases[j].wire - 11;   /* "x-ows:" sp "v" CRLF CRLF */
+                memcpy(buf, pre, n);
+                memcpy(buf + n, "x-ows:", 6); n += 6;
+                memset(buf + n, ' ', sp); n += sp;
+                memcpy(buf + n, "v\r\n\r\n", 5); n += 5;
+                ZUH_CHECK_EQ_INT(n - (sizeof pre - 1), cases[j].wire);
+                memset(sc, 0, sizeof sc);
+                sc[0].bytes = buf; sc[0].len = n; sc[0].max_read = rd[k];
+                dialer_init(&d, sc, 1); opts_for(&o, &d);
+                zuh_error_clear(&e);
+                rc = zuh_engine_get(&r, "http://example.test/", &o, &e);
+                ZUH_CHECK_EQ_INT(rc, cases[j].want);
+                if (rc == ZUH_OK) {
+                    ZUH_CHECK(zuh_headers_get(&r.trailers, "x-ows") &&
+                              strcmp(zuh_headers_get(&r.trailers, "x-ows"), "v") == 0);
+                    zuh_result_free(&r);
+                } else {
+                    ZUH_CHECK_EQ_INT(e.code, cases[j].want);
+                    ZUH_CHECK(has(e.message, "trailer section exceeds"));
                 }
                 dialer_free(&d);
             }
@@ -1481,7 +1522,7 @@ void suite_engine_mock(void) {
         dialer_free(&d); zuh_pool_free(pool);
     }
 
-    ZUH_CASE("engine: a response header block over 64 KiB is refused (§40)");
+    ZUH_CASE("engine: a response header block over 64 KiB is zu_http_parse_error (§40, D-101)");
     {
         static char big[80000];
         size_t k, n = 0;
@@ -1496,7 +1537,7 @@ void suite_engine_mock(void) {
         memset(sc, 0, sizeof sc); sc[0].bytes = big; sc[0].len = n;
         dialer_init(&d, sc, 1); opts_for(&o, &d);
         zuh_error_clear(&e);
-        ZUH_CHECK_EQ_INT(zuh_engine_get(&r, "http://example.test/", &o, &e), ZUH_ERR_BODY_LIMIT);
+        ZUH_CHECK_EQ_INT(zuh_engine_get(&r, "http://example.test/", &o, &e), ZUH_ERR_PARSE);
         ZUH_CHECK(has(e.message, "header block exceeds"));
         dialer_free(&d);
     }
