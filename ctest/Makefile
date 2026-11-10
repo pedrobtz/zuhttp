@@ -90,8 +90,45 @@ $(BUILD)/%.o: $(URIDIR)/%.c | $(BUILD)
 $(BUILD)/ng_%.o: $(NGDIR)/%.c | $(BUILD)
 	$(CC) $(NGFLAGS) -c -o $@ $<
 
-zuh_ctest: $(OWN) $(TESTS) $(VOBJ)
-	$(CC) $(CFLAGS) -o $@ $(OWN) $(TESTS) $(VOBJ) -lz $(NETLIBS)
+# One object per source, each from a compile command of its own, with header
+# dependencies (-MMD). Mutation testing needs this: Mull re-parses every file
+# from its recorded command line, and one command compiling 46 files cannot
+# be re-parsed (#238). The objects sit in $(OBJDIR), apart from the vendored
+# ones, so a change of CC (Mull's plugin) is a `make clean` away.
+OBJDIR  := $(BUILD)/own
+OWNOBJ  := $(patsubst %.c,$(OBJDIR)/%.o,$(notdir $(OWN)))
+TESTOBJ := $(patsubst %.c,$(OBJDIR)/%.o,$(TESTS))
+
+# The compiler and flags that built the objects. The stamp is rewritten, and
+# so every object rebuilt, whenever they change: ctest-lcov.sh and Mull pass
+# their own CC, and reusing objects from a plain build would give them an
+# uninstrumented binary that reports nothing, silently. Compared when the
+# Makefile is read, so it sees CC and CFLAGS from the command line but not
+# target-specific additions; `strict` and `asan` do not reuse these objects
+# (strict cleans first, asan compiles its sources in one command).
+FLAGSTAMP := $(OBJDIR)/.flags
+FLAGSNOW  := $(CC) $(CFLAGS)
+ifneq ($(FLAGSNOW),$(shell cat $(FLAGSTAMP) 2>/dev/null))
+$(shell mkdir -p $(OBJDIR) && printf '%s\n' '$(FLAGSNOW)' > $(FLAGSTAMP))
+endif
+# Recreated when missing, as after the `clean` that `strict` runs.
+$(FLAGSTAMP): | $(OBJDIR)
+	printf '%s\n' '$(FLAGSNOW)' > $@
+
+$(OBJDIR):
+	mkdir -p $@
+
+$(OBJDIR)/%.o: $(SRC)/%.c $(FLAGSTAMP) | $(OBJDIR)
+	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
+
+$(OBJDIR)/%.o: %.c $(FLAGSTAMP) | $(OBJDIR)
+	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
+
+
+-include $(wildcard $(OBJDIR)/*.d)
+
+zuh_ctest: $(OWNOBJ) $(TESTOBJ) $(VOBJ)
+	$(CC) $(CFLAGS) -o $@ $(OWNOBJ) $(TESTOBJ) $(VOBJ) -lz $(NETLIBS)
 
 run: zuh_ctest
 	./zuh_ctest
