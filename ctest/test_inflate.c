@@ -1,5 +1,6 @@
 #include "zuh_test.h"
 #include "zuh_inflate.h"
+#include "zuh_body.h"
 #include "zuh_alloc.h"
 #include "zuh_buffer.h"
 #include <string.h>
@@ -255,6 +256,85 @@ void suite_inflate(void) {
         ZUH_CHECK(z.out_total <= z.in_total * 10);
         ZUH_CHECK_EQ_INT((long long)out.len, (long long)z.out_total);
         zuh_buf_free(&out); zuh_buf_free(&src); zuh_inflate_free(&z);
+    }
+
+    /* #255: the ratio at its edge, at the shipped 1000:1. The cap is
+     * out <= 1000 x compressed bytes seen, so for a stream of c bytes the
+     * search finds a c for which 1000c - 1, 1000c and 1000c + 1 zeros all
+     * gzip to c bytes; fed whole, the first two pass and the third is the
+     * bomb error. zlib's output for zeros is near 1030:1 only past 1 MB. */
+    ZUH_CASE("limits: a gzip stream at 999.999, 1000 and 1000.001 to 1 against the default ratio (#255)");
+    {
+        unsigned char *zeros = (unsigned char *)zuh_calloc(1, 2u << 20);
+        unsigned char *comp = (unsigned char *)zuh_alloc(1u << 16);
+        size_t c, found = 0, lens[3];
+        ZUH_CHECK(zeros && comp);
+        for (c = 1000; zeros && comp && c < 2000 && !found; c++) {
+            int d;
+            for (d = 0; d < 3; d++) {
+                lens[d] = compress_with(15 + 16, zeros, 1000 * c - 1 + (size_t)d, comp, 1u << 16, 9);
+                if (lens[d] != c) break;
+            }
+            if (d == 3) found = c;
+        }
+        ZUH_CHECK(found > 0);
+        if (found) {
+            int d;
+            for (d = 0; d < 3; d++) {
+                size_t n = 1000 * found - 1 + (size_t)d, clen;
+                zuh_inflate z; zuh_buffer out; zuh_error e;
+                zuh_code rc;
+                clen = compress_with(15 + 16, zeros, n, comp, 1u << 16, 9);
+                ZUH_CHECK_EQ_INT(clen, found);
+                zuh_error_clear(&e);
+                ZUH_CHECK(zuh_buf_init(&out, 0, 0));
+                zuh_inflate_init(&z, ZUH_ENC_GZIP, 0, ZUH_MAX_DECOMPRESSION_RATIO);
+                rc = zuh_inflate_run(&z, comp, clen, &out, &e);
+                ZUH_CHECK_EQ_INT(rc, d < 2 ? ZUH_OK : ZUH_ERR_BODY_LIMIT);
+                ZUH_CHECK(out.len <= 1000 * found);
+                if (d < 2) {
+                    ZUH_CHECK_EQ_INT(out.len, n);
+                    ZUH_CHECK_EQ_INT(zuh_inflate_run(&z, NULL, 0, &out, &e), ZUH_OK);
+                } else {
+                    ZUH_CHECK_EQ_INT(e.code, ZUH_ERR_BODY_LIMIT);
+                    ZUH_CHECK(strstr(e.message, "ratio") != NULL);
+                }
+                zuh_inflate_free(&z); zuh_buf_free(&out);
+            }
+        }
+        zuh_free(zeros); zuh_free(comp);
+    }
+
+    /* #255: the ratio waits for 32 compressed bytes. No deflate stream runs
+     * far past 1000:1 (its ceiling is about 1030:1), so the warm-up is
+     * straddled against a ratio of 2, which zeros pass at once: the first
+     * 31 bytes of the stream are let through whatever they inflate to, and
+     * 32 or 33 are held to the ratio. */
+    ZUH_CASE("limits: the ratio applies from the 32nd compressed byte, not the 31st (#255)");
+    {
+        static unsigned char zeros[1u << 20];
+        unsigned char comp[4096];
+        size_t clen = compress_with(15 + 16, zeros, sizeof zeros, comp, sizeof comp, 9);
+        size_t k;
+        ZUH_CHECK(clen > 40);
+        for (k = 31; k <= 33; k++) {
+            zuh_inflate z; zuh_buffer out; zuh_error e;
+            zuh_code rc;
+            zuh_error_clear(&e);
+            ZUH_CHECK(zuh_buf_init(&out, 0, 0));
+            zuh_inflate_init(&z, ZUH_ENC_GZIP, 0, 2);
+            rc = zuh_inflate_run(&z, comp, k, &out, &e);
+            if (k < 32) {
+                /* Not yet judged, and over the ratio it would be judged by. */
+                ZUH_CHECK_EQ_INT(rc, ZUH_ERR_WOULDBLOCK);
+                ZUH_CHECK(out.len > 2 * 33);
+            } else {
+                ZUH_CHECK_EQ_INT(rc, ZUH_ERR_BODY_LIMIT);
+                ZUH_CHECK(strstr(e.message, "ratio") != NULL);
+                ZUH_CHECK(out.len <= 2 * k);
+            }
+            zuh_inflate_free(&z); zuh_buf_free(&out);
+        }
     }
 
     ZUH_CASE("no leaks across the suite");
