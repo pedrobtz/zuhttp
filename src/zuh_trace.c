@@ -93,9 +93,14 @@ void zuh_trace_add(zuh_trace *t, zuh_event e, const char *detail, uint64_t n) {
 void zuh_trace_add_at(zuh_trace *t, zuh_event e, const char *detail, uint64_t n,
                       zuh_millis at) {
     long ms, floor_ms;
+    size_t before;
     if (!t) return;
+    before = t->n;
     zuh_trace_add(t, e, detail, n);
-    if (t->n == 0 || t->ev[t->n - 1].ev != e) return;   /* dropped */
+    /* Dropped on a full trace. The count says so; the last entry's type
+     * does not, since it can be this same event type, logged earlier, whose
+     * time would then be rewritten (#294). */
+    if (t->n == before) return;
     ms = (long)(at - t->t0);
     floor_ms = t->n >= 2 ? t->ev[t->n - 2].at_ms : 0;
     if (ms < floor_ms) ms = floor_ms;
