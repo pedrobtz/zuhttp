@@ -903,6 +903,58 @@ void suite_body(void) {
         zuh_buf_free(&gz);
     }
 
+    /* #256: picohttpparser refuses a chunked body whose framing is at least
+     * 100 KiB and more than three quarters of what it has read, so a
+     * server cannot make the client parse framing forever. Its limit is
+     * this package's limit, and a re-vendor that moved it would show here.
+     * One-byte chunks are 5 bytes of framing to 1 of data. Read a byte at a
+     * time, every call but the one that completes the last-chunk line is
+     * incomplete, so the count is exact: 20479 chunks are 102395 framing
+     * bytes, and a last-chunk line of "000" brings that to 102399 and one
+     * of "0000" to 102400, the refusal.
+     * One-shot reads leave the final read uncounted, so they are straddled
+     * by a margin: 20000 chunks pass, 24000 do not. Two-byte chunks are 28%
+     * data, and pass at any length. */
+    ZUH_CASE("limits: picohttpparser's chunk-overhead refusal, byte-wise and one-shot (#256)");
+    {
+        static const struct { size_t chunks, dlen, max_read; const char *last; zuh_code want; } cases[] = {
+            { 20479, 1, 1, "000",  ZUH_OK }, { 20479, 1, 1, "0000", ZUH_ERR_PARSE },
+            { 20480, 1, 1, "0",    ZUH_ERR_PARSE },
+            { 20000, 1, 0, "0",    ZUH_OK }, { 24000, 1, 0, "0",    ZUH_ERR_PARSE },
+            { 30000, 2, 1, "0",    ZUH_OK }, { 30000, 2, 0, "0",    ZUH_OK } };
+        size_t j, i;
+        for (j = 0; j < sizeof cases / sizeof cases[0]; j++) {
+            zuh_buffer wire, got;
+            zuh_sink sink;
+            zuh_mock_step step;
+            zuh_code rc;
+            ZUH_CHECK(zuh_buf_init(&wire, 1u << 18, (size_t)-1));
+            for (i = 0; i < cases[j].chunks; i++)
+                zuh_buf_append_str(&wire, cases[j].dlen == 1 ? "1\r\nX\r\n" : "2\r\nXX\r\n");
+            zuh_buf_append_str(&wire, cases[j].last);
+            zuh_buf_append_str(&wire, "\r\n\r\n");
+            ZUH_CHECK(zuh_buf_init(&got, 1u << 16, (size_t)-1));
+            zuh_sink_memory_init(&sink, &got);
+            zuh_headers_init(&h);
+            step.kind = ZUH_MOCK_DATA; step.data = wire.data; step.len = wire.len; step.code = ZUH_OK;
+            zuh_error_clear(&e);
+            rc = run_body_split(&step, 1, ZUH_FRAME_CHUNKED, 0, cases[j].max_read, &sink, &h, 0, &e);
+            ZUH_CHECK_EQ_INT(rc, cases[j].want);
+            /* Only chunk data ever reached the sink, never framing. */
+            for (i = 0; i < got.len && got.data[i] == 'X'; i++) { }
+            ZUH_CHECK_EQ_INT(i, got.len);
+            if (rc == ZUH_OK) ZUH_CHECK_EQ_INT(got.len, cases[j].chunks * cases[j].dlen);
+            else {
+                ZUH_CHECK_EQ_INT(e.code, ZUH_ERR_PARSE);
+                ZUH_CHECK(strstr(e.message, "chunked") != NULL);
+                ZUH_CHECK(got.len <= cases[j].chunks * cases[j].dlen);
+            }
+            zuh_headers_free(&h);
+            zuh_buf_free(&got);
+            zuh_buf_free(&wire);
+        }
+    }
+
     ZUH_CASE("no leaks across the suite");
     {
         zuh_alloc_stats end;
