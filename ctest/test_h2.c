@@ -1176,6 +1176,28 @@ static void cases_limits(void) {
         }
     }
 
+    /* PR #261's survivor: the driver builds :status from its three digits;
+     * only 200 and a few common codes were ever asserted. */
+    ZUH_CASE("§65.2: every digit of :status reaches the response");
+    {
+        static const int st[] = { 207, 299, 418, 503, 599 };
+        size_t j;
+        for (j = 0; j < sizeof st / sizeof st[0]; j++) {
+            srv_dialer dd;
+            zuh_get_opts o;
+            zuh_result r;
+            zuh_error e;
+            zuh_code rc;
+            srv_cfg c; memset(&c, 0, sizeof c);
+            c.status = st[j];
+            dialer_init(&dd, &c); h2c_opts(&o, &dd); zuh_error_clear(&e);
+            rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            if (rc == ZUH_OK) { ZUH_CHECK_EQ_INT(r.status, st[j]); zuh_result_free(&r); }
+            dialer_free(&dd);
+        }
+    }
+
     /* #252: max_body is decoded bytes on each path, so 2999, 3000 and 3001
      * bytes against a cap of 3000 give the same answer everywhere. */
     ZUH_CASE("limits: max_body straddled over HTTP/1.1 and HTTP/2, buffered and pulled, identity and gzip (#252)");

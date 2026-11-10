@@ -60,6 +60,9 @@ typedef struct {
     /* After connection i's bytes, a peer gone silent: reads last until
      * their deadline (#181). */
     int         block_after[MAXC];
+    /* Writes that carried bytes, per connection: one when the body rides
+     * in the header write, two when it follows it (#208, PR #261). */
+    int         writes[MAXC];
 } dialer;
 
 typedef struct { zuh_stream *inner; dialer *d; size_t idx; } tap_impl;
@@ -83,7 +86,7 @@ static zuh_ssize tap_write(zuh_stream *s, const void *b, size_t n, zuh_deadline 
         return -1;
     }
     w = zuh_stream_write(t->inner, b, n, dl, e);
-    if (w > 0) zuh_buf_append(&t->d->sent[t->idx], b, (size_t)w);
+    if (w > 0) { zuh_buf_append(&t->d->sent[t->idx], b, (size_t)w); t->d->writes[t->idx]++; }
     return w;
 }
 static void tap_close(zuh_stream *s) { zuh_stream_close(((tap_impl *)s->impl)->inner); }
@@ -501,6 +504,39 @@ static void limits_cases(void) {
                 }
                 dialer_free(&d);
             }
+        }
+    }
+
+    /* PR #261's survivor: #208's threshold exactly. A body that fills the
+     * 64 KiB header buffer to its last byte rides in the header write; one
+     * byte more goes in a write of its own. The bytes on the wire are the
+     * same either way, so the write count is the oracle. The header length
+     * comes from a 60000-byte upload, whose Content-Length has as many
+     * digits as the ones straddling the edge. */
+    ZUH_CASE("limits: a body exactly filling the 64 KiB header write rides in it; one byte more does not (#208)");
+    {
+        static unsigned char up[70000];
+        zuh_req_spec spec;
+        size_t hl = 0, j;
+        conn_script sc[] = {{ "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok", 0, 0, 0, NULL }};
+        for (j = 0; j < sizeof up; j++) up[j] = (unsigned char)(j * 7 + 3);
+        for (j = 0; j < 5; j++) {
+            /* 60000 to measure, then the edge - 1, edge, edge + 1, then 0. */
+            size_t len = j == 0 ? 60000 : j == 4 ? 0 : 65536 - hl - 2 + j;
+            zuh_code rc;
+            memset(&spec, 0, sizeof spec);
+            spec.method = "POST"; spec.body = up; spec.body_len = len;
+            dialer_init(&d, sc, 1); opts_for(&o, &d);
+            zuh_error_clear(&e);
+            rc = zuh_engine_perform(&r, "http://example.test/up", &spec, &o, &e);
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            if (rc == ZUH_OK) zuh_result_free(&r);
+            ZUH_CHECK(d.sent[0].len >= len &&
+                      memcmp(d.sent[0].data + d.sent[0].len - len, up, len) == 0);
+            if (j == 0) hl = d.sent[0].len - len;
+            ZUH_CHECK_EQ_INT(d.sent[0].len, hl + len - (j == 4 ? 4 : 0));
+            ZUH_CHECK_EQ_INT(d.writes[0], j == 3 ? 2 : 1);
+            dialer_free(&d);
         }
     }
 
