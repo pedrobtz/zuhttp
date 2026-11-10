@@ -227,6 +227,15 @@ may have used: the client-first wrappers `zu_client_get()` and friends
   control character is refused as `zu_http_parse_error` before
   connecting, naming the header and never its value.
 
+- A response’s header limits (64 KiB a block, 100 fields, 256-byte
+  names, 8 KiB values) count and fail the same way over HTTP/1.1 and
+  HTTP/2, in headers and in trailers: a field costs its name, its value
+  and 32 bytes, and every limit raises `zu_http_parse_error`. An
+  HTTP/1.1 header block was `zu_body_limit_error`, and was accepted or
+  refused near 64 KiB depending on how the network split it. An
+  oversized proxy `CONNECT` reply is `zu_proxy_error`; it was reported
+  as out of memory.
+
 - [`zu_resp_connection()`](https://pedrobtz.github.io/zuhttp/reference/zu_resp_connection.md)
   reports `proxy_used` and `remote_ip` for a reused connection too; both
   were reset on every pool hit.
