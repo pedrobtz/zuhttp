@@ -16,6 +16,24 @@ static const char *red_url(zuh_buffer *b, const zuh_redact_policy *p, const char
 }
 static int streq(const char *a, const char *b) { return a && b && strcmp(a, b) == 0; }
 
+/* #269: redact the first `len` bytes of `buf` and compare the output byte for
+ * byte. The bytes after `len` are live memory carrying a secret parameter
+ * and a fragment, so a redactor that reads past its length writes them out
+ * and fails here, without needing a sanitizer to see it. */
+static int red_exact(const zuh_redact_policy *p, const char *url, const char *want) {
+    char buf[512];
+    zuh_buffer b;
+    size_t n = strlen(url), w = strlen(want);
+    int ok;
+    if (n + 32 > sizeof buf) return 0;
+    memcpy(buf, url, n);
+    memcpy(buf + n, "@&token=LEAK#zz/", 17);
+    if (!zuh_buf_init(&b, 64, 1 << 20)) return 0;
+    ok = zuh_redact_url(p, buf, n, &b) && b.len == w && memcmp(b.data, want, w) == 0;
+    zuh_buf_free(&b);
+    return ok;
+}
+
 void suite_redact(void) {
     zuh_redact_policy p;
     zuh_buffer b;
@@ -187,6 +205,106 @@ void suite_redact(void) {
             ZUH_CHECK(streq(out, "%70assword=<redacted>&user=a"));
         }
         zuh_buf_free(&b);
+    }
+
+    /* #269: the scheme is RFC 3986's ALPHA *( ALPHA / DIGIT / "+" / "-" /
+     * "." ), in either case, and nothing else; each character class is met
+     * at both of its ends and just outside them. */
+    ZUH_CASE("#269: the scheme is recognised in any case and at every class boundary");
+    ZUH_CHECK(red_exact(&p, "HTTP://user:secret@h/", "HTTP://h/"));
+    ZUH_CHECK(red_exact(&p, "Https://u:p@h/", "Https://h/"));
+    ZUH_CHECK(red_exact(&p, "a://u:p@h/", "a://h/"));
+    ZUH_CHECK(red_exact(&p, "z://u:p@h/", "z://h/"));
+    ZUH_CHECK(red_exact(&p, "A://u:p@h/", "A://h/"));
+    ZUH_CHECK(red_exact(&p, "Z://u:p@h/", "Z://h/"));
+    ZUH_CHECK(red_exact(&p, "zz+.-09://u:p@h/", "zz+.-09://h/"));
+    ZUH_CHECK(red_exact(&p, "xAZaz09://u:p@h/", "xAZaz09://h/"));
+    /* Not a scheme: a first character outside ALPHA, or a later one
+     * outside the set. The text passes through untouched. */
+    ZUH_CHECK(red_exact(&p, "9z://u:p@h/", "9z://u:p@h/"));
+    ZUH_CHECK(red_exact(&p, "@z://u:p@h/", "@z://u:p@h/"));
+    ZUH_CHECK(red_exact(&p, "[z://u:p@h/", "[z://u:p@h/"));
+    ZUH_CHECK(red_exact(&p, "`z://u:p@h/", "`z://u:p@h/"));
+    ZUH_CHECK(red_exact(&p, "{z://u:p@h/", "{z://u:p@h/"));
+    ZUH_CHECK(red_exact(&p, "a/b://u:p@h/", "a/b://u:p@h/"));
+    ZUH_CHECK(red_exact(&p, "a:b://u:p@h/", "a:b://u:p@h/"));
+    ZUH_CHECK(red_exact(&p, "a@b://u:p@h/", "a@b://u:p@h/"));
+    ZUH_CHECK(red_exact(&p, "a[b://u:p@h/", "a[b://u:p@h/"));
+    ZUH_CHECK(red_exact(&p, "a`b://u:p@h/", "a`b://u:p@h/"));
+    ZUH_CHECK(red_exact(&p, "a{b://u:p@h/", "a{b://u:p@h/"));
+    ZUH_CHECK(red_exact(&p, "a,b://u:p@h/", "a,b://u:p@h/"));
+
+    /* The edges of the input: "://" that would only be complete past the
+     * end, an authority running to the end, and a '@' just past it. */
+    ZUH_CASE("#269: the URL's length bounds every scan, byte for byte");
+    ZUH_CHECK(red_exact(&p, "ab:/", "ab:/"));
+    ZUH_CHECK(red_exact(&p, "ab:", "ab:"));
+    ZUH_CHECK(red_exact(&p, "https://u:p@host", "https://host"));
+    ZUH_CHECK(red_exact(&p, "https://host", "https://host"));
+    ZUH_CHECK(red_exact(&p, "https://u:p@h/path", "https://h/path"));
+    ZUH_CHECK(red_exact(&p, "https://u:p@h/p?x=1", "https://h/p?x=1"));
+    ZUH_CHECK(red_exact(&p, "https://h/?x=1&y=2&token=S&z=3", "https://h/?x=1&y=2&token=<redacted>&z=3"));
+    ZUH_CHECK(red_exact(&p, "https://h/?a=1;token=S;b", "https://h/?a=1;token=<redacted>;b"));
+    ZUH_CHECK(red_exact(&p, "https://h/?token=S#", "https://h/?token=<redacted>#"));
+    ZUH_CHECK(red_exact(&p, "https://h/?token=S#f?token=T", "https://h/?token=<redacted>#f?token=T"));
+    ZUH_CHECK(red_exact(&p, "https://u@h/?x=1#frag", "https://h/?x=1#frag"));
+    ZUH_CHECK(red_exact(&p, "https://h/?", "https://h/?"));
+    ZUH_CHECK(red_exact(&p, "/p?token=S", "/p?token=<redacted>"));
+    {
+        /* "://" completed only by the byte just past the end: not a scheme,
+         * so the first four bytes come back as they are. */
+        static const char cut[] = "ab://u:p@h/";
+        ZUH_CHECK(zuh_buf_init(&b, 64, 1 << 20));
+        ZUH_CHECK(zuh_redact_url(&p, cut, 4, &b));
+        ZUH_CHECK(b.len == 4 && memcmp(b.data, "ab:/", 4) == 0);
+        zuh_buf_free(&b);
+    }
+
+    /* A secret name spelled with escapes, every hex digit class at both
+     * ends: 0-9 ("%30", "%39"), a-f and A-F ("%61"/"%41", "%6e"/"%6E",
+     * "%5f"/"%5F"), and the characters just outside them, which leave the
+     * escape as written and so the name not secret. */
+    ZUH_CASE("#269: percent-encoded secret names, every hex digit class at its ends");
+    {
+        static const char *const extra[] = { "x0", "x9", "zap", "\x01q", NULL };
+        zuh_redact_policy px;
+        zuh_redact_policy_init(&px);
+        px.extra_params = extra;
+        ZUH_CHECK(red_exact(&p, "https://h/?p%41ssword=S", "https://h/?p%41ssword=<redacted>"));
+        ZUH_CHECK(red_exact(&p, "https://h/?p%61ssword=S", "https://h/?p%61ssword=<redacted>"));
+        ZUH_CHECK(red_exact(&p, "https://h/?pass%77ord=S", "https://h/?pass%77ord=<redacted>"));
+        ZUH_CHECK(red_exact(&p, "https://h/?api%5Fkey=S", "https://h/?api%5Fkey=<redacted>"));
+        ZUH_CHECK(red_exact(&p, "https://h/?api%5fkey=S", "https://h/?api%5fkey=<redacted>"));
+        ZUH_CHECK(red_exact(&p, "https://h/?toke%6E=S", "https://h/?toke%6E=<redacted>"));
+        ZUH_CHECK(red_exact(&p, "https://h/?toke%6e=S", "https://h/?toke%6e=<redacted>"));
+        ZUH_CHECK(red_exact(&px, "https://h/?x%30=S", "https://h/?x%30=<redacted>"));
+        ZUH_CHECK(red_exact(&px, "https://h/?x%39=S", "https://h/?x%39=<redacted>"));
+        ZUH_CHECK(red_exact(&px, "https://h/?%7Aap=S", "https://h/?%7Aap=<redacted>"));
+        ZUH_CHECK(red_exact(&px, "https://h/?%7aap=S", "https://h/?%7aap=<redacted>"));
+        ZUH_CHECK(red_exact(&px, "https://h/?%01q=S", "https://h/?%01q=<redacted>"));
+        /* Just outside each range: not an escape, so not "token". */
+        ZUH_CHECK(red_exact(&p, "https://h/?toke%6G=S", "https://h/?toke%6G=S"));
+        ZUH_CHECK(red_exact(&p, "https://h/?toke%6g=S", "https://h/?toke%6g=S"));
+        ZUH_CHECK(red_exact(&p, "https://h/?toke%6@=S", "https://h/?toke%6@=S"));
+        ZUH_CHECK(red_exact(&p, "https://h/?toke%6`=S", "https://h/?toke%6`=S"));
+        ZUH_CHECK(red_exact(&p, "https://h/?toke%6/=S", "https://h/?toke%6/=S"));
+        ZUH_CHECK(red_exact(&p, "https://h/?toke%6:=S", "https://h/?toke%6:=S"));
+        ZUH_CHECK(red_exact(&px, "https://h/?x%3/=S", "https://h/?x%3/=S"));
+        ZUH_CHECK(red_exact(&px, "https://h/?x%3:=S", "https://h/?x%3:=S"));
+    }
+
+    /* An escape is decoded only when both hex digits are inside the name:
+     * "tok%6" followed in memory by "5" is "tok%6", not "toke". */
+    ZUH_CASE("#269: an escape cut by the end of the name is not decoded");
+    {
+        static const char *const extra[] = { "toke", NULL };
+        static const char name[] = "tok%65";
+        zuh_redact_policy px;
+        zuh_redact_policy_init(&px);
+        px.extra_params = extra;
+        ZUH_CHECK(zuh_redact_is_secret_param(&px, name, 6));
+        ZUH_CHECK(!zuh_redact_is_secret_param(&px, name, 5));
+        ZUH_CHECK(!zuh_redact_is_secret_param(&px, name, 4));
     }
 
     ZUH_CASE("form bodies use the same policy");
