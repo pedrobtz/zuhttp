@@ -33,7 +33,7 @@ call to r-actions.
 | analyzers     | done     | native-checks.yaml                                                                                                                                                                                                          |
 | alloc-failure | done | alloc-failure.yaml (weekly over tools/alloc/exercise.R, R's allocations included (#237); at least 100 failures must reach zu_memory_error; base R's own TRE and gzfile() crashes are listed apart, #282) |
 | mutation | done | mutation.yaml (Mull over src/zuh_*.c against zuh_ctest, weekly (#238); survivors triaged in #269-#275) |
-| fuzz          | gap #239 | fuzz.yaml (own): 12 targets, corpus replay on every OS, libFuzzer smoke, weekly soak. Nine targets carry oracles; `fuzz_response`, `fuzz_chunked` and `fuzz_headers` fail only on a crash                                   |
+| fuzz | done | fuzz.yaml (own): 13 targets, every one with an oracle beyond a crash; `fuzz_response`, `fuzz_chunked` and `fuzz_headers` check against fuzz/http_grammar.h, an independent reading of RFC 9110 and 9112 (#239); corpus replay on every OS, libFuzzer smoke, weekly soak |
 | fuzz-reach    | done     | coverage-union.yaml (own): `tools/coverage/fuzz-lcov.sh` over the committed corpus against `fuzz_reach` in `tools/coverage/floor.dcf` (64%), and `tools/coverage/fuzz-gaps.sh` uploads the gap lists, on every pull request |
 <!-- markdownlint-enable MD013 -->
 
@@ -62,7 +62,7 @@ they know the answer only for the cases someone thought of.
 | HTTP/1.1 request, emit | libcurl sends the same request to the raw server; the recorded bytes compared | tests/testthat/test-libcurl.R (#241): 14 requests, the bytes the raw server recorded, uploads either side of 32 and 64 KiB |
 | Chunked upload, emit                       | `h11` (hypercorn) parses it; `/check` asserts byte count and order                                               | tests/testthat/test-http2.R, ctest/test_engine_mock.c                 |
 | Header field validation (CR, LF, NUL)      | hand-written cases                                                                                               | ctest/test_headers.c                                                  |
-| Header field validation (CR, LF, NUL)      | an accepted field re-serialises byte-identical; the RFC 9110 token and field-value grammar as a second validator | gap #239                                                              |
+| Header field validation (CR, LF, NUL) | an accepted field re-serialises byte-identical; the RFC 9110 token and field-value grammar as a second validator | fuzz/fuzz_headers.c (#239): both validators against the RFC 9110 grammar in fuzz/http_grammar.h; an accepted field is written as `name: value` CRLF and parses back to itself |
 | gzip, zlib and raw deflate, decode         | round trip with system zlib `deflate()`; split at every byte boundary; bomb caps                                 | ctest/test_inflate.c, fuzz/fuzz_body.c                                |
 | Multi-member gzip, decode                  | two members decode as their concatenation, as `gzip -dc` does                                                    | gap #242                                                              |
 | Repeated or stacked Content-Encoding       | refused with a classed error (#211), hand-written                                                                | ctest/test_body.c, ctest/test_inflate.c                               |

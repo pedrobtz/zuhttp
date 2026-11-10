@@ -60,7 +60,7 @@ make -C ctest tls-fork-nw     # tls-eof's fork case on Network.framework (#249);
 make -C ctest engine-asan      # engine-nw-asan, tls-asan: the live binaries under
                               #   ASan + UBSan (#231); CI runs all four
 
-# Fuzzing — 14 targets (engine and h2 are the whole request path; pull is the
+# Fuzzing — 13 targets (engine and h2 are the whole request path; pull is the
 # streamed-body API as a state machine; pool is the connection pool against a
 # model), each built two ways
 make -C fuzz replay-run       # corpus replay, needs no clang; a regression suite

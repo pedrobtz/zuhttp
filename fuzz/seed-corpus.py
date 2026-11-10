@@ -67,6 +67,21 @@ def main():
     w("response/bare_lf", "HTTP/1.1 200 OK\nContent-Length: 0\n\n")
     w("response/huge_status", "HTTP/1.1 999999 X\r\n\r\n")
     w("response/partial", "HTTP/1.1 200 OK\r\nContent-Len")
+    # #239: one per oracle. A bare CR is no line end (the grammar); a blank
+    # line with bytes after it is found through the last_len hint (read
+    # size); a reason and values with HTAB, obs-text and OWS survive being
+    # written back out (round trip); a code of four digits is refused, but
+    # only at the end of the line (the grammar's `early`).
+    w("response/regress-239-bare-cr", "HTTP/1.1 200 OK\r\nX-A: a\rX-B: b\r\n\r\n")
+    w("response/regress-239-hint", "HTTP/1.1 200 OK\r\nX-A: b\r\n\r\nbody")
+    w("response/regress-239-round-trip",
+      b"HTTP/1.1 404 Not\tF\xe9und  \r\nX-A: \t v  v \t\r\nY:\r\n\r\n")
+    w("response/regress-239-four-digit-status", "HTTP/1.1 2000 OK\r\n\r\n")
+    w("response/regress-239-four-digit-status-cut", "HTTP/1.1 9223")
+    # #268: RFC 9112 §6.1, an HTTP/1.0 response with Transfer-Encoding is
+    # read and then closed, keep-alive or not (the framing model).
+    w("response/regress-268-http10-chunked",
+      "HTTP/1.0 200 OK\r\nConnection: keep-alive\r\nTransfer-Encoding: chunked\r\n\r\n")
 
     # --- chunked: the first byte picks the fragmentation point --------------
     w("chunked/simple", b"\x03" + b"5\r\nhello\r\n0\r\n\r\n")
@@ -77,6 +92,28 @@ def main():
     w("chunked/negative", b"\x00" + b"-5\r\nhello\r\n")
     w("chunked/empty_final", b"\x00" + b"0\r\n\r\n")
     w("chunked/no_terminator", b"\x00" + b"5\r\nhello")
+    # #239: one per oracle. Two chunks meet (the grammar's payload); byte 0
+    # = 5 splits inside the chunk data (pieces); a refusal after a whole
+    # chunk delivers nothing of the failed call (#210's promise); trailers
+    # and surplus survive the re-encoding (round trip, 16 KiB chunks).
+    w("chunked/regress-239-chunk-boundary", b"\x00" + b"3\r\nabc\r\n4\r\ndefg\r\n0\r\n\r\n")
+    w("chunked/regress-239-split", b"\x05" + b"5\r\nhello\r\n0\r\n\r\n")
+    w("chunked/regress-239-error-after-data", b"\x00" + b"5\r\nhello\r\nzz\r\n")
+    w("chunked/regress-239-trailer-surplus",
+      b"\xc0" + b"5\r\nhello\r\n0\r\nX-T: v\r\nY: w\n\r\nHTTP/1.1 200 OK")
+    # The edges of the two readings: an extension the ABNF accepts; ones
+    # only picohttpparser's reading does; a chunk line ended by a bare LF,
+    # and a 17-digit chunk size, which both refuse.
+    w("chunked/regress-239-ext-strict",
+      b"\x00" + b'5 ; a = "q\\"x" ; b\r\nhello\r\n0;c=d\r\n\r\n')
+    w("chunked/regress-239-ext-lax", b"\x00" + b"5 junk\r\nhello\r\n3;\r\nabc\r\n0\r\n\r\n")
+    w("chunked/regress-239-bare-lf", b"\x00" + b"5\nhello\r\n0\r\n\r\n")
+    w("chunked/regress-239-17-digits", b"\x00" + b"00000000000000005\r\nhello\r\n0\r\n\r\n")
+    # D-101 (#280) parses a trailer section once it is complete, so a trailer
+    # line that can never be valid is refused at its end: the harness allows
+    # that deferral only when closing the line makes zuhttp refuse. Found by
+    # the libFuzzer smoke on the merge of main into #279.
+    w("chunked/regress-280-trailer-deferred", b"\x00" + b"0\r\nhSll@o")
 
     # --- headers: NAME \0 VALUE ---------------------------------------------
     w("headers/simple", b"Content-Type\x00application/json")
@@ -90,6 +127,16 @@ def main():
     w("headers/high_bytes", b"X-A\x00\xff\xfe\x80")
     w("headers/tab_value", b"X-A\x00\tvalue\t")
     w("headers/long_name", b"A" * 2000 + b"\x00v")
+    # #239: one per oracle. A bare CR, a control byte and a ':' in the name
+    # are each refused (the grammar); a name at the §40 limit is taken, one
+    # past it is not; OWS around a value is stripped by the re-parse and
+    # nothing else is (round trip).
+    w("headers/regress-239-bare-cr-value", b"X-A\x00a\rb")
+    w("headers/regress-239-ctl-value", b"X-A\x00a\x01b")
+    w("headers/regress-239-colon-in-name", b"X:A\x00v")
+    w("headers/regress-239-name-at-limit", b"A" * 256 + b"\x00v")
+    w("headers/regress-239-name-over-limit", b"A" * 257 + b"\x00v")
+    w("headers/regress-239-ows-value", b"X-A\x00 \t v v \t ")
 
     # --- uri -----------------------------------------------------------------
     uris = [
