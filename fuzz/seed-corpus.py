@@ -92,6 +92,23 @@ def main():
     w("chunked/negative", b"\x00" + b"-5\r\nhello\r\n")
     w("chunked/empty_final", b"\x00" + b"0\r\n\r\n")
     w("chunked/no_terminator", b"\x00" + b"5\r\nhello")
+    # #239: one per oracle. Two chunks meet (the grammar's payload); byte 0
+    # = 5 splits inside the chunk data (pieces); a refusal after a whole
+    # chunk delivers nothing of the failed call (#210's promise); trailers
+    # and surplus survive the re-encoding (round trip, 16 KiB chunks).
+    w("chunked/regress-239-chunk-boundary", b"\x00" + b"3\r\nabc\r\n4\r\ndefg\r\n0\r\n\r\n")
+    w("chunked/regress-239-split", b"\x05" + b"5\r\nhello\r\n0\r\n\r\n")
+    w("chunked/regress-239-error-after-data", b"\x00" + b"5\r\nhello\r\nzz\r\n")
+    w("chunked/regress-239-trailer-surplus",
+      b"\xc0" + b"5\r\nhello\r\n0\r\nX-T: v\r\nY: w\n\r\nHTTP/1.1 200 OK")
+    # The edges of the two readings: an extension the ABNF accepts; ones
+    # only picohttpparser's reading does; a chunk line ended by a bare LF,
+    # and a 17-digit chunk size, which both refuse.
+    w("chunked/regress-239-ext-strict",
+      b"\x00" + b'5 ; a = "q\\"x" ; b\r\nhello\r\n0;c=d\r\n\r\n')
+    w("chunked/regress-239-ext-lax", b"\x00" + b"5 junk\r\nhello\r\n3;\r\nabc\r\n0\r\n\r\n")
+    w("chunked/regress-239-bare-lf", b"\x00" + b"5\nhello\r\n0\r\n\r\n")
+    w("chunked/regress-239-17-digits", b"\x00" + b"00000000000000005\r\nhello\r\n0\r\n\r\n")
 
     # --- headers: NAME \0 VALUE ---------------------------------------------
     w("headers/simple", b"Content-Type\x00application/json")
