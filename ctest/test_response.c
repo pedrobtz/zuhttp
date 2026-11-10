@@ -1,5 +1,6 @@
 #include "zuh_test.h"
 #include "zuh_response.h"
+#include "zuh_pool.h"
 #include "zuh_alloc.h"
 #include <string.h>
 
@@ -123,6 +124,31 @@ void suite_response(void) {
         ZUH_CHECK_EQ_INT(r.framing.kind, ZUH_FRAME_LENGTH);
         ZUH_CHECK_EQ_INT(r.framing.length, 7);
         zuh_response_free(&r);
+    }
+
+    ZUH_CASE("RFC 9112 §6.1: an HTTP/1.0 response with Transfer-Encoding is never pooled (#268)");
+    {
+        /* The same head as HTTP/1.1 and as HTTP/1.0, for GET and HEAD: only
+         * the 1.0 one is faulty framing, read and then closed, even when the
+         * server asks for keep-alive. */
+        static const char *heads[2] = {
+            "HTTP/1.1 200 OK\r\nConnection: keep-alive\r\nTransfer-Encoding: chunked\r\n\r\n",
+            "HTTP/1.0 200 OK\r\nConnection: keep-alive\r\nTransfer-Encoding: chunked\r\n\r\n" };
+        int v, head;
+        for (v = 0; v < 2; v++) {
+            for (head = 0; head <= 1; head++) {
+                zuh_error e;
+                zuh_error_clear(&e);
+                zuh_response_init(&r);
+                ZUH_CHECK_EQ_INT(parse(&r, heads[v], &used), ZUH_OK);
+                ZUH_CHECK_EQ_INT(zuh_response_decide_framing(&r, head, &e), ZUH_OK);
+                ZUH_CHECK_EQ_INT(r.framing.kind, head ? ZUH_FRAME_NONE : ZUH_FRAME_CHUNKED);
+                ZUH_CHECK_EQ_INT(r.framing.poolable, v == 0);
+                ZUH_CHECK_EQ_INT(zuh_reuse_decide(ZUH_OK, &r.framing, &r.headers,
+                                                  r.minor_version) == ZUH_REUSE_OK, v == 0);
+                zuh_response_free(&r);
+            }
+        }
     }
 
     ZUH_CASE("§18.2: chunked decoding, including trailers");

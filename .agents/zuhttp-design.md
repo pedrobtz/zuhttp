@@ -829,6 +829,7 @@ Strict, not permissive (D-15):
 | chunk size invalid hex or overflowing (no per-chunk size cap: `max_body` bounds the decoded total, #223) | reject |
 | chunk framing above 80% of the bytes once it passes 100 KB (picohttpparser's guard against framing-overhead floods; found by fuzz_body's framing differential, #227) | reject |
 | neither header, body possible | read to close; not poolable |
+| `Transfer-Encoding` in an HTTP/1.0 response | faulty framing (RFC 9112 §6.1): read, then closed, never pooled, `keep-alive` or not; found by fuzz_response's framing model (#268) |
 | `obs-fold` | reject |
 | malformed status line, status not three digits | reject |
 

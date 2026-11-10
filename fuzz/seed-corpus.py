@@ -67,6 +67,21 @@ def main():
     w("response/bare_lf", "HTTP/1.1 200 OK\nContent-Length: 0\n\n")
     w("response/huge_status", "HTTP/1.1 999999 X\r\n\r\n")
     w("response/partial", "HTTP/1.1 200 OK\r\nContent-Len")
+    # #239: one per oracle. A bare CR is no line end (the grammar); a blank
+    # line with bytes after it is found through the last_len hint (read
+    # size); a reason and values with HTAB, obs-text and OWS survive being
+    # written back out (round trip); a code of four digits is refused, but
+    # only at the end of the line (the grammar's `early`).
+    w("response/regress-239-bare-cr", "HTTP/1.1 200 OK\r\nX-A: a\rX-B: b\r\n\r\n")
+    w("response/regress-239-hint", "HTTP/1.1 200 OK\r\nX-A: b\r\n\r\nbody")
+    w("response/regress-239-round-trip",
+      b"HTTP/1.1 404 Not\tF\xe9und  \r\nX-A: \t v  v \t\r\nY:\r\n\r\n")
+    w("response/regress-239-four-digit-status", "HTTP/1.1 2000 OK\r\n\r\n")
+    w("response/regress-239-four-digit-status-cut", "HTTP/1.1 9223")
+    # #268: RFC 9112 §6.1, an HTTP/1.0 response with Transfer-Encoding is
+    # read and then closed, keep-alive or not (the framing model).
+    w("response/regress-268-http10-chunked",
+      "HTTP/1.0 200 OK\r\nConnection: keep-alive\r\nTransfer-Encoding: chunked\r\n\r\n")
 
     # --- chunked: the first byte picks the fragmentation point --------------
     w("chunked/simple", b"\x03" + b"5\r\nhello\r\n0\r\n\r\n")
