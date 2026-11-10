@@ -36,7 +36,7 @@ url <- function(path) srv$url(path)
 dest <- tempfile(fileext = ".bin")
 r <- zu_get(url("/bytes/10000"), path = dest)
 zu_resp_path(r)
-#> [1] "/tmp/Rtmpj1jDVu/file1e62759c1a7f.bin"
+#> [1] "/tmp/RtmppF8GNl/file1ed244f906ff.bin"
 file.size(dest)
 #> [1] 10000
 length(zu_resp_raw(r))   # nothing was kept in memory
@@ -62,7 +62,7 @@ class(e)[1]
 readLines(dest)            # the old file is still intact
 #> [1] "the previous version"
 list.files(dirname(dest), pattern = basename(dest))   # and no partial file
-#> [1] "file1e62759c1a7f.bin"
+#> [1] "file1ed244f906ff.bin"
 ```
 
 One thing a file sink does not do is judge the status code. A 404 page
@@ -87,7 +87,7 @@ r <- zu_get(url("/drip?numbytes=5&duration=2"), callback = function(chunk) {
 length(seen)      # one call per chunk
 #> [1] 5
 seen
-#> [1] "09:31:11.6" "09:31:12.0" "09:31:12.4" "09:31:12.8" "09:31:13.2"
+#> [1] "10:38:18.8" "10:38:19.2" "10:38:19.6" "10:38:20.0" "10:38:20.4"
 ```
 
 That makes line-oriented streams easy to process incrementally — for
@@ -153,7 +153,7 @@ zu_resp_json(r)$gzipped
 #> [1] TRUE
 zu_resp_timings(r)[c("body_bytes_wire", "body_bytes_decoded")]
 #>    body_bytes_wire body_bytes_decoded 
-#>                218                363
+#>                217                363
 ```
 
 `decode = FALSE` keeps the bytes exactly as sent — what you want when
