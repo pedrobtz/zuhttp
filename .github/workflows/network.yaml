@@ -338,6 +338,18 @@ jobs:
           nc -z 127.0.0.1 10000 || { cat "$RUNNER_TEMP/grpc-server.log"; exit 1; }
           echo "ZU_GRPC_TEST_SERVER=http://127.0.0.1:10000" >> "$GITHUB_ENV"
 
+      # #240: h11, the reference parser test-h11.R compares zuhttp's
+      # HTTP/1.1 response parsing with, pinned. Its venv goes first on the
+      # PATH, so the suite's `python3` is the venv's; without h11 that test
+      # skips, as it does wherever this step does not run.
+      - name: Install h11 for the HTTP/1.1 parser comparison
+        timeout-minutes: 3
+        run: |
+          python3 -m venv "$RUNNER_TEMP/h11venv"
+          "$RUNNER_TEMP/h11venv/bin/pip" install --quiet h11==0.16.0
+          "$RUNNER_TEMP/h11venv/bin/python" -c "import h11; print(h11.__version__)"
+          echo "$RUNNER_TEMP/h11venv/bin" >> "$GITHUB_PATH"
+
       - name: Install and run the slice
         timeout-minutes: 10
         env:

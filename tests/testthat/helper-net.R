@@ -162,20 +162,44 @@ skip_under_gctorture <- function() {
   }
 }
 
+# Whether a condition means the host was never reached: a timeout, or a
+# connect or I/O error that carries the operating system's error code
+# (`backend_code`: ECONNRESET, ECONNREFUSED, WSAETIMEDOUT). A zu_connect_error
+# without one is zuhttp's own verdict after the connection worked, such as
+# "HTTP/2 is required, but badssl.com did not negotiate it" (§65.1), and must
+# reach the test: an earlier version keyed on the class alone, and skipped
+# test-http2.R's refusal test on the refusal it exists to see.
+badssl_unreachable <- function(e) {
+  inherits(e, "zu_timeout_error") ||
+    (inherits(e, c("zu_connect_error", "zu_io_error")) &&
+      !is.null(e$backend_code))
+}
+
 # zu_get() against badssl.com, which resets connections from CI runners now
 # and then ("Connection reset by peer" on macOS). A transport failure is
 # retried, twice; anything else -- a response, a TLS verdict -- is returned on
 # the first attempt, so a flaky network can neither fail a test nor make one
 # pass. The same rule as ctest's get_retrying() and dial().
+#
+# When all three attempts fail to reach the host, the test is skipped, not
+# failed: what these tests check is the verdict, and an unreachable
+# third-party host says nothing about it. On 2026-11-10 badssl.com refused
+# GitHub's macOS and Windows runners all day and held every pull request
+# red. #63 replaces these tests with local fixtures.
 zu_get_badssl <- function(...) {
-  transient <- c("zu_connect_error", "zu_io_error", "zu_timeout_error")
   for (attempt in 1:3) {
     r <- tryCatch(zu_get(...), error = function(e) e)
     if (!inherits(r, "error")) {
       return(r)
     }
-    if (!inherits(r, transient) || attempt == 3L) {
+    if (!badssl_unreachable(r)) {
       stop(r)
+    }
+    if (attempt == 3L) {
+      testthat::skip(paste0(
+        "badssl.com unreachable after 3 attempts (#63): ",
+        conditionMessage(r)
+      ))
     }
     # Back to back, the retries met the same reset in the same millisecond.
     Sys.sleep(c(1, 3)[attempt])
