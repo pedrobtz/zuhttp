@@ -80,3 +80,44 @@ with_fake_proxy <- function(mode, code) {
   }
   rawToChar(readBin(logf, "raw", file.size(logf)))
 }
+
+# #244: did a request reach the proxy? `srv` is a with_raw_server_seq()
+# server standing in for the proxy; `fetch` makes one request and may fail,
+# since a direct request goes to a closed port or a name that does not
+# resolve, and a proxied HTTPS request gets a CONNECT answer it refuses.
+reached_proxy <- function(srv, fetch) {
+  before <- length(srv$seen())
+  try(fetch(), silent = TRUE)
+  length(srv$seen()) > before
+}
+
+# The proxy environment cleared, then `env` set, for the duration of the
+# caller's frame. "PROXY" in a value is replaced by the proxy's URL.
+local_proxy_env <- function(env, proxy, .local_envir = parent.frame()) {
+  vars <- c(
+    "http_proxy",
+    "HTTP_PROXY",
+    "https_proxy",
+    "HTTPS_PROXY",
+    "all_proxy",
+    "ALL_PROXY",
+    "no_proxy",
+    "NO_PROXY"
+  )
+  vals <- stats::setNames(rep(NA_character_, length(vars)), vars)
+  vals[names(env)] <- sub("PROXY", proxy, env, fixed = TRUE)
+  withr::local_envvar(vals, .local_envir = .local_envir)
+}
+
+zu_fetch_env_proxy <- function(url) {
+  function() {
+    zu_get(url, client = zu_client(pool = NULL, timeout = 3, check = FALSE))
+  }
+}
+
+curl_fetch_env_proxy <- function(url) {
+  function() {
+    h <- curl::new_handle(timeout = 3, connecttimeout = 3)
+    curl::curl_fetch_memory(url, handle = h)
+  }
+}

@@ -42,9 +42,11 @@ Depends:
 Imports:
     zujson (>= 0.1.0)
 Suggests:
+    curl,
     parallel,
     testthat (>= 3.1.7),
     webfakes,
+    withr,
     zuhtml (>= 0.1.0),
     zuxml (>= 0.1.0)
 SystemRequirements: zlib; and each platform's own TLS stack, which

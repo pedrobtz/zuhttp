@@ -8,6 +8,8 @@
 #include "zuh_test.h"
 #include "zuh_uri.h"
 #include "zuh_alloc.h"
+#include "rfc3986_examples.h"
+#include <stdio.h>
 #include <string.h>
 
 void suite_uri(void);
@@ -193,32 +195,63 @@ void suite_uri(void) {
 
     ZUH_CHECK_EQ_INT(P(&base, "http://a/b/c/d;p?q"), ZUH_OK);
 
-    ZUH_CASE("RFC 3986 §5.4.1 normal examples");
-    ZUH_CHECK_EQ_INT(R(&r, &base, "g"), ZUH_OK);
-    ZUH_CHECK(streq(r.path_query, "/b/c/g")); zuh_uri_free(&r);
-    ZUH_CHECK_EQ_INT(R(&r, &base, "./g"), ZUH_OK);
-    ZUH_CHECK(streq(r.path_query, "/b/c/g")); zuh_uri_free(&r);
-    ZUH_CHECK_EQ_INT(R(&r, &base, "g/"), ZUH_OK);
-    ZUH_CHECK(streq(r.path_query, "/b/c/g/")); zuh_uri_free(&r);
-    ZUH_CHECK_EQ_INT(R(&r, &base, "/g"), ZUH_OK);
-    ZUH_CHECK(streq(r.path_query, "/g")); zuh_uri_free(&r);
-    ZUH_CHECK_EQ_INT(R(&r, &base, "?y"), ZUH_OK);
-    ZUH_CHECK(streq(r.path_query, "/b/c/d;p?y")); zuh_uri_free(&r);
-    ZUH_CHECK_EQ_INT(R(&r, &base, "g?y"), ZUH_OK);
-    ZUH_CHECK(streq(r.path_query, "/b/c/g?y")); zuh_uri_free(&r);
-    ZUH_CHECK_EQ_INT(R(&r, &base, "../g"), ZUH_OK);
-    ZUH_CHECK(streq(r.path_query, "/b/g")); zuh_uri_free(&r);
-    ZUH_CHECK_EQ_INT(R(&r, &base, "../../g"), ZUH_OK);
-    ZUH_CHECK(streq(r.path_query, "/g")); zuh_uri_free(&r);
-
-    ZUH_CASE("RFC 3986 §5.4.2 — .. cannot climb above root");
-    ZUH_CHECK_EQ_INT(R(&r, &base, "../../../g"), ZUH_OK);
-    ZUH_CHECK(streq(r.path_query, "/g"));
-    ZUH_CHECK(streq(r.host, "a"));
-    zuh_uri_free(&r);
-    ZUH_CHECK_EQ_INT(R(&r, &base, "../../../../g"), ZUH_OK);
-    ZUH_CHECK(streq(r.path_query, "/g"));
-    zuh_uri_free(&r);
+    ZUH_CASE("RFC 3986 §5.4.1 and §5.4.2: all 42 examples (#245)");
+    /* The table is the RFC's, verbatim (rfc3986_examples.h). What the flat
+     * struct should hold is derived from the RFC's result string: the host
+     * is the authority, path_query is the rest up to any fragment, which
+     * §8.2 drops, and an empty path is "/", the origin-form of RFC 9112
+     * §3.2.1. Two results are not HTTP URLs a client can request, and §8.2's
+     * policy layer refuses them: "g:h" has a non-HTTP scheme, and "http:g"
+     * (RFC 3986 §5.4.2's strict result, which §19.6 uses) has no authority,
+     * so there is no host to connect to. */
+    {
+        size_t i;
+        for (i = 0; i < RFC3986_N_EXAMPLES; i++) {
+            const rfc3986_example *ex = &rfc3986_examples[i];
+            const char *res = ex->result, *auth, *slash, *hash;
+            char host[32], pq[64];
+            size_t hn, pn;
+            zuh_code rc = R(&r, &base, ex->ref);
+            if (strncmp(res, "http://", 7) != 0) {
+                ZUH_CHECK_EQ_INT(rc, ZUH_ERR_URL);
+                if (rc != ZUH_ERR_URL)
+                    printf("       §%s \"%s\" should be refused\n", ex->section, ex->ref);
+                if (rc == ZUH_OK) zuh_uri_free(&r);
+                continue;
+            }
+            auth = res + 7;
+            slash = auth + strcspn(auth, "/?#");
+            hn = (size_t)(slash - auth);
+            memcpy(host, auth, hn);
+            host[hn] = '\0';
+            hash = strchr(slash, '#');
+            pn = hash ? (size_t)(hash - slash) : strlen(slash);
+            if (pn == 0 || slash[0] != '/') {
+                pq[0] = '/';
+                memcpy(pq + 1, slash, pn);
+                pn++;
+            } else {
+                memcpy(pq, slash, pn);
+            }
+            pq[pn] = '\0';
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            if (rc != ZUH_OK) {
+                printf("       §%s \"%s\" refused, RFC gives %s\n", ex->section, ex->ref, res);
+                continue;
+            }
+            ZUH_CHECK(streq(r.scheme, "http"));
+            ZUH_CHECK(streq(r.host, host));
+            ZUH_CHECK_EQ_INT(r.port, 80);
+            ZUH_CHECK(r.userinfo == NULL);
+            ZUH_CHECK(streq(r.path_query, pq));
+            if (!streq(r.host, host) || !streq(r.path_query, pq))
+                printf("       §%s \"%s\" gave http://%s%s, RFC gives %s\n",
+                       ex->section, ex->ref, r.host ? r.host : "(null)",
+                       r.path_query ? r.path_query : "(null)", res);
+            zuh_uri_free(&r);
+        }
+        ZUH_CHECK_EQ_INT(RFC3986_N_EXAMPLES, 42);
+    }
 
     ZUH_CASE("an absolute Location ignores the base entirely");
     ZUH_CHECK_EQ_INT(R(&r, &base, "https://other.example:8443/z"), ZUH_OK);
