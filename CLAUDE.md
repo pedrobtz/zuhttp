@@ -14,7 +14,7 @@ file and a shared file disagree, this file wins for this package.
 
 @.claude/shared/workflow.md @.claude/shared/r-package.md
 @.claude/shared/ci.md @.claude/shared/native-code.md
-@.claude/shared/correctness.md
+@.claude/shared/correctness.md @.claude/shared/assurance.md
 
 ## The two documents that govern this repo
 
@@ -25,6 +25,7 @@ and are excluded from the R package build:
 |----|----|----|
 | [`.agents/zuhttp-design.md`](https://pedrobtz.github.io/zuhttp/.agents/zuhttp-design.md) | The design, edition 2: a normative specification in 65 numbered sections, each with a status line; a Decision Register (D-1…D-97); a risk register. | Before changing behaviour. Cite the section, e.g. §31.9. |
 | [`.agents/roadmap.md`](https://pedrobtz.github.io/zuhttp/.agents/roadmap.md) | The plan, edition 2: milestones M0–M3 (0.1.0 on CRAN with HTTP/2 → 0.2.0 → 0.3.0 → 1.0; M4 folded into M0, D-96), work packages W1–W22 with exit criteria, and an append-only findings log. | Before starting work, to see which work package owns it. |
+| [`.agents/assurance.md`](https://pedrobtz.github.io/zuhttp/.agents/assurance.md) | What checks each boundary, long-lived object and limit, against the portfolio’s assurance standard; every gap names an issue. CI’s `assurance` job holds it to the standard. | Before adding a boundary, object or limit: add its row and its test. |
 | [`.agents/history/`](https://pedrobtz.github.io/zuhttp/.agents/history/) | Edition 1 of both, verbatim: every spike measurement and how each stage landed. | When you need the *why* behind a decision, or a measurement. |
 
 **Read the relevant section before implementing.** Nearly every
@@ -129,9 +130,9 @@ check depend on example.com and badssl.com.
                     h2-test-server.py, h2-test-cert.sh, check-feature-macros,
                     check-objects-sync, check-vendor-licenses, check-code-lines,
                     ci-fork-guard.R, ci-masking.R, ci-run-tests.R, vendor/
-    .github/        R-CMD-check and native-checks (pedrobtz/r-actions), c-core, fuzz,
-                    network (the network and per-backend jobs), vendor,
-                    conventions, coverage, coverage-union, pkgdown
+    .github/        R-CMD-check, native-checks and assurance (pedrobtz/r-actions),
+                    c-core, fuzz, network (the network and per-backend jobs),
+                    vendor, conventions, coverage, coverage-union, pkgdown
 
 `configure` / `configure.win` pick the TLS backend and substitute
 `@SSL_CFLAGS@` / `@SSL_LIBS@` / `@TLS_OBJ@` into `src/Makevars{,.win}`.
@@ -188,9 +189,13 @@ is specific to zuhttp:
 
 - **The wire is the oracle.** No test counted what a server received for
   an HTTP/1.1 upload, and no in-memory upload between 32 KiB and 64 KiB
-  was tested, so a 40 KB body went out twice (#208) for months. Upload
-  tests use `helper-rawserver.R` and assert the bytes that arrived, at
-  sizes straddling the 64 KiB header-plus-body combine.
+  was tested, so a 40 KB body went out twice (#208) for months. The
+  upload check is in C: `ctest/test_engine_mock.c` records every byte
+  the engine writes and asserts each body goes out exactly once, at
+  sizes straddling the 64 KiB header-plus-body combine, and
+  `fuzz_engine` checks the same framing on fuzzed uploads.
+  `helper-rawserver.R` records only the request head, so an R test of a
+  body’s bytes needs a server that reads the body.
 - **`max_body` is decoded bytes, everywhere.** The chunk decoder billed
   compressed bytes against it (#212). Equivalent payloads under
   Content-Length and chunked framing are tested as a pair.

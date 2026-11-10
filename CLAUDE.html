@@ -48,7 +48,7 @@
 <div class="section level2">
 <h2 id="shared-conventions">Shared conventions<a class="anchor" aria-label="anchor" href="#shared-conventions"></a></h2>
 <p>The portfolio’s shared rules are synced into <code>.claude/shared/</code> from <code>pedrobtz/packages:claude/shared/</code>. Never edit them here. Where this file and a shared file disagree, this file wins for this package.</p>
-<p>@.claude/shared/workflow.md @.claude/shared/r-package.md @.claude/shared/ci.md @.claude/shared/native-code.md @.claude/shared/correctness.md</p>
+<p>@.claude/shared/workflow.md @.claude/shared/r-package.md @.claude/shared/ci.md @.claude/shared/native-code.md @.claude/shared/correctness.md @.claude/shared/assurance.md</p>
 </div>
 <div class="section level2">
 <h2 id="the-two-documents-that-govern-this-repo">The two documents that govern this repo<a class="anchor" aria-label="anchor" href="#the-two-documents-that-govern-this-repo"></a></h2>
@@ -62,6 +62,9 @@
 </tr><tr><td><a href=".agents/roadmap.html"><code>.agents/roadmap.md</code></a></td>
 <td>The plan, edition 2: milestones M0–M3 (0.1.0 on CRAN with HTTP/2 → 0.2.0 → 0.3.0 → 1.0; M4 folded into M0, D-96), work packages W1–W22 with exit criteria, and an append-only findings log.</td>
 <td>Before starting work, to see which work package owns it.</td>
+</tr><tr><td><a href=".agents/assurance.html"><code>.agents/assurance.md</code></a></td>
+<td>What checks each boundary, long-lived object and limit, against the portfolio’s assurance standard; every gap names an issue. CI’s <code>assurance</code> job holds it to the standard.</td>
+<td>Before adding a boundary, object or limit: add its row and its test.</td>
 </tr><tr><td><a href=".agents/history/"><code>.agents/history/</code></a></td>
 <td>Edition 1 of both, verbatim: every spike measurement and how each stage landed.</td>
 <td>When you need the <em>why</em> behind a decision, or a measurement.</td>
@@ -141,9 +144,9 @@ tools/          update-uriparser, update-picohttpparser, update-nghttp2,
                 h2-test-server.py, h2-test-cert.sh, check-feature-macros,
                 check-objects-sync, check-vendor-licenses, check-code-lines,
                 ci-fork-guard.R, ci-masking.R, ci-run-tests.R, vendor/
-.github/        R-CMD-check and native-checks (pedrobtz/r-actions), c-core, fuzz,
-                network (the network and per-backend jobs), vendor,
-                conventions, coverage, coverage-union, pkgdown</code></pre>
+.github/        R-CMD-check, native-checks and assurance (pedrobtz/r-actions),
+                c-core, fuzz, network (the network and per-backend jobs),
+                vendor, conventions, coverage, coverage-union, pkgdown</code></pre>
 <p><code>configure</code> / <code>configure.win</code> pick the TLS backend and substitute <code>@SSL_CFLAGS@</code> / <code>@SSL_LIBS@</code> / <code>@TLS_OBJ@</code> into <code>src/Makevars{,.win}</code>.</p>
 </div>
 <div class="section level2">
@@ -170,7 +173,7 @@ tools/          update-uriparser, update-picohttpparser, update-nghttp2,
 <h2 id="what-the-2026-11-09-reviews-found-here">What the 2026-11-09 reviews found here<a class="anchor" aria-label="anchor" href="#what-the-2026-11-09-reviews-found-here"></a></h2>
 <p>The four bug families and the tests they call for are portfolio rules now (<code>.claude/shared/correctness.md</code>); they were written from this package. Three outside reviews (<code>.agents/reviews/2026-11-09-fable.md</code> consolidates them) found 16 valid bugs, #208–#223, in code that passed 2,526 C checks, the full R suite and 33,000 sanitised fuzz inputs. What is specific to zuhttp:</p>
 <ul><li>
-<strong>The wire is the oracle.</strong> No test counted what a server received for an HTTP/1.1 upload, and no in-memory upload between 32 KiB and 64 KiB was tested, so a 40 KB body went out twice (#208) for months. Upload tests use <code>helper-rawserver.R</code> and assert the bytes that arrived, at sizes straddling the 64 KiB header-plus-body combine.</li>
+<strong>The wire is the oracle.</strong> No test counted what a server received for an HTTP/1.1 upload, and no in-memory upload between 32 KiB and 64 KiB was tested, so a 40 KB body went out twice (#208) for months. The upload check is in C: <code>ctest/test_engine_mock.c</code> records every byte the engine writes and asserts each body goes out exactly once, at sizes straddling the 64 KiB header-plus-body combine, and <code>fuzz_engine</code> checks the same framing on fuzzed uploads. <code>helper-rawserver.R</code> records only the request head, so an R test of a body’s bytes needs a server that reads the body.</li>
 <li>
 <strong><code>max_body</code> is decoded bytes, everywhere.</strong> The chunk decoder billed compressed bytes against it (#212). Equivalent payloads under Content-Length and chunked framing are tested as a pair.</li>
 <li>
