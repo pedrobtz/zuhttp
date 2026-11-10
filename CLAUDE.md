@@ -17,6 +17,7 @@ a shared file disagree, this file wins for this package.
 @.claude/shared/ci.md
 @.claude/shared/native-code.md
 @.claude/shared/correctness.md
+@.claude/shared/assurance.md
 
 ## The two documents that govern this repo
 
@@ -26,6 +27,7 @@ Both live in [`.agents/`](.agents/) and are excluded from the R package build:
 |---|---|---|
 | [`.agents/zuhttp-design.md`](.agents/zuhttp-design.md) | The design, edition 2: a normative specification in 65 numbered sections, each with a status line; a Decision Register (D-1…D-97); a risk register. | Before changing behaviour. Cite the section, e.g. §31.9. |
 | [`.agents/roadmap.md`](.agents/roadmap.md) | The plan, edition 2: milestones M0–M3 (0.1.0 on CRAN with HTTP/2 → 0.2.0 → 0.3.0 → 1.0; M4 folded into M0, D-96), work packages W1–W22 with exit criteria, and an append-only findings log. | Before starting work, to see which work package owns it. |
+| [`.agents/assurance.md`](.agents/assurance.md) | What checks each boundary, long-lived object and limit, against the portfolio's assurance standard; every gap names an issue. CI's `assurance` job holds it to the standard. | Before adding a boundary, object or limit: add its row and its test. |
 | [`.agents/history/`](.agents/history/) | Edition 1 of both, verbatim: every spike measurement and how each stage landed. | When you need the *why* behind a decision, or a measurement. |
 
 **Read the relevant section before implementing.** Nearly every non-obvious
@@ -130,9 +132,9 @@ tools/          update-uriparser, update-picohttpparser, update-nghttp2,
                 h2-test-server.py, h2-test-cert.sh, check-feature-macros,
                 check-objects-sync, check-vendor-licenses, check-code-lines,
                 ci-fork-guard.R, ci-masking.R, ci-run-tests.R, vendor/
-.github/        R-CMD-check and native-checks (pedrobtz/r-actions), c-core, fuzz,
-                network (the network and per-backend jobs), vendor,
-                conventions, coverage, coverage-union, pkgdown
+.github/        R-CMD-check, native-checks and assurance (pedrobtz/r-actions),
+                c-core, fuzz, network (the network and per-backend jobs),
+                vendor, conventions, coverage, coverage-union, pkgdown
 ```
 
 `configure` / `configure.win` pick the TLS backend and substitute
