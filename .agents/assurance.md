@@ -31,8 +31,8 @@ call to r-actions.
 | rchk          | done     | native-checks.yaml                                                                                                                                                                                                          |
 | gctorture     | done     | native-checks.yaml                                                                                                                                                                                                          |
 | analyzers     | done     | native-checks.yaml                                                                                                                                                                                                          |
-| alloc-failure | gap #237 | ctest sweeps `zuh_alloc_fail_after()` over the C core (#107, #188), but no workflow fails R's allocations under `C_zu_perform`; #214 was one                                                                                |
-| mutation      | gap #238 | not called: `ctest/Makefile` builds `zuh_ctest` in one compile command, and Mull needs one `-c` per source                                                                                                                  |
+| alloc-failure | done | alloc-failure.yaml (weekly over tools/alloc/exercise.R, R's allocations included (#237); at least 100 failures must reach zu_memory_error; base R's own TRE and gzfile() crashes are listed apart, #282) |
+| mutation | done | mutation.yaml (Mull over src/zuh_*.c against zuh_ctest, weekly (#238); survivors triaged in #269-#275) |
 | fuzz          | gap #239 | fuzz.yaml (own): 12 targets, corpus replay on every OS, libFuzzer smoke, weekly soak. Nine targets carry oracles; `fuzz_response`, `fuzz_chunked` and `fuzz_headers` fail only on a crash                                   |
 | fuzz-reach    | done     | coverage-union.yaml (own): `tools/coverage/fuzz-lcov.sh` over the committed corpus against `fuzz_reach` in `tools/coverage/floor.dcf` (64%), and `tools/coverage/fuzz-gaps.sh` uploads the gap lists, on every pull request |
 <!-- markdownlint-enable MD013 -->
