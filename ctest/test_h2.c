@@ -28,6 +28,7 @@ void suite_h2(void);
 static void cases_w21(void);
 static void cases_w22(void);
 static void cases_review(void);
+static void cases_mutants(void);
 
 /* --- what the server does -------------------------------------------------- */
 
@@ -36,7 +37,7 @@ typedef struct {
     const char *hname[4], *hvalue[4];
     const void *body;
     size_t      body_len;
-    int         informational;   /* send a 103 before the response */
+    int         informational;   /* send a 103 before the response; >1: that status */
     int         rst_code;        /* reset the stream instead of answering */
     int         goaway_after;    /* GOAWAY once the response is out */
     int         eof_mid_body;    /* stop the connection half-way through DATA */
@@ -85,6 +86,7 @@ typedef struct {
     size_t written;              /* bytes the client wrote on this connection */
     int reads, wouldblocks;      /* client reads, and how many blocked first */
     int closes;                  /* zuh_stream_close() on this connection (#249) */
+    int readable_fail;           /* readable() reports an error (#270) */
 } srv;
 
 typedef struct {
@@ -233,7 +235,9 @@ static void respond(srv *v, int32_t sid) {
         return;
     }
     if (c->informational) {
-        nghttp2_nv info = { (uint8_t *)":status", (uint8_t *)"103", 7, 3, 0 };
+        static char ist[8];
+        nghttp2_nv info = { (uint8_t *)":status", (uint8_t *)ist, 7, 3, 0 };
+        snprintf(ist, sizeof ist, "%d", c->informational > 1 ? c->informational : 103);
         nghttp2_submit_headers(v->srv, NGHTTP2_FLAG_NONE, sid, NULL, &info, 1, NULL);
     }
     snprintf(st, sizeof st, "%d", c->status ? c->status : 200);
@@ -340,6 +344,7 @@ static void lb_destroy(zuh_stream *st) { zuh_free(st); }
 static int lb_readable(zuh_stream *st, int ms) {
     srv *v = (srv *)st->impl;
     (void)ms;
+    if (v->readable_fail) return -1;
     return (v->out_len > v->out_off || v->eof) ? 1 : 0;
 }
 static const zuh_stream_vtable k_lb_vt = {
@@ -1280,6 +1285,7 @@ void suite_h2(void) {
     cases_w22();
     cases_review();
     cases_limits();
+    cases_mutants();
 }
 
 
@@ -2427,6 +2433,181 @@ static void cases_review(void) {
         }
         ZUH_CHECK_EQ_INT(zuh_pool_idle_count(pool), 0);
         zuh_pool_free(pool);
+        dialer_free(&dd);
+    }
+}
+
+/* --- #270: what the request and frame-pump code must get right ----------- */
+
+/* A body function whose pieces are larger than a DATA frame (16384), so a
+ * piece goes out in several frames and the body function is asked for more
+ * than what is left of it, from a non-zero offset. */
+typedef struct { int pieces, sent; unsigned char buf[20000]; } big_gen;
+static zuh_code big_next(void *ctx, const void **data, size_t *len, zuh_deadline dl,
+                         zuh_error *err) {
+    big_gen *g = (big_gen *)ctx;
+    size_t k;
+    (void)dl; (void)err;
+    if (g->sent == g->pieces) { *len = 0; return ZUH_OK; }
+    for (k = 0; k < sizeof g->buf; k++)
+        g->buf[k] = (unsigned char)(((size_t)g->sent * 31 + k) & 0xff);
+    *data = g->buf; *len = sizeof g->buf;
+    g->sent++;
+    return ZUH_OK;
+}
+
+static void cases_mutants(void) {
+    srv_dialer dd;
+    zuh_get_opts o;
+    zuh_result r;
+    zuh_error e;
+    zuh_code rc;
+
+    /* RFC 9113 §8.2.1: field names go out lowercase. 'A' and 'Z' are the
+     * ends of the range that is lowered; digits and '-' stay as they are. */
+    ZUH_CASE("#270: every request field reaches the server, its name lowercased at A and Z");
+    {
+        static const char *const hn[] = { "Accept", "X-AZ-09", "x-lower", "ZETA", "Alpha" };
+        static const char *const hv[] = { "*/*", "1", "2", "3", "4" };
+        zuh_req_spec spec;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        memset(&spec, 0, sizeof spec);
+        spec.header_names = hn; spec.header_values = hv; spec.n_headers = 5;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        ZUH_CHECK(has(dd.conns[0].fields, "accept: */*\n"));
+        ZUH_CHECK(has(dd.conns[0].fields, "x-az-09: 1\n"));
+        ZUH_CHECK(has(dd.conns[0].fields, "x-lower: 2\n"));
+        ZUH_CHECK(has(dd.conns[0].fields, "zeta: 3\n"));
+        ZUH_CHECK(has(dd.conns[0].fields, "alpha: 4\n"));
+        /* A successful request leaves no error behind. */
+        ZUH_CHECK_EQ_INT(e.code, ZUH_OK);
+        ZUH_CHECK(e.message[0] == '\0');
+        dialer_free(&dd);
+    }
+
+    /* §8.2.2: a TE other than "trailers" is refused wherever it sits. */
+    ZUH_CASE("#270: a TE other than trailers is refused when it is not the first field");
+    {
+        static const char *const hn[] = { "Accept", "X-One", "TE" };
+        static const char *const hv[] = { "*/*", "1", "gzip" };
+        zuh_req_spec spec;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        memset(&spec, 0, sizeof spec);
+        spec.header_names = hn; spec.header_values = hv; spec.n_headers = 3;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_ERR_PARSE);
+        ZUH_CHECK_EQ_INT(dd.conns[0].requests, 0);
+        dialer_free(&dd);
+    }
+
+    /* Each 20000-byte piece leaves in two DATA frames; the second is asked
+     * for up to a frame from offset 16384, with 3616 left. The server's
+     * count and position-weighted sum say every byte went once, in order. */
+    ZUH_CASE("#270: a body piece larger than a DATA frame is sent exactly once");
+    {
+        static big_gen g;
+        zuh_req_spec spec;
+        unsigned long want_sum = 0;
+        size_t want_total = 0, k;
+        int p;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        memset(&g, 0, sizeof g); g.pieces = 3;
+        for (p = 0; p < g.pieces; p++)
+            for (k = 0; k < sizeof g.buf; k++) {
+                unsigned char b = (unsigned char)(((size_t)p * 31 + k) & 0xff);
+                want_sum += (unsigned long)b * (unsigned long)(want_total % 251 + 1);
+                want_total++;
+            }
+        memset(&spec, 0, sizeof spec);
+        spec.method = "POST";
+        spec.source.next = big_next; spec.source.ctx = &g;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/up", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        ZUH_CHECK_EQ_INT(dd.conns[0].body_total, want_total);
+        ZUH_CHECK(dd.conns[0].body_sum == want_sum);
+        dialer_free(&dd);
+    }
+
+    /* The connection ending under the response is reported with what
+     * happened, not as an error with nothing said. */
+    ZUH_CASE("#270: the connection ending mid-body says the server closed it");
+    {
+        static char body[20000];
+        srv_cfg c; memset(&c, 0, sizeof c);
+        memset(body, 'q', sizeof body);
+        c.body = body; c.body_len = sizeof body; c.eof_mid_body = 1;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_ERR_IO);
+        ZUH_CHECK(has(e.message, "closed"));
+        dialer_free(&dd);
+    }
+
+    /* A transport whose readable() fails: the HTTP/2 connection reports the
+     * failure, so the §26.2 probe drops it, rather than "idle and alive". */
+    ZUH_CASE("#270: an HTTP/2 connection whose transport reports an error is not idle-and-alive");
+    {
+        zuh_stream *t = NULL, *h2s = NULL;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        dialer_init(&dd, &c); zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(lb_dial(&dd, "example.test", 80, &t, &e), ZUH_OK);
+        ZUH_CHECK_EQ_INT(zuh_h2_wrap(&h2s, t, 0, &e), ZUH_OK);
+        if (h2s) {
+            ZUH_CHECK_EQ_INT(zuh_stream_readable(h2s, 0), 0);
+            dd.conns[0].readable_fail = 1;
+            ZUH_CHECK(zuh_stream_readable(h2s, 0) < 0);
+            zuh_stream_free(h2s);
+        }
+        dialer_free(&dd);
+    }
+
+    /* SETTINGS_MAX_HEADER_LIST_SIZE is the configured §40 limit, as the
+     * server decoded it. */
+    ZUH_CASE("#270: the server is told the configured header limit");
+    {
+        zuh_stream *t = NULL, *h2s = NULL;
+        zuh_headers hh;
+        zuh_h2_request rq;
+        int st = 0, bodiless = 0;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        dialer_init(&dd, &c); zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(lb_dial(&dd, "example.test", 80, &t, &e), ZUH_OK);
+        ZUH_CHECK_EQ_INT(zuh_h2_wrap(&h2s, t, 12345, &e), ZUH_OK);
+        zuh_headers_init(&hh);
+        memset(&rq, 0, sizeof rq);
+        rq.method = "GET"; rq.scheme = "http"; rq.authority = "example.test"; rq.path = "/";
+        rq.headers = &hh;
+        if (h2s) {
+            rc = zuh_h2_begin(h2s, &rq, &st, &hh, &bodiless, zuh_deadline_in(1000), &e);
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            ZUH_CHECK_EQ_INT(nghttp2_session_get_remote_settings(
+                                 dd.conns[0].srv, NGHTTP2_SETTINGS_MAX_HEADER_LIST_SIZE), 12345);
+            zuh_stream_free(h2s);
+        }
+        zuh_headers_free(&hh);
+        dialer_free(&dd);
+    }
+
+    /* RFC 9110 §15.2: 100 is informational like 103; the final head is the
+     * 200 after it. */
+    ZUH_CASE("#270: a 100 before the response is skipped like a 103");
+    {
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.informational = 100; c.body = "ok"; c.body_len = 2;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            ZUH_CHECK_EQ_INT(r.status, 200);
+            ZUH_CHECK(r.body.len == 2 && memcmp(r.body.data, "ok", 2) == 0);
+            zuh_result_free(&r);
+        }
         dialer_free(&dd);
     }
 }
