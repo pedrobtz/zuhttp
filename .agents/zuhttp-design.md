@@ -836,6 +836,13 @@ Strict, not permissive (D-15):
 Rejections raise `zu_http_parse_error`, and the connection is closed, never
 pooled (§26.3).
 
+Three rows are stricter than RFC 9112 asks, and `test-h11.R` (#240) holds
+them as the expected differences from h11: an `obs-fold`, which §5.2 has a
+user agent replace with SP; and an equal `Content-Length` repeated as two
+fields or as a list, which RFC 9110 §8.6 lets a recipient collapse. h11 is
+the stricter on BWS before a chunk extension's `;`, which RFC 9112 §7.1.1
+allows and zuhttp accepts.
+
 #### 18.2 Chunked trailers
 
 **Status:** Built (W21, 2026-11-04).
@@ -924,9 +931,13 @@ An explicit `proxy =` wins; `proxy = FALSE` disables proxying (D-48), and
 
 #### 20.2 `NO_PROXY` matching
 
-Comma-separated; `*` matches everything; a leading dot is ignored; matching is
-on label boundaries, case-insensitive; an entry may carry a port; IP literals
-match exactly; CIDR is not supported.
+Comma-separated; `*` matches everything; a leading dot is ignored, and so is
+a root dot, as it is on the host (§8.2); matching is on label boundaries,
+case-insensitive; an entry may carry a port, and an IPv6 entry is written in
+brackets to do so (`[::1]:8080`, brackets optional without one); an IP
+literal on either side matches exactly, never as a suffix; CIDR is not
+supported. libcurl differs on brackets, ports and CIDR, and agrees on the
+rest (`test-proxy.R`, #244).
 
 #### 20.3 Request forms
 

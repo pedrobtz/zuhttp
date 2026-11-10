@@ -180,3 +180,248 @@ test_that("a non-2xx CONNECT surfaces the proxy's own status (§20.3)", {
     }
   }))
 })
+
+# --- #244: proxy selection against libcurl -------------------------------
+#
+# The same (environment, URL) rows through zuhttp and through libcurl, with
+# a recording server as the proxy: proxied or direct is whether it saw the
+# request. A direct request goes to a closed loopback port or to a name in
+# .invalid (RFC 6761 §6.4: never resolves), so it fails fast and touches no
+# network. Each row states what zuhttp does (§20.1, §20.2); a row where
+# libcurl differs says why, and which of the two is right.
+
+test_that("proxy and NO_PROXY selection matches libcurl's (#244)", {
+  skip_if_not_installed("curl")
+  skip_if_not_installed("withr")
+  closed <- free_port()
+  h <- function(host, scheme = "http") {
+    sprintf("%s://%s:%d/", scheme, host, closed)
+  }
+  # zu: does zuhttp proxy? curl: does libcurl, where it differs (NA = same).
+  rows <- list(
+    list(
+      env = c(http_proxy = "PROXY"),
+      url = h("a.example.invalid"),
+      zu = TRUE
+    ),
+    # §20.1: HTTP_PROXY is ignored (httpoxy); libcurl ignores it too.
+    list(
+      env = c(HTTP_PROXY = "PROXY"),
+      url = h("a.example.invalid"),
+      zu = FALSE
+    ),
+    list(
+      env = c(https_proxy = "PROXY"),
+      url = h("a.example.invalid", "https"),
+      zu = TRUE
+    ),
+    list(
+      env = c(HTTPS_PROXY = "PROXY"),
+      url = h("a.example.invalid", "https"),
+      zu = TRUE
+    ),
+    # An http_proxy is not for https URLs, nor https_proxy for http.
+    list(
+      env = c(http_proxy = "PROXY"),
+      url = h("a.example.invalid", "https"),
+      zu = FALSE
+    ),
+    list(
+      env = c(https_proxy = "PROXY"),
+      url = h("a.example.invalid"),
+      zu = FALSE
+    ),
+    list(env = c(all_proxy = "PROXY"), url = h("a.example.invalid"), zu = TRUE),
+    list(
+      env = c(ALL_PROXY = "PROXY"),
+      url = h("a.example.invalid", "https"),
+      zu = TRUE
+    ),
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = "*"),
+      url = h("a.example.invalid"),
+      zu = FALSE
+    ),
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = ""),
+      url = h("a.example.invalid"),
+      zu = TRUE
+    ),
+    # Suffix matching on label boundaries.
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = "example.invalid"),
+      url = h("a.example.invalid"),
+      zu = FALSE
+    ),
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = "example.invalid"),
+      url = h("example.invalid"),
+      zu = FALSE
+    ),
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = "example.invalid"),
+      url = h("notexample.invalid"),
+      zu = TRUE
+    ),
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = "a.example.invalid"),
+      url = h("example.invalid"),
+      zu = TRUE
+    ),
+    # A leading dot is ignored, so it also matches the bare domain.
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = ".example.invalid"),
+      url = h("a.example.invalid"),
+      zu = FALSE
+    ),
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = ".example.invalid"),
+      url = h("example.invalid"),
+      zu = FALSE
+    ),
+    # Case-insensitive, list separators, and the uppercase variable.
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = "EXAMPLE.Invalid"),
+      url = h("a.example.invalid"),
+      zu = FALSE
+    ),
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = "x.invalid, example.invalid"),
+      url = h("a.example.invalid"),
+      zu = FALSE
+    ),
+    list(
+      env = c(http_proxy = "PROXY", NO_PROXY = "example.invalid"),
+      url = h("a.example.invalid"),
+      zu = FALSE
+    ),
+    list(
+      env = c(https_proxy = "PROXY", no_proxy = "example.invalid"),
+      url = h("a.example.invalid", "https"),
+      zu = FALSE
+    ),
+    # The lowercase variable wins when both are set.
+    list(
+      env = c(
+        http_proxy = "PROXY",
+        no_proxy = "x.invalid",
+        NO_PROXY = "example.invalid"
+      ),
+      url = h("a.example.invalid"),
+      zu = TRUE
+    ),
+    # A root dot on the host is stripped (§8.2) before matching.
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = "example.invalid"),
+      url = h("a.example.invalid."),
+      zu = FALSE
+    ),
+    # "*" is special only alone; "*.example.invalid" is not a glob.
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = "*.example.invalid"),
+      url = h("a.example.invalid"),
+      zu = TRUE
+    ),
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = "localhost"),
+      url = h("localhost"),
+      zu = FALSE
+    ),
+    # IP literals match exactly, never by suffix.
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = "127.0.0.1"),
+      url = h("127.0.0.1"),
+      zu = FALSE
+    ),
+    # An address has no labels: a partial one is not a suffix (#266).
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = "0.0.1"),
+      url = h("127.0.0.1"),
+      zu = TRUE
+    ),
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = "1"),
+      url = h("127.0.0.1"),
+      zu = TRUE
+    ),
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = "::1"),
+      url = h("[::1]"),
+      zu = FALSE
+    ),
+    # Expected difference: zuhttp reads an IPv6 entry in brackets, the form
+    # an entry needs to carry a port ("[::1]:8080", §20.2), and libcurl
+    # compares the brackets as text and never matches.
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = "[::1]"),
+      url = h("[::1]"),
+      zu = FALSE,
+      curl = TRUE
+    ),
+    # Expected difference: §20.2 does not support CIDR, so the entry matches
+    # nothing and the request is proxied, the safe side of the gap; libcurl
+    # (7.86 and later) supports CIDR and goes direct.
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = "127.0.0.0/8"),
+      url = h("127.0.0.1"),
+      zu = TRUE,
+      curl = FALSE
+    ),
+    # Expected difference: §20.2 lets an entry carry a port, which must
+    # match too; libcurl has no port syntax and the entry never matches.
+    list(
+      env = c(
+        http_proxy = "PROXY",
+        no_proxy = paste0("example.invalid:", closed)
+      ),
+      url = h("a.example.invalid"),
+      zu = FALSE,
+      curl = TRUE
+    ),
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = "example.invalid:1"),
+      url = h("a.example.invalid"),
+      zu = TRUE
+    ),
+    # A root dot on an entry is stripped like the host's (#267).
+    list(
+      env = c(http_proxy = "PROXY", no_proxy = "example.invalid."),
+      url = h("a.example.invalid"),
+      zu = FALSE
+    )
+  )
+  results <- with_raw_server_seq(
+    crlf("HTTP/1.1 200 OK", "Content-Length: 2", "Connection: close", "", "hi"),
+    function(srv) {
+      lapply(rows, function(row) {
+        local_proxy_env(row$env, srv$url)
+        c(
+          zu = reached_proxy(srv, zu_fetch_env_proxy(row$url)),
+          curl = reached_proxy(srv, curl_fetch_env_proxy(row$url))
+        )
+      })
+    }
+  )
+  for (i in seq_along(rows)) {
+    row <- rows[[i]]
+    label <- paste0(
+      "row ",
+      i,
+      ": ",
+      paste0(names(row$env), "=", row$env, collapse = " "),
+      " ",
+      row$url
+    )
+    want_curl <- if (is.null(row$curl)) row$zu else row$curl
+    expect_identical(
+      results[[i]][["zu"]],
+      row$zu,
+      label = paste("zuhttp", label)
+    )
+    expect_identical(
+      results[[i]][["curl"]],
+      want_curl,
+      label = paste("libcurl", label)
+    )
+  }
+})

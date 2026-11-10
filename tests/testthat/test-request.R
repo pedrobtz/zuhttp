@@ -262,3 +262,83 @@ test_that("`redirects` beyond an integer is refused, not read as no redirects (#
     200L
   )
 })
+
+# --- #243: percent-encoding against three references ----------------------
+#
+# §8.2: zu_query() and zu_body_form() encode from UTF-8, every byte outside
+# RFC 3986 §2.3's unreserved set as %XX (uppercase, §2.1), space as %20. The
+# references: that rule computed here from the RFC, libcurl's
+# curl_easy_escape() and Python's urllib.parse.quote(safe=""). A random
+# string set, seeded, with the characters a hand-written case forgets: "~"
+# and "*" (unreserved in RFC 3986, reserved in RFC 2396), "+", the controls,
+# and code points of two, three and four UTF-8 bytes.
+
+test_that("query and form values are RFC 3986 percent-encoded UTF-8 (#243)", {
+  s <- encoding_inputs()
+  want <- vapply(s, rfc3986_encode, character(1), USE.NAMES = FALSE)
+  q <- vapply(s, zu_query_encoded, character(1), USE.NAMES = FALSE)
+  f <- vapply(s, zu_form_encoded, character(1), USE.NAMES = FALSE)
+  expect_identical(q, want)
+  expect_identical(f, paste0("k=", want))
+  # A name is encoded by the same rule as a value.
+  nm <- s[nzchar(s)][1:50]
+  got <- vapply(
+    nm,
+    function(n) {
+      rawToChar(
+        zu_body_form(
+          zu_request("POST", "https://x/"),
+          stats::setNames(list("v"), n)
+        )$body
+      )
+    },
+    character(1),
+    USE.NAMES = FALSE
+  )
+  expect_identical(
+    got,
+    paste0(vapply(nm, rfc3986_encode, character(1), USE.NAMES = FALSE), "=v")
+  )
+})
+
+test_that("query encoding matches libcurl's curl_escape() (#243)", {
+  skip_if_not_installed("curl")
+  s <- encoding_inputs()
+  q <- vapply(s, zu_query_encoded, character(1), USE.NAMES = FALSE)
+  expect_identical(q, curl::curl_escape(s))
+})
+
+test_that("query encoding matches Python's urllib.parse.quote() (#243)", {
+  skip_unless_python()
+  s <- encoding_inputs()
+  ref <- run_python_json("quote.py", charToRaw(enc2utf8(zujson::json_write(s))))
+  q <- vapply(s, zu_query_encoded, character(1), USE.NAMES = FALSE)
+  expect_identical(q, unlist(ref))
+})
+
+test_that("a form body round-trips through Python's form decoder (#243)", {
+  skip_unless_python()
+  s <- encoding_inputs()
+  # Names and values together, several pairs to a body, so "&" and "="
+  # inside a value are tested where they could split a pair.
+  forms <- lapply(seq(1, length(s) - 2L, by = 3L), function(i) {
+    stats::setNames(as.list(s[i + 1:2]), c(paste0("n", s[i]), "x=&y"))
+  })
+  bodies <- vapply(
+    forms,
+    function(x) {
+      rawToChar(zu_body_form(zu_request("POST", "https://x/"), x)$body)
+    },
+    character(1)
+  )
+  ref <- run_python_json(
+    "form_decode.py",
+    charToRaw(enc2utf8(zujson::json_write(bodies)))
+  )
+  got <- lapply(ref, function(pairs) {
+    pairs <- lapply(pairs, unlist)
+    stats::setNames(lapply(pairs, `[[`, 2L), vapply(pairs, `[[`, "", 1L))
+  })
+  want <- lapply(forms, function(x) lapply(x, enc2utf8))
+  expect_identical(got, want)
+})
