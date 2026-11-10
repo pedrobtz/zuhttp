@@ -59,6 +59,21 @@ jobs:
           floor=$(sed -n 's/^fuzz_reach: //p' tools/coverage/floor.dcf)
           tools/coverage/fuzz-lcov.sh fuzz.lcov corpus "$floor"
 
+      # The lists behind that number: functions no fuzzer enters, conditions
+      # fuzzed one way only, and lines only ctest reaches. The per-file table
+      # and the function list also go to the job summary; the full report is
+      # an artifact. It never fails: the floor above is the gate.
+      - name: Fuzz gaps
+        run: tools/coverage/fuzz-gaps.sh fuzz.lcov ctest.lcov | tee fuzz-gaps.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-gaps-${{ matrix.os }}
+          path: |
+            fuzz-gaps.txt
+            fuzz.lcov
+          retention-days: 30
+
       # §65.8: the HTTP/2 and gRPC servers test-http2.R drives, as
       # network.yaml starts them. The pulled body's R entry points in init.c
       # and the driver's live paths are reachable only against a server, so
