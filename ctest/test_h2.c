@@ -2986,6 +2986,28 @@ static void cases_mutants(void) {
         dialer_free(&dd);
     }
 
+    /* #273: over HTTP/2 the write is timed to the response head; it is a
+     * duration within the call, and no later than the whole request. */
+    ZUH_CASE("#273: HTTP/2 timings are durations within the call, in order");
+    {
+        zuh_millis t0, t1;
+        long wall;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.body = "ok"; c.body_len = 2;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); zuh_error_clear(&e);
+        t0 = zuh_now_ms();
+        rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+        t1 = zuh_now_ms();
+        wall = (long)(t1 - t0) + 1;
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            ZUH_CHECK(r.timings.request_write >= 0 && r.timings.request_write <= wall);
+            ZUH_CHECK(r.timings.total >= r.timings.request_write && r.timings.total <= wall);
+            zuh_result_free(&r);
+        }
+        dialer_free(&dd);
+    }
+
     /* RFC 9110 §15.2: 100 is informational like 103; the final head is the
      * 200 after it. */
     ZUH_CASE("#270: a 100 before the response is skipped like a 103");

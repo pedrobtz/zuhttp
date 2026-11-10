@@ -17,12 +17,15 @@
 #include "zuh_alloc.h"
 #include "zuh_sink.h"
 #include <zlib.h>
+#include <string.h>
+#include <stdio.h>
 #if defined(ZUH_POSIX)
 #  include <unistd.h>
 #  include <sys/wait.h>
 #endif
 
 void suite_engine_mock(void);
+static void cases_273(void);
 
 /* 16: #254 follows a chain of 11 redirects, a connection a hop. */
 #define MAXC 16
@@ -2188,4 +2191,306 @@ void suite_engine_mock(void) {
                  scn_big_headers, ZUH_OK);
 
     limits_cases();
+    cases_273();
+}
+
+/* --- #273: the engine's control flow, timings and messages --------------- */
+
+/* A scenario with one caller header, for the message an allocation failure
+ * while adding it leaves. */
+static zuh_code scn_one_header(zuh_error *e) {
+    static const char *hn[] = { "X-One" };
+    static const char *hv[] = { "1" };
+    dialer d; zuh_get_opts o; zuh_result r; zuh_req_spec spec; zuh_code rc;
+    conn_script s[] = {{ OK200(2) "ok", 0, 0, 0, NULL }};
+    memset(&spec, 0, sizeof spec);
+    spec.header_names = hn; spec.header_values = hv; spec.n_headers = 1;
+    dialer_init(&d, s, 1); opts_for(&o, &d);
+    rc = zuh_engine_perform(&r, "http://example.test/", &spec, &o, e);
+    if (rc == ZUH_OK) zuh_result_free(&r);
+    dialer_free(&d);
+    return rc;
+}
+
+static void cases_273(void) {
+    zuh_get_opts o;
+    zuh_result r;
+    zuh_error e;
+    dialer d;
+    zuh_code rc;
+
+    /* §35.3: every timing is a duration since the request started, so none
+     * is negative, none exceeds the wall time around the call, and they
+     * nest: the request is written before the first byte, which is before
+     * the end. Both write paths: a body in the header write, and one large
+     * enough to follow it. */
+    ZUH_CASE("#273: timings are durations within the call, in order");
+    {
+        static char big[100000];
+        size_t k;
+        memset(big, 'b', sizeof big);
+        for (k = 0; k < 2; k++) {
+            zuh_req_spec spec;
+            zuh_millis t0, t1;
+            long wall;
+            conn_script s[] = {{ OK200(2) "ok", 0, 0, 0, NULL }};
+            memset(&spec, 0, sizeof spec);
+            spec.method = "POST";
+            spec.body = k ? big : "hello"; spec.body_len = k ? sizeof big : 5;
+            dialer_init(&d, s, 1); opts_for(&o, &d); zuh_error_clear(&e);
+            t0 = zuh_now_ms();
+            rc = zuh_engine_perform(&r, "http://example.test/", &spec, &o, &e);
+            t1 = zuh_now_ms();
+            wall = (long)(t1 - t0) + 1;
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            if (rc == ZUH_OK) {
+                ZUH_CHECK(r.timings.request_write >= 0 && r.timings.request_write <= wall);
+                ZUH_CHECK(r.timings.ttfb >= r.timings.request_write && r.timings.ttfb <= wall);
+                ZUH_CHECK(r.timings.response_read >= 0 && r.timings.response_read <= wall);
+                ZUH_CHECK(r.timings.total >= r.timings.ttfb && r.timings.total <= wall);
+                zuh_result_free(&r);
+            }
+            dialer_free(&d);
+        }
+    }
+
+    /* timeout_ms 0 is "the default", not "no time at all": for the request
+     * and for each read of a pulled body. */
+    ZUH_CASE("#273: timeout_ms 0 means the default, for the request and a pulled body");
+    {
+        conn_script s[] = {{ OK200(5) "hello", 0, 0, 0, NULL }};
+        dialer_init(&d, s, 1); opts_for(&o, &d); o.timeout_ms = 0; zuh_error_clear(&e);
+        rc = zuh_engine_get(&r, "http://example.test/", &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        dialer_free(&d);
+
+        dialer_init(&d, s, 1); opts_for(&o, &d);
+        o.timeout_ms = 0; o.body_timeout_ms = 0; o.stream_body = 1; zuh_error_clear(&e);
+        rc = zuh_engine_get(&r, "http://example.test/", &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            zuh_buffer got;
+            zuh_buf_init(&got, 0, (size_t)-1);
+            while ((rc = zuh_open_body_read(r.open, &got, 2, &e)) == ZUH_OK &&
+                   !zuh_open_body_done(r.open)) { }
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            ZUH_CHECK(got.len == 5 && memcmp(got.data, "hello", 5) == 0);
+            zuh_buf_free(&got);
+            zuh_result_free(&r);
+        }
+        dialer_free(&d);
+    }
+
+    /* A successful request leaves no error behind: no code, no message. */
+    ZUH_CASE("#273: a successful request leaves the error empty");
+    {
+        static const char *hn[] = { "X-A", "X-B" };
+        static const char *hv[] = { "1", "2" };
+        zuh_req_spec spec;
+        conn_script s[] = {{ OK200(2) "ok", 0, 0, 0, NULL }};
+        memset(&spec, 0, sizeof spec);
+        spec.header_names = hn; spec.header_values = hv; spec.n_headers = 2;
+        dialer_init(&d, s, 1); opts_for(&o, &d); zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        ZUH_CHECK_EQ_INT(e.code, ZUH_OK);
+        ZUH_CHECK(e.message[0] == '\0');
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        dialer_free(&d);
+    }
+
+    /* §35.3: request.sent counts what reached the wire, head and body. */
+    ZUH_CASE("#273: the traced request.sent count is the bytes written");
+    {
+        static zuh_trace tr;
+        zuh_req_spec spec;
+        size_t i, n = 0;
+        int seen = 0;
+        conn_script s[] = {{ OK200(2) "ok", 0, 0, 0, NULL }};
+        memset(&spec, 0, sizeof spec);
+        spec.method = "POST"; spec.body = "hello"; spec.body_len = 5;
+        zuh_trace_init(&tr);
+        dialer_init(&d, s, 1); opts_for(&o, &d); o.trace = &tr; zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        for (i = 0; i < tr.n; i++)
+            if (tr.ev[i].ev == ZUH_EV_REQUEST_SENT) { n = (size_t)tr.ev[i].n; seen = 1; }
+        ZUH_CHECK(seen);
+        ZUH_CHECK_EQ_INT(n, d.sent[0].len);
+        dialer_free(&d);
+    }
+
+    /* D-78: a caller's Content-Length is checked against the body, digit by
+     * digit; only the n_headers fields given are read, whatever follows in
+     * the caller's arrays. */
+    ZUH_CASE("#273: caller framing is read for n_headers fields, and Content-Length in full");
+    {
+        static const char *hn[] = { "Content-Length", "Transfer-Encoding" };
+        static const char *hv9[] = { "9", "chunked" };
+        static const char *hv12[] = { " 12\t", "chunked" };
+        zuh_req_spec spec;
+        conn_script s[] = {{ OK200(2) "ok", 0, 0, 0, NULL }};
+        memset(&spec, 0, sizeof spec);
+        spec.method = "POST"; spec.header_names = hn; spec.n_headers = 1;
+        spec.header_values = hv9; spec.body = "123456789"; spec.body_len = 9;
+        dialer_init(&d, s, 1); opts_for(&o, &d); zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        dialer_free(&d);
+        spec.header_values = hv12; spec.body = "123456789012"; spec.body_len = 12;
+        dialer_init(&d, s, 1); opts_for(&o, &d); zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        dialer_free(&d);
+    }
+
+    /* §17.1, D-85: a bad value is reported with its header's name when the
+     * name is a short token (at most 64 bytes), and by position otherwise. */
+    ZUH_CASE("#273: a bad header value names a 64-byte header, and numbers a 65-byte one");
+    {
+        static char n64[65], n65[66];
+        const char *hn[1], *hv[1] = { "a\r\nb" };
+        zuh_req_spec spec;
+        conn_script s[] = {{ OK200(2) "ok", 0, 0, 0, NULL }};
+        memset(n64, 'h', 64); n64[64] = '\0';
+        memset(n65, 'h', 65); n65[65] = '\0';
+        memset(&spec, 0, sizeof spec);
+        spec.header_names = hn; spec.header_values = hv; spec.n_headers = 1;
+        hn[0] = n64;
+        dialer_init(&d, s, 1); opts_for(&o, &d); zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(zuh_engine_perform(&r, "http://example.test/", &spec, &o, &e), ZUH_ERR_PARSE);
+        ZUH_CHECK(has(e.message, n64));
+        dialer_free(&d);
+        hn[0] = n65;
+        dialer_init(&d, s, 1); opts_for(&o, &d); zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(zuh_engine_perform(&r, "http://example.test/", &spec, &o, &e), ZUH_ERR_PARSE);
+        ZUH_CHECK(has(e.message, "request header 1 "));
+        ZUH_CHECK(!has(e.message, n64));
+        dialer_free(&d);
+    }
+
+    /* §20.3: the bytes a proxy sent past its CONNECT reply are counted. */
+    ZUH_CASE("#273: a proxy's bytes after CONNECT are counted in the error");
+    {
+        conn_script junk[] = {{ "HTTP/1.1 200 Connection Established\r\n\r\n\x16\x03\x01", 0, 0, 0, NULL }};
+        dialer_init(&d, junk, 1); opts_for(&o, &d); o.proxy = "http://proxy.test:3128";
+        zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(zuh_engine_get(&r, "https://example.test/", &o, &e), ZUH_ERR_PROXY);
+        ZUH_CHECK(has(e.message, "sent 3 unexpected bytes"));
+        dialer_free(&d);
+    }
+
+    /* §34.4: every failure carries a message, and one that ran out of memory
+     * says so. Failing each allocation in turn: no out-of-memory exit reads
+     * "request failed", and one that could not add the caller's header
+     * names it as header 1, the only one. */
+    ZUH_CASE("#273: out-of-memory failures say so, and name the header they could not add");
+    {
+        zuh_alloc_stats before, after;
+        long total, k, nomem = 0, header_msgs = 0, bad = 0;
+        zuh_alloc_stats_get(&before);
+        zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(scn_one_header(&e), ZUH_OK);
+        zuh_alloc_stats_get(&after);
+        total = (long)(after.total_allocs - before.total_allocs);
+        for (k = 0; k < total; k++) {
+            zuh_error_clear(&e);
+            zuh_alloc_fail_after(k);
+            rc = scn_one_header(&e);
+            zuh_alloc_fail_after(-1);
+            if (rc != ZUH_ERR_NOMEM) continue;
+            nomem++;
+            if (strcmp(e.message, "request failed") == 0) bad++;
+            if (has(e.message, "could not be added")) {
+                header_msgs++;
+                if (!has(e.message, "request header 1 could")) bad++;
+            }
+        }
+        ZUH_CHECK(nomem > 0);
+        ZUH_CHECK(header_msgs > 0);
+        ZUH_CHECK_EQ_INT(bad, 0);
+    }
+
+    /* §26.5: the pool key carries the pins given, and only those: the
+     * n_pins first, whatever the caller's array holds after them. */
+    ZUH_CASE("#273: the pool key carries exactly n_pins pins");
+    {
+        static const char *pa[] = { "sha256//AAAA", "sha256//XXXX" };
+        static const char *pb[] = { "sha256//AAAA", "sha256//YYYY" };
+        zuh_tls_config ta, tb;
+        zuh_pool *pool = zuh_pool_new(NULL);
+        zuh_pool_stats st;
+        conn_script s[] = {{ OK200(2) "ok", 0, 0, 1, OK200(2) "ok" }, { OK200(2) "ok", 0, 0, 1, NULL }};
+        zuh_tls_config_init(&ta); zuh_tls_config_init(&tb);
+        ta.pins = pa; ta.n_pins = 1;
+        tb.pins = pb; tb.n_pins = 1;
+        dialer_init(&d, s, 2); opts_for(&o, &d); o.pool = pool;
+        o.tls = &ta; zuh_error_clear(&e);
+        rc = zuh_engine_get(&r, "http://example.test/1", &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        o.tls = &tb; zuh_error_clear(&e);
+        rc = zuh_engine_get(&r, "http://example.test/2", &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        zuh_pool_stats_get(pool, &st);
+        ZUH_CHECK_EQ_INT(st.hits, 1);
+        ZUH_CHECK_EQ_INT(d.next, 1);
+        zuh_pool_free(pool);
+        dialer_free(&d);
+    }
+
+    /* A TLS setting with no pins is not a pin list: a connection made with
+     * it serves a request with no TLS setting at all, as both name the same
+     * defaults over plain HTTP. */
+    ZUH_CASE("#273: a TLS setting without pins keys the pool as no setting does");
+    {
+        zuh_tls_config t0;
+        zuh_pool *pool = zuh_pool_new(NULL);
+        zuh_pool_stats st;
+        conn_script s[] = {{ OK200(2) "ok", 0, 0, 1, OK200(2) "ok" }, { OK200(2) "ok", 0, 0, 1, NULL }};
+        memset(&t0, 0, sizeof t0);
+        dialer_init(&d, s, 2); opts_for(&o, &d); o.pool = pool;
+        o.tls = &t0; zuh_error_clear(&e);
+        rc = zuh_engine_get(&r, "http://example.test/1", &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        o.tls = NULL; zuh_error_clear(&e);
+        rc = zuh_engine_get(&r, "http://example.test/2", &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        zuh_pool_stats_get(pool, &st);
+        ZUH_CHECK_EQ_INT(st.hits, 1);
+        zuh_pool_free(pool);
+        dialer_free(&d);
+    }
+
+    /* §19.4: with max_redirects 0 a 3xx is the response, body and all, and
+     * nothing is followed. */
+    ZUH_CASE("#273: max_redirects 0 returns the 3xx with its body");
+    {
+        conn_script s[] = {{ "HTTP/1.1 302 Found\r\nLocation: /a\r\nContent-Length: 5\r\n\r\nmoved", 0, 0, 0, NULL }};
+        dialer_init(&d, s, 1); opts_for(&o, &d); o.max_redirects = 0; o.stream_body = 1;
+        zuh_error_clear(&e);
+        rc = zuh_engine_get(&r, "http://example.test/", &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            zuh_buffer got;
+            ZUH_CHECK_EQ_INT(r.status, 302);
+            ZUH_CHECK(r.open != NULL);
+            zuh_buf_init(&got, 0, (size_t)-1);
+            if (r.open)
+                while (zuh_open_body_read(r.open, &got, 64, &e) == ZUH_OK &&
+                       !zuh_open_body_done(r.open)) { }
+            ZUH_CHECK(got.len == 5 && memcmp(got.data, "moved", 5) == 0);
+            zuh_buf_free(&got);
+            zuh_result_free(&r);
+        }
+        ZUH_CHECK_EQ_INT(d.next, 1);
+        dialer_free(&d);
+    }
 }
