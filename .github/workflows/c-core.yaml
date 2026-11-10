@@ -110,6 +110,16 @@ jobs:
           ZU_TEST_TRACE: "1"
         run: make asan
 
+      # #262: `make asan` after a plain build linked the plain vendored
+      # objects, so picohttpparser, uriparser and nghttp2 ran unsanitised.
+      # CI builds from a clean tree and never sees that order; this builds
+      # both orders and reads the objects.
+      - name: Build flavours keep their own vendored objects
+        if: runner.os == 'Linux'
+        timeout-minutes: 15
+        working-directory: ctest
+        run: ./check-flavours.sh
+
       # zuhttp vendors only part of uriparser (design §8.2). Calling into an
       # excluded module is otherwise a bare "undefined symbol" at link time;
       # this says what actually went wrong. The excluded set is a security
