@@ -70,3 +70,68 @@ test_that("the parent's own requests still work after a child has tripped the gu
   # parent, which never forked and whose trustd connection is intact.
   expect_identical(zu_resp_status(zu_get("https://example.com")), 200L)
 })
+
+# §26.4 hazard 1 for a connection checked out into a streamed response
+# (#209, #250). The body records the PID that opened it: in a forked child
+# a read raises zu_fork_error, an abort does nothing, and the finalizer
+# drops the child's copy without a close. The parent's view is the oracle:
+# a child that read from the socket would take bytes from the middle of the
+# parent's body, and one that closed it would cut the body short.
+#
+# Non-vacuity: removing the zuh_fork_guard_tripped() check from
+# open_body_fill() in src/zuh_engine.c makes the child's reads succeed and
+# leaves the parent a body with a hole in it, failing both halves.
+test_that("a forked child cannot read an open zu_stream, and the parent reads it whole (#250)", {
+  testthat::skip_if_not_installed("parallel")
+  body <- as.raw(seq_len(300000) %% 251)
+  head <- sprintf("HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n", length(body))
+  with_raw_server(c(charToRaw(head), body), function(url) {
+    r <- zu_perform(zu_request("GET", url), stream = TRUE)
+    first <- zu_resp_read(r, 1000)
+    expect_length(first, 1000)
+
+    job <- parallel::mcparallel(
+      {
+        # Read well past what the parent has already staged in memory, so
+        # an unguarded read would reach the socket the two processes share.
+        attempt <- function() {
+          tryCatch(
+            {
+              for (i in 1:50) {
+                if (length(zu_resp_read(r, 65536)) == 0L) break
+              }
+              "read"
+            },
+            error = function(e) class(e)
+          )
+        }
+        out <- list(first = attempt(), second = attempt())
+        zu_resp_abort(r) # a no-op in a child: the connection is the parent's
+        rm(r)
+        gc() # the finalizer, in the child
+        out
+      },
+      silent = TRUE
+    )
+    child <- parallel::mccollect(job, wait = TRUE)[[1]]
+
+    # The child came back, with the documented terminal state.
+    expect_type(child, "list")
+    expect_true("zu_fork_error" %in% child$first)
+    expect_true("zu_fork_error" %in% child$second)
+
+    # The parent's body is intact: every byte, in order, after the child
+    # tried to read, aborted and finalised it.
+    rest <- list()
+    repeat {
+      piece <- zu_resp_read(r, 65536)
+      if (length(piece) == 0L) {
+        break
+      }
+      rest[[length(rest) + 1L]] <- piece
+    }
+    got <- c(first, unlist(rest))
+    expect_identical(length(got), length(body))
+    expect_identical(got, body)
+  })
+})

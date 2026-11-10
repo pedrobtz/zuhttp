@@ -268,8 +268,25 @@ zuh_tlseof_asan: $(ENGSRC) tls_eof/drive.c
 tls-eof-asan: zuh_tlseof_asan
 	$(SANENV) DRIVE=$(CURDIR)/zuh_tlseof_asan tls_eof/run.sh
 
+# #249: the fork case of tls_eof (tls_eof/fork.sh) on Network.framework, so
+# the drop of an inherited connection is tested on the macOS backend too.
+# Needs the openssl CLI for the certificate; tls-eof runs it on OpenSSL.
+zuh_tlseof_nw: $(NWSRC) tls_eof/drive.c
+	$(CC) $(ENGBASE) $(URIFLAGS) -o $@ $(NWSRC) tls_eof/drive.c \
+	      -framework Network -framework Security -framework CoreFoundation -lz $(NETLIBS)
+
+tls-fork-nw: zuh_tlseof_nw
+	DRIVE=$(CURDIR)/zuh_tlseof_nw tls_eof/fork.sh
+
+zuh_tlseof_nw_asan: $(NWSRC) tls_eof/drive.c
+	$(CC) $(ENGBASE) $(SANFLAGS) $(URIFLAGS) -o $@ $(NWSRC) tls_eof/drive.c \
+	      -framework Network -framework Security -framework CoreFoundation -lz $(NETLIBS)
+
+tls-fork-nw-asan: zuh_tlseof_nw_asan
+	$(SANENV) DRIVE=$(CURDIR)/zuh_tlseof_nw_asan tls_eof/fork.sh
+
 clean:
-	rm -rf zuh_ctest zuh_ctest_asan zuh_tlstest zuh_engtest zuh_engtest_nw zuh_engtest_sch zuh_tlseof zuh_tlseof_asan \
+	rm -rf zuh_ctest zuh_ctest_asan zuh_tlstest zuh_engtest zuh_engtest_nw zuh_engtest_sch zuh_tlseof zuh_tlseof_asan zuh_tlseof_nw zuh_tlseof_nw_asan \
 	      zuh_tlstest_asan zuh_engtest_asan zuh_engtest_nw_asan *.dSYM build build-asan *.o
 
-.PHONY: all run strict asan clean tls tls-asan tls-eof tls-eof-asan engine engine-asan engine-nw-asan engine-nw engine-sch
+.PHONY: all run strict asan clean tls tls-asan tls-eof tls-eof-asan tls-fork-nw tls-fork-nw-asan engine engine-asan engine-nw-asan engine-nw engine-sch

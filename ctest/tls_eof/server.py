@@ -11,6 +11,8 @@
 #   keepalive answers every request on a connection until the client closes,
 #             one thread per connection: the third mode's pooled connection
 #             stays open while another connection's handshake fails.
+#   fork      keepalive with a 200 KB body at /big and a line per accept,
+#             request and close, for fork.sh to read (#249).
 #
 # SSLObject over memory BIOs, so the bytes on the wire are exactly these.
 import socket, ssl, sys, time
@@ -48,6 +50,47 @@ def keepalive(raw):
     finally:
         raw.close()
 
+
+BIG = bytes(i % 251 for i in range(200000))
+
+
+def forked(raw, n):
+    # A line per event, so fork.sh can read off what each connection
+    # received: a child that closed an inherited connection gracefully shows
+    # up as "closed by the client" before the parent's last requests on it.
+    s = ctx.wrap_socket(raw, server_side=True)
+    reqs = 0
+    try:
+        while True:
+            req = b""
+            while b"\r\n\r\n" not in req:
+                d = s.recv(4096)
+                if not d:
+                    print("conn %d closed by the client after %d requests" % (n, reqs),
+                          flush=True)
+                    return
+                req += d
+            reqs += 1
+            path = req.split(b" ", 2)[1]
+            print("conn %d request %d %s" % (n, reqs, path.decode()), flush=True)
+            if path == b"/big":
+                s.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n" % len(BIG) + BIG)
+            else:
+                s.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+    except (ssl.SSLError, OSError) as e:
+        print("conn %d ended: %s" % (n, e), flush=True)
+    finally:
+        raw.close()
+
+
+if mode == "fork":
+    import threading
+    for n in range(1, 4):
+        raw, _ = ls.accept()
+        print("accept %d" % n, flush=True)
+        threading.Thread(target=forked, args=(raw, n), daemon=True).start()
+    time.sleep(5)
+    sys.exit(0)
 
 if mode == "keepalive":
     import threading

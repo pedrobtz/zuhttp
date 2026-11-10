@@ -150,7 +150,8 @@ void zuh_pool_stats_get(const zuh_pool *p, zuh_pool_stats *out);
 void zuh_pool_config_get(const zuh_pool *p, zuh_pool_config *out);
 size_t zuh_pool_idle_count(const zuh_pool *p);
 
-/* Close and drop every idle connection. */
+/* Close and drop every idle connection; in a forked child, drop them without
+ * a close, as the fork guard does (§26.4, #265). */
 void zuh_pool_clear(zuh_pool *p);
 
 /* Test seam: the pool reads time through this, so idle expiry can be tested

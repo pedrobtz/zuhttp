@@ -497,6 +497,35 @@ void suite_pool(void) {
         }
         ZUH_CHECK_EQ_INT(zuh_pool_idle_count(p), 1);
     }
+
+    ZUH_CASE("#265: a child that clears the pool drops the inherited connection without a close");
+    {
+        /* zu_pool_clear() from R in an mclapply() worker. Clear was the one
+         * operation that skipped the guard, and closed the parent's
+         * connections gracefully (found by fuzz/fuzz_pool.c). */
+        pid_t kid = fork();
+        if (kid == 0) {
+            long closes = zuh_mock_stream_closes_total();
+            zuh_pool_stats cst;
+            int step = 0;
+            zuh_pool_clear(p);
+            zuh_pool_stats_get(p, &cst);
+            if (zuh_mock_stream_closes_total() != closes) step = 1;
+            else if (zuh_pool_idle_count(p) != 0) step = 2;
+            else if (cst.discarded_fork != 1 || cst.forks_detected != 1) step = 3;
+            zuh_pool_free(p);
+            zuh_pool_key_free(&a);
+            _exit(step);
+        }
+        ZUH_CHECK(kid > 0);
+        if (kid > 0) {
+            int status = -1;
+            ZUH_CHECK(waitpid(kid, &status, 0) == kid);
+            ZUH_CHECK(WIFEXITED(status));
+            ZUH_CHECK_EQ_INT(WIFEXITED(status) ? WEXITSTATUS(status) : -1, 0);
+        }
+        ZUH_CHECK_EQ_INT(zuh_pool_idle_count(p), 1);
+    }
 #endif
     zuh_pool_free(p);
 
@@ -623,6 +652,142 @@ void suite_pool(void) {
         }
         zuh_pool_free(rp);
         zuh_pool_key_free(&ka); zuh_pool_key_free(&kx); zuh_pool_key_free(&kc);
+    }
+
+    /* --- what the 2026-11-10 mutation run (Mull, #261) found unasserted ---
+     * Each case below fails under a mutant that survived the suite above. */
+    {
+        zuh_pool_key ka, kb, kc, kcp;
+        zuh_pool_config pc;
+        zuh_pool *q;
+        zuh_stream *s1, *s2, *s3, *got;
+        zuh_headers h;
+        zuh_framing ok_len = { ZUH_FRAME_LENGTH, 5, 1 };
+        basic_key(&ka, "a.test", 443);
+        basic_key(&kb, "b.test", 443);
+        basic_key(&kc, "c.test", 443);
+
+        ZUH_CASE("§26.2: idle exactly idle_timeout_ms is expired; one ms less is not");
+        zuh_pool_config_init(&pc);
+        pc.idle_timeout_ms = 1000;
+        q = zuh_pool_new(&pc);
+        zuh_pool_set_clock(q, fake_now, NULL);
+        s1 = idle_stream();
+        zuh_pool_release(q, &ka, s1, ZUH_REUSE_OK);
+        g_now += 999;
+        got = zuh_pool_acquire(q, &ka);
+        ZUH_CHECK(got == s1);
+        zuh_pool_release(q, &ka, got, ZUH_REUSE_OK);
+        g_now += 1000;
+        ZUH_CHECK(zuh_pool_acquire(q, &ka) == NULL);
+        zuh_pool_stats_get(q, &st);
+        ZUH_CHECK_EQ_INT(st.discarded_expired, 1);
+        zuh_pool_free(q);
+
+        ZUH_CASE("§26.2: max_per_host 0 is no per-host limit");
+        zuh_pool_config_init(&pc);
+        pc.max_per_host = 0;
+        q = zuh_pool_new(&pc);
+        {
+            int i;
+            for (i = 0; i < 5; i++) zuh_pool_release(q, &ka, idle_stream(), ZUH_REUSE_OK);
+        }
+        ZUH_CHECK_EQ_INT(zuh_pool_idle_count(q), 5);
+        zuh_pool_stats_get(q, &st);
+        ZUH_CHECK_EQ_INT(st.discarded_capacity, 0);
+        zuh_pool_free(q);
+
+        ZUH_CASE("§26.2: the per-host cap evicts that host's OLDEST connection");
+        zuh_pool_config_init(&pc);
+        pc.max_per_host = 2;
+        q = zuh_pool_new(&pc);
+        s1 = idle_stream(); s2 = idle_stream(); s3 = idle_stream();
+        zuh_pool_release(q, &kb, idle_stream(), ZUH_REUSE_OK);   /* another host, older */
+        zuh_pool_release(q, &ka, s1, ZUH_REUSE_OK);
+        zuh_pool_release(q, &ka, s2, ZUH_REUSE_OK);
+        zuh_pool_release(q, &ka, s3, ZUH_REUSE_OK);              /* s1 goes, not b's */
+        ZUH_CHECK_EQ_INT(zuh_pool_idle_count(q), 3);
+        got = zuh_pool_acquire(q, &ka);
+        ZUH_CHECK(got == s3);                                     /* newest first */
+        if (got) { zuh_stream_close(got); zuh_stream_free(got); }
+        got = zuh_pool_acquire(q, &ka);
+        ZUH_CHECK(got == s2);
+        if (got) { zuh_stream_close(got); zuh_stream_free(got); }
+        ZUH_CHECK(zuh_pool_acquire(q, &ka) == NULL);
+        got = zuh_pool_acquire(q, &kb);
+        ZUH_CHECK(got != NULL);                                   /* the other host kept */
+        if (got) { zuh_stream_close(got); zuh_stream_free(got); }
+        zuh_pool_free(q);
+
+        ZUH_CASE("§26.2: the global cap evicts the oldest connection of any host");
+        zuh_pool_config_init(&pc);
+        pc.max_idle = 2;
+        q = zuh_pool_new(&pc);
+        zuh_pool_release(q, &ka, idle_stream(), ZUH_REUSE_OK);
+        zuh_pool_release(q, &kb, idle_stream(), ZUH_REUSE_OK);
+        zuh_pool_release(q, &kc, idle_stream(), ZUH_REUSE_OK);
+        ZUH_CHECK(zuh_pool_acquire(q, &ka) == NULL);
+        got = zuh_pool_acquire(q, &kb);
+        ZUH_CHECK(got != NULL);
+        if (got) { zuh_stream_close(got); zuh_stream_free(got); }
+        zuh_pool_free(q);
+
+        ZUH_CASE("a NULL pool, key or stream is refused without a crash");
+        q = zuh_pool_new(NULL);
+        ZUH_CHECK(zuh_pool_acquire(NULL, &ka) == NULL);
+        ZUH_CHECK(zuh_pool_acquire(q, NULL) == NULL);
+        zuh_pool_release(q, &ka, NULL, ZUH_REUSE_OK);
+        ZUH_CHECK_EQ_INT(zuh_pool_idle_count(q), 0);
+        zuh_pool_stats_get(q, &st);
+        ZUH_CHECK_EQ_INT(st.misses, 0);                          /* refused, not a miss */
+        zuh_pool_free(q);
+
+        ZUH_CASE("§26.1: a copied key owns equal copies of every string, and NULL stays NULL");
+        ZUH_CHECK_EQ_INT(zuh_pool_key_copy(&kcp, &ka), 1);
+        ZUH_CHECK(kcp.host != ka.host && strcmp(kcp.host, "a.test") == 0);
+        ZUH_CHECK(kcp.scheme != ka.scheme && strcmp(kcp.scheme, "https") == 0);
+        ZUH_CHECK(kcp.proxy == NULL && kcp.pins == NULL && kcp.ca_file == NULL);
+        zuh_pool_key_free(&kcp);
+
+        ZUH_CASE("§42: every reason's name, and out-of-range ones, read as written");
+        ZUH_CHECK(strcmp(zuh_reuse_name(ZUH_REUSE_OK), "ok") == 0);
+        ZUH_CHECK(strcmp(zuh_reuse_name(ZUH_NOREUSE_TLS_ERROR), "tls_error") == 0);
+        ZUH_CHECK(strcmp(zuh_reuse_name(ZUH_REUSE_REASON_COUNT), "unknown") == 0);
+        ZUH_CHECK(strcmp(zuh_reuse_name((zuh_reuse)-1), "unknown") == 0);
+
+        ZUH_CASE("§26.3: Connection tokens fold case and lose trailing tabs and spaces");
+        {
+            static const char *closing[] = {
+                "close\t", "keep-alive , close\t", "KEEP-ALIVE , close\t",
+                "close ,keep-alive", "close\t\t,x", NULL
+            };
+            static const char *alive10[] = {
+                "KEEP-ALIVE", "Keep-Alive\t", "x , keep-alive  ", NULL
+            };
+            int i;
+            for (i = 0; closing[i]; i++) {
+                zuh_headers_init(&h);
+                zuh_headers_add_str(&h, "Connection", closing[i]);
+                ZUH_CHECK_EQ_INT(zuh_reuse_decide(ZUH_OK, &ok_len, &h, 1),
+                                 ZUH_NOREUSE_CONNECTION_CLOSE);
+                zuh_headers_free(&h);
+            }
+            for (i = 0; alive10[i]; i++) {   /* HTTP/1.0 is persistent only with it */
+                zuh_headers_init(&h);
+                zuh_headers_add_str(&h, "Connection", alive10[i]);
+                ZUH_CHECK_EQ_INT(zuh_reuse_decide(ZUH_OK, &ok_len, &h, 0), ZUH_REUSE_OK);
+                zuh_headers_free(&h);
+            }
+        }
+
+        ZUH_CASE("§26.3: close in the FIRST of two Connection headers counts too");
+        zuh_headers_init(&h);
+        zuh_headers_add_str(&h, "Connection", "close");
+        zuh_headers_add_str(&h, "Connection", "keep-alive");
+        ZUH_CHECK_EQ_INT(zuh_reuse_decide(ZUH_OK, &ok_len, &h, 1), ZUH_NOREUSE_CONNECTION_CLOSE);
+        zuh_headers_free(&h);
+
+        zuh_pool_key_free(&ka); zuh_pool_key_free(&kb); zuh_pool_key_free(&kc);
     }
 
     ZUH_CASE("no leaks across the suite");

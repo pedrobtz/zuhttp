@@ -1176,7 +1176,7 @@ closed exactly once, which the mock stream counts (review #187).
 Two hazards, one mechanism (`zu_fork.{h,c}`):
 
 1. **Inherited connections.** Every pool records its creator's PID and checks
-   it on every acquire, release and free. On mismatch, inherited connections
+   it on every acquire, release, clear and free (#265). On mismatch, inherited connections
    are dropped without a TLS shutdown (which would write into the parent's
    session) and the pool is re-initialised. A connection checked out into a
    streamed response (§65.4) is not in any pool, so the open body records its
@@ -1188,7 +1188,16 @@ Two hazards, one mechanism (`zu_fork.{h,c}`):
    clusters and `multisession` do, because they exec.
 
 `tools/ci-fork-guard.R` runs the second hazard in CI and fails on a skip as
-well as a failure.
+well as a failure. The first is tested on live connections as well as mock
+streams (#249): `ctest/tls_eof/fork.sh` holds a pulled body and an idle
+pooled connection to a scripted TLS server, forks, has the child free both,
+and reads from the server's log that neither connection received anything
+from the child, over OpenSSL (`tls-eof`, `tls-eof-asan`) and
+Network.framework (`tls-fork-nw`, `tls-fork-nw-asan`); `ctest/test_h2.c`
+does the same for two HTTP/2 sessions. OpenSSL's drop is silent because
+`tls_destroy()`'s `SSL_shutdown()` writes its close_notify into a memory BIO
+that nothing flushes; a backend whose destroy writes is caught by that log.
+Windows has no `fork()`, so Schannel has no counterpart.
 
 #### 26.5 Serialization and session lifetime (D-23, D-36)
 
@@ -1725,9 +1734,10 @@ without a canary arm is a defect.
 
 ### 43. Fuzzing
 
-**Status:** Partial — twelve targets, all with oracles on their results
-(#239); corpus replay on three OSes in CI; the 24 h soak per target (§61.8)
-is W17.
+**Status:** Partial — thirteen targets (W9's DER walker, the eleventh in
+the list below, is not written yet), all with oracles on their results
+(#239, #247); corpus replay on three OSes in CI; the 24 h soak per target
+(§61.8) is W17.
 
 Targets: response parser, chunked decoder, headers, URI, redirect, proxy
 environment, inflate limits, body path, redaction, and the **engine** — the
@@ -1737,7 +1747,13 @@ first 10-minute soak, clean). W9 adds the DER walker as the eleventh, and W20
 the HTTP/2 session fed hostile frame input through the D-72 seam as the
 twelfth (§65.8), and the pulled body's API, a fuzzed sequence of reads,
 peeks, aborts and done checks against a model, as the thirteenth (§65.4,
-#229). Each harness builds against libFuzzer and against a plain
+#229), over HTTP/1.1 and over HTTP/2 against an in-process nghttp2 server,
+pooled or not, and through a wire that ends, resets or goes silent part-way
+through the body (#248); the fourteenth is the connection pool, a fuzzed sequence of acquires,
+releases for every §26.3 reason, a server closing an idle connection, an
+injected clock, clears and forks against a reference model of §26 (#247).
+The harness stands in for `zuh_fork.c`, so a fork is a change of process id
+it controls. Each harness builds against libFuzzer and against a plain
 replay driver, so the corpus is a regression suite everywhere, Windows
 included.
 Only curated seeds are committed.
@@ -1747,8 +1763,15 @@ limit or a readable aborted stream crash nothing; the review of 2026-11-09
 found 16 such bugs in code every target reached. So every target that can
 carry an oracle on its results does: the body path compares whole and
 one-byte reads and three framings of one payload (#227), the engine checks
-that every request it wrote is framed by its Content-Length (#228), and the
-pull target checks every result against its model (#229).
+that every request it wrote is framed by its Content-Length (#228), the
+pull target checks every result against its model (#229) and that a
+connection goes back to the pool only after a clean end or a clean HTTP/2
+cancel, then serves the next request whole (#248), and the pool
+target checks which connection every acquire returns, every counter
+`zu_pool_stats()` reports, both caps, and how often each connection was
+closed and freed: once each when the pool discards it, never closed when a
+fork drops it (#247). Its first run found #265, a clear in a forked child
+that closed the parent's connections.
 
 The response, chunked and headers targets are checked against a second
 reading of the grammar (#239). `fuzz/http_grammar.h` writes RFC 9110's

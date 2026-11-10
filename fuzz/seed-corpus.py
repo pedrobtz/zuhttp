@@ -8,7 +8,7 @@ import shutil
 import zlib
 
 TARGETS = ("response", "chunked", "headers", "uri", "redirect", "inflate",
-           "proxy", "redact", "body", "h2", "pull")
+           "proxy", "redact", "body", "h2", "pull", "pool")
 
 README = """\
 Curated fuzz seeds (design §43, §50.3).
@@ -358,6 +358,104 @@ def main():
     w("pull/abort-mid-bytewise", bytes([3, 12]) + b"hello, world" + op(0, 2) + op(2) +
       op(1, 3) + op(0, 3) + op(3))
     w("pull/empty", bytes([0, 0]) + op(0, 8) + op(3) + op(2) + op(0, 8))
+    # #248: byte 0 bit 3 pools the connection, bit 4 is HTTP/2 (bits 0-1 then
+    # the DATA frame size: 1, 7, 64, 1000; bit 2 16-byte transport reads, so
+    # the stream is still on the wire when it is cut), bits 5-6 a failure (1
+    # the connection ends, 2 a reset, 3 a silent peer: a timeout); with a
+    # failure, the byte after the length is where it cuts. After the body a
+    # second request on the pool must get the whole payload.
+    POOL, H2, EOF_, RESET, SILENT = 0x08, 0x10, 0x20, 0x40, 0x60
+
+    def pl(n):
+        return bytes((i * 7 + 3) % 256 for i in range(n))
+
+    def pull(opts, n, ops, cut=None):
+        return bytes([opts, n]) + (bytes([cut]) if cut is not None else b"") + pl(n) + ops
+    w("pull/h2-read-all", pull(H2 | 1, 12, op(0, 3) * 6 + op(3)))
+    w("pull/h2-pooled-read-all", pull(H2 | POOL | 1, 40, op(0, 9) * 6 + op(3)))
+    w("pull/h2-pooled-peek", pull(H2 | POOL | 0, 30, op(1, 4) * 8 + op(0, 64) + op(3)))
+    # A clean cancel keeps the connection, and the next request reuses it.
+    w("pull/regress-h2-abort-pools", pull(H2 | POOL | 4 | 1, 200, op(0, 10) + op(2) +
+      op(0, 4) + op(3)))
+    w("pull/h2-abort-after-end", pull(H2 | POOL | 2, 200, op(0, 10) + op(2) + op(0, 4) + op(3)))
+    w("pull/regress-h2-eof-mid-body", pull(H2 | POOL | EOF_ | 4 | 1, 100, op(0, 64) * 8 + op(3),
+      40))
+    w("pull/regress-h2-reset-mid-body", pull(H2 | POOL | RESET | 0, 60, op(0, 16) * 6 + op(3), 10))
+    w("pull/regress-h2-timeout", pull(H2 | POOL | SILENT | 4 | 1, 80, op(0, 20) * 8 + op(3), 30))
+    w("pull/regress-h2-abort-before-reset", pull(H2 | POOL | RESET | 4 | 1, 90,
+      op(0, 5) + op(2) + op(0, 5) + op(3), 50))
+    w("pull/regress-h1-pooled-end", pull(POOL | 0, 12, op(0, 5) * 4 + op(3)))
+    w("pull/regress-h1-pooled-chunked", pull(POOL | 1, 23, op(0, 4) * 8 + op(3)))
+    w("pull/regress-h1-pooled-abort-bytewise", pull(POOL | 3, 50, op(0, 1) + op(2) + op(0, 3) +
+      op(3)))
+    w("pull/regress-h1-eof-mid-body", pull(POOL | EOF_ | 0, 50, op(0, 8) * 8 + op(3), 20))
+    w("pull/regress-h1-reset-chunked", pull(POOL | RESET | 1, 41, op(0, 6) * 9 + op(3), 13))
+    w("pull/regress-h1-timeout", pull(POOL | SILENT | 4, 60, op(1, 9) * 4 + op(0, 30) * 6 +
+      op(3), 25))
+    w("pull/regress-h1-close-eof-is-end", pull(POOL | EOF_ | 2, 30, op(0, 7) * 6 + op(3), 12))
+    w("pull/regress-h1-timeout-unpooled", pull(SILENT | 0, 20, op(0, 3) * 4 + op(2) + op(0, 1),
+      5))
+
+    # --- pool (#247): the connection pool against its model ----------------
+    # byte 0: max_idle (bits 0-2) and max_per_host (bits 3-4, 0 = no limit);
+    # byte 1: idle_timeout in 100 ms units (0 = never); then one byte per
+    # operation, (arg << 3) | op: 0 acquire key arg % 6 (host arg % 3), 1
+    # release clean, 2 release after a partial read (arg bit 0: unread bytes
+    # waiting, else body_incomplete), 3 release with error reason arg % 6, 4
+    # the server closes idle connection arg, 5 advance arg * 25 ms, 6 fork,
+    # 7 arg % 4: clear, check_fork, nothing, free and make a new pool.
+    def po(kind, a=0):
+        return bytes([(a << 3) | kind])
+    ACQ, REL, PART, ERR, SRVCLOSE, CLOCK, FORK, MISC = range(8)
+
+    def cfg(max_idle, per_host, timeout_units):
+        return bytes([max_idle | (per_host << 3), timeout_units])
+    w("pool/reuse-clean", cfg(4, 2, 3) + po(ACQ, 0) + po(REL) + po(ACQ, 0) + po(REL) +
+      po(ACQ, 1) + po(REL) + po(ACQ, 0) + po(ACQ, 1))
+    # One mechanism each. max_per_host 1: two connections for a.test under
+    # two keys (TLS 1.2 and 1.3 minimums), so the cap is by host, not key.
+    w("pool/regress-per-host-cap", cfg(7, 1, 0) + po(ACQ, 0) + po(ACQ, 0) + po(ACQ, 3) +
+      po(REL) + po(REL) + po(REL) + po(ACQ, 0) + po(ACQ, 3))
+    w("pool/regress-max-idle", cfg(2, 0, 0) + po(ACQ, 0) + po(ACQ, 1) + po(ACQ, 2) +
+      po(REL) + po(REL) + po(REL) + po(ACQ, 0) + po(ACQ, 1) + po(ACQ, 2))
+    w("pool/regress-max-idle-zero", cfg(0, 0, 0) + po(ACQ, 0) + po(REL) + po(ACQ, 0))
+    # idle_timeout 100 ms, straddled: 75 ms is reused, 100 ms is expired.
+    w("pool/regress-expiry-under", cfg(4, 0, 1) + po(ACQ, 0) + po(REL) + po(CLOCK, 3) +
+      po(ACQ, 0))
+    w("pool/regress-expiry-at", cfg(4, 0, 1) + po(ACQ, 0) + po(REL) + po(CLOCK, 3) +
+      po(CLOCK, 1) + po(ACQ, 0))
+    w("pool/regress-no-expiry", cfg(4, 0, 0) + po(ACQ, 0) + po(REL) + po(CLOCK, 31) * 8 +
+      po(ACQ, 0))
+    w("pool/regress-stale-idle", cfg(4, 0, 0) + po(ACQ, 0) + po(REL) + po(SRVCLOSE, 0) +
+      po(ACQ, 0))
+    # Two idle for one key, the newer one stale: it goes, the older is used.
+    w("pool/regress-stale-then-good", cfg(4, 0, 0) + po(ACQ, 0) + po(ACQ, 0) + po(REL) +
+      po(REL) + po(SRVCLOSE, 0) + po(ACQ, 0) + po(ACQ, 0))
+    w("pool/regress-acquire-newest", cfg(4, 0, 0) + po(ACQ, 0) + po(ACQ, 0) + po(REL, 0) +
+      po(REL, 0) + po(ACQ, 0) + po(ACQ, 0) + po(ACQ, 0))
+    w("pool/regress-partial-read", cfg(4, 0, 0) + po(ACQ, 0) + po(PART, 0) + po(ACQ, 0))
+    w("pool/regress-unread-bytes", cfg(4, 0, 0) + po(ACQ, 0) + po(PART, 1) + po(ACQ, 0))
+    w("pool/regress-error-reasons", cfg(7, 0, 0) + po(ACQ, 0) * 6 +
+      b"".join(po(ERR, a) for a in range(6)) + po(ACQ, 0))
+    w("pool/regress-key-not-host", cfg(4, 0, 0) + po(ACQ, 0) + po(REL) + po(ACQ, 3) +
+      po(ACQ, 0))
+    # §26.4: idle connections dropped without a close, in-flight ones the
+    # child's to drop, and nothing from before the fork reused after it.
+    w("pool/regress-fork", cfg(4, 0, 0) + po(ACQ, 0) + po(ACQ, 1) + po(REL) + po(REL) +
+      po(FORK) + po(ACQ, 0) + po(REL) + po(ACQ, 0))
+    w("pool/regress-fork-in-flight", cfg(4, 0, 0) + po(ACQ, 0) + po(ACQ, 0) + po(REL) +
+      po(FORK) + po(ACQ, 0) + po(REL))
+    w("pool/regress-fork-check", cfg(4, 0, 0) + po(ACQ, 0) + po(REL) + po(FORK) +
+      po(MISC, 1) + po(MISC, 1) + po(ACQ, 0))
+    w("pool/regress-fork-free", cfg(4, 0, 0) + po(ACQ, 0) + po(REL) + po(FORK) +
+      po(MISC, 3) + po(ACQ, 0) + po(REL))
+    # #265: zuh_pool_clear() in a child closed the parent's connections.
+    w("pool/regress-265-fork-clear", cfg(4, 0, 0) + po(ACQ, 0) + po(REL) + po(FORK) +
+      po(MISC, 0) + po(ACQ, 0))
+    w("pool/regress-fork-end", cfg(4, 0, 0) + po(ACQ, 0) + po(ACQ, 2) + po(REL) + po(REL) +
+      po(FORK))
+    w("pool/clear-and-free", cfg(6, 3, 2) + po(ACQ, 0) + po(ACQ, 1) + po(REL) + po(REL) +
+      po(MISC, 0) + po(ACQ, 0) + po(REL) + po(MISC, 3) + po(ACQ, 0))
 
     with open(os.path.join("corpus", "README"), "w") as f:
         f.write(README)

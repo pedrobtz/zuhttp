@@ -91,12 +91,16 @@ static int b64_val(char c) {
 static unsigned char *b64_decode(const char *src, size_t n, size_t *out_len) {
     unsigned char *out = (unsigned char *)malloc(n / 4 * 3 + 3);
     size_t i, len = 0;
-    int acc = 0, bits = 0;
+    /* Unsigned and masked to the bits still pending (at most 7, plus the 6
+     * just added): an int shifted on without a mask overflowed after five
+     * characters, which is undefined behaviour (#278). */
+    unsigned acc = 0;
+    int bits = 0;
     if (!out) return NULL;
     for (i = 0; i < n; i++) {
         int v = b64_val(src[i]);
         if (v < 0) continue;
-        acc = (acc << 6) | v;
+        acc = ((acc << 6) | (unsigned)v) & 0x3FFFu;
         bits += 6;
         if (bits >= 8) {
             bits -= 8;

@@ -1,4 +1,5 @@
-/* The engine over the OpenSSL backend against tls_eof/server.py (D-86).
+/* The engine over a TLS backend against tls_eof/server.py (D-86): OpenSSL,
+ * and for the fork case Network.framework too (#249).
  *
  *   drive noclose  URL CA   one request; the close-delimited body arrives whole
  *   drive together URL CA   two requests on one pooled client; the second must
@@ -11,6 +12,12 @@
  *                           body "ok": for the server that renegotiates
  *                           mid-response (#215, run under ASan) and for a
  *                           certificate that names only an IP address (#216)
+ *   drive fork URL CA       #249: a pulled body open on one connection and a
+ *                           second connection idle in the pool, then fork();
+ *                           the child must not read the body, and frees both
+ *                           without a byte reaching the server; the parent
+ *                           then reads its body whole and reuses both
+ *                           connections (fork.sh reads the server's log)
  *
  * Exits 0 when the engine behaved, 1 otherwise, saying which. */
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
@@ -21,6 +28,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
+#include <sys/wait.h>
 
 static int stale(const char *url, const char *ca, const char *other) {
     zuh_get_opts o;
@@ -53,6 +62,130 @@ static int stale(const char *url, const char *ca, const char *other) {
     return bad;
 }
 
+/* Read a pulled body to its end. */
+static zuh_code read_all(zuh_open_body *b, zuh_buffer *got, zuh_error *e) {
+    for (;;) {
+        size_t before = got->len;
+        zuh_code rc = zuh_open_body_read(b, got, 7000, e);
+        if (rc != ZUH_OK || got->len == before) return rc;
+    }
+}
+
+static int forkcase(const char *url, const char *ca) {
+    char big[512];
+    zuh_get_opts o;
+    zuh_result ra, rb, r1, r2;
+    zuh_buffer got;
+    zuh_error e;
+    zuh_code rc;
+    zuh_pool_stats st;
+    pid_t kid;
+    int bad = 0, status = -1;
+    size_t i;
+    zuh_pool *pool = zuh_pool_new(NULL);
+    snprintf(big, sizeof big, "%sbig", url);
+    zuh_get_opts_init(&o);
+    o.proxy_set = 1; o.timeout_ms = 10000; o.pool = pool; o.ca_file = ca;
+    zuh_buf_init(&got, 0, (size_t)-1);
+
+    /* Connection 1 checked out into a pulled body, part-read; connection 2
+     * idle in the pool. */
+    o.stream_body = 1;
+    rc = zuh_engine_perform(&ra, big, NULL, &o, &e);
+    if (rc != ZUH_OK || !ra.open) { printf("FAIL fork: /big: %s\n", e.message); return 1; }
+    if (zuh_open_body_read(ra.open, &got, 1000, &e) != ZUH_OK || got.len == 0) {
+        printf("FAIL fork: the first read of /big: %s\n", e.message);
+        return 1;
+    }
+    o.stream_body = 0;
+    rc = zuh_engine_perform(&rb, url, NULL, &o, &e);
+    if (rc != ZUH_OK) { printf("FAIL fork: request 2: %s\n", e.message); return 1; }
+    zuh_result_free(&rb);
+    if (zuh_pool_idle_count(pool) != 1) { printf("FAIL fork: nothing pooled\n"); return 1; }
+
+    fflush(stdout);
+    kid = fork();
+    if (kid == 0) {
+        /* The child reports the first check that failed in its status. */
+        zuh_buffer cgot;
+        zuh_pool_stats cst;
+        int step = 0;
+        zuh_buf_init(&cgot, 0, (size_t)-1);
+        if (zuh_open_body_read(ra.open, &cgot, 1000, &e) != ZUH_ERR_FORK || cgot.len) step = 1;
+        else if (zuh_open_body_read(ra.open, &cgot, 1000, &e) != ZUH_ERR_FORK) step = 2;
+        else {
+            zuh_open_body_abort(ra.open);                /* a no-op in a child */
+            if (zuh_pool_check_fork(pool) != 1) step = 3;
+            else {
+                zuh_pool_stats_get(pool, &cst);
+                if (zuh_pool_idle_count(pool) != 0 || cst.discarded_fork != 1) step = 4;
+            }
+        }
+        /* The finalizers' path: the body and the pool freed in the child. */
+        zuh_result_free(&ra);
+        zuh_pool_free(pool);
+        zuh_buf_free(&cgot);
+        zuh_buf_free(&got);
+        _exit(step);
+    }
+    if (kid < 0 || waitpid(kid, &status, 0) != kid || !WIFEXITED(status) ||
+        WEXITSTATUS(status) != 0) {
+        printf("FAIL fork: the child failed at step %d\n",
+               WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+        bad = 1;
+    }
+    {   /* time for anything the child sent to reach the server and be acted on */
+        struct timespec ts = { 0, 300000000L };
+        nanosleep(&ts, NULL);
+    }
+
+    /* The parent's body is intact: every byte, in order, none consumed by
+     * the child. */
+    rc = read_all(ra.open, &got, &e);
+    if (rc != ZUH_OK) { printf("FAIL fork: reading /big after the fork: %s\n", e.message); bad = 1; }
+    if (got.len != 200000) {
+        printf("FAIL fork: /big is %lu bytes, not 200000\n", (unsigned long)got.len);
+        bad = 1;
+    }
+    for (i = 0; i < got.len && i < 200000; i++)
+        if (got.data[i] != (unsigned char)(i % 251)) {
+            printf("FAIL fork: /big differs at byte %lu\n", (unsigned long)i);
+            bad = 1;
+            break;
+        }
+    zuh_result_free(&ra);
+    zuh_buf_free(&got);
+
+    /* Both connections are still the parent's: two requests at once take
+     * one each, and neither is a new connection. */
+    o.stream_body = 1;
+    rc = zuh_engine_perform(&r1, url, NULL, &o, &e);
+    if (rc != ZUH_OK) { printf("FAIL fork: request 4: %s\n", e.message); zuh_pool_free(pool); return 1; }
+    rc = zuh_engine_perform(&r2, url, NULL, &o, &e);
+    if (rc != ZUH_OK) { printf("FAIL fork: request 5: %s\n", e.message); bad = 1; }
+    else {
+        if (!r1.reused_connection || !r2.reused_connection) {
+            printf("FAIL fork: a connection the child inherited was not reusable (%d, %d)\n",
+                   r1.reused_connection, r2.reused_connection);
+            bad = 1;
+        }
+        zuh_buf_init(&got, 0, (size_t)-1);
+        if (read_all(r2.open, &got, &e) != ZUH_OK || got.len != 2) bad = 1;
+        zuh_buf_free(&got);
+        zuh_result_free(&r2);
+    }
+    zuh_buf_init(&got, 0, (size_t)-1);
+    if (read_all(r1.open, &got, &e) != ZUH_OK || got.len != 2) bad = 1;
+    zuh_buf_free(&got);
+    zuh_result_free(&r1);
+    zuh_pool_stats_get(pool, &st);
+    printf("fork: child exit %d, hits %lu, misses %lu\n", WIFEXITED(status) ? WEXITSTATUS(status) : -1,
+           (unsigned long)st.hits, (unsigned long)st.misses);
+    if (st.hits != 2 || st.misses != 2) { printf("FAIL fork: expected 2 hits and 2 misses\n"); bad = 1; }
+    zuh_pool_free(pool);
+    return bad;
+}
+
 static int one(const char *url, const char *ca) {
     zuh_get_opts o;
     zuh_result r;
@@ -81,7 +214,8 @@ int main(int argc, char **argv) {
     zuh_pool *pool = NULL;
     if (argc == 5 && strcmp(argv[1], "stale") == 0) return stale(argv[2], argv[3], argv[4]);
     if (argc == 4 && strcmp(argv[1], "one") == 0) return one(argv[2], argv[3]);
-    if (argc != 4) { fprintf(stderr, "usage: drive noclose|together|one URL CA | stale URL CA OTHER\n"); return 2; }
+    if (argc == 4 && strcmp(argv[1], "fork") == 0) return forkcase(argv[2], argv[3]);
+    if (argc != 4) { fprintf(stderr, "usage: drive noclose|together|one|fork URL CA | stale URL CA OTHER\n"); return 2; }
     together = strcmp(argv[1], "together") == 0;
     zuh_get_opts_init(&o);
     o.ca_file = argv[3]; o.proxy_set = 1; o.timeout_ms = 10000;
