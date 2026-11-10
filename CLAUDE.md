@@ -142,8 +142,10 @@ tools/          update-uriparser, update-picohttpparser, update-nghttp2,
                 check-objects-sync, check-vendor-licenses, check-code-lines,
                 ci-fork-guard.R, ci-masking.R, ci-run-tests.R, vendor/
 .github/        R-CMD-check, native-checks and assurance (pedrobtz/r-actions),
-                c-core, fuzz, network (the network and per-backend jobs),
-                vendor, conventions, coverage, coverage-union, pkgdown
+                c-core, fuzz, network (the Linux network and per-backend jobs),
+                platforms (every macOS and Windows check, one job per OS:
+                tools/ci/platform.sh), vendor, conventions, coverage,
+                coverage-union, pkgdown
 ```
 
 `configure` / `configure.win` pick the TLS backend and substitute

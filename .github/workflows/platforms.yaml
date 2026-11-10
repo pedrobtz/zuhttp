@@ -1,0 +1,32 @@
+# zuhttp's per-OS checks, one job per OS (.claude/shared/ci.md, "A package's
+# own workflows"). tools/ci/platform.sh holds them: the C core, the TLS and
+# 63.2 slices on OpenSSL and Network.framework, the R network slice and fork
+# guard on macOS; the C core, the S1 header probes and the S8 Schannel slice
+# on Windows. Until 2026-11-10 they were eight macOS jobs and four Windows
+# jobs in c-core, network and fuzz.yaml, and four open pull requests queued
+# behind each other for macOS runners. Linux keeps its jobs in those files.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 4 * * 1"    # the full profile: corpus replays on macOS and Windows
+
+name: platforms.yaml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  platforms:
+    uses: pedrobtz/r-actions/.github/workflows/platforms.yml@v1.35.0
+    with:
+      profile: auto
+      r-dependencies: true
+      python-version: "3.12"
+      timeout-minutes: 60

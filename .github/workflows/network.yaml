@@ -96,77 +96,6 @@ jobs:
           fi
 
   # ---------------------------------------------------------------
-  # S1 — Windows: does the Rtools mingw-w64 SDK expose SCH_CREDENTIALS?
-  #      This is the gate that cannot be answered on a Mac.
-  # ---------------------------------------------------------------
-  windows-s1:
-    runs-on: windows-latest
-    name: S1 Windows (Rtools Schannel headers)
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v6
-
-      # Gives us Rtools, i.e. the *exact* toolchain R uses to build packages.
-      - uses: r-lib/actions/setup-r@v2
-        with:
-          r-version: release
-
-      - name: Toolchain identity
-        working-directory: spike/windows-schannel
-        run: |
-          echo "R CC     : $(R CMD config CC)"
-          echo "R CFLAGS : $(R CMD config CFLAGS)"
-          $(R CMD config CC) --version | head -2
-
-      - name: Probe A — macro-level report (always compiles)
-        working-directory: spike/windows-schannel
-        run: |
-          CC=$(R CMD config CC)
-          $CC -O1 -o probe.exe probe.c -lsecur32 -lcrypt32 -lws2_32
-          ./probe.exe
-
-      - name: Probe B — does SCH_CREDENTIALS exist at the default target?
-        working-directory: spike/windows-schannel
-        run: |
-          CC=$(R CMD config CC)
-          if $CC -fsyntax-only probe_struct.c 2> struct_err.txt; then
-            echo "SCH_CREDENTIALS: PRESENT at the toolchain's default _WIN32_WINNT."
-          else
-            echo "SCH_CREDENTIALS: MISSING at the toolchain's default _WIN32_WINNT."
-            echo "--- compiler output (first 5 lines) ---"
-            head -5 struct_err.txt
-          fi
-
-      # mingw-w64 gates the TLS 1.3 Schannel declarations behind
-      # _WIN32_WINNT >= 0x0A00. Rtools defaults to 0x0601 (Windows 7), so
-      # "missing" may mean "not requested" rather than "not shipped".
-      # This is the probe that actually decides R-3.
-      - name: Probe C — retry with _WIN32_WINNT=0x0A00  (gate for R-3)
-        working-directory: spike/windows-schannel
-        run: |
-          CC=$(R CMD config CC)
-          echo "Retrying with -D_WIN32_WINNT=0x0A00 -DNTDDI_VERSION=0x0A000000"
-          if $CC -fsyntax-only -D_WIN32_WINNT=0x0A00 -DNTDDI_VERSION=0x0A000000 \
-                 probe_struct.c 2> struct_err_win10.txt; then
-            echo
-            echo "SCH_CREDENTIALS: PRESENT once the target is raised to Windows 10."
-            echo "::notice::S1 verdict: Rtools DOES ship the TLS 1.3 Schannel declarations; they are gated behind _WIN32_WINNT>=0x0A00. Fix is a compile flag, not local struct declarations. R-3 downgraded."
-            $CC -O1 -D_WIN32_WINNT=0x0A00 -DNTDDI_VERSION=0x0A000000 \
-                -o probe_win10.exe probe.c -lsecur32 -lcrypt32 -lws2_32
-            echo
-            echo "--- full report at _WIN32_WINNT=0x0A00 ---"
-            ./probe_win10.exe
-          else
-            echo
-            echo "SCH_CREDENTIALS: STILL MISSING even at _WIN32_WINNT=0x0A00."
-            echo "--- compiler output ---"
-            cat struct_err_win10.txt
-            echo "::warning::S1 verdict: Rtools genuinely lacks SCH_CREDENTIALS. zuhttp must declare it locally (design 47.4) or ship Windows TLS 1.2-only. R-3 confirmed."
-          fi
-
-  # ---------------------------------------------------------------
   # S7 — the OpenSSL engine against real endpoints.
   #      Network-dependent by nature, which is why it lives here and not in
   #      c-core.yaml: that suite must stay deterministic and offline.
@@ -177,7 +106,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]   # macOS: platforms.yaml
     steps:
       - uses: actions/checkout@v6
 
@@ -259,7 +188,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]   # macOS: platforms.yaml
     steps:
       - uses: actions/checkout@v6
       - name: Run the suite with the DNS assertions enabled
@@ -278,7 +207,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]   # macOS: platforms.yaml
     steps:
       - uses: actions/checkout@v6
 
@@ -367,7 +296,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]   # macOS: platforms.yaml
     steps:
       - uses: actions/checkout@v6
       - name: Install OpenSSL
@@ -409,220 +338,3 @@ jobs:
           # #215: the renegotiation case is a memory error, visible only
           # under ASan; the same script, against an instrumented driver.
           make tls-eof-asan
-
-      # #249: the fork case of the script above (tls_eof/fork.sh) on the
-      # macOS system stack, plain and under ASan + UBSan. tls-eof already ran
-      # it on OpenSSL; Network.framework is the other backend a fork can
-      # reach, and this leg has the openssl CLI the certificate needs.
-      - name: Network.framework fork drop (#249)
-        if: runner.os == 'macOS'
-        timeout-minutes: 10
-        working-directory: ctest
-        run: |
-          export OPENSSL="$(brew --prefix openssl@3)/bin/openssl"
-          make tls-fork-nw
-          make tls-fork-nw-asan
-
-  # The macOS system stack: Network.framework engine + SecTrust trust (D-63,
-  # W13). Needs no OpenSSL at all, which is the point (§2). The slice covers
-  # the dialled path (D-71): HTTPS through a real CONNECT proxy, cancellation
-  # in connect and handshake, TLS 1.3.
-  slice-network-framework:
-    runs-on: macos-latest
-    name: S9 macOS system TLS (Network.framework + SecTrust)
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Build and run the slice on the system stack
-        timeout-minutes: 10
-        working-directory: ctest
-        run: make engine-nw
-
-      - name: The same slice under ASan + UBSan (#231)
-        timeout-minutes: 10
-        working-directory: ctest
-        run: make engine-nw-asan
-
-      # macOS 11-13 have no Network.framework API for HTTP CONNECT. The
-      # refusal they get is built in by forcing the availability check off,
-      # since no runner is that old.
-      - name: The same slice as macOS < 14 sees it (proxied HTTPS refused)
-        timeout-minutes: 10
-        working-directory: ctest
-        run: |
-          rm -f zuh_engtest_nw
-          make engine-nw NW_FLAGS=-DZUH_NW_ASSUME_NO_PROXY_API=1
-
-      # D-32 / R-12: HTTPS after fork() must raise a named condition, never
-      # take the worker down. S0 measured the unmitigated case as SIGSEGV, so
-      # this is a regression test against a crash and must run on macOS.
-      - uses: r-lib/actions/setup-r@v2
-        with:
-          r-version: release
-
-      - uses: r-lib/actions/setup-r-dependencies@v2
-        with:
-          extra-packages: any::testthat
-
-      # The assertions live in tests/testthat/test-fork.R, not inline here.
-      # Two reasons: this repo requires every CI R check to run FROM A FILE
-      # (an `Rscript -e` with a multi-line argument dies on Windows before it
-      # executes anything, which cost five rounds in S8), and a check that
-      # only exists in a workflow is invisible to anyone running the suite
-      # locally. The file skips itself unless it is on macOS, on the Secure
-      # Transport backend, and online — so it is inert everywhere else.
-      - name: Install and check the fork guard (R-12)
-        timeout-minutes: 10
-        env:
-          NOT_CRAN: "true"
-          ZU_TEST_NETWORK: "1"
-        run: |
-          R CMD INSTALL .
-          Rscript tools/ci-fork-guard.R
-
-  # S8 — Windows on Schannel. This is the only place it can be built or run:
-  # there is no Windows machine in the loop, so CI is the compiler.
-  slice-schannel:
-    runs-on: windows-latest
-    name: S8 Windows system TLS (Schannel)
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: r-lib/actions/setup-r@v2
-        with:
-          r-version: release
-
-      # Compile the backend on its own first. A syntax or type error here is
-      # far easier to read than the same error inside R CMD INSTALL.
-      - name: Compile the Schannel backend standalone
-        timeout-minutes: 5
-        run: |
-          CC=$(R CMD config CC)
-          echo "compiler: $CC"
-          $CC --version | head -1
-          $CC -std=c99 -Wall -Wextra -c -Isrc -Isrc/vendor/picohttpparser \
-              -o /tmp/sch.o src/zuh_tls_schannel.c
-
-      # Run the slice in C BEFORE involving R. The previous attempt segfaulted
-      # inside Rscript, which reports exit 139 and nothing else; a crash here
-      # names the binary and the step, and the suite prints each case as it
-      # goes so the last line before a crash identifies it.
-      - name: Run the slice in C on Schannel
-        timeout-minutes: 10
-        working-directory: ctest
-        env:
-          ZU_TEST_TRACE: "1"
-        run: make engine-sch CC="$(R CMD config CC)"
-
-      # #286: the peer-initiated TLS events OpenSSL gets from tls_eof's
-      # scripted servers (a close without close_notify, a close_notify behind
-      # the body, a renegotiation) and the IP-literal rows (#216, #246), over
-      # Schannel. The fixture CA goes into the runner's machine Root store,
-      # since Schannel has no ca_file; the script removes it.
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - name: Scripted TLS servers on Schannel
-        timeout-minutes: 10
-        working-directory: ctest
-        run: make tls-eof-sch CC="$(R CMD config CC)"
-
-      # Added while diagnosing, kept because it earns its place: the package is
-      # built at -O2 -std=gnu2x while ctest uses -O1 -std=c99, and a backend
-      # that only works at one of those is a backend with undefined behaviour
-      # in it.
-      - name: Run the slice in C with R's compiler flags
-        timeout-minutes: 10
-        working-directory: ctest
-        env:
-          ZU_TEST_TRACE: "1"
-        run: |
-          make clean
-          make engine-sch CC="$(R CMD config CC)" \
-               BASE="-std=gnu2x -O2 -Wall -mfpmath=sse -msse2 -mstackrealign -I../src -I../src/vendor/picohttpparser -I../src/vendor/uriparser -I."
-          echo "exit=$?"
-
-      # D-88: zujson is zuhttp's one Import. This job installs nothing else on
-      # purpose, so the dependency comes from CRAN here rather than through
-      # setup-r-dependencies.
-      - name: Install
-        timeout-minutes: 10
-        run: |
-          Rscript -e 'install.packages("zujson", repos = "https://cloud.r-project.org")'
-          R CMD INSTALL .
-
-      # Split into one step per operation. The previous attempt segfaulted with
-      # ZERO output — even a stderr write before library() never appeared — so
-      # progress printing inside one Rscript cannot be trusted here. Step
-      # boundaries are reported by the runner itself and cannot be lost.
-      - name: R1 load the package
-        timeout-minutes: 3
-        run: Rscript --vanilla -e 'library(zuhttp); cat("loaded\n")'
-
-      - name: R2 backend identity
-        timeout-minutes: 3
-        run: Rscript --vanilla -e 'library(zuhttp); cat("backend:", zu_tls_backend(), "\n"); stopifnot(identical(zu_tls_backend(), "schannel"))'
-
-      # Every R check below runs from a FILE, never from a multi-line
-      # `Rscript -e`. On this runner a -e argument containing newlines
-      # segfaults before any of the script executes, which is why three
-      # earlier steps "crashed" with no output while the identical code on one
-      # line succeeded four times in a row. That was an artefact of how I
-      # wrote the step, not a defect in the package.
-      - name: R3 the slice from R, run from a file
-        timeout-minutes: 10
-        run: |
-          cat > check.R <<'RS'
-          library(zuhttp)
-          stopifnot(identical(zu_tls_backend(), "schannel"))
-
-          r <- zu_get("https://example.com")
-          cat("status", zu_resp_status(r), "tls", r$tls_version,
-              "bytes", length(zu_resp_raw(r)), "\n")
-          stopifnot(zu_resp_status(r) == 200L)
-          stopifnot(grepl("Example Domain", zu_resp_text(r), fixed = TRUE))
-          stopifnot(identical(r$tls_version, "TLSv1.2"))
-
-          # §65.1, W20: Schannel offers h2 by ALPN, and http2 = "off" does not.
-          h <- zu_get("https://httpbingo.org/get")
-          cat("h2 ->", zu_resp_connection(h)$http_version, "\n")
-          stopifnot(identical(zu_resp_connection(h)$http_version, "HTTP/2"))
-          h1 <- zu_get("https://httpbingo.org/get", client = zu_client(http2 = "off"))
-          stopifnot(identical(zu_resp_connection(h1)$http_version, "HTTP/1.1"))
-
-          # The whole point of D-5: Windows has trust anchors again. badssl.com
-          # refuses runners at times (#63, #283): three attempts, then a check
-          # whose host never answered is skipped and says so. A verdict, right
-          # or wrong, still decides; the rule is tests/testthat/helper-net.R's.
-          unreachable <- function(e) {
-            inherits(e, c("zu_timeout_error", "zu_io_error")) ||
-              (inherits(e, "zu_connect_error") && !is.null(e$backend_code))
-          }
-          badssl <- function(url) {
-            for (attempt in 1:3) {
-              e <- tryCatch(zu_get(url), error = function(e) e)
-              if (!(inherits(e, "error") && unreachable(e))) return(e)
-              Sys.sleep(c(1, 3, 0)[attempt])
-            }
-            cat("SKIP", url, ": badssl.com unreachable after 3 attempts (#63):",
-                conditionMessage(e), "\n")
-            NULL
-          }
-          e <- badssl("https://expired.badssl.com/")
-          if (!is.null(e)) {
-            cat("expired ->", class(e)[1], "|", conditionMessage(e), "\n")
-            stopifnot(inherits(e, "zu_tls_certificate_error"))
-          }
-          e2 <- badssl("https://wrong.host.badssl.com/")
-          if (!is.null(e2)) {
-            cat("wrong host ->", class(e2)[1], "\n")
-            stopifnot(inherits(e2, "zu_tls_hostname_error"))
-          }
-
-          cat("S8: Windows HTTPS works, and bad certificates are rejected\n")
-          RS
-          Rscript --vanilla check.R
-

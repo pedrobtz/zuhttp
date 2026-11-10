@@ -17,6 +17,8 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "23 5 * * 1"    # the full profile: the macOS leg
 
 name: coverage-union.yaml
 
@@ -27,13 +29,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    uses: pedrobtz/r-actions/.github/workflows/changes.yml@v1.35.0
+    with:
+      name: coverage-union
+      profile: auto
+
+  # Linux on every push; macOS, whose leg sat 41 minutes for a runner on
+  # 2026-11-10, at the full profile only (.claude/shared/ci.md): weekly,
+  # on dispatch and under full-ci.
   coverage:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ${{ matrix.os }}
     name: coverage (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: ${{ fromJSON(needs.changes.outputs.profile == 'full' && '["ubuntu-latest", "macos-latest"]' || '["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@v6
 
