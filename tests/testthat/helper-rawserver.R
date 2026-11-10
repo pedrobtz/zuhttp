@@ -74,7 +74,9 @@ crlf <- function(...) paste0(paste(c(...), collapse = "\r\n"))
 # Connection i is answered with responses[[i]], cycling when there are
 # fewer responses than connections, and closed after the response. A body
 # is read by its Content-Length, or as chunked to the end of the trailers,
-# and an `Expect: 100-continue` is answered with a 100 first. `code`
+# and an `Expect: 100-continue` is answered with a 100 first. Anything that
+# arrives within about 0.1 s after the framed end is recorded too, so a
+# client that sends more than it declared is seen doing it. `code`
 # receives a list: `url`, the server's base URL, and `seen()`, the requests
 # recorded so far, each a raw vector of exactly the bytes that arrived. A
 # request is recorded before its response is written, so once a client has
@@ -104,10 +106,21 @@ with_raw_server_seq <- function(responses, code) {
       "  f <- file.path(d, sprintf('resp-%d.bin', i)); readBin(f, 'raw', file.size(f))",
       "})",
       "crlf <- charToRaw('\\r\\n')",
+      # Non-blocking, polled: a read that finds nothing yet returns raw(0),
+      # so each read waits up to 10 s for its bytes, and drain() below can
+      # ask what else arrived without blocking.
+      "read_some <- function(con, k) {",
+      "  deadline <- Sys.time() + 10",
+      "  repeat {",
+      "    b <- readBin(con, 'raw', k)",
+      "    if (length(b) || Sys.time() > deadline) return(b)",
+      "    Sys.sleep(0.002)",
+      "  }",
+      "}",
       "read_line <- function(con) {",
       "  buf <- raw()",
       "  repeat {",
-      "    b <- readBin(con, 'raw', 1L)",
+      "    b <- read_some(con, 1L)",
       "    if (length(b) == 0L) break",
       "    buf <- c(buf, b); m <- length(buf)",
       "    if (m >= 2L && identical(buf[(m - 1L):m], crlf)) break",
@@ -117,9 +130,20 @@ with_raw_server_seq <- function(responses, code) {
       "read_n <- function(con, k) {",
       "  out <- raw()",
       "  while (length(out) < k) {",
-      "    b <- readBin(con, 'raw', k - length(out))",
+      "    b <- read_some(con, k - length(out))",
       "    if (length(b) == 0L) break",
       "    out <- c(out, b)",
+      "  }",
+      "  out",
+      "}",
+      # Whatever the client sent past the framed end of its request. It
+      # should be nothing: a body sent twice (#208) shows up here, where a
+      # server that stops at Content-Length would never see it.
+      "drain <- function(con) {",
+      "  out <- raw(); quiet <- 0L",
+      "  while (quiet < 50L) {",
+      "    b <- readBin(con, 'raw', 65536L)",
+      "    if (length(b)) { out <- c(out, b); quiet <- 0L } else { quiet <- quiet + 1L; Sys.sleep(0.002) }",
       "  }",
       "  out",
       "}",
@@ -128,7 +152,7 @@ with_raw_server_seq <- function(responses, code) {
       "i <- 0L",
       "repeat {",
       "  con <- tryCatch(",
-      "    socketAccept(srv, blocking = TRUE, open = 'r+b', timeout = 60),",
+      "    socketAccept(srv, blocking = FALSE, open = 'r+b', timeout = 60),",
       "    error = function(e) NULL",
       "  )",
       "  if (is.null(con)) break",
@@ -162,8 +186,9 @@ with_raw_server_seq <- function(responses, code) {
       "  } else if (length(cl) == 1L && !is.na(as.numeric(cl))) {",
       "    body <- read_n(con, as.numeric(cl))",
       "  }",
+      "  extra <- drain(con)",
       "  tmp <- file.path(d, sprintf('seen-%d.tmp', i))",
-      "  writeBin(c(head, body), tmp)",
+      "  writeBin(c(head, body, extra), tmp)",
       "  file.rename(tmp, file.path(d, sprintf('seen-%d.bin', i)))",
       "  try(writeBin(resp[[(i - 1L) %% n + 1L]], con), silent = TRUE)",
       "  try(flush(con), silent = TRUE)",
