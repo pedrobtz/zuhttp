@@ -1280,3 +1280,17 @@ changed the plan or the design.
     not propagated. CLAUDE.md now carries the rules these imply.
   - Also found while tidying: `fuzz/corpus/body 2` and `chunked 2`, empty
     Finder duplicates from 2026-09-08, untracked; removed.
+
+- **2026-11-10 — a model of the connection pool (#247) finds #265.**
+  `fuzz/fuzz_pool.c` runs fuzzed sequences of pool operations against a
+  reference model written from §26. On the curated seeds, before any mutation,
+  it found that `zuh_pool_clear()` skipped the fork guard that acquire,
+  release and free run, so `zu_pool_clear()` in an `mclapply()` worker
+  closed the parent's connections gracefully and left the guard to trip on
+  the next acquire with nothing to drop. No shipped backend turns that close
+  into bytes on the wire (OpenSSL's `SSL_shutdown` goes to an unflushed
+  memory BIO, Network.framework checks the PID), so it was a broken contract
+  rather than a corrupted session. Four rules were broken by hand, one at a
+  time, to show the target is not vacuous: the per-host cap skipped, a
+  `body_incomplete` release pooled, the fork drop made graceful, and the
+  idle timeout compared with `>`. Each aborts on its own `regress-*` seed.

@@ -56,8 +56,9 @@ make -C ctest tls-eof-asan    # the same under ASan: a renegotiating server (#21
 make -C ctest engine-asan      # engine-nw-asan, tls-asan: the live binaries under
                               #   ASan + UBSan (#231); CI runs all four
 
-# Fuzzing — 12 targets (engine and h2 are the whole request path; pull is the
-# streamed-body API as a state machine), each built two ways
+# Fuzzing — 14 targets (engine and h2 are the whole request path; pull is the
+# streamed-body API as a state machine; pool is the connection pool against a
+# model), each built two ways
 make -C fuzz replay-run       # corpus replay, needs no clang; a regression suite
 make -C fuzz replay-asan      # the same corpus under ASan + UBSan
 make -C fuzz fuzz-run         # libFuzzer, needs clang

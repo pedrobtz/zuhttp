@@ -1239,6 +1239,81 @@ static void cases_w21(void) {
         ZUH_CHECK_EQ_INT(rc, ZUH_OK);
         if (rc == ZUH_OK) { ZUH_CHECK_EQ_INT(r.reused_connection, 0); zuh_result_free(&r); }
         ZUH_CHECK_EQ_INT(dd.dials, 2);
+        {   /* and it is counted where zu_pool_stats() reports it (#261) */
+            zuh_pool_stats st;
+            zuh_pool_stats_get(pool, &st);
+            ZUH_CHECK_EQ_INT(st.discarded_stale, 1);
+        }
+        zuh_pool_free(pool);
+        dialer_free(&dd);
+    }
+
+    /* The keepalive conditions the 2026-11-10 mutation run (#261) found
+     * unasserted: off means off, a zero timeout means the default, and the
+     * timeout, not the request's whole budget, bounds the wait. */
+    ZUH_CASE("§65.6: keepalive_time 0 is off: no PING however long the connection idled");
+    {
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.body = "k"; c.body_len = 1;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd);
+        pool = zuh_pool_new(NULL); o.pool = pool;
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/1", NULL, &o, &e);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        spin_ms(5);
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/2", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) { ZUH_CHECK_EQ_INT(r.reused_connection, 1); zuh_result_free(&r); }
+        ZUH_CHECK_EQ_INT(dd.conns[0].pings, 0);
+        zuh_pool_free(pool);
+        dialer_free(&dd);
+    }
+
+    ZUH_CASE("§65.6: keepalive_timeout 0 waits the default for the ACK, not zero");
+    {
+        zuh_pool_config pc;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.body = "k"; c.body_len = 1;
+        zuh_pool_config_init(&pc); pc.keepalive_time_ms = 1; pc.keepalive_timeout_ms = 0;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd);
+        pool = zuh_pool_new(&pc); o.pool = pool;
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/1", NULL, &o, &e);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        spin_ms(5);
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/2", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) { ZUH_CHECK_EQ_INT(r.reused_connection, 1); zuh_result_free(&r); }
+        ZUH_CHECK_EQ_INT(dd.conns[0].pings, 1);
+        ZUH_CHECK_EQ_INT(dd.dials, 1);
+        zuh_pool_free(pool);
+        dialer_free(&dd);
+    }
+
+    ZUH_CASE("§65.6: a silent peer costs keepalive_timeout, not the request's timeout");
+    {
+        zuh_pool_config pc;
+        zuh_millis t0;
+        long took;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.body = "k"; c.body_len = 1; c.stall_after_first = 1; c.block_on_empty = 1;
+        zuh_pool_config_init(&pc); pc.keepalive_time_ms = 1; pc.keepalive_timeout_ms = 50;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); o.timeout_ms = 3000;
+        pool = zuh_pool_new(&pc); o.pool = pool;
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/1", NULL, &o, &e);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        spin_ms(5);
+        zuh_error_clear(&e);
+        t0 = zuh_now_ms();
+        rc = zuh_engine_perform(&r, "http://example.test/2", NULL, &o, &e);
+        took = (long)(zuh_now_ms() - t0);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) { ZUH_CHECK_EQ_INT(r.reused_connection, 0); zuh_result_free(&r); }
+        ZUH_CHECK(took >= 50);           /* it did wait for the ACK */
+        ZUH_CHECK(took < 1500);          /* and no longer than keepalive_timeout */
         zuh_pool_free(pool);
         dialer_free(&dd);
     }

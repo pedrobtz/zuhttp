@@ -29,7 +29,7 @@ import shutil
 import sys
 
 TARGETS = ("response", "chunked", "headers", "uri", "redirect", "inflate",
-           "proxy", "redact", "body", "engine", "h2", "pull")
+           "proxy", "redact", "body", "engine", "h2", "pull", "pool")
 
 INTERESTING = bytes([0x00, 0x01, 0x7f, 0x80, 0xff, 0x0d, 0x0a, 0x20, 0x09,
                      0x3a, 0x3b, 0x2c, 0x3d, 0x25, 0x2f, 0x3f, 0x23, 0x40,

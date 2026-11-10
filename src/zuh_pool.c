@@ -179,6 +179,10 @@ static void entry_destroy(pool_entry *e, int graceful) {
 void zuh_pool_clear(zuh_pool *p) {
     pool_entry *e, *next;
     if (!p) return;
+    /* §26.4 applies to every operation in a child, and zu_pool_clear() is
+     * one an mclapply() worker can call: without this it closed the parent's
+     * connections gracefully (#265, found by fuzz/fuzz_pool.c). */
+    zuh_pool_check_fork(p);
     for (e = p->head; e; e = next) { next = e->next; entry_destroy(e, 1); }
     p->head = NULL;
     p->idle = 0;

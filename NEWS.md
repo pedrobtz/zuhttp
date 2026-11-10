@@ -52,7 +52,8 @@ bundles neither cryptography nor a CA bundle. One R dependency, its sibling
 * Response bodies to memory, to a file (`path =`), or to a callback
   (`callback =`), the last two without holding the body in memory.
 * Connection pooling with keep-alive, and a PID guard that drops connections
-  inherited across `fork()`.
+  inherited across `fork()`, without closing them, on every pool operation
+  in the child, `zu_pool_clear()` included (#265).
 * Redirects with method rewriting and cross-origin credential stripping
   (up to 10 by default; a longer chain raises `zu_too_many_redirects`);
   transparent gzip and deflate under explicit limits: 16 MiB of decoded body,

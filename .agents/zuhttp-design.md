@@ -1161,7 +1161,7 @@ closed exactly once, which the mock stream counts (review #187).
 Two hazards, one mechanism (`zu_fork.{h,c}`):
 
 1. **Inherited connections.** Every pool records its creator's PID and checks
-   it on every acquire, release and free. On mismatch, inherited connections
+   it on every acquire, release, clear and free (#265). On mismatch, inherited connections
    are dropped without a TLS shutdown (which would write into the parent's
    session) and the pool is re-initialised. A connection checked out into a
    streamed response (§65.4) is not in any pool, so the open body records its
@@ -1699,7 +1699,7 @@ without a canary arm is a defect.
 
 ### 43. Fuzzing
 
-**Status:** Partial — twelve targets, corpus replay on three OSes in CI; the
+**Status:** Partial — fourteen targets, corpus replay on three OSes in CI; the
 24 h soak per target (§61.8) is W17.
 
 Targets: response parser, chunked decoder, headers, URI, redirect, proxy
@@ -1710,7 +1710,11 @@ first 10-minute soak, clean). W9 adds the DER walker as the eleventh, and W20
 the HTTP/2 session fed hostile frame input through the D-72 seam as the
 twelfth (§65.8), and the pulled body's API, a fuzzed sequence of reads,
 peeks, aborts and done checks against a model, as the thirteenth (§65.4,
-#229). Each harness builds against libFuzzer and against a plain
+#229); the fourteenth is the connection pool, a fuzzed sequence of acquires,
+releases for every §26.3 reason, a server closing an idle connection, an
+injected clock, clears and forks against a reference model of §26 (#247).
+The harness stands in for `zuh_fork.c`, so a fork is a change of process id
+it controls. Each harness builds against libFuzzer and against a plain
 replay driver, so the corpus is a regression suite everywhere, Windows
 included.
 Only curated seeds are committed.
@@ -1720,8 +1724,13 @@ limit or a readable aborted stream crash nothing; the review of 2026-11-09
 found 16 such bugs in code every target reached. So the targets that can
 carry an oracle on their results do: the body path compares whole and
 one-byte reads and three framings of one payload (#227), the engine checks
-that every request it wrote is framed by its Content-Length (#228), and the
-pull target checks every result against its model (#229).
+that every request it wrote is framed by its Content-Length (#228), the
+pull target checks every result against its model (#229), and the pool
+target checks which connection every acquire returns, every counter
+`zu_pool_stats()` reports, both caps, and how often each connection was
+closed and freed: once each when the pool discards it, never closed when a
+fork drops it (#247). Its first run found #265, a clear in a forked child
+that closed the parent's connections.
 
 ### 44. Static Analysis
 
