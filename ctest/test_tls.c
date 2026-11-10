@@ -68,6 +68,22 @@ static zuh_code dial(const char *host, const zuh_tls_config *cfg,
     return rc;
 }
 
+/* badssl.com is a third-party host. When all three attempts fail to reach it
+ * (a connect error, a reset, a timeout), the case is skipped and counted,
+ * not failed: what these cases test is the TLS verdict, and an unreachable
+ * host says nothing about it. A verdict, right or wrong, is still checked.
+ * On 2026-11-10 badssl.com refused GitHub's macOS and Windows runners all
+ * day. #63 replaces these cases with local fixtures. */
+static int badssl_skipped = 0;
+static int badssl_unreachable(zuh_code rc, const zuh_error *err) {
+    if (rc != ZUH_ERR_IO && rc != ZUH_ERR_CONNECT && rc != ZUH_ERR_TIMEOUT) return 0;
+    printf("  SKIP %s\n       badssl.com unreachable after 3 attempts (#63): %s\n",
+           zuh_test_current, err->message);
+    fflush(stdout);
+    badssl_skipped++;
+    return 1;
+}
+
 int main(void) {
     zuh_tls_config cfg;
     zuh_error e;
@@ -115,28 +131,32 @@ int main(void) {
     ZUH_CASE("§14.6: an expired certificate is rejected as zu_tls_certificate_error");
     zuh_tls_config_init(&cfg);
     if (dial("expired.badssl.com", &cfg, &s, NULL, &e) != ZUH_OK) {
-        ZUH_CHECK_EQ_INT(e.code, ZUH_ERR_TLS_CERT);
+        if (!badssl_unreachable(e.code, &e))
+            ZUH_CHECK_EQ_INT(e.code, ZUH_ERR_TLS_CERT);
         printf("       %s\n", e.message);
     } else { ZUH_CHECK(0); zuh_tls_stream_free(s); s = NULL; }
 
     ZUH_CASE("§14.6: a hostname mismatch is zu_tls_hostname_error, distinctly");
     zuh_tls_config_init(&cfg);
     if (dial("wrong.host.badssl.com", &cfg, &s, NULL, &e) != ZUH_OK) {
-        ZUH_CHECK_EQ_INT(e.code, ZUH_ERR_TLS_HOSTNAME);
+        if (!badssl_unreachable(e.code, &e))
+            ZUH_CHECK_EQ_INT(e.code, ZUH_ERR_TLS_HOSTNAME);
         printf("       %s\n", e.message);
     } else { ZUH_CHECK(0); zuh_tls_stream_free(s); s = NULL; }
 
     ZUH_CASE("§14.6: an untrusted root is zu_tls_certificate_error");
     zuh_tls_config_init(&cfg);
     if (dial("untrusted-root.badssl.com", &cfg, &s, NULL, &e) != ZUH_OK) {
-        ZUH_CHECK_EQ_INT(e.code, ZUH_ERR_TLS_CERT);
+        if (!badssl_unreachable(e.code, &e))
+            ZUH_CHECK_EQ_INT(e.code, ZUH_ERR_TLS_CERT);
         printf("       %s\n", e.message);
     } else { ZUH_CHECK(0); zuh_tls_stream_free(s); s = NULL; }
 
     ZUH_CASE("§14.6: a self-signed certificate is rejected");
     zuh_tls_config_init(&cfg);
     if (dial("self-signed.badssl.com", &cfg, &s, NULL, &e) != ZUH_OK) {
-        ZUH_CHECK_EQ_INT(e.code, ZUH_ERR_TLS_CERT);
+        if (!badssl_unreachable(e.code, &e))
+            ZUH_CHECK_EQ_INT(e.code, ZUH_ERR_TLS_CERT);
     } else { ZUH_CHECK(0); zuh_tls_stream_free(s); s = NULL; }
 
     ZUH_CASE("§14.4: a wrong pin is refused even though the chain is valid");
@@ -163,7 +183,8 @@ int main(void) {
         cfg.pins = pins;
         cfg.n_pins = 1;
         if (dial("untrusted-root.badssl.com", &cfg, &s, NULL, &e) != ZUH_OK) {
-            ZUH_CHECK_EQ_INT(e.code, ZUH_ERR_TLS_CERT);
+            if (!badssl_unreachable(e.code, &e))
+                ZUH_CHECK_EQ_INT(e.code, ZUH_ERR_TLS_CERT);
             printf("       %s\n", e.message);
         } else { ZUH_CHECK(0); zuh_tls_stream_free(s); s = NULL; }
     }
@@ -182,6 +203,8 @@ int main(void) {
     ZUH_CHECK_EQ_INT(st.live_blocks, 0);
 
     printf("\n%d checks, %d failures\n", zuh_test_checks, zuh_test_fails);
+    if (badssl_skipped)
+        printf("%d case(s) skipped: badssl.com unreachable (#63)\n", badssl_skipped);
     printf("allocations: %lu made, %lu freed, %lu live\n",
            (unsigned long)st.total_allocs, (unsigned long)st.total_frees,
            (unsigned long)st.live_blocks);

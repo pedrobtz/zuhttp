@@ -188,6 +188,22 @@ static void pause_ms(unsigned ms) {
 #endif
 }
 
+/* badssl.com is a third-party host. When all three attempts fail to reach it
+ * (a connect error, a reset, a timeout), the case is skipped and counted,
+ * not failed: what these cases test is the TLS verdict, and an unreachable
+ * host says nothing about it. A verdict, right or wrong, is still checked.
+ * On 2026-11-10 badssl.com refused GitHub's macOS and Windows runners all
+ * day. #63 replaces these cases with local fixtures. */
+static int badssl_skipped = 0;
+static int badssl_unreachable(zuh_code rc, const zuh_error *err) {
+    if (rc != ZUH_ERR_IO && rc != ZUH_ERR_CONNECT && rc != ZUH_ERR_TIMEOUT) return 0;
+    printf("  SKIP %s\n       badssl.com unreachable after 3 attempts (#63): %s\n",
+           zuh_test_current, err->message);
+    fflush(stdout);
+    badssl_skipped++;
+    return 1;
+}
+
 static zuh_code get_retrying(zuh_result *r, const char *url, const zuh_get_opts *o,
                              zuh_error *e) {
     static const unsigned waits_ms[2] = { 1000u, 3000u };
@@ -306,13 +322,15 @@ int main(void) {
 
     ZUH_CASE("certificate verification is on by default");
     rc = get_retrying(&r, "https://expired.badssl.com/", &o, &e);
-    ZUH_CHECK_EQ_INT(rc, ZUH_ERR_TLS_CERT);
+    if (!badssl_unreachable(rc, &e))
+        ZUH_CHECK_EQ_INT(rc, ZUH_ERR_TLS_CERT);
     printf("  -> %s: %s\n", zuh_code_class(rc), e.message);
     if (rc == ZUH_OK) zuh_result_free(&r);
 
     ZUH_CASE("a hostname mismatch is distinct from a bad chain");
     rc = get_retrying(&r, "https://wrong.host.badssl.com/", &o, &e);
-    ZUH_CHECK_EQ_INT(rc, ZUH_ERR_TLS_HOSTNAME);
+    if (!badssl_unreachable(rc, &e))
+        ZUH_CHECK_EQ_INT(rc, ZUH_ERR_TLS_HOSTNAME);
     if (rc == ZUH_OK) zuh_result_free(&r);
 
     ZUH_CASE("a bad URL is refused before any connection");
@@ -511,5 +529,7 @@ int main(void) {
     }
 
     printf("\n%d checks, %d failures\n", zuh_test_checks, zuh_test_fails);
+    if (badssl_skipped)
+        printf("%d case(s) skipped: badssl.com unreachable (#63)\n", badssl_skipped);
     return zuh_test_fails ? 1 : 0;
 }

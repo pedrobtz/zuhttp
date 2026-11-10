@@ -167,6 +167,12 @@ skip_under_gctorture <- function() {
 # retried, twice; anything else -- a response, a TLS verdict -- is returned on
 # the first attempt, so a flaky network can neither fail a test nor make one
 # pass. The same rule as ctest's get_retrying() and dial().
+#
+# When all three attempts fail to reach the host, the test is skipped, not
+# failed: what these tests check is the verdict, and an unreachable
+# third-party host says nothing about it. On 2026-11-10 badssl.com refused
+# GitHub's macOS and Windows runners all day and held every pull request
+# red. #63 replaces these tests with local fixtures.
 zu_get_badssl <- function(...) {
   transient <- c("zu_connect_error", "zu_io_error", "zu_timeout_error")
   for (attempt in 1:3) {
@@ -174,8 +180,14 @@ zu_get_badssl <- function(...) {
     if (!inherits(r, "error")) {
       return(r)
     }
-    if (!inherits(r, transient) || attempt == 3L) {
+    if (!inherits(r, transient)) {
       stop(r)
+    }
+    if (attempt == 3L) {
+      testthat::skip(paste0(
+        "badssl.com unreachable after 3 attempts (#63): ",
+        conditionMessage(r)
+      ))
     }
     # Back to back, the retries met the same reset in the same millisecond.
     Sys.sleep(c(1, 3)[attempt])
