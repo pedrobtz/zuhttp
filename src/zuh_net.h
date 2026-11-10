@@ -64,4 +64,11 @@ void zuh_net_stream_free(zuh_stream *s);
 /* Peer address of a connected stream, for §35.2 remote_ip. */
 int zuh_net_peer_ip(const zuh_stream *s, char *out, size_t cap);
 
+/* How many of the dialling request's pointers the connection still holds:
+ * its trace and its timings, both read only while connecting. 0 once
+ * zuh_net_connect() has returned, since a pooled connection outlives the
+ * request that dialled it (#251). The tick context is the caller's to keep
+ * alive or NULL: init.c passes NULL for exactly this reason. */
+int zuh_net_borrowed(const zuh_stream *s);
+
 #endif /* ZUHTTP_NET_H */

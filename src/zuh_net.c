@@ -333,6 +333,10 @@ zuh_code zuh_net_connect(zuh_stream **out, const char *host, uint16_t port,
         return last;
     }
 
+    /* The trace and timings are the dialling request's, read only above. A
+     * pooled connection outlives that request, so it keeps neither (#251). */
+    m->opts.trace = NULL;
+    m->opts.timings = NULL;
     st->vt = &k_net_vt;
     st->impl = m;
     *out = st;
@@ -352,4 +356,11 @@ int zuh_net_peer_ip(const zuh_stream *s, char *out, size_t cap) {
     strncpy(out, m->peer, cap - 1);
     out[cap - 1] = '\0';
     return m->peer[0] != '\0';
+}
+
+int zuh_net_borrowed(const zuh_stream *s) {
+    const net_impl *m;
+    if (!s || !s->impl || s->vt != &k_net_vt) return 0;
+    m = (const net_impl *)s->impl;
+    return (m->opts.trace != NULL) + (m->opts.timings != NULL);
 }

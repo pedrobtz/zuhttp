@@ -2193,6 +2193,52 @@ static void cases_review(void) {
         dialer_free(&dd);
     }
 
+    /* #251: the request body is the caller's and the connection is pooled
+     * past it. After the stream closes the connection holds no pointer into
+     * the request; the body is on the heap and freed before the next
+     * request, so a later read of it is a heap-use-after-free under asan. */
+    ZUH_CASE("#251: a closed stream leaves no pointer into its request");
+    {
+        zuh_stream *t = NULL, *h2s = NULL;
+        zuh_headers hh;
+        zuh_h2_request rq;
+        int st = 0, bodiless = 0;
+        char *body = (char *)malloc(5);
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.status = 204;
+        ZUH_CHECK(body != NULL);
+        memcpy(body, "hello", 5);
+        dialer_init(&dd, &c);
+        zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(lb_dial(&dd, "example.test", 80, &t, &e), ZUH_OK);
+        ZUH_CHECK_EQ_INT(zuh_h2_wrap(&h2s, t, 0, &e), ZUH_OK);
+        zuh_headers_init(&hh);
+        memset(&rq, 0, sizeof rq);
+        rq.method = "POST"; rq.scheme = "http"; rq.authority = "example.test"; rq.path = "/a";
+        rq.headers = &hh; rq.body = body; rq.body_len = 5;
+        rc = zuh_h2_begin(h2s, &rq, &st, &hh, &bodiless, zuh_deadline_in(1000), &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        ZUH_CHECK_EQ_INT(st, 204);
+        ZUH_CHECK_EQ_INT(bodiless, 1);
+        ZUH_CHECK_EQ_INT(dd.conns[0].body_len, 5);
+        ZUH_CHECK_EQ_INT(zuh_h2_borrowed(h2s), 0);
+        free(body);
+        ZUH_CHECK(zuh_h2_reusable(h2s));
+        zuh_headers_free(&hh);
+        zuh_headers_init(&hh);
+        memset(&rq, 0, sizeof rq);
+        rq.method = "GET"; rq.scheme = "http"; rq.authority = "example.test"; rq.path = "/b";
+        rq.headers = &hh;
+        zuh_error_clear(&e);
+        rc = zuh_h2_begin(h2s, &rq, &st, &hh, &bodiless, zuh_deadline_in(1000), &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        ZUH_CHECK_EQ_INT(dd.conns[0].requests, 2);
+        ZUH_CHECK_EQ_INT(zuh_h2_borrowed(h2s), 0);
+        zuh_headers_free(&hh);
+        zuh_stream_free(h2s);
+        dialer_free(&dd);
+    }
+
     /* #147: the idle probe answers from what arrived on the connection. */
     stale_probe_case("§65.2: an idle connection the server sent GOAWAY on is stale (#147)",
                      poke_goaway, 2);
