@@ -47,10 +47,6 @@ zuh_code zuh_redirect_decide(const zuh_redirect_policy *p, int status,
                            const zuh_uri *to, size_t hops_so_far,
                            zuh_redirect_decision *out, zuh_error *err);
 
-/* Apply §19.2 to a header set: remove every credential-bearing field.
- * Returns how many were removed. "Credential-bearing" is §42.1's list of
- * secret headers plus whatever `p` adds (NULL: the defaults). */
-size_t zuh_redirect_strip_credentials(zuh_headers *h, const zuh_redact_policy *p);
 
 /* Nonzero if `name` is one of the headers §19.2 strips on a cross-origin
  * redirect. The engine rebuilds each hop's headers from the caller's list,

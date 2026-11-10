@@ -1,6 +1,6 @@
 #!/bin/sh
 # Regenerates tests/testthat/fixtures/tls/, the §50.5 certificate matrix:
-# two CAs and five leaves, committed with this script as their provenance
+# two CAs and eight leaves, committed with this script as their provenance
 # (review #193; the matrix used to be generated at test time, and skipped
 # itself whenever the openssl CLI changed). Run from the package root:
 #
@@ -29,13 +29,16 @@ ca() {   # name cn
 ca ca zuhttp-test-CA
 ca rogueca zuhttp-rogue-CA
 
+# A SAN is a DNS name unless it is given with its type, as IP:127.0.0.1 or
+# DNS:127.0.0.1 are for the #246 rows; the CN is the name without the type.
 ext() {  # name san
-  printf 'subjectAltName=DNS:%s\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n' "$2" > "$1.ext"
+  case $2 in *:*) san=$2 ;; *) san=DNS:$2 ;; esac
+  printf 'subjectAltName=%s\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n' "$san" > "$1.ext"
 }
 csr() {  # name san
   ext "$1" "$2"
   openssl req -newkey rsa:2048 -keyout "$1.key" -out "$1.csr" -nodes \
-    -subj "/CN=$2" 2>/dev/null
+    -subj "/CN=${2#*:}" 2>/dev/null
 }
 leaf() { # name san signer
   csr "$1" "$2"
@@ -72,6 +75,12 @@ CNF
 leaf good localhost ca
 leaf wronghost other.test ca
 leaf untrusted localhost rogueca
+# #246: an IP literal matches iPAddress SANs only. `ip` is the control that
+# 127.0.0.1 verifies at all; the other two must be refused as a name
+# mismatch, one naming another address, one naming 127.0.0.1 as a DNS name.
+leaf ip IP:127.0.0.1 ca
+leaf ipother IP:127.0.0.2 ca
+leaf ipdns DNS:127.0.0.1 ca
 dated expired 20240101000000Z 20240201000000Z
 dated notyet  20400101000000Z 20400201000000Z
 

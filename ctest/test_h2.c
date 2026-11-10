@@ -28,6 +28,8 @@ void suite_h2(void);
 static void cases_w21(void);
 static void cases_w22(void);
 static void cases_review(void);
+static void cases_peer(void);
+static void cases_mutants(void);
 
 /* --- what the server does -------------------------------------------------- */
 
@@ -36,7 +38,7 @@ typedef struct {
     const char *hname[4], *hvalue[4];
     const void *body;
     size_t      body_len;
-    int         informational;   /* send a 103 before the response */
+    int         informational;   /* send a 103 before the response; >1: that status */
     int         rst_code;        /* reset the stream instead of answering */
     int         goaway_after;    /* GOAWAY once the response is out */
     int         eof_mid_body;    /* stop the connection half-way through DATA */
@@ -85,6 +87,7 @@ typedef struct {
     size_t written;              /* bytes the client wrote on this connection */
     int reads, wouldblocks;      /* client reads, and how many blocked first */
     int closes;                  /* zuh_stream_close() on this connection (#249) */
+    int readable_fail;           /* readable() reports an error (#270) */
 } srv;
 
 typedef struct {
@@ -233,7 +236,9 @@ static void respond(srv *v, int32_t sid) {
         return;
     }
     if (c->informational) {
-        nghttp2_nv info = { (uint8_t *)":status", (uint8_t *)"103", 7, 3, 0 };
+        static char ist[16];
+        nghttp2_nv info = { (uint8_t *)":status", (uint8_t *)ist, 7, 3, 0 };
+        snprintf(ist, sizeof ist, "%d", c->informational > 1 ? c->informational : 103);
         nghttp2_submit_headers(v->srv, NGHTTP2_FLAG_NONE, sid, NULL, &info, 1, NULL);
     }
     snprintf(st, sizeof st, "%d", c->status ? c->status : 200);
@@ -299,7 +304,7 @@ static zuh_ssize lb_read(zuh_stream *st, void *b, size_t n, zuh_deadline d, zuh_
         return -1;
     }
     if (have == 0) {
-        if (v->eof || v->cfg->raw) return 0;
+        if (v->eof || (v->cfg->raw && !v->cfg->block_on_empty)) return 0;
         if (v->cfg->block_on_empty) {
             /* A peer that is silently gone: the read lasts until the
              * deadline, as a socket's would. */
@@ -340,6 +345,7 @@ static void lb_destroy(zuh_stream *st) { zuh_free(st); }
 static int lb_readable(zuh_stream *st, int ms) {
     srv *v = (srv *)st->impl;
     (void)ms;
+    if (v->readable_fail) return -1;
     return (v->out_len > v->out_off || v->eof) ? 1 : 0;
 }
 static const zuh_stream_vtable k_lb_vt = {
@@ -1280,6 +1286,8 @@ void suite_h2(void) {
     cases_w22();
     cases_review();
     cases_limits();
+    cases_peer();
+    cases_mutants();
 }
 
 
@@ -2427,6 +2435,571 @@ static void cases_review(void) {
         }
         ZUH_CHECK_EQ_INT(zuh_pool_idle_count(pool), 0);
         zuh_pool_free(pool);
+        dialer_free(&dd);
+    }
+}
+
+
+/* --- #264: a scripted HTTP/2 peer that misbehaves mid-body ---------------- */
+
+/* The in-process nghttp2 server above is well behaved, which is what makes
+ * it an oracle for the client's frames and useless for the server's faults.
+ * Here the peer is exact bytes (srv_cfg.raw): a server preface, a response
+ * head, some DATA, then one fault. Each case asserts the §65.2 class, what
+ * the caller was handed before the error, and that a session the client
+ * gave up on is not pooled (§26.3). correctness.md: peer-initiated
+ * behaviour comes from a scripted counterpart.
+ *
+ * What a pulled read hands over before the error depends on how the bytes
+ * were split into reads: one read can carry the DATA and the fault, and
+ * the driver fails the body without delivering what it held. So a pulled
+ * body is asserted to be a prefix of the DATA the peer sent, never more and
+ * never other bytes, the rule fuzz_body uses (#227); a buffered body that
+ * failed delivers nothing at all.
+ *
+ * Not here: DATA past the advertised window. The client grants window back
+ * as the caller takes bytes (§65.4), so a peer that ignores its
+ * WINDOW_UPDATEs is still inside the credit the client gave; overrunning it
+ * needs a peer that reads them, and the nghttp2 server above never sends
+ * past its window. A PING flood is not one either: the client's writes
+ * always drain here, and nghttp2's flood guard is on unsent replies. */
+
+typedef struct { unsigned char *b; size_t n, cap; } h2_script;
+
+static void sc_bytes(h2_script *s, const void *p, size_t n) {
+    if (s->n + n > s->cap) {
+        s->cap = (s->n + n) * 2 + 256;
+        s->b = (unsigned char *)realloc(s->b, s->cap);
+    }
+    if (n) memcpy(s->b + s->n, p, n);
+    s->n += n;
+}
+static void sc_frame(h2_script *s, uint8_t type, uint8_t flags, uint32_t sid,
+                     const void *pl, size_t len) {
+    unsigned char h[9];
+    h[0] = (unsigned char)(len >> 16); h[1] = (unsigned char)(len >> 8);
+    h[2] = (unsigned char)len; h[3] = type; h[4] = flags;
+    h[5] = (unsigned char)((sid >> 24) & 0x7f); h[6] = (unsigned char)(sid >> 16);
+    h[7] = (unsigned char)(sid >> 8); h[8] = (unsigned char)sid;
+    sc_bytes(s, h, 9);
+    sc_bytes(s, pl, len);
+}
+static void be32(unsigned char *p, uint32_t v) {
+    p[0] = (unsigned char)(v >> 24); p[1] = (unsigned char)(v >> 16);
+    p[2] = (unsigned char)(v >> 8); p[3] = (unsigned char)v;
+}
+static void sc_setting(h2_script *s, uint16_t id, uint32_t v) {
+    unsigned char p[6];
+    p[0] = (unsigned char)(id >> 8); p[1] = (unsigned char)id;
+    be32(p + 2, v);
+    sc_frame(s, NGHTTP2_SETTINGS, 0, 0, p, 6);
+}
+/* An empty SETTINGS and the ACK of the client's. */
+static void sc_preface(h2_script *s) {
+    sc_frame(s, NGHTTP2_SETTINGS, 0, 0, NULL, 0);
+    sc_frame(s, NGHTTP2_SETTINGS, NGHTTP2_FLAG_ACK, 0, NULL, 0);
+}
+/* :status 200 (static index 8), and content-length as a literal with the
+ * static name 28 when `clen` is given: RFC 7541 §6.1, §6.2.2, no Huffman. */
+static void sc_head(h2_script *s, uint32_t sid, uint8_t flags, const char *clen) {
+    unsigned char blk[64];
+    size_t n = 0;
+    blk[n++] = 0x88;
+    if (clen) {
+        size_t k = strlen(clen);
+        blk[n++] = 0x0f; blk[n++] = 0x0d; blk[n++] = (unsigned char)k;
+        memcpy(blk + n, clen, k); n += k;
+    }
+    sc_frame(s, NGHTTP2_HEADERS, (uint8_t)(flags | NGHTTP2_FLAG_END_HEADERS), sid, blk, n);
+}
+static void sc_data(h2_script *s, uint32_t sid, uint8_t flags, const char *d, size_t n) {
+    sc_frame(s, NGHTTP2_DATA, flags, sid, d, n);
+}
+static void sc_u32(h2_script *s, uint8_t type, uint32_t sid, uint32_t v) {
+    unsigned char p[4];
+    be32(p, v);
+    sc_frame(s, type, 0, sid, p, 4);
+}
+static void sc_goaway(h2_script *s, uint32_t last, uint32_t code) {
+    unsigned char p[8];
+    be32(p, last); be32(p + 4, code);
+    sc_frame(s, NGHTTP2_GOAWAY, 0, 0, p, 8);
+}
+
+typedef struct {
+    const zuh_req_spec *spec;   /* NULL: a GET */
+    int    pulled;              /* zu_perform(stream = TRUE), read in `piece`s */
+    size_t piece;
+    int    block;               /* once the script is out, silent, not gone */
+    long   timeout_ms;
+} peer_how;
+
+typedef struct {
+    zuh_code rc;          /* perform's code, or the first failing read's */
+    int      perform_ok;  /* perform itself returned the head */
+    zuh_buffer got;       /* every body byte the caller was handed */
+    size_t   idle;        /* connections the pool holds afterwards */
+    zuh_error e;
+} peer_out;
+
+static void peer_run(const h2_script *s, const peer_how *how, peer_out *po) {
+    srv_dialer dd;
+    zuh_get_opts o;
+    zuh_result r;
+    zuh_pool *pool = zuh_pool_new(NULL);
+    srv_cfg c;
+    memset(&c, 0, sizeof c);
+    memset(po, 0, sizeof *po);
+    c.raw = s->b; c.raw_len = s->n; c.block_on_empty = how->block;
+    zuh_buf_init(&po->got, 0, (size_t)-1);
+    dialer_init(&dd, &c); h2c_opts(&o, &dd);
+    o.pool = pool; o.stream_body = how->pulled;
+    if (how->timeout_ms) o.timeout_ms = how->timeout_ms;
+    zuh_error_clear(&po->e);
+    po->rc = zuh_engine_perform(&r, "http://example.test/", how->spec, &o, &po->e);
+    po->perform_ok = po->rc == ZUH_OK;
+    if (po->rc == ZUH_OK) {
+        if (how->pulled) {
+            while ((po->rc = zuh_open_body_read(r.open, &po->got, how->piece, &po->e)) == ZUH_OK &&
+                   !zuh_open_body_done(r.open)) { }
+        } else {
+            zuh_buf_append(&po->got, r.body.data, r.body.len);
+        }
+        zuh_result_free(&r);
+    }
+    po->idle = zuh_pool_idle_count(pool);
+    zuh_pool_free(pool);
+    dialer_free(&dd);
+}
+
+static int got_is(const peer_out *po, const char *want) {
+    size_t n = strlen(want);
+    return po->got.len == n && (n == 0 || memcmp(po->got.data, want, n) == 0);
+}
+static int got_prefix_of(const peer_out *po, const char *sent) {
+    return po->got.len <= strlen(sent) &&
+           (po->got.len == 0 || memcmp(po->got.data, sent, po->got.len) == 0);
+}
+/* What a failed body may have handed the caller: nothing when buffered, a
+ * prefix of what was sent when pulled. */
+static int delivered_ok(const peer_out *po, int pulled, const char *sent) {
+    return pulled ? got_prefix_of(po, sent) : got_is(po, "");
+}
+
+static void cases_peer(void) {
+    peer_out po;
+    peer_how how;
+    int pulled;
+
+    /* The control: the same framing, well formed, succeeds with the body.
+     * Every fault below is this script with one thing changed. */
+    ZUH_CASE("#264: the scripted peer's well-formed response is accepted");
+    for (pulled = 0; pulled <= 1; pulled++) {
+        h2_script s = { 0, 0, 0 };
+        sc_preface(&s); sc_head(&s, 1, 0, "10");
+        sc_data(&s, 1, 0, "hello", 5); sc_data(&s, 1, NGHTTP2_FLAG_END_STREAM, "world", 5);
+        memset(&how, 0, sizeof how); how.pulled = pulled; how.piece = 3;
+        peer_run(&s, &how, &po);
+        ZUH_CHECK_EQ_INT(po.rc, ZUH_OK);
+        ZUH_CHECK(got_is(&po, "helloworld"));
+        zuh_buf_free(&po.got); free(s.b);
+    }
+
+    /* RST_STREAM(INTERNAL_ERROR) after half the body: zu_io_error carrying
+     * the HTTP/2 code, never a short success. */
+    ZUH_CASE("#264: RST_STREAM mid-body is zu_io_error with its code, never a short body");
+    for (pulled = 0; pulled <= 1; pulled++) {
+        h2_script s = { 0, 0, 0 };
+        sc_preface(&s); sc_head(&s, 1, 0, NULL);
+        sc_data(&s, 1, 0, "hello", 5);
+        sc_u32(&s, NGHTTP2_RST_STREAM, 1, NGHTTP2_INTERNAL_ERROR);
+        memset(&how, 0, sizeof how); how.pulled = pulled; how.piece = 3;
+        peer_run(&s, &how, &po);
+        ZUH_CHECK_EQ_INT(po.rc, ZUH_ERR_IO);
+        ZUH_CHECK_EQ_INT(po.e.backend_code, NGHTTP2_INTERNAL_ERROR);
+        ZUH_CHECK(delivered_ok(&po, pulled, "hello"));
+        zuh_buf_free(&po.got); free(s.b);
+    }
+
+    /* GOAWAY(INTERNAL_ERROR) naming stream 1 as processed, after half the
+     * body, then the connection ends: zu_io_error, never pooled. */
+    ZUH_CASE("#264: GOAWAY mid-body is zu_io_error, never a short body, and pools nothing");
+    for (pulled = 0; pulled <= 1; pulled++) {
+        h2_script s = { 0, 0, 0 };
+        sc_preface(&s); sc_head(&s, 1, 0, NULL);
+        sc_data(&s, 1, 0, "hello", 5);
+        sc_goaway(&s, 1, NGHTTP2_INTERNAL_ERROR);
+        memset(&how, 0, sizeof how); how.pulled = pulled; how.piece = 3;
+        peer_run(&s, &how, &po);
+        ZUH_CHECK_EQ_INT(po.rc, ZUH_ERR_IO);
+        ZUH_CHECK(delivered_ok(&po, pulled, "hello"));
+        ZUH_CHECK_EQ_INT(po.idle, 0);
+        zuh_buf_free(&po.got); free(s.b);
+    }
+
+    /* RFC 9113 §8.1.1: more DATA than content-length is malformed. The
+     * §65.2 case above covers fewer; this is the other side. */
+    ZUH_CASE("#264: DATA beyond content-length is zu_http_parse_error and pools nothing");
+    for (pulled = 0; pulled <= 1; pulled++) {
+        h2_script s = { 0, 0, 0 };
+        sc_preface(&s); sc_head(&s, 1, 0, "5");
+        sc_data(&s, 1, 0, "hello", 5); sc_data(&s, 1, NGHTTP2_FLAG_END_STREAM, "world", 5);
+        memset(&how, 0, sizeof how); how.pulled = pulled; how.piece = 3;
+        peer_run(&s, &how, &po);
+        ZUH_CHECK_EQ_INT(po.rc, ZUH_ERR_PARSE);
+        ZUH_CHECK(delivered_ok(&po, pulled, "hello"));
+        ZUH_CHECK_EQ_INT(po.idle, 0);
+        zuh_buf_free(&po.got); free(s.b);
+    }
+
+    /* §4.2: a frame larger than SETTINGS_MAX_FRAME_SIZE, which the client
+     * leaves at 16384, is FRAME_SIZE_ERROR on the connection. 16384 is
+     * accepted, 16385 is not. */
+    ZUH_CASE("#264: a DATA frame one byte over MAX_FRAME_SIZE is zu_http_parse_error");
+    {
+        static char big[16385];
+        size_t len;
+        memset(big, 'f', sizeof big);
+        for (len = 16384; len <= 16385; len++) {
+            h2_script s = { 0, 0, 0 };
+            sc_preface(&s); sc_head(&s, 1, 0, NULL);
+            sc_data(&s, 1, NGHTTP2_FLAG_END_STREAM, big, len);
+            memset(&how, 0, sizeof how);
+            peer_run(&s, &how, &po);
+            if (len == 16384) {
+                ZUH_CHECK_EQ_INT(po.rc, ZUH_OK);
+                ZUH_CHECK_EQ_INT(po.got.len, 16384);
+            } else {
+                ZUH_CHECK_EQ_INT(po.rc, ZUH_ERR_PARSE);
+                ZUH_CHECK(got_is(&po, ""));
+                ZUH_CHECK_EQ_INT(po.idle, 0);
+            }
+            zuh_buf_free(&po.got); free(s.b);
+        }
+    }
+
+    /* §6.9.1: a WINDOW_UPDATE that takes a window past 2^31 - 1 is
+     * FLOW_CONTROL_ERROR, on the connection (stream 0) or the stream. */
+    ZUH_CASE("#264: a WINDOW_UPDATE past 2^31-1 fails the request and pools nothing");
+    {
+        uint32_t sid;
+        for (sid = 0; sid <= 1; sid++) {
+            h2_script s = { 0, 0, 0 };
+            sc_preface(&s); sc_head(&s, 1, 0, NULL);
+            sc_data(&s, 1, 0, "hello", 5);
+            sc_u32(&s, NGHTTP2_WINDOW_UPDATE, sid, 0x7fffffffu);
+            sc_data(&s, 1, NGHTTP2_FLAG_END_STREAM, "world", 5);
+            memset(&how, 0, sizeof how);
+            peer_run(&s, &how, &po);
+            ZUH_CHECK(po.rc == ZUH_ERR_PARSE || po.rc == ZUH_ERR_IO);
+            ZUH_CHECK(got_is(&po, ""));
+            ZUH_CHECK_EQ_INT(po.idle, 0);
+            zuh_buf_free(&po.got); free(s.b);
+        }
+    }
+
+    /* Frames after END_STREAM. The response was whole before them, so it is
+     * returned, and the late bytes must not reach it. nghttp2 forgets a
+     * stream once both sides have ended it and drops what arrives for it
+     * afterwards, rather than ending the connection: RFC 9113 §5.1 lets an
+     * endpoint that cannot tell a late frame from a stale one do so. */
+    ZUH_CASE("#264: DATA or HEADERS after END_STREAM never reach a body");
+    {
+        int k;
+        for (k = 0; k < 2; k++) for (pulled = 0; pulled <= 1; pulled++) {
+            h2_script s = { 0, 0, 0 };
+            sc_preface(&s); sc_head(&s, 1, 0, NULL);
+            sc_data(&s, 1, NGHTTP2_FLAG_END_STREAM, "hello", 5);
+            if (k == 0) sc_data(&s, 1, 0, "late", 4);
+            else sc_head(&s, 1, NGHTTP2_FLAG_END_STREAM, NULL);
+            memset(&how, 0, sizeof how); how.pulled = pulled; how.piece = 3;
+            peer_run(&s, &how, &po);
+            ZUH_CHECK_EQ_INT(po.rc, ZUH_OK);
+            ZUH_CHECK(got_is(&po, "hello"));
+            zuh_buf_free(&po.got); free(s.b);
+        }
+    }
+
+    /* A trailer block may not carry a pseudo-header (§8.1): ":status"
+     * after the DATA is malformed, not a second response head. */
+    ZUH_CASE("#264: a trailer block carrying :status is zu_http_parse_error");
+    for (pulled = 0; pulled <= 1; pulled++) {
+        h2_script s = { 0, 0, 0 };
+        sc_preface(&s); sc_head(&s, 1, 0, "5");
+        sc_data(&s, 1, 0, "hello", 5);
+        sc_head(&s, 1, NGHTTP2_FLAG_END_STREAM, NULL);
+        memset(&how, 0, sizeof how); how.pulled = pulled; how.piece = 3;
+        peer_run(&s, &how, &po);
+        ZUH_CHECK_EQ_INT(po.rc, ZUH_ERR_PARSE);
+        ZUH_CHECK(delivered_ok(&po, pulled, "hello"));
+        ZUH_CHECK_EQ_INT(po.idle, 0);
+        zuh_buf_free(&po.got); free(s.b);
+    }
+
+    /* A SETTINGS change mid-body touches only what the client sends; the
+     * body is the control's, byte for byte. */
+    ZUH_CASE("#264: SETTINGS mid-body (window shrunk to 0, frame size raised) leaves the body intact");
+    for (pulled = 0; pulled <= 1; pulled++) {
+        h2_script s = { 0, 0, 0 };
+        sc_preface(&s); sc_head(&s, 1, 0, "10");
+        sc_data(&s, 1, 0, "hello", 5);
+        sc_setting(&s, NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE, 0);
+        sc_setting(&s, NGHTTP2_SETTINGS_MAX_FRAME_SIZE, 1u << 20);
+        sc_data(&s, 1, NGHTTP2_FLAG_END_STREAM, "world", 5);
+        memset(&how, 0, sizeof how); how.pulled = pulled; how.piece = 3;
+        peer_run(&s, &how, &po);
+        ZUH_CHECK_EQ_INT(po.rc, ZUH_OK);
+        ZUH_CHECK(got_is(&po, "helloworld"));
+        zuh_buf_free(&po.got); free(s.b);
+    }
+
+    /* The client sent ENABLE_PUSH = 0, so PUSH_PROMISE is PROTOCOL_ERROR on
+     * the connection (§8.4). */
+    ZUH_CASE("#264: PUSH_PROMISE after ENABLE_PUSH=0 is zu_http_parse_error and pools nothing");
+    {
+        static const unsigned char pp[] = { 0, 0, 0, 2, 0x82, 0x86, 0x84, 0x41, 1, 'x' };
+        h2_script s = { 0, 0, 0 };
+        sc_preface(&s); sc_head(&s, 1, 0, NULL);
+        sc_frame(&s, NGHTTP2_PUSH_PROMISE, NGHTTP2_FLAG_END_HEADERS, 1, pp, sizeof pp);
+        sc_data(&s, 1, NGHTTP2_FLAG_END_STREAM, "hello", 5);
+        memset(&how, 0, sizeof how);
+        peer_run(&s, &how, &po);
+        ZUH_CHECK_EQ_INT(po.rc, ZUH_ERR_PARSE);
+        ZUH_CHECK(got_is(&po, ""));
+        ZUH_CHECK_EQ_INT(po.idle, 0);
+        zuh_buf_free(&po.got); free(s.b);
+    }
+
+    /* A header block that never ends: HEADERS without END_HEADERS, then
+     * empty CONTINUATION frames. nghttp2 stops it (CVE-2024-27316's class);
+     * the client fails rather than spinning or growing. */
+    ZUH_CASE("#264: a CONTINUATION flood is refused before any response");
+    {
+        static const unsigned char st200[] = { 0x88 };
+        h2_script s = { 0, 0, 0 };
+        int i;
+        sc_preface(&s);
+        sc_frame(&s, NGHTTP2_HEADERS, 0, 1, st200, 1);
+        for (i = 0; i < 10000; i++) sc_frame(&s, NGHTTP2_CONTINUATION, 0, 1, NULL, 0);
+        memset(&how, 0, sizeof how);
+        peer_run(&s, &how, &po);
+        ZUH_CHECK_EQ_INT(po.rc, ZUH_ERR_PARSE);
+        ZUH_CHECK(!po.perform_ok);
+        ZUH_CHECK_EQ_INT(po.idle, 0);
+        zuh_buf_free(&po.got); free(s.b);
+    }
+
+    /* A peer that sends the head and half the body, then goes silent with
+     * the connection open: the deadline ends it as zu_timeout_error. */
+    ZUH_CASE("#264: a peer silent mid-body is zu_timeout_error at the deadline");
+    for (pulled = 0; pulled <= 1; pulled++) {
+        h2_script s = { 0, 0, 0 };
+        sc_preface(&s); sc_head(&s, 1, 0, NULL);
+        sc_data(&s, 1, 0, "hello", 5);
+        memset(&how, 0, sizeof how);
+        how.pulled = pulled; how.piece = 3; how.block = 1; how.timeout_ms = 200;
+        peer_run(&s, &how, &po);
+        ZUH_CHECK_EQ_INT(po.rc, ZUH_ERR_TIMEOUT);
+        ZUH_CHECK(delivered_ok(&po, pulled, "hello"));
+        ZUH_CHECK_EQ_INT(po.idle, 0);
+        zuh_buf_free(&po.got); free(s.b);
+    }
+
+    /* §6.9: a peer that grants no window for the upload. 100 KB is more than
+     * the 65535 bytes RFC 9113 lets go before the server's first
+     * WINDOW_UPDATE, which never comes: the deadline ends the request, as
+     * zu_timeout_error, rather than the upload waiting for ever. */
+    ZUH_CASE("#264: an upload the peer grants no window for is zu_timeout_error at the deadline");
+    {
+        static unsigned char up[100000];
+        zuh_req_spec spec;
+        h2_script s = { 0, 0, 0 };
+        memset(up, 'u', sizeof up);
+        memset(&spec, 0, sizeof spec);
+        spec.method = "POST"; spec.body = up; spec.body_len = sizeof up;
+        sc_setting(&s, NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE, 0);
+        sc_frame(&s, NGHTTP2_SETTINGS, NGHTTP2_FLAG_ACK, 0, NULL, 0);
+        memset(&how, 0, sizeof how);
+        how.spec = &spec; how.block = 1; how.timeout_ms = 200;
+        peer_run(&s, &how, &po);
+        ZUH_CHECK_EQ_INT(po.rc, ZUH_ERR_TIMEOUT);
+        ZUH_CHECK(!po.perform_ok);
+        ZUH_CHECK_EQ_INT(po.idle, 0);
+        zuh_buf_free(&po.got); free(s.b);
+    }
+}
+
+/* --- #270: what the request and frame-pump code must get right ----------- */
+
+/* A body function whose pieces are larger than a DATA frame (16384), so a
+ * piece goes out in several frames and the body function is asked for more
+ * than what is left of it, from a non-zero offset. */
+typedef struct { int pieces, sent; unsigned char buf[20000]; } big_gen;
+static zuh_code big_next(void *ctx, const void **data, size_t *len, zuh_deadline dl,
+                         zuh_error *err) {
+    big_gen *g = (big_gen *)ctx;
+    size_t k;
+    (void)dl; (void)err;
+    if (g->sent == g->pieces) { *len = 0; return ZUH_OK; }
+    for (k = 0; k < sizeof g->buf; k++)
+        g->buf[k] = (unsigned char)(((size_t)g->sent * 31 + k) & 0xff);
+    *data = g->buf; *len = sizeof g->buf;
+    g->sent++;
+    return ZUH_OK;
+}
+
+static void cases_mutants(void) {
+    srv_dialer dd;
+    zuh_get_opts o;
+    zuh_result r;
+    zuh_error e;
+    zuh_code rc;
+
+    /* RFC 9113 §8.2.1: field names go out lowercase. 'A' and 'Z' are the
+     * ends of the range that is lowered; digits and '-' stay as they are. */
+    ZUH_CASE("#270: every request field reaches the server, its name lowercased at A and Z");
+    {
+        static const char *const hn[] = { "Accept", "X-AZ-09", "x-lower", "ZETA", "Alpha" };
+        static const char *const hv[] = { "*/*", "1", "2", "3", "4" };
+        zuh_req_spec spec;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        memset(&spec, 0, sizeof spec);
+        spec.header_names = hn; spec.header_values = hv; spec.n_headers = 5;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        ZUH_CHECK(has(dd.conns[0].fields, "accept: */*\n"));
+        ZUH_CHECK(has(dd.conns[0].fields, "x-az-09: 1\n"));
+        ZUH_CHECK(has(dd.conns[0].fields, "x-lower: 2\n"));
+        ZUH_CHECK(has(dd.conns[0].fields, "zeta: 3\n"));
+        ZUH_CHECK(has(dd.conns[0].fields, "alpha: 4\n"));
+        /* A successful request leaves no error behind. */
+        ZUH_CHECK_EQ_INT(e.code, ZUH_OK);
+        ZUH_CHECK(e.message[0] == '\0');
+        dialer_free(&dd);
+    }
+
+    /* §8.2.2: a TE other than "trailers" is refused wherever it sits. */
+    ZUH_CASE("#270: a TE other than trailers is refused when it is not the first field");
+    {
+        static const char *const hn[] = { "Accept", "X-One", "TE" };
+        static const char *const hv[] = { "*/*", "1", "gzip" };
+        zuh_req_spec spec;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        memset(&spec, 0, sizeof spec);
+        spec.header_names = hn; spec.header_values = hv; spec.n_headers = 3;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_ERR_PARSE);
+        ZUH_CHECK_EQ_INT(dd.conns[0].requests, 0);
+        dialer_free(&dd);
+    }
+
+    /* Each 20000-byte piece leaves in two DATA frames; the second is asked
+     * for up to a frame from offset 16384, with 3616 left. The server's
+     * count and position-weighted sum say every byte went once, in order. */
+    ZUH_CASE("#270: a body piece larger than a DATA frame is sent exactly once");
+    {
+        static big_gen g;
+        zuh_req_spec spec;
+        unsigned long want_sum = 0;
+        size_t want_total = 0, k;
+        int p;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        memset(&g, 0, sizeof g); g.pieces = 3;
+        for (p = 0; p < g.pieces; p++)
+            for (k = 0; k < sizeof g.buf; k++) {
+                unsigned char b = (unsigned char)(((size_t)p * 31 + k) & 0xff);
+                want_sum += (unsigned long)b * (unsigned long)(want_total % 251 + 1);
+                want_total++;
+            }
+        memset(&spec, 0, sizeof spec);
+        spec.method = "POST";
+        spec.source.next = big_next; spec.source.ctx = &g;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/up", &spec, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) zuh_result_free(&r);
+        ZUH_CHECK_EQ_INT(dd.conns[0].body_total, want_total);
+        ZUH_CHECK(dd.conns[0].body_sum == want_sum);
+        dialer_free(&dd);
+    }
+
+    /* The connection ending under the response is reported with what
+     * happened, not as an error with nothing said. */
+    ZUH_CASE("#270: the connection ending mid-body says the server closed it");
+    {
+        static char body[20000];
+        srv_cfg c; memset(&c, 0, sizeof c);
+        memset(body, 'q', sizeof body);
+        c.body = body; c.body_len = sizeof body; c.eof_mid_body = 1;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_ERR_IO);
+        ZUH_CHECK(has(e.message, "closed"));
+        dialer_free(&dd);
+    }
+
+    /* A transport whose readable() fails: the HTTP/2 connection reports the
+     * failure, so the §26.2 probe drops it, rather than "idle and alive". */
+    ZUH_CASE("#270: an HTTP/2 connection whose transport reports an error is not idle-and-alive");
+    {
+        zuh_stream *t = NULL, *h2s = NULL;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        dialer_init(&dd, &c); zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(lb_dial(&dd, "example.test", 80, &t, &e), ZUH_OK);
+        ZUH_CHECK_EQ_INT(zuh_h2_wrap(&h2s, t, 0, &e), ZUH_OK);
+        if (h2s) {
+            ZUH_CHECK_EQ_INT(zuh_stream_readable(h2s, 0), 0);
+            dd.conns[0].readable_fail = 1;
+            ZUH_CHECK(zuh_stream_readable(h2s, 0) < 0);
+            zuh_stream_free(h2s);
+        }
+        dialer_free(&dd);
+    }
+
+    /* SETTINGS_MAX_HEADER_LIST_SIZE is the configured §40 limit, as the
+     * server decoded it. */
+    ZUH_CASE("#270: the server is told the configured header limit");
+    {
+        zuh_stream *t = NULL, *h2s = NULL;
+        zuh_headers hh;
+        zuh_h2_request rq;
+        int st = 0, bodiless = 0;
+        srv_cfg c; memset(&c, 0, sizeof c);
+        dialer_init(&dd, &c); zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(lb_dial(&dd, "example.test", 80, &t, &e), ZUH_OK);
+        ZUH_CHECK_EQ_INT(zuh_h2_wrap(&h2s, t, 12345, &e), ZUH_OK);
+        zuh_headers_init(&hh);
+        memset(&rq, 0, sizeof rq);
+        rq.method = "GET"; rq.scheme = "http"; rq.authority = "example.test"; rq.path = "/";
+        rq.headers = &hh;
+        if (h2s) {
+            rc = zuh_h2_begin(h2s, &rq, &st, &hh, &bodiless, zuh_deadline_in(1000), &e);
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            ZUH_CHECK_EQ_INT(nghttp2_session_get_remote_settings(
+                                 dd.conns[0].srv, NGHTTP2_SETTINGS_MAX_HEADER_LIST_SIZE), 12345);
+            zuh_stream_free(h2s);
+        }
+        zuh_headers_free(&hh);
+        dialer_free(&dd);
+    }
+
+    /* RFC 9110 §15.2: 100 is informational like 103; the final head is the
+     * 200 after it. */
+    ZUH_CASE("#270: a 100 before the response is skipped like a 103");
+    {
+        srv_cfg c; memset(&c, 0, sizeof c);
+        c.informational = 100; c.body = "ok"; c.body_len = 2;
+        dialer_init(&dd, &c); h2c_opts(&o, &dd); zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/", NULL, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        if (rc == ZUH_OK) {
+            ZUH_CHECK_EQ_INT(r.status, 200);
+            ZUH_CHECK(r.body.len == 2 && memcmp(r.body.data, "ok", 2) == 0);
+            zuh_result_free(&r);
+        }
         dialer_free(&dd);
     }
 }

@@ -34,6 +34,25 @@ request changes code, every later push to it runs every workflow.
 A package's own workflows gate the same way by calling `changes.yml` rather
 than carrying a `paths-ignore` list.
 
+## A package's own workflows
+
+A workflow a package writes for itself, an ABI probe, a fuzz-corpus replay or
+a live-network slice, follows three rules.
+
+- **Gate it** by calling `changes.yml` and testing its `docs-only` and
+  `profile` outputs, never with a `paths-ignore` list.
+- **One job per OS.** Per-OS checks are steps of r-actions' `platforms.yml`,
+  which runs the package's `tools/ci/platform.sh <os>` once on each runner. A
+  pull request runs at most one macOS job and one Windows job beyond
+  `r-cmd-check.yml`'s own. A free account gets about five macOS runners at a
+  time, and eight one-minute macOS jobs a pull request queued four open pull
+  requests behind each other in zuhttp, then cancelled some of them ("The job
+  was not acquired by Runner of type hosted").
+- **Slow extras wait for `full`.** A libFuzzer run longer than a minute, a
+  coverage leg on macOS, a corpus replay on a second OS: test
+  `R_ACTIONS_PROFILE` in the script, or the `profile` output in a workflow,
+  so they run on the weekly schedule, on dispatch and under `full-ci`.
+
 ## Labels
 
 A label on a pull request can ask for more checking, or for less:

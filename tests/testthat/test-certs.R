@@ -20,7 +20,7 @@ test_that("the committed TLS fixture is not about to expire (#193)", {
   # run out the whole matrix fails for the wrong reason, so this says why
   # first, and what to do: tools/make-tls-fixture, then commit fixtures/tls.
   fx <- tls_fixture()
-  for (n in c("good", "wronghost", "untrusted")) {
+  for (n in c("good", "wronghost", "untrusted", "ip", "ipother", "ipdns")) {
     pem <- readLines(fx$cert(n), warn = FALSE)
     # The notAfter date, read without the openssl CLI: the certificate's
     # DER, base64 in the PEM, carries it as a UTCTime "YYMMDDhhmmssZ" right
@@ -85,6 +85,45 @@ test_that("a hostname mismatch is its OWN condition class (§14.6)", {
     expect_false(inherits(e, "zu_tls_certificate_error"))
     expect_match(conditionMessage(e), "localhost", fixed = TRUE)
   })
+})
+
+test_that("an IP literal verifies against an iPAddress SAN (#216, #246)", {
+  # The control for the two rows after it: a certificate naming 127.0.0.1
+  # as an address is accepted when the URL names 127.0.0.1.
+  skip_unless_local_tls()
+  fx <- tls_fixture()
+  with_tls_server(
+    "ip",
+    function(url) {
+      r <- zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10)
+      expect_identical(zu_resp_status(r), 200L)
+    },
+    host = "127.0.0.1"
+  )
+})
+
+test_that("an IP literal is refused by another address or a DNS SAN (#246)", {
+  # RFC 6125 §1.7.2: an IP literal matches iPAddress entries only. So a
+  # certificate naming 127.0.0.2, or naming 127.0.0.1 as a dNSName, is a
+  # name mismatch: the hostname class, not "untrusted" and not a handshake
+  # fault (#290 was OpenSSL reporting the latter).
+  skip_unless_local_tls()
+  fx <- tls_fixture()
+  for (cert in c("ipother", "ipdns")) {
+    with_tls_server(
+      cert,
+      function(url) {
+        e <- tryCatch(
+          zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10),
+          condition = function(e) e
+        )
+        expect_s3_class(e, "zu_tls_hostname_error")
+        expect_false(inherits(e, "zu_tls_certificate_error"))
+        expect_false(inherits(e, "zu_response"))
+      },
+      host = "127.0.0.1"
+    )
+  }
 })
 
 test_that("an expired certificate is rejected", {

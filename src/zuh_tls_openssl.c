@@ -484,7 +484,11 @@ zuh_code zuh_tls_connect(zuh_stream **out, zuh_stream *inner, const char *hostna
                 zuh_error_set(err, ZUH_ERR_TLS_PIN, ZUH_PHASE_TLS,
                              "certificate public key does not match any configured pin");
                 rc = ZUH_ERR_TLS_PIN;
-            } else if (v == X509_V_ERR_HOSTNAME_MISMATCH) {
+            } else if (v == X509_V_ERR_HOSTNAME_MISMATCH ||
+                       /* An IP literal is checked by set1_ip_asc() (#216),
+                        * which fails with its own code; it is still the
+                        * §14.6 name mismatch, not a handshake fault (#290). */
+                       v == X509_V_ERR_IP_ADDRESS_MISMATCH) {
                 zuh_error_set(err, ZUH_ERR_TLS_HOSTNAME, ZUH_PHASE_TLS,
                              "certificate is not valid for '%s'", t->hostname);
                 rc = ZUH_ERR_TLS_HOSTNAME;
