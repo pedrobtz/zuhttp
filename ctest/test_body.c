@@ -955,6 +955,79 @@ void suite_body(void) {
         }
     }
 
+    /* #271: what a body read leaves over, and what it says when the
+     * connection ends early, per framing. */
+    ZUH_CASE("#271: a connection ending early names its framing");
+    {
+        static const char part[] = "5\r\nhel";
+        zuh_mock_step st[1];
+        zuh_buffer out; zuh_sink sink; zuh_code rc;
+        st[0].kind = ZUH_MOCK_DATA; st[0].data = part; st[0].len = sizeof part - 1; st[0].code = ZUH_OK;
+        zuh_headers_init(&h);
+        zuh_buf_init(&out, 0, (size_t)-1); zuh_sink_memory_init(&sink, &out); zuh_error_clear(&e);
+        rc = run_body(st, 1, ZUH_FRAME_CHUNKED, 0, &sink, &h, 0, 1u << 20, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_ERR_PARSE);
+        ZUH_CHECK(strstr(e.message, "chunked") != NULL);
+        zuh_buf_free(&out);
+        zuh_buf_init(&out, 0, (size_t)-1); zuh_sink_memory_init(&sink, &out); zuh_error_clear(&e);
+        rc = run_body(st, 1, ZUH_FRAME_LENGTH, 100, &sink, &h, 0, 1u << 20, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_ERR_PARSE);
+        ZUH_CHECK(strstr(e.message, "of 100") != NULL);
+        zuh_buf_free(&out);
+        zuh_headers_free(&h);
+    }
+
+    /* Content-Length met mid-read, after an earlier read: the body is the
+     * declared bytes and the rest is surplus, counted exactly. */
+    ZUH_CASE("#271: Content-Length reached in a second read takes exactly what is left");
+    {
+        zuh_mock_step st[2];
+        zuh_stream *s;
+        zuh_body_pipe p; zuh_framing fr; zuh_buffer out; zuh_sink sink; zuh_code rc;
+        
+        st[0].kind = ZUH_MOCK_DATA; st[0].data = "abcdef"; st[0].len = 6; st[0].code = ZUH_OK;
+        st[1].kind = ZUH_MOCK_DATA; st[1].data = "ghijXXXX"; st[1].len = 8; st[1].code = ZUH_OK;
+        s = zuh_mock_stream_new(st, 2, 0, 0);
+        zuh_headers_init(&h);
+        zuh_buf_init(&out, 0, (size_t)-1); zuh_sink_memory_init(&sink, &out); zuh_error_clear(&e);
+        fr.kind = ZUH_FRAME_LENGTH; fr.length = 10; fr.poolable = 1;
+        rc = zuh_body_pipe_init(&p, &sink, &h, 0, 1u << 20, &e);
+        if (rc == ZUH_OK) rc = zuh_body_read(s, &fr, &p, NULL, 0, forever(), &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        ZUH_CHECK(out.len == 10 && memcmp(out.data, "abcdefghij", 10) == 0);
+        ZUH_CHECK_EQ_INT(p.surplus, 4);
+        zuh_body_pipe_free(&p); zuh_stream_free(s);
+        zuh_buf_free(&out); zuh_headers_free(&h);
+    }
+
+    /* The bytes that came with the headers can be more than one read's
+     * worth. Past the last chunk, every one of them is surplus: what this
+     * read decoded past the end, and what the seed still holds. */
+    ZUH_CASE("#271: surplus after a chunked body counts the unread seed too");
+    {
+        static char seed[20000 + 32];
+        static const char body[] = "3\r\nabc\r\n0\r\n\r\n";
+        size_t blen = sizeof body - 1, extra = 20000;
+        zuh_mock_step st[1];
+        zuh_stream *s;
+        zuh_body_pipe p; zuh_framing fr; zuh_buffer out; zuh_sink sink; zuh_code rc;
+        
+        memcpy(seed, body, blen);
+        memset(seed + blen, 'Z', extra);
+        st[0].kind = ZUH_MOCK_EOF; st[0].data = NULL; st[0].len = 0; st[0].code = ZUH_OK;
+        s = zuh_mock_stream_new(st, 1, 0, 0);
+        zuh_headers_init(&h);
+        zuh_buf_init(&out, 0, (size_t)-1); zuh_sink_memory_init(&sink, &out); zuh_error_clear(&e);
+        fr.kind = ZUH_FRAME_CHUNKED; fr.length = 0; fr.poolable = 1;
+        rc = zuh_body_pipe_init(&p, &sink, &h, 0, 1u << 20, &e);
+        if (rc == ZUH_OK) rc = zuh_body_read(s, &fr, &p, seed, blen + extra, forever(), &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        ZUH_CHECK(out.len == 3 && memcmp(out.data, "abc", 3) == 0);
+        ZUH_CHECK_EQ_INT(p.surplus, extra);
+        zuh_body_pipe_free(&p); zuh_stream_free(s);
+        zuh_buf_free(&out); zuh_headers_free(&h);
+    }
+
     ZUH_CASE("no leaks across the suite");
     {
         zuh_alloc_stats end;

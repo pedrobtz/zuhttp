@@ -176,6 +176,39 @@ void suite_framing(void) {
     ZUH_CHECK(f.poolable);
     zuh_headers_free(&h);
 
+    /* #271: OWS trimming that leaves nothing stops at the value's ends,
+     * whatever lies beyond them in memory. */
+    ZUH_CASE("#271: trimming a value of only OWS leaves it empty, inside its bounds");
+    {
+        static const char buf[] = "    x";
+        const char *p = buf + 1;
+        size_t n = 2;
+        zuh_trim_ows(&p, &n);
+        ZUH_CHECK_EQ_INT(n, 0);
+        p = buf + 1; n = 3;
+        zuh_trim_ows(&p, &n);
+        ZUH_CHECK_EQ_INT(n, 0);
+        p = "\t a \t"; n = 5;
+        zuh_trim_ows(&p, &n);
+        ZUH_CHECK(n == 1 && p[0] == 'a');
+    }
+
+    /* RFC 9110 §15: three digits, so 599 is a status and 600 is not. */
+    ZUH_CASE("#271: framing accepts status 599 and refuses 600");
+    {
+        zuh_headers h599;
+        zuh_framing fr599;
+        zuh_error e599;
+        zuh_headers_init(&h599);
+        zuh_headers_add_str(&h599, "Content-Length", "0");
+        zuh_error_clear(&e599);
+        ZUH_CHECK_EQ_INT(zuh_framing_decide(&h599, 599, 0, &fr599, &e599), ZUH_OK);
+        ZUH_CHECK_EQ_INT(zuh_framing_decide(&h599, 600, 0, &fr599, &e599), ZUH_ERR_PARSE);
+        ZUH_CHECK_EQ_INT(zuh_framing_decide(&h599, 100, 0, &fr599, &e599), ZUH_OK);
+        ZUH_CHECK_EQ_INT(zuh_framing_decide(&h599, 99, 0, &fr599, &e599), ZUH_ERR_PARSE);
+        zuh_headers_free(&h599);
+    }
+
     ZUH_CASE("no leaks across the suite");
     {
         zuh_alloc_stats st;

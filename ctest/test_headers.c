@@ -132,6 +132,39 @@ void suite_headers(void) {
         zuh_headers_free(&h);
     }
 
+    /* #271: zuh_ascii_ncasecmp orders like strcmp after lowering, by length
+     * first; equal names compare 0 in any case. */
+    ZUH_CASE("#271: zuh_ascii_ncasecmp orders in both directions");
+    {
+        ZUH_CHECK(zuh_ascii_ncasecmp("a", 1, "b", 1) < 0);
+        ZUH_CHECK(zuh_ascii_ncasecmp("b", 1, "a", 1) > 0);
+        ZUH_CHECK(zuh_ascii_ncasecmp("B", 1, "a", 1) > 0);
+        ZUH_CHECK(zuh_ascii_ncasecmp("a", 1, "ab", 2) < 0);
+        ZUH_CHECK(zuh_ascii_ncasecmp("ab", 2, "a", 1) > 0);
+        ZUH_CHECK(zuh_ascii_ncasecmp("Ab", 2, "aB", 2) == 0);
+        /* Every ASCII boundary of the case fold: '@' '[' '`' '{' are not
+         * letters and fold to nothing. */
+        ZUH_CHECK(zuh_ascii_ncasecmp("@", 1, "`", 1) != 0);
+        ZUH_CHECK(zuh_ascii_ncasecmp("[", 1, "{", 1) != 0);
+        ZUH_CHECK(zuh_ascii_ncasecmp("A", 1, "a", 1) == 0);
+        ZUH_CHECK(zuh_ascii_ncasecmp("Z", 1, "z", 1) == 0);
+    }
+
+    ZUH_CASE("#271: zuh_headers_at answers at the last index and not one past it");
+    {
+        const char *n, *v;
+        zuh_headers_init(&h);
+        zuh_headers_add_str(&h, "A", "1");
+        zuh_headers_add_str(&h, "B", "2");
+        ZUH_CHECK(zuh_headers_at(&h, 1, &n, &v) && strcmp(n, "B") == 0 && strcmp(v, "2") == 0);
+        ZUH_CHECK(!zuh_headers_at(&h, 2, &n, &v));
+        zuh_headers_free(&h);
+    }
+
+    ZUH_CASE("#271: a NULL value is valid only when empty");
+    ZUH_CHECK(zuh_header_value_valid(NULL, 0));
+    ZUH_CHECK(!zuh_header_value_valid(NULL, 1));
+
     ZUH_CASE("no leaks across the suite");
     {
         zuh_alloc_stats st;

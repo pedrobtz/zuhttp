@@ -337,6 +337,18 @@ void suite_response(void) {
         zuh_response_free(&r);
     }
 
+    /* #271: 1xx is 100 to 199, both ends. */
+    ZUH_CASE("#271: informational is 100 to 199 inclusive");
+    {
+        zuh_response ri;
+        memset(&ri, 0, sizeof ri);
+        ri.status = 99;  ZUH_CHECK(!zuh_response_is_informational(&ri));
+        ri.status = 100; ZUH_CHECK(zuh_response_is_informational(&ri));
+        ri.status = 199; ZUH_CHECK(zuh_response_is_informational(&ri));
+        ri.status = 200; ZUH_CHECK(!zuh_response_is_informational(&ri));
+        ZUH_CHECK(!zuh_response_is_informational(NULL));
+    }
+
     ZUH_CASE("no leaks across the suite");
     {
         zuh_alloc_stats st;
