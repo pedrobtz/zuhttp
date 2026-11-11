@@ -9,8 +9,10 @@ zu_headers(req, ...)
 \arguments{
 \item{req}{A \code{zu_request}.}
 
-\item{...}{Named header values. A value of \code{NA} removes a header inherited
-from the client (§31.9); a same-name value replaces it, case-insensitively.}
+\item{...}{Named header values, one value per name. A value of \code{NA}
+removes a header inherited from the client (§31.9); a same-name value
+replaces it, case-insensitively. A vector of several values, or a name
+given twice, is an error: join a list-valued field yourself.}
 }
 \value{
 A \code{zu_request}.

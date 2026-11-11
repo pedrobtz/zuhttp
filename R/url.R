@@ -67,9 +67,22 @@ join_url <- function(base, path) {
 # is percent-encoded from its UTF-8 bytes. utils::URLencode() is not used: it
 # works on characters rather than bytes, and its `reserved` handling has caught
 # people out often enough that a 10-line loop is the better trade.
+# Text as UTF-8 bytes for the wire. enc2utf8() reads an "unknown" string as
+# the native encoding, and in a C locale that is ASCII, so "café" from a
+# script became "caf<c3><a9>". Convert only what is marked latin1, or native
+# text in a non-UTF-8 locale that is not already valid UTF-8.
+to_utf8 <- function(x) {
+  x <- as.character(x)
+  enc <- Encoding(x)
+  need <- enc == "latin1" |
+    (enc == "unknown" & !l10n_info()[["UTF-8"]] & !validUTF8(x))
+  x[need] <- enc2utf8(x[need])
+  x
+}
+
 pct_encode <- function(x) {
   vapply(
-    enc2utf8(as.character(x)),
+    to_utf8(x),
     function(s) {
       if (is.na(s)) {
         return(NA_character_)
@@ -93,6 +106,12 @@ pct_encode <- function(x) {
 
 # R values on the wire. TRUE/FALSE become "true"/"false" rather than R's
 # "TRUE"/"FALSE", because the receiving end is almost never R.
+# One value per element, each formatted on its own. format() on the whole
+# vector padded character values to a common width ("a  "), rounded doubles
+# to 7 significant digits and gave them their neighbours' format ("1.0"), and
+# in a C locale escaped non-ASCII bytes to "<c3><a9>" before pct_encode()
+# saw them (the bug-hunt emit slice). Doubles get the shortest decimal that
+# reads back as the same number, which is what zu_body_json() sends.
 query_atom <- function(v) {
   if (is.logical(v)) {
     return(ifelse(v, "true", "false"))
@@ -100,18 +119,45 @@ query_atom <- function(v) {
   if (inherits(v, "POSIXt")) {
     return(format(v, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))
   }
-  format(v, scientific = FALSE, trim = TRUE)
+  if (is.factor(v)) {
+    v <- as.character(v)
+  }
+  if (is.character(v)) {
+    return(to_utf8(v))
+  }
+  if (is.double(v)) {
+    return(vapply(v, num_atom, ""))
+  }
+  as.character(v)
+}
+
+num_atom <- function(x) {
+  if (!is.finite(x)) {
+    return(as.character(x))
+  }
+  x <- x + 0 # -0 is 0
+  if (x == trunc(x) && abs(x) < 2^53) {
+    return(sprintf("%.0f", x))
+  }
+  for (d in 15:17) {
+    s <- sprintf("%.*g", d, x)
+    if (as.numeric(s) == x) break
+  }
+  s
 }
 
 # A length > 1 value repeats the key: list(id = c(1, 2)) -> "id=1&id=2". This
-# is the form nearly every server framework parses into a list.
+# is the form nearly every server framework parses into a list. Walked by
+# position, not name: q[[nm]] returns the first of a repeated name each time,
+# so list(a = "1", a = "2") sent "a=1&a=1".
 build_query <- function(q) {
   if (is.null(q) || !length(q)) {
     return(NULL)
   }
   parts <- character()
-  for (nm in names(q)) {
-    v <- q[[nm]]
+  nms <- names(q)
+  for (i in seq_along(q)) {
+    v <- q[[i]]
     if (is.null(v) || !length(v)) {
       next
     }
@@ -119,7 +165,10 @@ build_query <- function(q) {
     if (!length(v)) {
       next
     }
-    parts <- c(parts, paste0(pct_encode(nm), "=", pct_encode(query_atom(v))))
+    parts <- c(
+      parts,
+      paste0(pct_encode(nms[[i]]), "=", pct_encode(query_atom(v)))
+    )
   }
   if (!length(parts)) NULL else paste0(parts, collapse = "&")
 }

@@ -45,7 +45,7 @@ zu_response <- function(
   structure(
     list(
       status = check_whole(status, "status", min = 100, max = 599),
-      headers = as_header_vec(headers),
+      headers = as_header_vec(headers, request = FALSE),
       body = body,
       url = url,
       tls_version = tls_version,
@@ -53,7 +53,11 @@ zu_response <- function(
       method = NULL,
       timings = c(total = NA_real_),
       request = NULL,
-      trailers = if (is.null(trailers)) NULL else as_header_vec(trailers)
+      trailers = if (is.null(trailers)) {
+        NULL
+      } else {
+        as_header_vec(trailers, request = FALSE)
+      }
     ),
     class = "zu_response"
   )

@@ -186,8 +186,10 @@ zu_query <- function(req, ...) {
 #' Add headers
 #'
 #' @param req A `zu_request`.
-#' @param ... Named header values. A value of `NA` removes a header inherited
-#'   from the client (§31.9); a same-name value replaces it, case-insensitively.
+#' @param ... Named header values, one value per name. A value of `NA`
+#'   removes a header inherited from the client (§31.9); a same-name value
+#'   replaces it, case-insensitively. A vector of several values, or a name
+#'   given twice, is an error: join a list-valued field yourself.
 #' @return A `zu_request`.
 #' @export
 #' @examples
