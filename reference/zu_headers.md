@@ -16,8 +16,10 @@ zu_headers(req, ...)
 
 - ...:
 
-  Named header values. A value of `NA` removes a header inherited from
-  the client (§31.9); a same-name value replaces it, case-insensitively.
+  Named header values, one value per name. A value of `NA` removes a
+  header inherited from the client (§31.9); a same-name value replaces
+  it, case-insensitively. A vector of several values, or a name given
+  twice, is an error: join a list-valued field yourself.
 
 ## Value
 

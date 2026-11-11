@@ -61,8 +61,10 @@
 
 
 <dt id="arg--">...<a class="anchor" aria-label="anchor" href="#arg--"></a></dt>
-<dd><p>Named header values. A value of <code>NA</code> removes a header inherited
-from the client (§31.9); a same-name value replaces it, case-insensitively.</p></dd>
+<dd><p>Named header values, one value per name. A value of <code>NA</code>
+removes a header inherited from the client (§31.9); a same-name value
+replaces it, case-insensitively. A vector of several values, or a name
+given twice, is an error: join a list-valued field yourself.</p></dd>
 
 </dl></div>
     <div class="section level2">

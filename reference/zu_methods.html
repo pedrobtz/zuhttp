@@ -197,7 +197,9 @@ request only.</p>
 
 
 <dl><dt id="arg-url">url<a class="anchor" aria-label="anchor" href="#arg-url"></a></dt>
-<dd><p>An absolute URL, or a path joined to the client's <code>base_url</code>.</p></dd>
+<dd><p>An absolute URL, or a path joined to the client's <code>base_url</code>.
+A URL carrying credentials (<code>user:password@</code>) is refused with
+<code>zu_url_error</code>; send them as a header instead.</p></dd>
 
 
 <dt id="arg-query">query<a class="anchor" aria-label="anchor" href="#arg-query"></a></dt>

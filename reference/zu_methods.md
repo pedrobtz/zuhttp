@@ -149,7 +149,9 @@ zu_delete(
 
 - url:
 
-  An absolute URL, or a path joined to the client's `base_url`.
+  An absolute URL, or a path joined to the client's `base_url`. A URL
+  carrying credentials (`user:password@`) is refused with
+  `zu_url_error`; send them as a header instead.
 
 - query:
 
