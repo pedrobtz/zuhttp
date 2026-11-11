@@ -87,6 +87,36 @@ test_that("a hostname mismatch is its OWN condition class (§14.6)", {
   })
 })
 
+test_that("a name only in the subject CN is no name (#308)", {
+  skip_unless_local_tls()
+  fx <- tls_fixture()
+  # RFC 9110 §4.3.4: a client MUST NOT use a CN-ID. OpenSSL's host check
+  # fell back to the CN when a certificate had no DNS SAN, and accepted
+  # what Network.framework refused.
+  with_tls_server("cnonly", function(url) {
+    e <- tryCatch(
+      zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10),
+      error = function(e) e
+    )
+    expect_s3_class(e, "zu_tls_hostname_error")
+  })
+})
+
+test_that("a client-authentication certificate is not a server's (#309)", {
+  skip_unless_local_tls()
+  fx <- tls_fixture()
+  # Trusted CA, right name, EKU clientAuth only (RFC 5280 §4.2.1.12): a
+  # certificate failure, as every backend says for every other chain
+  # fault, not OpenSSL's zu_tls_handshake_error.
+  with_tls_server("clientonly", function(url) {
+    e <- tryCatch(
+      zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10),
+      error = function(e) e
+    )
+    expect_s3_class(e, "zu_tls_certificate_error")
+  })
+})
+
 test_that("an IP literal verifies against an iPAddress SAN (#216, #246)", {
   # The control for the two rows after it: a certificate naming 127.0.0.1
   # as an address is accepted when the URL names 127.0.0.1.

@@ -19,7 +19,11 @@
  *                           renegotiation until #298
  *   drive hostname URL CA   #246: one request that must be refused with
  *                           ZUH_ERR_TLS_HOSTNAME, for a certificate naming a
- *                           different IP, or naming the IP only as a DNS name
+ *                           different IP, or naming the IP only as a DNS name,
+ *                           or naming the host only in its subject CN (#308)
+ *   drive certificate URL CA  one request that must be refused with
+ *                           ZUH_ERR_TLS_CERT: a client-authentication leaf
+ *                           (#309)
  *   drive fork URL CA       #249: a pulled body open on one connection and a
  *                           second connection idle in the pool, then fork();
  *                           the child must not read the body, and frees both
@@ -235,7 +239,7 @@ static int one(const char *url, const char *ca) {
  * matched against iPAddress SANs only (RFC 6125 §1.7.2, RFC 5280 §4.2.1.6),
  * so neither another address nor the same address spelled as a dNSName may
  * pass, and the failure is the hostname class, not "untrusted". */
-static int hostname(const char *url, const char *ca) {
+static int refused_as(const char *what, zuh_code want, const char *url, const char *ca) {
     zuh_get_opts o;
     zuh_result r;
     zuh_error e;
@@ -244,15 +248,15 @@ static int hostname(const char *url, const char *ca) {
     o.ca_file = ca_opt(ca); o.proxy_set = 1; o.timeout_ms = 10000;
     rc = zuh_engine_get(&r, url, &o, &e);
     if (rc == ZUH_OK) {
-        printf("FAIL hostname: %s was accepted (status %d)\n", url, r.status);
+        printf("FAIL %s: %s was accepted (status %d)\n", what, url, r.status);
         zuh_result_free(&r);
         return 1;
     }
-    if (rc != ZUH_ERR_TLS_HOSTNAME) {
-        printf("FAIL hostname: code %d, not ZUH_ERR_TLS_HOSTNAME: %s\n", rc, e.message);
+    if (rc != want) {
+        printf("FAIL %s: code %d, not %d: %s\n", what, rc, want, e.message);
         return 1;
     }
-    printf("hostname: refused as expected (%s)\n", e.message);
+    printf("%s: refused as expected (%s)\n", what, e.message);
     return 0;
 }
 
@@ -288,11 +292,14 @@ int main(int argc, char **argv) {
     if (argc == 5 && strcmp(argv[1], "stale") == 0) return stale(argv[2], argv[3], argv[4]);
     if (argc == 4 && strcmp(argv[1], "one") == 0) return one(argv[2], argv[3]);
     if (argc == 4 && strcmp(argv[1], "refused") == 0) return refused(argv[2], argv[3]);
-    if (argc == 4 && strcmp(argv[1], "hostname") == 0) return hostname(argv[2], argv[3]);
+    if (argc == 4 && strcmp(argv[1], "hostname") == 0)
+        return refused_as("hostname", ZUH_ERR_TLS_HOSTNAME, argv[2], argv[3]);
+    if (argc == 4 && strcmp(argv[1], "certificate") == 0)
+        return refused_as("certificate", ZUH_ERR_TLS_CERT, argv[2], argv[3]);
 #ifndef _WIN32
     if (argc == 4 && strcmp(argv[1], "fork") == 0) return forkcase(argv[2], argv[3]);
 #endif
-    if (argc != 4) { fprintf(stderr, "usage: drive noclose|together|one|hostname|fork URL CA | stale URL CA OTHER\n"); return 2; }
+    if (argc != 4) { fprintf(stderr, "usage: drive noclose|together|one|hostname|certificate|fork URL CA | stale URL CA OTHER\n"); return 2; }
     together = strcmp(argv[1], "together") == 0;
     zuh_get_opts_init(&o);
     o.ca_file = ca_opt(argv[3]); o.proxy_set = 1; o.timeout_ms = 10000;

@@ -426,7 +426,11 @@ zuh_code zuh_tls_connect(zuh_stream **out, zuh_stream *inner, const char *hostna
         if (!is_ip) SSL_set_tlsext_host_name(t->ssl, t->hostname);
         if (cfg->verify_peer && cfg->verify_hostname) {
             X509_VERIFY_PARAM *p = SSL_get0_param(t->ssl);
-            X509_VERIFY_PARAM_set_hostflags(p, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+            /* NEVER_CHECK_SUBJECT: without a DNS SAN OpenSSL fell back to
+             * the subject CN, which RFC 9110 §4.3.4 forbids a client to use
+             * and SecTrust refuses (#308). */
+            X509_VERIFY_PARAM_set_hostflags(p, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS |
+                                               X509_CHECK_FLAG_NEVER_CHECK_SUBJECT);
             if ((is_ip ? X509_VERIFY_PARAM_set1_ip_asc(p, t->hostname)
                        : X509_VERIFY_PARAM_set1_host(p, t->hostname, 0)) != 1) {
                 zuh_error_set(err, ZUH_ERR_TLS, ZUH_PHASE_TLS, "cannot set the verification host");
@@ -492,12 +496,12 @@ zuh_code zuh_tls_connect(zuh_stream **out, zuh_stream *inner, const char *hostna
                 zuh_error_set(err, ZUH_ERR_TLS_HOSTNAME, ZUH_PHASE_TLS,
                              "certificate is not valid for '%s'", t->hostname);
                 rc = ZUH_ERR_TLS_HOSTNAME;
-            } else if (v == X509_V_ERR_CERT_HAS_EXPIRED ||
-                       v == X509_V_ERR_CERT_NOT_YET_VALID ||
-                       v == X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT ||
-                       v == X509_V_ERR_SELF_SIGNED_CERT_IN_CHAIN ||
-                       v == X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY ||
-                       v == X509_V_ERR_UNABLE_TO_VERIFY_LEAF_SIGNATURE) {
+            } else if (v != X509_V_OK) {
+                /* Any other verification result is the chain's fault: an
+                 * unknown or missing issuer, expiry, a wrong EKU, a weak key.
+                 * Listing six codes sent the rest to the handshake class, and
+                 * the same certificate raised a different R class here than
+                 * on Schannel and Network.framework (#309). */
                 zuh_error_set(err, ZUH_ERR_TLS_CERT, ZUH_PHASE_TLS,
                              "certificate verification failed for '%s': %s",
                              t->hostname, X509_verify_cert_error_string(v));
