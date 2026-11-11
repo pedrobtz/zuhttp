@@ -32,7 +32,17 @@ concurrency:
 # that rule was written against.
 
 jobs:
+  # ci.md: a documentation-only pull request skips the jobs below. The gate
+  # is r-actions' changes.yml, as in fuzz.yaml; assurance.yml reports a job
+  # that is not wired to it.
+  changes:
+    uses: pedrobtz/r-actions/.github/workflows/changes.yml@v1
+    with:
+      name: c-core
+
   ctest:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ${{ matrix.os }}
     name: C core (${{ matrix.os }})
     strategy:
@@ -140,6 +150,8 @@ jobs:
   # A leak or a wild write here is a release blocker (§45), so run the same
   # suite under valgrind where it is cheap to do so.
   valgrind:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: C core (valgrind)
     steps:

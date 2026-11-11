@@ -27,6 +27,14 @@ concurrency:
 # instead of 20. lto, rchk and analyzers take minutes either way and run on
 # every push.
 jobs:
+  # ci.md: a documentation-only pull request skips the jobs below. The gate
+  # is r-actions' changes.yml, as in fuzz.yaml; assurance.yml reports a job
+  # that is not wired to it.
+  changes:
+    uses: pedrobtz/r-actions/.github/workflows/changes.yml@v1
+    with:
+      name: native-checks
+
   # UBSan under clang and gcc with CRAN's flags; ASan in the R-hub containers,
   # whose R is itself instrumented. ASan is the one that matters most for the
   # glue: an interrupt longjmps out of the engine, and what it skips past is
@@ -101,6 +109,8 @@ jobs:
   # and body-function paths, about two minutes, and fails on a finding whose
   # stack passes through zuhttp.
   valgrind-glue:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     name: valgrind (R glue, init.c)
     runs-on: ubuntu-latest
     timeout-minutes: 20

@@ -20,6 +20,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ci.md: a documentation-only pull request skips the jobs below. The gate
+  # is r-actions' changes.yml, as in fuzz.yaml; assurance.yml reports a job
+  # that is not wired to it.
+  changes:
+    uses: pedrobtz/r-actions/.github/workflows/changes.yml@v1
+    with:
+      name: vendor
+
   # tools/vendor/verify, manifest.tsv and checksums.sha256 are the defaults and
   # the family layout. `paths` narrows the pull-request half to the bytes that
   # came from upstream: each src/vendor/<lib>/VENDOR, the LICENSE copies and
@@ -48,6 +56,8 @@ jobs:
   # comparison; everything else, the patched sources and the licence copy
   # included, must come out identical.
   nghttp2-reproducible:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: nghttp2 rebuilt from upstream matches the tree
     steps:

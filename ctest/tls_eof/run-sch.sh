@@ -87,6 +87,15 @@ stop
 serve badmac good
 "$drive" one "https://localhost:$port/" - || status=1
 stop
+# A response that stops partway times out; an upload into a reset fails as
+# a write error. The same rows as run.sh's.
+serve stall good
+"$drive" stall "https://localhost:$port/close" - || status=1
+"$drive" stall "https://localhost:$port/length" - || status=1
+stop
+serve reset good
+"$drive" upload "https://localhost:$port/" - || status=1
+stop
 # #215: a TLS 1.2 renegotiation between the request and the response.
 # Schannel reports SEC_I_RENEGOTIATE, which is not handled yet (#298): the
 # request fails with a TLS class and no body. `refused` says so when that

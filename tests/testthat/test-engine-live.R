@@ -795,3 +795,20 @@ test_that("zu_resp_read(timeout = ) bounds one read of a stalled body, then the 
   expect_lt(proc.time()[["elapsed"]] - t0, 1.5)
   expect_error(zu_resp_read(r, 1), class = "zu_io_error")
 })
+
+test_that("an upload to a server that resets is zu_io_error, not SIGPIPE (#324)", {
+  # The server reads the head and closes with the body unread, so the
+  # kernel resets the connection and later writes meet a dead socket.
+  # Without MSG_NOSIGNAL / SO_NOSIGPIPE that write raised SIGPIPE, and R's
+  # handler longjmped out of the engine with an unclassed "ignoring SIGPIPE
+  # signal" error. Network.framework writes through its own stack, so on
+  # macOS this exercises the plain-TCP path, the one that was affected.
+  with_raw_server(raw(0), function(url) {
+    e <- tryCatch(
+      zu_post(paste0(url, "/up"), body = raw(8e6), timeout = 10),
+      error = function(e) e
+    )
+    expect_s3_class(e, "zu_error")
+    expect_false(grepl("SIGPIPE", conditionMessage(e)))
+  })
+})

@@ -19,6 +19,12 @@
 #   badmac    a complete response and, in the same TCP send, a record whose
 #             MAC is broken, then the connection held open (#314): the
 #             response must reach the client before the error does.
+#   stall     keepalive whose responses stop partway: /close is HTTP/1.0
+#             and close-delimited, /length has Content-Length 100; ten body
+#             bytes each, then nothing, with the connection held open. A
+#             client's deadline must say timeout, never end of body.
+#   reset     reads a request head, then resets the connection (SO_LINGER
+#             0) while the client is still sending its body.
 #   fork      keepalive with a 200 KB body at /big and a line per accept,
 #             request and close, for fork.sh to read (#249).
 #
@@ -59,6 +65,18 @@ def keepalive(raw):
                 if not d:
                     return
                 req += d
+            if mode == "stall":
+                if b"/close" in req:
+                    s.sendall(b"HTTP/1.0 200 OK\r\n\r\n" + b"x" * 10)
+                else:
+                    s.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n" + b"x" * 10)
+                time.sleep(10)
+                return
+            if mode == "reset":
+                import struct
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+                s.close()
+                return
             if mode == "bulk":
                 n = 16 * 1024 * 1024
                 s.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n" % n)
@@ -112,7 +130,7 @@ if mode == "fork":
     time.sleep(5)
     sys.exit(0)
 
-if mode in ("keepalive", "resume", "bulk", "optcert"):
+if mode in ("keepalive", "resume", "bulk", "optcert", "stall", "reset"):
     import threading
     for _ in range(3):
         raw, _ = ls.accept()

@@ -147,6 +147,12 @@ static zuh_ssize net_read(zuh_stream *s, void *buf, size_t n, zuh_deadline d, zu
     }
 }
 
+#if defined(MSG_NOSIGNAL)
+#  define ZUH_SEND_FLAGS MSG_NOSIGNAL
+#else
+#  define ZUH_SEND_FLAGS 0
+#endif
+
 static zuh_ssize net_write(zuh_stream *s, const void *buf, size_t n, zuh_deadline d, zuh_error *err) {
     net_impl *m = (net_impl *)s->impl;
     for (;;) {
@@ -156,7 +162,12 @@ static zuh_ssize net_write(zuh_stream *s, const void *buf, size_t n, zuh_deadlin
         int wn = send(m->fd, (const char *)buf, (int)(n > INT_MAX ? INT_MAX : n), 0);
         w = wn;
 #else
-        w = send(m->fd, buf, n, 0);
+        /* #324: a write to a connection the peer reset raises SIGPIPE, and
+         * R's handler calls error() from inside the signal handler, which
+         * longjmps out of the engine past every cleanup. MSG_NOSIGNAL (and
+         * SO_NOSIGPIPE where there is no flag, see connect) turns it into
+         * EPIPE, an ordinary write error. */
+        w = send(m->fd, buf, n, ZUH_SEND_FLAGS);
 #endif
         if (w >= 0) return w;
         if (sock_errno() == ZUH_EINTR) continue;
@@ -276,6 +287,11 @@ zuh_code zuh_net_connect(zuh_stream **out, const char *host, uint16_t port,
         zuh_sock fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (fd == ZUH_INVALID_SOCK) continue;
         if (!set_nonblocking(fd)) { zuh_closesocket(fd); continue; }
+#if defined(SO_NOSIGPIPE)
+        /* #324: macOS and the BSDs have no MSG_NOSIGNAL; the socket option
+         * is how a write to a reset peer returns EPIPE instead of SIGPIPE. */
+        (void)setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
+#endif
         /* Per candidate address, not once: getaddrinfo returns a list and
          * this loop walks it, so a host whose first AAAA is black-holed shows
          * up as several connect.start events rather than as one slow one. */

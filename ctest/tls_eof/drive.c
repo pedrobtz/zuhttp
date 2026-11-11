@@ -31,6 +31,13 @@
  *   drive h2reneg URL CA    #315: an HTTP/2 request to a server that
  *                           renegotiates TLS 1.2, which must fail with a TLS
  *                           error (RFC 9113 §9.2.1), not wait out its deadline
+ *   drive stall URL CA      a response that stops partway (server.py stall),
+ *                           which must end in ZUH_ERR_TIMEOUT: a deadline
+ *                           read as end of stream would deliver a truncated
+ *                           close-delimited body as complete
+ *   drive upload URL CA     a 4 MiB POST to a server that resets mid-body,
+ *                           which must fail, and fail as something other than
+ *                           a timeout: the write error has to surface
  *   drive fork URL CA       #249: a pulled body open on one connection and a
  *                           second connection idle in the pool, then fork();
  *                           the child must not read the body, and frees both
@@ -45,6 +52,7 @@
 #include "zuh_engine.h"
 #include "zuh_pool.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #ifdef _WIN32
@@ -336,6 +344,55 @@ static int h2reneg(const char *url, const char *ca) {
     return 0;
 }
 
+static int stall(const char *url, const char *ca) {
+    zuh_get_opts o;
+    zuh_result r;
+    zuh_error e;
+    zuh_code rc;
+    zuh_get_opts_init(&o);
+    o.ca_file = ca_opt(ca); o.proxy_set = 1; o.timeout_ms = 1500;
+    rc = zuh_engine_get(&r, url, &o, &e);
+    if (rc == ZUH_OK) {
+        printf("FAIL stall %s: accepted with %lu body bytes\n", url, (unsigned long)r.body.len);
+        zuh_result_free(&r);
+        return 1;
+    }
+    if (rc != ZUH_ERR_TIMEOUT) {
+        printf("FAIL stall %s: code %d, not a timeout: %s\n", url, rc, e.message);
+        return 1;
+    }
+    printf("stall %s: timed out as expected\n", url);
+    return 0;
+}
+
+static int upload(const char *url, const char *ca) {
+    zuh_get_opts o;
+    zuh_req_spec req;
+    zuh_result r;
+    zuh_error e;
+    zuh_code rc;
+    size_t n = 4u * 1024u * 1024u;
+    char *body = (char *)calloc(n, 1);
+    if (!body) return 1;
+    zuh_get_opts_init(&o);
+    o.ca_file = ca_opt(ca); o.proxy_set = 1; o.timeout_ms = 10000;
+    memset(&req, 0, sizeof req);
+    req.method = "POST"; req.body = body; req.body_len = n;
+    rc = zuh_engine_perform(&r, url, &req, &o, &e);
+    free(body);
+    if (rc == ZUH_OK) {
+        printf("FAIL upload: accepted (status %d)\n", r.status);
+        zuh_result_free(&r);
+        return 1;
+    }
+    if (rc == ZUH_ERR_TIMEOUT) {
+        printf("FAIL upload: timed out instead of failing the write: %s\n", e.message);
+        return 1;
+    }
+    printf("upload: failed as expected, code %d (%s)\n", rc, e.message);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     zuh_get_opts o;
     zuh_result r;
@@ -346,6 +403,8 @@ int main(int argc, char **argv) {
     if (argc == 5 && strcmp(argv[1], "stale") == 0) return stale(argv[2], argv[3], argv[4]);
     if (argc == 4 && strcmp(argv[1], "one") == 0) return one(argv[2], argv[3]);
     if (argc == 4 && strcmp(argv[1], "refused") == 0) return refused(argv[2], argv[3]);
+    if (argc == 4 && strcmp(argv[1], "stall") == 0) return stall(argv[2], argv[3]);
+    if (argc == 4 && strcmp(argv[1], "upload") == 0) return upload(argv[2], argv[3]);
     if (argc == 4 && strcmp(argv[1], "h2reneg") == 0) return h2reneg(argv[2], argv[3]);
     if (argc == 4 && strcmp(argv[1], "hostname") == 0)
         return refused_as("hostname", ZUH_ERR_TLS_HOSTNAME, argv[2], argv[3]);
@@ -355,7 +414,7 @@ int main(int argc, char **argv) {
 #ifndef _WIN32
     if (argc == 4 && strcmp(argv[1], "fork") == 0) return forkcase(argv[2], argv[3]);
 #endif
-    if (argc != 4) { fprintf(stderr, "usage: drive noclose|together|one|hostname|certificate|resume|fork URL CA | stale URL CA OTHER\n"); return 2; }
+    if (argc != 4) { fprintf(stderr, "usage: drive noclose|together|one|hostname|certificate|resume|h2reneg|stall|upload|fork URL CA | stale URL CA OTHER\n"); return 2; }
     together = strcmp(argv[1], "together") == 0;
     zuh_get_opts_init(&o);
     o.ca_file = ca_opt(argv[3]); o.proxy_set = 1; o.timeout_ms = 10000;

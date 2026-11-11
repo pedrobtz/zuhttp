@@ -15,11 +15,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ci.md: a documentation-only pull request skips the jobs below. The gate
+  # is r-actions' changes.yml, as in fuzz.yaml; assurance.yml reports a job
+  # that is not wired to it.
+  changes:
+    uses: pedrobtz/r-actions/.github/workflows/changes.yml@v1
+    with:
+      name: conventions
+
   # configure and cleanup run under CRAN's /bin/sh, which on Debian is dash. A
   # bashism there fails only on the machines that build the package for users.
   # configure.win runs under Rtools' sh, but is held to the same rule so the
   # two stay one dialect.
   shell-syntax:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: configure scripts parse under dash
     steps:
@@ -36,6 +46,8 @@ jobs:
   # The R formatter (#110): air.toml configures it, and code it would change
   # fails here rather than turning up as noise in the next contributor's diff.
   air-format:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: R code is air-formatted
     steps:
@@ -46,6 +58,8 @@ jobs:
   # Design §51.3's budget for project-owned C, measured on every change so that
   # R-4 is read before a work package lands rather than after.
   code-lines:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: project-owned C within budget
     steps:
@@ -55,6 +69,8 @@ jobs:
 
   # Success criterion §61.13: attaching zuhttp after httr2 masks nothing.
   httr2-masking:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: no masking message beside httr2
     steps:
@@ -72,6 +88,8 @@ jobs:
   # (D-66). The first job keeps the prefix out of the code; the second proves
   # the point of it, by compiling zuhttp's headers beside zukomp's.
   c-prefix:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: internal C prefix is zuh_
     steps:
@@ -84,6 +102,8 @@ jobs:
   # and Fedora builders and every user's first install go through this path,
   # and nothing else exercises it (W16).
   configure-without-openssl:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: configure names the missing OpenSSL package
     steps:

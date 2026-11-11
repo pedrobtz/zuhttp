@@ -58,3 +58,5 @@ ctest/zuh_nwrx
 ctest/zuh_tlstest_asan
 ctest/zuh_engtest_asan
 ctest/zuh_engtest_nw_asan
+ctest/zu_tlstest
+tests/testthat/fixtures/tls/*.srl
