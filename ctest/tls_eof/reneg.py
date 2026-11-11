@@ -8,11 +8,15 @@
 # resuming. One connection, then it exits.
 #
 #   reneg.py PORT CERT KEY    (OPENSSL names the CLI, default `openssl`)
+#
+# With RENEG_ALPN=h2 the server selects h2 and renegotiates once the client's
+# connection preface arrives (#315): an HTTP/2 client must refuse that.
 import os, subprocess, sys, time
 
 port, cert, key = sys.argv[1], sys.argv[2], sys.argv[3]
 p = subprocess.Popen([os.environ.get("OPENSSL", "openssl"), "s_server", "-accept", port,
-                      "-cert", cert, "-key", key, "-tls1_2", "-no_ticket", "-no_cache"],
+                      "-cert", cert, "-key", key, "-tls1_2", "-no_ticket", "-no_cache"]
+                     + (["-alpn", os.environ["RENEG_ALPN"]] if os.environ.get("RENEG_ALPN") else []),
                      stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 seen = b""
 while b"ACCEPT" not in seen:

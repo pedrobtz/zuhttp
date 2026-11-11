@@ -1,6 +1,6 @@
 #!/bin/sh
 # make tls-eof: run drive against server.py in every mode (D-86), and against
-# reneg.py (#215) an IP-only certificate (#216) and the two it must refuse (#246), then fork.sh (#249).
+# reneg.py (#215), a resumable session after an unverified one (#307), an IP-only certificate (#216) and the two it must refuse (#246), then fork.sh (#249).
 # DRIVE names the driver binary: make tls-eof-asan runs the same script
 # against an ASan build.
 set -e
@@ -65,12 +65,40 @@ for c in ipother ipdns; do
   kill $srv 2>/dev/null || true; wait $srv 2>/dev/null || true
 done
 
+# #307: verify off, then verification against a CA that does not vouch for
+# the server; at TLS 1.2, where the server resumes sessions.
+port=$(free_port)
+python3 "$here/server.py" resume "$port" "$tmp/other.pem" "$tmp/other-key.pem" >"$tmp/srv.log" 2>&1 &
+srv=$!
+wait_ready
+"$drive" resume "https://localhost:$port/" "$tmp/cert.pem" || status=1
+kill $srv 2>/dev/null || true; wait $srv 2>/dev/null || true
+
+# #313 and #314, the differential for Schannel's run-sch.sh: an optional
+# client-certificate request, and a response followed by a broken record.
+for mode in optcert badmac; do
+  port=$(free_port)
+  python3 "$here/server.py" "$mode" "$port" "$tmp/cert.pem" "$tmp/key.pem" >"$tmp/srv.log" 2>&1 &
+  srv=$!
+  wait_ready
+  "$drive" one "https://localhost:$port/" "$tmp/cert.pem" || status=1
+  kill $srv 2>/dev/null || true; wait $srv 2>/dev/null || true
+done
+
 # #215: a renegotiation runs the verify callback after the dial returned.
 port=$(free_port)
 OPENSSL="$openssl" python3 "$here/reneg.py" "$port" "$tmp/cert.pem" "$tmp/key.pem" >"$tmp/srv.log" 2>&1 &
 srv=$!
 wait_ready
 "$drive" one "https://localhost:$port/" "$tmp/cert.pem" || status=1
+kill $srv 2>/dev/null || true; wait $srv 2>/dev/null || true
+
+# #315: the same renegotiation on an HTTP/2 connection is refused.
+port=$(free_port)
+RENEG_ALPN=h2 OPENSSL="$openssl" python3 "$here/reneg.py" "$port" "$tmp/cert.pem" "$tmp/key.pem" >"$tmp/srv.log" 2>&1 &
+srv=$!
+wait_ready
+"$drive" h2reneg "https://localhost:$port/" "$tmp/cert.pem" || status=1
 kill $srv 2>/dev/null || true; wait $srv 2>/dev/null || true
 
 # #249: connections a forked child inherited, dropped without a byte.

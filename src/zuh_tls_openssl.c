@@ -57,7 +57,29 @@ typedef struct {
      * every chain failure on a pinned request as zu_tls_pin_error (§14.6;
      * found by the §50.5 pin-over-untrusted-chain row, 2026-09-25). */
     int        pin_mismatch;
+    /* #315: the server asked to renegotiate an HTTP/2 connection. */
+    int        h2_reneg;
 } tls_impl;
+
+/* RFC 9113 §9.2.1: HTTP/2 over TLS 1.2 MUST disable renegotiation and treat
+ * one as a connection error. SSL_OP_NO_RENEGOTIATION alone answers a
+ * HelloRequest with a warning alert and carries on, so the request would
+ * wait out its deadline instead of failing; this sees the message itself. */
+static void h2_msg_cb(int write_p, int version, int content_type, const void *buf,
+                      size_t len, SSL *ssl, void *arg) {
+    (void)version; (void)ssl;
+    if (!write_p && content_type == SSL3_RT_HANDSHAKE && len > 0 &&
+        ((const unsigned char *)buf)[0] == SSL3_MT_HELLO_REQUEST)
+        ((tls_impl *)arg)->h2_reneg = 1;
+}
+
+static int h2_reneg_refused(tls_impl *t, zuh_phase phase, zuh_error *err) {
+    if (!t->h2_reneg) return 0;
+    zuh_error_set(err, ZUH_ERR_TLS, phase,
+                 "the server renegotiated TLS on an HTTP/2 connection, which "
+                 "RFC 9113 §9.2.1 forbids");
+    return 1;
+}
 
 static void ssl_err_string(char *out, size_t cap) {
     unsigned long e = ERR_peek_last_error();
@@ -241,6 +263,7 @@ static zuh_ssize tls_read(zuh_stream *s, void *buf, size_t n, zuh_deadline d, zu
          * SSL_ERROR_SSL. Found by the shuffled CI run (#121). */
         ERR_clear_error();
         r = SSL_read(t->ssl, buf, (int)(n > INT_MAX ? INT_MAX : n));
+        if (h2_reneg_refused(t, ZUH_PHASE_READ, err)) return -1;
         if (r > 0) return (zuh_ssize)r;
         e = SSL_get_error(t->ssl, r);
         if (e == SSL_ERROR_ZERO_RETURN) return 0;          /* clean close_notify */
@@ -280,6 +303,7 @@ static zuh_ssize tls_write(zuh_stream *s, const void *buf, size_t n, zuh_deadlin
         int w, e;
         ERR_clear_error();   /* as in tls_read() */
         w = SSL_write(t->ssl, buf, (int)(n > INT_MAX ? INT_MAX : n));
+        if (h2_reneg_refused(t, ZUH_PHASE_WRITE, err)) return -1;
         if (w > 0) {
             if (flush_out(t, d, err) != ZUH_OK) return -1;
             return (zuh_ssize)w;
@@ -426,7 +450,11 @@ zuh_code zuh_tls_connect(zuh_stream **out, zuh_stream *inner, const char *hostna
         if (!is_ip) SSL_set_tlsext_host_name(t->ssl, t->hostname);
         if (cfg->verify_peer && cfg->verify_hostname) {
             X509_VERIFY_PARAM *p = SSL_get0_param(t->ssl);
-            X509_VERIFY_PARAM_set_hostflags(p, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+            /* NEVER_CHECK_SUBJECT: without a DNS SAN OpenSSL fell back to
+             * the subject CN, which RFC 9110 §4.3.4 forbids a client to use
+             * and SecTrust refuses (#308). */
+            X509_VERIFY_PARAM_set_hostflags(p, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS |
+                                               X509_CHECK_FLAG_NEVER_CHECK_SUBJECT);
             if ((is_ip ? X509_VERIFY_PARAM_set1_ip_asc(p, t->hostname)
                        : X509_VERIFY_PARAM_set1_host(p, t->hostname, 0)) != 1) {
                 zuh_error_set(err, ZUH_ERR_TLS, ZUH_PHASE_TLS, "cannot set the verification host");
@@ -492,12 +520,12 @@ zuh_code zuh_tls_connect(zuh_stream **out, zuh_stream *inner, const char *hostna
                 zuh_error_set(err, ZUH_ERR_TLS_HOSTNAME, ZUH_PHASE_TLS,
                              "certificate is not valid for '%s'", t->hostname);
                 rc = ZUH_ERR_TLS_HOSTNAME;
-            } else if (v == X509_V_ERR_CERT_HAS_EXPIRED ||
-                       v == X509_V_ERR_CERT_NOT_YET_VALID ||
-                       v == X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT ||
-                       v == X509_V_ERR_SELF_SIGNED_CERT_IN_CHAIN ||
-                       v == X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY ||
-                       v == X509_V_ERR_UNABLE_TO_VERIFY_LEAF_SIGNATURE) {
+            } else if (v != X509_V_OK) {
+                /* Any other verification result is the chain's fault: an
+                 * unknown or missing issuer, expiry, a wrong EKU, a weak key.
+                 * Listing six codes sent the rest to the handshake class, and
+                 * the same certificate raised a different R class here than
+                 * on Schannel and Network.framework (#309). */
                 zuh_error_set(err, ZUH_ERR_TLS_CERT, ZUH_PHASE_TLS,
                              "certificate verification failed for '%s': %s",
                              t->hostname, X509_verify_cert_error_string(v));
@@ -526,6 +554,13 @@ zuh_code zuh_tls_connect(zuh_stream **out, zuh_stream *inner, const char *hostna
             memcpy(t->info.alpn, sel, sel_len);
             t->info.alpn[sel_len] = '\0';
         }
+    }
+    /* #315: no renegotiation once HTTP/2 is chosen; HTTP/1.1 keeps it,
+     * which #215's servers need. TLS 1.3 has none to refuse. */
+    if (strcmp(t->info.alpn, "h2") == 0 && SSL_version(t->ssl) < TLS1_3_VERSION) {
+        SSL_set_options(t->ssl, SSL_OP_NO_RENEGOTIATION);
+        SSL_set_msg_callback_arg(t->ssl, t);
+        SSL_set_msg_callback(t->ssl, h2_msg_cb);
     }
 
     s->vt = &k_tls_vt;

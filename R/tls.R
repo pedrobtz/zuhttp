@@ -17,7 +17,8 @@
 #'   enterprise case — a corporate root alongside the public ones.
 #' @param pins Public-key pins as `"sha256//<base64>"` strings. Checked **in
 #'   addition to** chain and hostname verification, never instead of it
-#'   (§14.4). A connection must satisfy both.
+#'   (§14.4). A connection must satisfy both, so `pins` with `verify = FALSE`
+#'   raises `zu_tls_unsupported_error` before any connection is made.
 #' @param revocation Check certificate revocation. **Off by default**, and the
 #'   default is deliberate — see below.
 #' @param min_version Minimum TLS version: `12` or `13`.
@@ -167,7 +168,7 @@ check_pem <- function(path, arg) {
   )
 }
 
-check_tls <- function(tls) {
+check_tls <- function(tls, verify = TRUE) {
   if (is.null(tls)) {
     return(NULL)
   }
@@ -181,7 +182,7 @@ check_tls <- function(tls) {
     }
     if (!is.null(p)) check_pem(p, f)
   }
-  .Call(C_zu_tls_check, unclass(tls))
+  .Call(C_zu_tls_check, unclass(tls), isTRUE(verify))
   tls
 }
 

@@ -305,6 +305,15 @@ zuh_tlseof_nw: $(NWSRC) tls_eof/drive.c
 tls-fork-nw: zuh_tlseof_nw
 	DRIVE=$(CURDIR)/zuh_tlseof_nw tls_eof/fork.sh
 
+# #311: the receive buffer stays bounded under a slow reader. nwrx.c
+# includes the backend source to read its buffer, so it is not linked twice.
+zuh_nwrx: $(NWSRC) tls_eof/nwrx.c
+	$(CC) $(ENGBASE) $(URIFLAGS) -o $@ $(filter-out $(SRC)/zuh_tls_nw.c,$(NWSRC)) tls_eof/nwrx.c \
+	      -framework Network -framework Security -framework CoreFoundation -lz $(NETLIBS)
+
+tls-rx-nw: zuh_nwrx
+	NWRX=$(CURDIR)/zuh_nwrx tls_eof/nwrx.sh
+
 zuh_tlseof_nw_asan: $(NWSRC) tls_eof/drive.c
 	$(CC) $(ENGBASE) $(SANFLAGS) $(URIFLAGS) -o $@ $(NWSRC) tls_eof/drive.c \
 	      -framework Network -framework Security -framework CoreFoundation -lz $(NETLIBS)
@@ -313,7 +322,7 @@ tls-fork-nw-asan: zuh_tlseof_nw_asan
 	$(SANENV) DRIVE=$(CURDIR)/zuh_tlseof_nw_asan tls_eof/fork.sh
 
 clean:
-	rm -rf zuh_ctest zuh_ctest_asan zuh_tlstest zuh_engtest zuh_engtest_nw zuh_engtest_sch zuh_tlseof zuh_tlseof_asan zuh_tlseof_nw zuh_tlseof_nw_asan \
+	rm -rf zuh_ctest zuh_ctest_asan zuh_tlstest zuh_engtest zuh_engtest_nw zuh_engtest_sch zuh_tlseof zuh_tlseof_asan zuh_tlseof_nw zuh_tlseof_nw_asan zuh_nwrx \
 	      zuh_tlstest_asan zuh_engtest_asan zuh_engtest_nw_asan *.dSYM build build-asan *.o
 
-.PHONY: all run strict asan clean tls tls-asan tls-eof tls-eof-asan tls-fork-nw tls-fork-nw-asan engine engine-asan engine-nw-asan engine-nw engine-sch tls-eof-sch
+.PHONY: all run strict asan clean tls tls-asan tls-eof tls-eof-asan tls-fork-nw tls-fork-nw-asan tls-rx-nw engine engine-asan engine-nw-asan engine-nw engine-sch tls-eof-sch

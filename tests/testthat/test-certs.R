@@ -87,6 +87,36 @@ test_that("a hostname mismatch is its OWN condition class (§14.6)", {
   })
 })
 
+test_that("a name only in the subject CN is no name (#308)", {
+  skip_unless_local_tls()
+  fx <- tls_fixture()
+  # RFC 9110 §4.3.4: a client MUST NOT use a CN-ID. OpenSSL's host check
+  # fell back to the CN when a certificate had no DNS SAN, and accepted
+  # what Network.framework refused.
+  with_tls_server("cnonly", function(url) {
+    e <- tryCatch(
+      zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10),
+      error = function(e) e
+    )
+    expect_s3_class(e, "zu_tls_hostname_error")
+  })
+})
+
+test_that("a client-authentication certificate is not a server's (#309)", {
+  skip_unless_local_tls()
+  fx <- tls_fixture()
+  # Trusted CA, right name, EKU clientAuth only (RFC 5280 §4.2.1.12): a
+  # certificate failure, as every backend says for every other chain
+  # fault, not OpenSSL's zu_tls_handshake_error.
+  with_tls_server("clientonly", function(url) {
+    e <- tryCatch(
+      zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10),
+      error = function(e) e
+    )
+    expect_s3_class(e, "zu_tls_certificate_error")
+  })
+})
+
 test_that("an IP literal verifies against an iPAddress SAN (#216, #246)", {
   # The control for the two rows after it: a certificate naming 127.0.0.1
   # as an address is accepted when the URL names 127.0.0.1.
@@ -221,6 +251,39 @@ test_that("verify = FALSE accepts what verification would reject", {
     r <- suppressWarnings(zu_get(url, verify = FALSE, timeout = 10))
     expect_identical(zu_resp_status(r), 200L)
   })
+})
+
+test_that("a TLS session is never resumed past the trust it was verified with (#307)", {
+  skip_unless_local_tls()
+  # Network.framework kept a process-wide session cache and a resumed
+  # handshake skipped the verify block, so a strict request after an
+  # unverified one to the same server was accepted unverified. TLS 1.2,
+  # because that is where s_server resumed; each request is a fresh client,
+  # so the pool is not what carries the session.
+  fx <- tls_fixture()
+  with_tls_server(
+    "good",
+    function(url) {
+      get <- function(...) {
+        tryCatch(
+          zu_get(url, timeout = 10, client = zu_client(...)),
+          error = function(e) e
+        )
+      }
+      r <- suppressWarnings(get(verify = FALSE))
+      expect_identical(zu_resp_status(r), 200L)
+      expect_s3_class(get(), "zu_tls_certificate_error")
+      expect_identical(
+        zu_resp_status(get(tls = zu_tls(ca_file = fx$ca))),
+        200L
+      )
+      expect_s3_class(
+        get(tls = zu_tls(ca_file = fx$rogue_ca)),
+        "zu_tls_certificate_error"
+      )
+    },
+    args = "-tls1_2"
+  )
 })
 
 test_that("verify = FALSE warns, every time, and names what it turns off", {

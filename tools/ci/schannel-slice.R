@@ -18,6 +18,14 @@ stopifnot(zu_resp_status(r) == 200L)
 stopifnot(grepl("Example Domain", zu_resp_text(r), fixed = TRUE))
 stopifnot(identical(r$tls_version, "TLSv1.2"))
 
+# §35.2, #312: the same contract test-info.R holds the other backends to,
+# which never runs here because the R network suite does not run on Windows.
+cn <- zu_resp_connection(r)
+cat("trust", cn$trust_backend, "cipher", cn$tls_cipher, "\n")
+stopifnot(identical(cn$trust_backend, "schannel"))
+stopifnot(nzchar(cn$tls_cipher), !grepl("^0x", cn$tls_cipher))
+stopifnot(grepl("[A-Z]", cn$tls_cipher), !grepl("^alg ", cn$tls_cipher))
+
 # §65.1, W20: Schannel offers h2 by ALPN, and http2 = "off" does not.
 h <- zu_get("https://httpbingo.org/get")
 cat("h2 ->", zu_resp_connection(h)$http_version, "\n")
