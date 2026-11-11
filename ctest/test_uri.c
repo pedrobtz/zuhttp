@@ -318,4 +318,26 @@ void suite_uri(void) {
         ZUH_CHECK(after.total_allocs > before.total_allocs);
         ZUH_CHECK_EQ_INT(after.live_blocks, before.live_blocks);
     }
+
+    /* #272: scheme and host are lowercased at both ends of A-Z. */
+    ZUH_CASE("#272: scheme and host are lowercased, Z included");
+    ZUH_CHECK_EQ_INT(P(&u, "HTTP://WWW.AZ.ZZ/Path"), ZUH_OK);
+    ZUH_CHECK(strcmp(u.scheme, "http") == 0);
+    ZUH_CHECK(strcmp(u.host, "www.az.zz") == 0);
+    ZUH_CHECK(strcmp(u.path_query, "/Path") == 0);
+    zuh_uri_free(&u);
+
+    /* The origin string fits only with room for its NUL: a buffer of
+     * exactly its length is too small, with a port and without. */
+    ZUH_CASE("#272: the origin string at its buffer's exact size");
+    ZUH_CHECK_EQ_INT(P(&u, "http://h:8080/x"), ZUH_OK);
+    ZUH_CHECK(!zuh_uri_origin_string(&u, origin, 13));        /* "http://h:8080" */
+    ZUH_CHECK(zuh_uri_origin_string(&u, origin, 14));
+    ZUH_CHECK(strcmp(origin, "http://h:8080") == 0);
+    zuh_uri_free(&u);
+    ZUH_CHECK_EQ_INT(P(&u, "http://h/x"), ZUH_OK);
+    ZUH_CHECK(!zuh_uri_origin_string(&u, origin, 8));         /* "http://h" */
+    ZUH_CHECK(zuh_uri_origin_string(&u, origin, 9));
+    ZUH_CHECK(strcmp(origin, "http://h") == 0);
+    zuh_uri_free(&u);
 }
