@@ -184,7 +184,13 @@ zu_transport_perform.zu_cassette_transport <- function(transport, req) {
   tape <- cassette_read(transport$dir, transport$name)
   hit <- Position(function(i) identical(i$key, key), tape, nomatch = 0L)
 
-  if (transport$mode != "record" && hit > 0L) {
+  # A retry is a new attempt, not a lookup: in auto mode the first attempt's
+  # 503 was recorded, then replayed to every retry, and that 503 was what
+  # later runs replayed though the server had answered 200 (the bug hunt's
+  # R-layer slice). A retry goes to the network and replaces the entry, so
+  # the tape ends holding the response the call finished with.
+  retrying <- transport$mode == "auto" && isTRUE((req$attempt %||% 1L) > 1L)
+  if (transport$mode != "record" && hit > 0L && !retrying) {
     return(replay_response(tape[[hit]]$response))
   }
 

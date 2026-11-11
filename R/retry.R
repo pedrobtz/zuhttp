@@ -65,6 +65,13 @@ zu_retry <- function(
   if (!is.null(on)) {
     on <- check_whole(on, "on", min = 100, max = 599, n = NA)
   }
+  flag <- function(x, nm) {
+    # isTRUE() read jitter = 1 or "yes" as FALSE, silently.
+    if (!is.logical(x) || length(x) != 1L || is.na(x)) {
+      stop("`", nm, "` must be TRUE or FALSE", call. = FALSE)
+    }
+    x
+  }
   pos <- function(x, nm) {
     if (!is.numeric(x) || length(x) != 1L || is.na(x) || x < 0) {
       stop("`", nm, "` must be a single non-negative number", call. = FALSE)
@@ -77,8 +84,8 @@ zu_retry <- function(
       backoff = backoff,
       base = pos(base, "base"),
       max_delay = pos(max_delay, "max_delay"),
-      jitter = isTRUE(jitter),
-      retry_after = isTRUE(retry_after),
+      jitter = flag(jitter, "jitter"),
+      retry_after = flag(retry_after, "retry_after"),
       max_retry_after = pos(max_retry_after, "max_retry_after"),
       attempt_timeout = if (is.null(attempt_timeout)) {
         NULL
@@ -183,7 +190,14 @@ zu_req_retry <- function(
   req <- check_req(req)
   req$policy$retry <- zu_retry(attempts = attempts, ...)
   if (!is.null(replay_safe)) {
-    req$replay_safe <- isTRUE(replay_safe)
+    if (
+      !is.logical(replay_safe) ||
+        length(replay_safe) != 1L ||
+        is.na(replay_safe)
+    ) {
+      stop("`replay_safe` must be TRUE or FALSE", call. = FALSE)
+    }
+    req$replay_safe <- replay_safe
   }
   if (!is.null(idempotency_key) && !identical(idempotency_key, FALSE)) {
     key <- if (isTRUE(idempotency_key)) {

@@ -806,7 +806,9 @@ zu_resp_check <- function(resp) {
   }
   msg <- paste0(
     if (!is.null(resp$method)) paste0(resp$method, " ") else "",
-    resp$url %||% "request",
+    # Redacted here too: a zu_response() built by hand holds its URL as given
+    # (§42.2), and the message is an egress.
+    if (is.null(resp$url)) "request" else zu_redact_url(resp$url),
     " failed: HTTP ",
     resp$status,
     if (nzchar(status_text(resp$status))) {
@@ -963,12 +965,40 @@ status_hint <- function(s) {
 # --- Content-Type ----------------------------------------------------------
 # Enough of RFC 9110 5.6.6 to read a charset out of a real header, including
 # the quoted form that servers do send: text/plain; charset="utf-8".
+split_unquoted <- function(s, sep) {
+  ch <- strsplit(s, "", fixed = TRUE)[[1]]
+  out <- character()
+  cur <- character()
+  inq <- FALSE
+  esc <- FALSE
+  for (c in ch) {
+    if (esc) {
+      cur <- c(cur, c)
+      esc <- FALSE
+    } else if (inq && c == "\\") {
+      cur <- c(cur, c)
+      esc <- TRUE
+    } else if (c == "\"") {
+      cur <- c(cur, c)
+      inq <- !inq
+    } else if (!inq && c == sep) {
+      out <- c(out, paste(cur, collapse = ""))
+      cur <- character()
+    } else {
+      cur <- c(cur, c)
+    }
+  }
+  c(out, paste(cur, collapse = ""))
+}
+
 parse_content_type <- function(v) {
   if (is.null(v) || !length(v) || is.na(v[[1]]) || !nzchar(v[[1]])) {
     return(list(type = NULL, params = list()))
   }
   v <- v[[1]]
-  parts <- strsplit(v, ";", fixed = TRUE)[[1]]
+  # Split on the ; that are outside a quoted-string (RFC 9110 §5.6.4):
+  # a="x;y" is one parameter, not a = "x and a stray y.
+  parts <- split_unquoted(v, ";")
   type <- tolower(trimws(parts[[1]]))
   params <- list()
   for (p in parts[-1]) {

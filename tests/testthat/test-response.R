@@ -209,3 +209,18 @@ test_that("on_invalid = \"substitute\" survives a NUL byte", {
   expect_identical(zu_resp_text(r, on_invalid = "substitute"), "a<00>b")
   expect_error(zu_resp_text(r), class = "zu_body_decode_error")
 })
+
+test_that("a quoted media-type parameter may contain a semicolon", {
+  ct <- zuhttp:::parse_content_type('text/plain; a="x;y"; charset=utf-8')
+  expect_identical(ct$params$a, "x;y")
+  expect_identical(ct$params$charset, "utf-8")
+})
+
+test_that("zu_resp_check() redacts a hand-built response's URL (§42.2)", {
+  e <- tryCatch(
+    zu_resp_check(zu_response(500L, url = "http://u:p@h.test/?token=1")),
+    error = function(e) e
+  )
+  expect_false(grepl("u:p@", conditionMessage(e), fixed = TRUE))
+  expect_false(grepl("token=1", conditionMessage(e), fixed = TRUE))
+})

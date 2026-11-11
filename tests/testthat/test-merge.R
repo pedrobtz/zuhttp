@@ -274,3 +274,31 @@ test_that("timeouts round up to whole milliseconds, never down to none", {
   expect_identical(zuhttp:::timeout_ms(0.0005), 1L)
   expect_identical(zuhttp:::timeout_ms(30), 30000L)
 })
+
+test_that("user_agent and zu_retry() flags are refused unless they say what they mean", {
+  m <- zu_mock_transport(zu_stub(response = zu_response(200L, body = "x")))
+  cl <- zu_client(transport = m)
+  for (ua in list(NA_character_, c("a", "b"), 5)) {
+    expect_error(
+      zu_get("https://x.test", user_agent = ua, client = cl),
+      "user_agent"
+    )
+  }
+  expect_error(zu_retry(jitter = 1), "jitter")
+  expect_error(zu_retry(retry_after = "yes"), "retry_after")
+  expect_error(
+    zu_req_retry(zu_request("POST", "https://x.test"), replay_safe = "yes"),
+    "replay_safe"
+  )
+})
+
+test_that("an explicit Content-Type of NA sends none, even for a JSON body", {
+  seen <- with_raw_server(
+    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n",
+    function(url) {
+      req <- zu_body_json(zu_request("POST", paste0(url, "/j")), list(a = 1))
+      zu_perform(zu_headers(req, "Content-Type" = NA))
+    }
+  )
+  expect_false(grepl("Content-Type", seen, ignore.case = TRUE))
+})
