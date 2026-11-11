@@ -262,12 +262,9 @@ zu_client_update <- function(client, ...) {
   client
 }
 
-as_header_vec <- function(h) {
+as_header_vec <- function(h, request = TRUE) {
   if (is.null(h) || !length(h)) {
     return(NULL)
-  }
-  if (is.list(h)) {
-    h <- unlist(h)
   }
   if (is.null(names(h)) || any(is.na(names(h))) || any(!nzchar(names(h)))) {
     stop(
@@ -275,8 +272,49 @@ as_header_vec <- function(h) {
       call. = FALSE
     )
   }
-  # NA is meaningful (it erases), so it survives as.character() here.
-  structure(as.character(h), names = names(h))
+  # One value per name. unlist() turned "X-V" = c("a", "b") into X-V1 and
+  # X-V2, headers nobody asked for, and a name given twice kept only the
+  # first; both are refused rather than guessed at (D-56 in spirit).
+  if (is.list(h)) {
+    long <- names(h)[lengths(h) != 1L]
+    if (length(long)) {
+      stop(
+        "header `",
+        long[[1]],
+        "` must be a single value; join a list-valued ",
+        "field yourself, e.g. paste(x, collapse = \", \")",
+        call. = FALSE
+      )
+    }
+    h <- vapply(h, header_atom, "", USE.NAMES = TRUE)
+  } else {
+    h <- structure(
+      vapply(seq_along(h), function(i) header_atom(h[[i]]), ""),
+      names = names(h)
+    )
+  }
+  # A request header is set once. A response may repeat one (Set-Cookie), so
+  # zu_response() and the mock transport pass request = FALSE.
+  dup <- names(h)[duplicated(tolower(names(h)))]
+  if (request && length(dup)) {
+    stop("header `", dup[[1]], "` is given twice; give it once", call. = FALSE)
+  }
+  h
+}
+
+# NA is meaningful (it erases), so it survives. A number is written in full,
+# never as R's 1e+05.
+header_atom <- function(v) {
+  if (length(v) == 1L && is.na(v)) {
+    return(NA_character_)
+  }
+  if (is.factor(v)) {
+    v <- as.character(v)
+  }
+  if (is.double(v)) {
+    return(num_atom(v))
+  }
+  to_utf8(v)
 }
 
 as_query_list <- function(q) {
@@ -293,8 +331,16 @@ as_query_list <- function(q) {
   # NULL and NA both mean "erase" (§31.9), and they have to mean the same
   # thing here: list(a = NULL) is a perfectly ordinary way to write it, but a
   # NULL cannot survive being carried through a list, so it becomes NA now.
-  for (nm in names(q)) {
-    if (is.null(q[[nm]])) q[[nm]] <- NA
+  for (i in seq_along(q)) {
+    if (is.null(q[[i]])) q[i] <- list(NA)
+  }
+  # A name given twice is one parameter with both values, in order:
+  # list(a = "1", a = "2") is "a=1&a=2", not the first value twice.
+  nms <- names(q)
+  if (anyDuplicated(nms)) {
+    q <- lapply(split(q, factor(nms, levels = unique(nms))), function(v) {
+      do.call(c, unname(v))
+    })
   }
   q
 }
