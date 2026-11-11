@@ -132,7 +132,7 @@ spki_pin <- function(cert) {
 # the base URL. openssl s_server -www answers any request with a small page,
 # which is all the matrix needs — what is under test is the handshake.
 # `host` is the name the URL uses: the #246 rows connect by IP literal.
-with_tls_server <- function(cert, code, host = "localhost") {
+with_tls_server <- function(cert, code, host = "localhost", args = "") {
   fx <- tls_fixture()
   port <- NULL
   for (attempt in 1:8) {
@@ -143,12 +143,13 @@ with_tls_server <- function(cert, code, host = "localhost") {
       c(
         "-c",
         shQuote(sprintf(
-          "echo $$ > %s; exec %s s_server -cert %s -key %s -accept %d -www -quiet",
+          "echo $$ > %s; exec %s s_server -cert %s -key %s -accept %d -www -quiet %s",
           pidf,
           openssl_bin(),
           fx$cert(cert),
           fx$key(cert),
-          p
+          p,
+          args
         ))
       ),
       wait = FALSE,

@@ -223,6 +223,39 @@ test_that("verify = FALSE accepts what verification would reject", {
   })
 })
 
+test_that("a TLS session is never resumed past the trust it was verified with (#307)", {
+  skip_unless_local_tls()
+  # Network.framework kept a process-wide session cache and a resumed
+  # handshake skipped the verify block, so a strict request after an
+  # unverified one to the same server was accepted unverified. TLS 1.2,
+  # because that is where s_server resumed; each request is a fresh client,
+  # so the pool is not what carries the session.
+  fx <- tls_fixture()
+  with_tls_server(
+    "good",
+    function(url) {
+      get <- function(...) {
+        tryCatch(
+          zu_get(url, timeout = 10, client = zu_client(...)),
+          error = function(e) e
+        )
+      }
+      r <- suppressWarnings(get(verify = FALSE))
+      expect_identical(zu_resp_status(r), 200L)
+      expect_s3_class(get(), "zu_tls_certificate_error")
+      expect_identical(
+        zu_resp_status(get(tls = zu_tls(ca_file = fx$ca))),
+        200L
+      )
+      expect_s3_class(
+        get(tls = zu_tls(ca_file = fx$rogue_ca)),
+        "zu_tls_certificate_error"
+      )
+    },
+    args = "-tls1_2"
+  )
+})
+
 test_that("verify = FALSE warns, every time, and names what it turns off", {
   skip_unless_local_tls()
   # §14.1: no single "insecure" switch that disables both peer and hostname

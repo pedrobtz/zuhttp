@@ -11,6 +11,8 @@
 #   keepalive answers every request on a connection until the client closes,
 #             one thread per connection: the third mode's pooled connection
 #             stays open while another connection's handshake fails.
+#   resume    keepalive, at most TLS 1.2 (where sessions resume), with a
+#             line per connection saying whether it was resumed (#307).
 #   fork      keepalive with a 200 KB body at /big and a line per accept,
 #             request and close, for fork.sh to read (#249).
 #
@@ -20,6 +22,8 @@ import socket, ssl, sys, time
 mode, port, cert, key = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
 ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 ctx.load_cert_chain(cert, key)
+if mode == "resume":
+    ctx.maximum_version = ssl.TLSVersion.TLSv1_2
 ls = socket.socket()
 ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 ls.bind(("127.0.0.1", port))
@@ -36,6 +40,8 @@ def pump(raw, inc):
 
 def keepalive(raw):
     s = ctx.wrap_socket(raw, server_side=True)
+    if mode == "resume":
+        print("reused=%s" % s.session_reused, flush=True)
     try:
         while True:
             req = b""
@@ -92,7 +98,7 @@ if mode == "fork":
     time.sleep(5)
     sys.exit(0)
 
-if mode == "keepalive":
+if mode in ("keepalive", "resume"):
     import threading
     for _ in range(3):
         raw, _ = ls.accept()

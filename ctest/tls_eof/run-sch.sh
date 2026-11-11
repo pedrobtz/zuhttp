@@ -64,6 +64,12 @@ for c in ipother ipdns; do
   "$drive" hostname "https://127.0.0.1:$port/" - || status=1
   stop
 done
+# #307: verify off, then system trust (which has the fixture CA but not the
+# rogue one): Schannel's session cache is process-wide, and the second
+# handshake must still be verified.
+serve resume untrusted
+"$drive" resume "https://localhost:$port/" - || status=1
+stop
 # #215: a TLS 1.2 renegotiation between the request and the response.
 # Schannel reports SEC_I_RENEGOTIATE, which is not handled yet (#298): the
 # request fails with a TLS class and no body. `refused` says so when that

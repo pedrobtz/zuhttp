@@ -968,6 +968,12 @@ zuh_code zuh_tls_dial(zuh_stream **out, const char *host, uint16_t port,
             sec_protocol_options_t so = nw_tls_copy_sec_protocol_options(tls);
             sec_protocol_options_set_min_tls_protocol_version(so,
                 min13 ? tls_protocol_version_TLSv13 : tls_protocol_version_TLSv12);
+            /* #307: no resumption (§51.1). Network.framework's session cache
+             * is process-wide and a resumed handshake carries no
+             * certificate, so the verify block below never ran: a request
+             * after a verify = FALSE one to the same server was accepted
+             * unverified, and so was one whose ca_file trusts nothing. */
+            sec_protocol_options_set_tls_resumption_enabled(so, false);
             /* §65.1: the offer, one name per call, in preference order. */
             {
                 const char *p = m->alpn_offer;
