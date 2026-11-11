@@ -115,4 +115,46 @@ void suite_error(void) {
         c.min_version = 12;
         ZUH_CHECK_EQ_INT(zuh_tls_config_check(&c, 0u, "testbe", &e), ZUH_OK);
     }
+
+    /* #274: the class chain fills at most `max` slots, at every max; the
+     * slot past it is never written. */
+    ZUH_CASE("#274: the class chain stops at max, and writes nothing past it");
+    {
+        const char *full[16], *out[17];
+        int n_full, max, k, bad = 0;
+        n_full = zuh_code_class_chain(ZUH_ERR_TLS_HOSTNAME, full, 16);
+        ZUH_CHECK(n_full >= 4);
+        for (max = 0; max <= n_full; max++) {
+            int n;
+            for (k = 0; k < 17; k++) out[k] = "SENTINEL";
+            n = zuh_code_class_chain(ZUH_ERR_TLS_HOSTNAME, out, max);
+            if (n != max) bad++;
+            for (k = 0; k < n; k++) if (strcmp(out[k], full[k]) != 0) bad++;
+            if (strcmp(out[max], "SENTINEL") != 0) bad++;
+        }
+        ZUH_CHECK_EQ_INT(bad, 0);
+    }
+
+    ZUH_CASE("#274: class names and the public code at the table's ends");
+    ZUH_CHECK(strcmp(zuh_code_class(ZUH_OK), "zu_ok") == 0);
+    ZUH_CHECK(strcmp(zuh_code_class(ZUH_CODE_COUNT), "zu_error") == 0);
+    ZUH_CHECK(strcmp(zuh_code_class((zuh_code)(ZUH_CODE_COUNT - 1)), "zu_error") != 0);
+    ZUH_CHECK_EQ_INT(zuh_code_public(ZUH_CODE_COUNT), ZUH_CODE_COUNT);
+    ZUH_CHECK_EQ_INT(zuh_code_public((zuh_code)(ZUH_CODE_COUNT - 1)), ZUH_ERR_IO);
+
+    /* #274: ALPN names of 1 to 255 bytes, and a list that fits its buffer
+     * exactly. */
+    ZUH_CASE("#274: ALPN wire form at 255 bytes, and at an exact fit");
+    {
+        static char name[257];
+        unsigned char wire[300];
+        memset(name, 'p', 256);
+        name[255] = '\0';
+        ZUH_CHECK_EQ_INT(zuh_tls_alpn_wire(name, wire, sizeof wire), 256);
+        ZUH_CHECK_EQ_INT(wire[0], 255);
+        name[255] = 'p'; name[256] = '\0';
+        ZUH_CHECK_EQ_INT(zuh_tls_alpn_wire(name, wire, sizeof wire), 0);
+        ZUH_CHECK_EQ_INT(zuh_tls_alpn_wire("h2,http/1.1", wire, 12), 12);
+        ZUH_CHECK_EQ_INT(zuh_tls_alpn_wire("h2,http/1.1", wire, 11), 0);
+    }
 }

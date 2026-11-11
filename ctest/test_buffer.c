@@ -95,6 +95,37 @@ void suite_buffer(void) {
         zuh_buf_free(&b);
     }
 
+    /* #274: capacity grows by half again, from 64, only when a write needs
+     * it, and to exactly what is needed when that is more. */
+    ZUH_CASE("#274: buffer capacity grows 1.5x, and only when needed");
+    {
+        zuh_buffer g;
+        static char fill[300];
+        memset(fill, 'f', sizeof fill);
+        ZUH_CHECK(zuh_buf_init(&g, 64, 0));
+        ZUH_CHECK_EQ_INT(g.cap, 64);
+        ZUH_CHECK(zuh_buf_append(&g, fill, 64));
+        ZUH_CHECK_EQ_INT(g.cap, 64);              /* exactly full: no growth */
+        ZUH_CHECK(zuh_buf_append(&g, fill, 1));
+        ZUH_CHECK_EQ_INT(g.cap, 96);              /* 64 + 32 */
+        ZUH_CHECK(zuh_buf_append(&g, fill, 31));
+        ZUH_CHECK_EQ_INT(g.cap, 96);              /* 96 needed, 96 held */
+        ZUH_CHECK(zuh_buf_append(&g, fill, 1));
+        ZUH_CHECK_EQ_INT(g.cap, 144);
+        ZUH_CHECK(zuh_buf_append(&g, fill, 300));
+        ZUH_CHECK_EQ_INT(g.len, 397);
+        ZUH_CHECK(g.cap >= 397 && g.cap <= 486);  /* 144 * 1.5^n, first past 397 */
+        zuh_buf_free(&g);
+        /* Under a cap, growth stops at the cap. */
+        ZUH_CHECK(zuh_buf_init(&g, 64, 100));
+        ZUH_CHECK(zuh_buf_append(&g, fill, 65));
+        ZUH_CHECK_EQ_INT(g.cap, 96);
+        ZUH_CHECK(zuh_buf_append(&g, fill, 35));
+        ZUH_CHECK_EQ_INT(g.cap, 100);
+        ZUH_CHECK(!zuh_buf_append(&g, fill, 1));
+        zuh_buf_free(&g);
+    }
+
     ZUH_CASE("no leaks across the suite");
     {
         zuh_alloc_stats st;

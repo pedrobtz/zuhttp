@@ -204,4 +204,32 @@ void suite_trace(void) {
         zuh_trace_add_at(&t, ZUH_EV_DNS_DONE, NULL, 0, t.t0);
         ZUH_CHECK_EQ_INT(t.dropped, 2);
     }
+
+    /* #274: names at the ends of the event table, and a detail exactly the
+     * slot's size or made of nothing but continuation bytes. */
+    ZUH_CASE("#274: event names at the table's ends");
+    ZUH_CHECK(strcmp(zuh_event_name((zuh_event)0), "?") != 0);
+    ZUH_CHECK(strcmp(zuh_event_name((zuh_event)(ZUH_EV_COUNT - 1)), "?") != 0);
+    ZUH_CHECK(strcmp(zuh_event_name(ZUH_EV_COUNT), "?") == 0);
+
+    ZUH_CASE("#274: a detail of exactly the slot's size is truncated and marked");
+    {
+        static zuh_trace t;
+        static char d[ZUH_TRACE_DETAIL + 1], cont[ZUH_TRACE_DETAIL + 50];
+        size_t n;
+        memset(d, 'd', ZUH_TRACE_DETAIL); d[ZUH_TRACE_DETAIL] = '\0';
+        zuh_trace_init(&t);
+        zuh_trace_add(&t, ZUH_EV_DNS_START, d, 0);
+        n = strlen(t.ev[0].detail);
+        ZUH_CHECK(n == ZUH_TRACE_DETAIL - 1);
+        ZUH_CHECK(strcmp(t.ev[0].detail + n - 3, ZUH_TRACE_TRUNC) == 0);
+        /* d[0..254] and the NUL fit: one less is not truncated. */
+        d[ZUH_TRACE_DETAIL - 1] = '\0';
+        zuh_trace_add(&t, ZUH_EV_DNS_START, d, 0);
+        ZUH_CHECK(strcmp(t.ev[1].detail, d) == 0);
+        /* Nothing but continuation bytes: no character boundary to keep. */
+        memset(cont, 0x80, sizeof cont - 1); cont[sizeof cont - 1] = '\0';
+        zuh_trace_add(&t, ZUH_EV_DNS_START, cont, 0);
+        ZUH_CHECK(strcmp(t.ev[2].detail, ZUH_TRACE_TRUNC) == 0);
+    }
 }
