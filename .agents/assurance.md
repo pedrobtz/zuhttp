@@ -127,6 +127,7 @@ One row per limit the package enforces. "Straddled by" is the test of
 | `max_body`, HTTP/1.1 identity                       | decoded bytes                            | ctest/test_body.c (caps 1 to 30 under close, exactly at cap under Content-Length); fuzz/fuzz_body.c at 8    |
 | `max_body`, chunked identity and gzip, HTTP/1.1 | decoded bytes | ctest/test_body.c (#252): Content-Length, chunked and close, identity and gzip, at cap - 1, cap and cap + 1 |
 | `max_body`, HTTP/2 and pulled bodies | decoded bytes | ctest/test_h2.c (#252): HTTP/1.1 and HTTP/2, buffered and pulled, identity and gzip, at 2999, 3000 and 3001 |
+| Network.framework receive backlog | wire bytes, two 64 KiB receives (#311) | ctest/tls_eof/nwrx.c `make -C ctest tls-rx-nw`: a 16 MiB body read slower than loopback stays within 128 KiB; not straddled, since the bound is "bounded", not an exact figure |
 | `max_body` from R                                   | bytes, `>= 1` or `Inf`                   | tests/testthat/test-response.R, tests/testthat/test-merge.R                                                 |
 | `ZUH_MAX_HEADER_BYTES`, HTTP/1.1 response head | wire bytes, 64 KiB a head (D-101) | ctest/test_engine_mock.c (#258): over 64 KiB on the wire is refused at every read size |
 | header bytes, HTTP/1.1 trailers and HTTP/2 | name + value + 32 a field, pseudo-headers free; `zu_http_parse_error` everywhere (D-101) | ctest/test_h2.c (#259): one field list at 65535, 65536 and 65537 bytes through the H1 head, H1 trailers, H2 headers and H2 trailers, whole and byte-wise |

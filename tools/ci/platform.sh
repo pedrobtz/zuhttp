@@ -40,6 +40,8 @@ macos() {
   step "Network.framework fork drop (#249)"
   OPENSSL="$openssl_bin" make -C ctest tls-fork-nw
   OPENSSL="$openssl_bin" make -C ctest tls-fork-nw-asan
+  step "Network.framework receive backpressure (#311)"
+  make -C ctest tls-rx-nw
 
   step "S9 slice on Network.framework + SecTrust, and under ASan + UBSan"
   make -C ctest engine-nw

@@ -53,6 +53,7 @@ ctest/zuh_tlseof
 ctest/zuh_tlseof_asan
 ctest/zuh_tlseof_nw
 ctest/zuh_tlseof_nw_asan
+ctest/zuh_nwrx
 # live binaries under ASan (#231)
 ctest/zuh_tlstest_asan
 ctest/zuh_engtest_asan
