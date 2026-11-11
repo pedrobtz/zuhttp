@@ -14,6 +14,11 @@
 #   resume    keepalive, at most TLS 1.2 (where sessions resume), with a
 #             line per connection saying whether it was resumed (#307).
 #   bulk      keepalive, answering with a 16 MiB body, for nwrx (#311).
+#   optcert   keepalive, asking for a client certificate it does not require
+#             (#313): a client with none must still be answered.
+#   badmac    a complete response and, in the same TCP send, a record whose
+#             MAC is broken, then the connection held open (#314): the
+#             response must reach the client before the error does.
 #   fork      keepalive with a 200 KB body at /big and a line per accept,
 #             request and close, for fork.sh to read (#249).
 #
@@ -25,6 +30,9 @@ ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 ctx.load_cert_chain(cert, key)
 if mode == "resume":
     ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+if mode == "optcert":
+    ctx.verify_mode = ssl.CERT_OPTIONAL
+    ctx.load_verify_locations(cert)   # any CA will do: none is presented
 ls = socket.socket()
 ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 ls.bind(("127.0.0.1", port))
@@ -104,7 +112,7 @@ if mode == "fork":
     time.sleep(5)
     sys.exit(0)
 
-if mode in ("keepalive", "resume", "bulk"):
+if mode in ("keepalive", "resume", "bulk", "optcert"):
     import threading
     for _ in range(3):
         raw, _ = ls.accept()
@@ -140,6 +148,15 @@ for _ in range(2):
         obj.write(b"HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n" + b"x" * 5000)
         raw.sendall(out.read())
         raw.close()                     # FIN, and never a close_notify
+    elif mode == "badmac":
+        obj.write(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+        good = out.read()
+        obj.write(b"x")
+        bad = bytearray(out.read())
+        bad[-1] ^= 1                    # the MAC (or AEAD tag) no longer checks
+        raw.sendall(good + bytes(bad))
+        time.sleep(3)
+        raw.close()
     else:
         obj.write(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
         try:

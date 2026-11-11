@@ -79,6 +79,14 @@ stop
 serve keepalive clientonly
 "$drive" certificate "https://localhost:$port/" - || status=1
 stop
+# #313: a server that asks for a client certificate it does not require.
+# #314: a response, then a record that fails to decrypt, in one send.
+serve optcert good
+"$drive" one "https://localhost:$port/" - || status=1
+stop
+serve badmac good
+"$drive" one "https://localhost:$port/" - || status=1
+stop
 # #215: a TLS 1.2 renegotiation between the request and the response.
 # Schannel reports SEC_I_RENEGOTIATE, which is not handled yet (#298): the
 # request fails with a TLS class and no body. `refused` says so when that

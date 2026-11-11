@@ -74,6 +74,17 @@ wait_ready
 "$drive" resume "https://localhost:$port/" "$tmp/cert.pem" || status=1
 kill $srv 2>/dev/null || true; wait $srv 2>/dev/null || true
 
+# #313 and #314, the differential for Schannel's run-sch.sh: an optional
+# client-certificate request, and a response followed by a broken record.
+for mode in optcert badmac; do
+  port=$(free_port)
+  python3 "$here/server.py" "$mode" "$port" "$tmp/cert.pem" "$tmp/key.pem" >"$tmp/srv.log" 2>&1 &
+  srv=$!
+  wait_ready
+  "$drive" one "https://localhost:$port/" "$tmp/cert.pem" || status=1
+  kill $srv 2>/dev/null || true; wait $srv 2>/dev/null || true
+done
+
 # #215: a renegotiation runs the verify callback after the dial returned.
 port=$(free_port)
 OPENSSL="$openssl" python3 "$here/reneg.py" "$port" "$tmp/cert.pem" "$tmp/key.pem" >"$tmp/srv.log" 2>&1 &
