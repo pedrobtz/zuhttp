@@ -91,6 +91,10 @@ typedef struct {
      * it, because the same DecryptMessage pass may have produced the
      * response's last plaintext, which has to be handed over first. */
     int         peer_closed;
+    /* A decrypt error met after earlier records of the same pass were
+     * decrypted: reported once `dec` is drained, as close_notify is (#314). */
+    zuh_code    failed;
+    zuh_error   failed_err;
 } sch_impl;
 
 /* --- diagnostics ---------------------------------------------------------- */
@@ -412,6 +416,17 @@ static zuh_code do_handshake(sch_impl *t, const char *hostname, const char *alpn
             return ZUH_OK;
         }
 
+        /* A CertificateRequest, and SCH_CRED_NO_DEFAULT_CREDS gave Schannel
+         * no certificate: call again with the same input and without
+         * reading, and it answers with an empty Certificate, as OpenSSL and
+         * Network.framework do. It failed the handshake when a server only
+         * asked for one (#313); a server that requires one still refuses.
+         * This is not client-certificate support (D-67). */
+        if (ss == SEC_I_INCOMPLETE_CREDENTIALS && !(req & ISC_REQ_USE_SUPPLIED_CREDS)) {
+            req |= ISC_REQ_USE_SUPPLIED_CREDS;
+            continue;
+        }
+
         if (ss == SEC_I_CONTINUE_NEEDED || ss == SEC_E_INCOMPLETE_MESSAGE) {
             char chunk[ZUH_SCH_READ_CHUNK];
             zuh_ssize n;
@@ -512,6 +527,10 @@ static zuh_ssize sch_read(zuh_stream *s, void *buf, size_t n, zuh_deadline d, zu
             return (zuh_ssize)take;
         }
         if (t->peer_closed) return 0;
+        if (t->failed) {
+            if (err) *err = t->failed_err;
+            return -1;
+        }
         {
             zuh_code rc = decrypt_available(t, err);
             if (rc == ZUH_OK) continue;
@@ -521,6 +540,16 @@ static zuh_ssize sch_read(zuh_stream *s, void *buf, size_t n, zuh_deadline d, zu
              * response headers ended", which every server that closes after
              * responding could trigger (#123). The loop hands it over first. */
             if (rc == ZUH_ERR_CLOSED) { t->peer_closed = 1; continue; }
+            /* The same for an error: records before the bad one were
+             * decrypted into `dec`, and returning at once lost them (#314).
+             * Hand them over, then report it, as SSL_read() does. */
+            if (rc != ZUH_ERR_WOULDBLOCK && t->dec.len > 0) {
+                t->failed = rc;
+                if (err) t->failed_err = *err;
+                else zuh_error_clear(&t->failed_err);
+                if (err) zuh_error_clear(err);
+                continue;
+            }
             if (rc != ZUH_ERR_WOULDBLOCK) return -1;
         }
         {
@@ -615,7 +644,7 @@ static int sch_readable(zuh_stream *s, int timeout_ms) {
     sch_impl *t;
     if (!s || !s->impl) return -1;
     t = (sch_impl *)s->impl;
-    if (t->dec.len > 0 || t->enc.len > 0 || t->peer_closed) return 1;
+    if (t->dec.len > 0 || t->enc.len > 0 || t->peer_closed || t->failed) return 1;
     return zuh_stream_readable(t->inner, timeout_ms);
 }
 
@@ -707,11 +736,25 @@ zuh_code zuh_tls_connect(zuh_stream **out, zuh_stream *inner, const char *hostna
             snprintf(t->protocol, sizeof t->protocol, "%s",
                      (info.dwProtocol & SP_PROT_TLS1_2_CLIENT) ? "TLSv1.2" :
                      (info.dwProtocol & SP_PROT_TLS1_1_CLIENT) ? "TLSv1.1" : "unknown");
-            snprintf(t->cipher, sizeof t->cipher, "alg 0x%08lx/%lu bit",
-                     (unsigned long)info.aiCipher, (unsigned long)info.dwCipherStrength);
         } else {
             snprintf(t->protocol, sizeof t->protocol, "TLSv1.2");
-            snprintf(t->cipher, sizeof t->cipher, "unknown");
+        }
+    }
+    {
+        /* §35.2 wants a suite NAME (#312): "alg 0x00006610/256 bit" was the
+         * bulk cipher's ALG_ID, which says nothing about key exchange or
+         * mode. CIPHER_INFO gives the IANA suite code the shared table
+         * names, and Schannel's own name for a code the table lacks. */
+        SecPkgContext_CipherInfo ci;
+        const char *name = NULL;
+        memset(&ci, 0, sizeof ci);
+        snprintf(t->cipher, sizeof t->cipher, "unknown");
+        if (QueryContextAttributes(&t->ctx, SECPKG_ATTR_CIPHER_INFO, &ci) == SEC_E_OK) {
+            name = zuh_tls_cipher_name((unsigned)(ci.dwCipherSuite & 0xFFFFu));
+            if (name) snprintf(t->cipher, sizeof t->cipher, "%s", name);
+            else if (ci.szCipherSuite[0])
+                WideCharToMultiByte(CP_UTF8, 0, ci.szCipherSuite, -1, t->cipher,
+                                    (int)sizeof t->cipher, NULL, NULL);
         }
     }
 
@@ -756,7 +799,9 @@ int zuh_tls_get_info(const zuh_stream *s, zuh_tls_info *out) {
     snprintf(out->protocol, sizeof out->protocol, "%s", t->protocol);
     snprintf(out->alpn, sizeof out->alpn, "%s", t->alpn);
     snprintf(out->cipher, sizeof out->cipher, "%s", t->cipher);
-    snprintf(out->trust_backend, sizeof out->trust_backend, "wincertstore");
+    /* zuh_tls.h's names (§35.2): the backend, as "sectrust" and "openssl"
+     * are; "wincertstore" matched nothing a caller tests for (#312). */
+    snprintf(out->trust_backend, sizeof out->trust_backend, "schannel");
     return 1;
 }
 
