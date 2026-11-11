@@ -22,6 +22,18 @@ int zuh_redirect_is_credential_header(const zuh_redact_policy *p, const char *na
     return name ? zuh_redact_is_secret_header(p, name, strlen(name)) : 0;
 }
 
+int zuh_redirect_is_body_header(const char *name) {
+    static const char *const k[] = {
+        "Content-Type", "Content-Encoding", "Content-Language", "Content-Location",
+        "Content-MD5", "Content-Digest", "Repr-Digest", "Digest"
+    };
+    size_t i;
+    if (!name) return 0;
+    for (i = 0; i < sizeof k / sizeof k[0]; i++)
+        if (zuh_ascii_casecmp(name, k[i]) == 0) return 1;
+    return 0;
+}
+
 zuh_code zuh_redirect_decide(const zuh_redirect_policy *p, int status,
                            const char *method, const zuh_uri *from,
                            const zuh_uri *to, size_t hops_so_far,

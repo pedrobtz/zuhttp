@@ -158,6 +158,7 @@ accepted when that work package's PR merges.
 | D-104 | **`pins` with `verify = FALSE` is refused** with `zu_tls_unsupported_error`, before DNS or TCP (`zuh_tls_config_check()`, called from R with the request's merged `verify` and again inside each backend's connect). §14.4 makes a pin additive to verification, and every backend installs its pin check with its verifier, so with verification off the pin was silently ignored (#310). Pinning without verification, as curl's `--pinnedpubkey` with `-k` does, would be a new feature, not this one | Accepted 2026-11-11 (#310) | 14.4, 14.1 | review |
 | D-105 | **The decompression ratio is output over input consumed so far**, checked as inflate runs, so the verdict is the same however the bytes arrive. Input was counted when offered, before inflating: a body fed whole had its incompressible tail credited while its zeros were still decoding and passed, and the same body in pieces was refused (#327). A body whose overall ratio is under the cap but whose prefix decodes past it, such as a long run of zeros before random bytes, is now refused at every split: a streaming decoder cannot know what follows | Accepted 2026-11-11 (#327) | 21.4, 40 | review |
 | D-106 | **Query, form and header values are formatted one value at a time, as the server should read them.** A character value is sent as its UTF-8 bytes, unpadded; a factor as its labels; a double as the shortest decimal that reads back as the same number (what `zu_body_json()` sends), never rounded to 7 digits or written as `1e+05`; a repeated query name keeps every value in order. A request header has one value per name: a vector value or a name given twice is an error rather than a guess (`unlist()` had invented `X-V1`/`X-V2` and dropped the second of a repeated name). Text marked `unknown` in a C locale is taken as UTF-8 bytes, not escaped. Found by a bug hunt's emit slice | Accepted 2026-11-11 | 17, 31.9 | review |
+| D-107 | **A redirect that drops the body drops the headers that describe it** on every later hop: the Fetch standard's request-body headers and the body digests (§28.3). A 303 turned a POST into a GET and the GET still carried the POST's `Content-Type`, `Content-Encoding` and `Content-MD5` (the bug hunt's emit slice). Other caller headers stay, `Idempotency-Key` included; a 307 or 308 resends the body and keeps them all | Accepted 2026-11-11 | 19.1, 28.3 | review |
 
 ---
 
@@ -1293,8 +1294,13 @@ Known sizes send `Content-Length`, including a stat-ed file.
 #### 28.3 Body and content type
 
 `zu_body_json()` sets `application/json`, `zu_body_form()` sets
-`application/x-www-form-urlencoded`; file and raw bodies set nothing. An
-explicit header always wins.
+`application/x-www-form-urlencoded`, `zu_body_file()` and `zu_body_stream()`
+default to `application/octet-stream`, and `zu_body_raw()` sets nothing
+unless given `type`. An explicit header always wins. A redirect that drops the
+body (a 301, 302 or 303 that rewrites the method to GET, §19.1) drops the
+headers that describe it too: `Content-Type`, `Content-Encoding`,
+`Content-Language`, `Content-Location` and the body digests (`Content-MD5`,
+`Content-Digest`, `Repr-Digest`, `Digest`), as RFC 9110 §15.4 asks (D-107).
 
 ### 29. Threading and Process Model
 

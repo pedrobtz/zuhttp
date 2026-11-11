@@ -1003,6 +1003,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
      * that later returns to the first origin does not get the credentials
      * back, because the hop in between chose where to send us. */
     int strip_creds    = 0;
+    int body_dropped   = 0;   /* a redirect dropped the body (§19.1) */
 
     if (!out || !url) return ZUH_ERR_URL;
     zuh_env_system(&sysenv);
@@ -1199,6 +1200,12 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
             /* D-78: framing comes from this hop's body, which a 303 may have
              * dropped; the caller's length, checked above, is never sent. */
             if (zuh_ascii_casecmp(req->header_names[hi], "Content-Length") == 0)
+                continue;
+            /* RFC 9110 §15.4: a 301/302/303 that turned the request into a
+             * GET dropped its body, and the headers describing that body
+             * went on with the GET: Content-Type, Content-Encoding, a digest
+             * of bytes no longer sent (the bug hunt's emit slice). */
+            if (body_dropped && zuh_redirect_is_body_header(req->header_names[hi]))
                 continue;
             rc = zuh_headers_add_str(&rq.headers, req->header_names[hi],
                                     req->header_values[hi]);
@@ -1546,7 +1553,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
                  * the body after 303 -> GET would send a body no method
                  * expects. */
                 if (dec.rewrite_to_get) { method = "GET"; is_head = 0; }
-                if (dec.drop_body) { body = NULL; body_len = 0; }
+                if (dec.drop_body) { body = NULL; body_len = 0; body_dropped = 1; }
                 /* §28.2, §65.7: a streamed body has been sent and cannot
                  * be sent again; a 307/308 that would resend it is refused
                  * rather than sent short. A 303 drops it, as it drops any

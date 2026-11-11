@@ -1092,6 +1092,37 @@ void suite_engine_mock(void) {
         ZUH_CHECK(!has(sent(&d, 1), "Content-Length: 7"));
         zuh_result_free(&r); dialer_free(&d);
 
+        /* RFC 9110 §15.4: the headers describing the dropped body go with
+         * it, the caller's other headers stay, and a 307 keeps them all,
+         * since it resends the body they describe (the emit slice). */
+        {
+            static const char *nm[] = { "Content-Type", "content-encoding", "Content-MD5",
+                                        "Content-Digest", "Idempotency-Key", "X-Trace" };
+            static const char *vl[] = { "application/x-thing", "gzip", "abc",
+                                        "sha-256=:x:", "k1", "t1" };
+            spec.header_names = nm; spec.header_values = vl; spec.n_headers = 6;
+            dialer_init(&d, s303, 2); opts_for(&o, &d);
+            rc = zuh_engine_perform(&r, "http://example.test/submit", &spec, &o, &e);
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            ZUH_CHECK(has(sent(&d, 0), "Content-Type: application/x-thing"));
+            ZUH_CHECK(has(sent(&d, 0), "content-encoding: gzip"));
+            ZUH_CHECK(!has(sent(&d, 1), "Content-Type"));
+            ZUH_CHECK(!has(sent(&d, 1), "content-encoding"));
+            ZUH_CHECK(!has(sent(&d, 1), "Content-MD5"));
+            ZUH_CHECK(!has(sent(&d, 1), "Content-Digest"));
+            ZUH_CHECK(has(sent(&d, 1), "Idempotency-Key: k1"));
+            ZUH_CHECK(has(sent(&d, 1), "X-Trace: t1"));
+            zuh_result_free(&r); dialer_free(&d);
+
+            dialer_init(&d, s307, 2); opts_for(&o, &d);
+            rc = zuh_engine_perform(&r, "http://example.test/submit", &spec, &o, &e);
+            ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+            ZUH_CHECK(has(sent(&d, 1), "Content-Type: application/x-thing"));
+            ZUH_CHECK(has(sent(&d, 1), "Content-MD5: abc"));
+            zuh_result_free(&r); dialer_free(&d);
+            spec.header_names = NULL; spec.header_values = NULL; spec.n_headers = 0;
+        }
+
         dialer_init(&d, s307, 2); opts_for(&o, &d);
         rc = zuh_engine_perform(&r, "http://example.test/submit", &spec, &o, &e);
         ZUH_CHECK_EQ_INT(rc, ZUH_OK);
