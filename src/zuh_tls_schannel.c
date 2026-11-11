@@ -132,8 +132,10 @@ static int ip_literal(const char *host, unsigned char *addr, size_t *alen) {
     return ok;
 }
 
-/* Whether the leaf names `addr` in an iPAddress SAN. */
-static int leaf_names_ip(PCCERT_CONTEXT leaf, const unsigned char *addr, size_t alen) {
+/* Whether the leaf has a SAN entry of type `choice`: with `addr`, an
+ * iPAddress equal to it; without, any entry of that type. */
+static int leaf_san_has(PCCERT_CONTEXT leaf, DWORD choice,
+                        const unsigned char *addr, size_t alen) {
     PCERT_EXTENSION ext;
     CERT_ALT_NAME_INFO *info = NULL;
     DWORD sz = 0, i;
@@ -147,9 +149,9 @@ static int leaf_names_ip(PCCERT_CONTEXT leaf, const unsigned char *addr, size_t 
         return 0;
     for (i = 0; i < info->cAltEntry && !found; i++) {
         const CERT_ALT_NAME_ENTRY *e = &info->rgAltEntry[i];
-        found = e->dwAltNameChoice == CERT_ALT_NAME_IP_ADDRESS &&
-                (size_t)e->IPAddress.cbData == alen &&
-                memcmp(e->IPAddress.pbData, addr, alen) == 0;
+        if (e->dwAltNameChoice != choice) continue;
+        found = !addr || ((size_t)e->IPAddress.cbData == alen &&
+                          memcmp(e->IPAddress.pbData, addr, alen) == 0);
     }
     LocalFree(info);
     return found;
@@ -168,7 +170,9 @@ static zuh_code verify_peer(sch_impl *t, const char *hostname,
     zuh_code rc = ZUH_OK;
     int wlen;
     char detail[256];
+    LPSTR server_auth[1];
 
+    server_auth[0] = (LPSTR)szOID_PKIX_KP_SERVER_AUTH;
     ss = QueryContextAttributes(&t->ctx, SECPKG_ATTR_REMOTE_CERT_CONTEXT, &leaf);
     if (ss != SEC_E_OK || !leaf) {
         sspi_message(ss, detail, sizeof detail);
@@ -181,9 +185,12 @@ static zuh_code verify_peer(sch_impl *t, const char *hostname,
 
     memset(&chain_para, 0, sizeof chain_para);
     chain_para.cbSize = sizeof chain_para;
+    /* RFC 5280 §4.2.1.12: a server certificate is one valid for serverAuth.
+     * With no usage requested the chain checked none, and a leaf issued for
+     * client authentication verified as a server's (#309). */
     chain_para.RequestedUsage.dwType = USAGE_MATCH_TYPE_AND;
-    chain_para.RequestedUsage.Usage.cUsageIdentifier = 0;
-    chain_para.RequestedUsage.Usage.rgpszUsageIdentifier = NULL;
+    chain_para.RequestedUsage.Usage.cUsageIdentifier = 1;
+    chain_para.RequestedUsage.Usage.rgpszUsageIdentifier = server_auth;
 
     /* §14.5 / D-31: revocation is OFF by default. Windows would otherwise make
      * a network call we can neither deadline nor cancel. */
@@ -229,7 +236,14 @@ static zuh_code verify_peer(sch_impl *t, const char *hostname,
     memset(&policy_status, 0, sizeof policy_status);
     policy_status.cbSize = sizeof policy_status;
 
-    if (!CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_SSL, chain,
+    if (chain->TrustStatus.dwErrorStatus & CERT_TRUST_IS_NOT_VALID_FOR_USAGE) {
+        /* Said here rather than left to the SSL policy, whose mapping of
+         * the usage status is not documented (#309). */
+        zuh_error_set(err, ZUH_ERR_TLS_CERT, ZUH_PHASE_TLS,
+                     "certificate verification failed for '%s': it is not valid "
+                     "for server authentication", hostname ? hostname : "(unknown)");
+        rc = ZUH_ERR_TLS_CERT;
+    } else if (!CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_SSL, chain,
                                           &policy_para, &policy_status)) {
         zuh_error_set(err, ZUH_ERR_TLS_CERT, ZUH_PHASE_TLS,
                      "certificate policy check failed (0x%08lx)",
@@ -258,9 +272,20 @@ static zuh_code verify_peer(sch_impl *t, const char *hostname,
          * iPAddress only, as OpenSSL's set1_ip_asc() does (#216). */
         unsigned char addr[16];
         size_t alen = 0;
-        if (ip_literal(hostname, addr, &alen) && !leaf_names_ip(leaf, addr, alen)) {
+        if (ip_literal(hostname, addr, &alen)) {
+            if (!leaf_san_has(leaf, CERT_ALT_NAME_IP_ADDRESS, addr, alen)) {
+                zuh_error_set(err, ZUH_ERR_TLS_HOSTNAME, ZUH_PHASE_TLS,
+                             "certificate is valid but names no IP address '%s'", hostname);
+                rc = ZUH_ERR_TLS_HOSTNAME;
+            }
+        } else if (!leaf_san_has(leaf, CERT_ALT_NAME_DNS_NAME, NULL, 0)) {
+            /* The policy fell back to the subject CN when the leaf had no
+             * dNSName, which RFC 9110 §4.3.4 forbids a client to use (#308).
+             * With one present it matches the SAN only, so requiring one is
+             * enough to keep the CN out. */
             zuh_error_set(err, ZUH_ERR_TLS_HOSTNAME, ZUH_PHASE_TLS,
-                         "certificate is valid but names no IP address '%s'", hostname);
+                         "certificate is valid but names '%s' only in its subject CN, "
+                         "which is not a host name", hostname);
             rc = ZUH_ERR_TLS_HOSTNAME;
         }
     }

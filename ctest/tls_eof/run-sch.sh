@@ -70,6 +70,15 @@ done
 serve resume untrusted
 "$drive" resume "https://localhost:$port/" - || status=1
 stop
+# #308: a name only in the subject CN is no name. #309: a leaf for client
+# authentication is not a server certificate; Schannel's chain request names
+# no EKU, so this is the row that says whether its SSL policy checks one.
+serve keepalive cnonly
+"$drive" hostname "https://localhost:$port/" - || status=1
+stop
+serve keepalive clientonly
+"$drive" certificate "https://localhost:$port/" - || status=1
+stop
 # #215: a TLS 1.2 renegotiation between the request and the response.
 # Schannel reports SEC_I_RENEGOTIATE, which is not handled yet (#298): the
 # request fails with a TLS class and no body. `refused` says so when that
