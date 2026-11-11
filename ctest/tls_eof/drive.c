@@ -20,6 +20,9 @@
  *   drive hostname URL CA   #246: one request that must be refused with
  *                           ZUH_ERR_TLS_HOSTNAME, for a certificate naming a
  *                           different IP, or naming the IP only as a DNS name
+ *   drive h2reneg URL CA    #315: an HTTP/2 request to a server that
+ *                           renegotiates TLS 1.2, which must fail with a TLS
+ *                           error (RFC 9113 §9.2.1), not wait out its deadline
  *   drive fork URL CA       #249: a pulled body open on one connection and a
  *                           second connection idle in the pool, then fork();
  *                           the child must not read the body, and frees both
@@ -278,6 +281,28 @@ static int refused(const char *url, const char *ca) {
     return 0;
 }
 
+static int h2reneg(const char *url, const char *ca) {
+    zuh_get_opts o;
+    zuh_result r;
+    zuh_error e;
+    zuh_code rc;
+    zuh_get_opts_init(&o);
+    o.ca_file = ca_opt(ca); o.proxy_set = 1; o.timeout_ms = 8000;
+    o.http2 = ZUH_H2_REQUIRED;
+    rc = zuh_engine_get(&r, url, &o, &e);
+    if (rc == ZUH_OK) {
+        printf("FAIL h2reneg: accepted (status %d)\n", r.status);
+        zuh_result_free(&r);
+        return 1;
+    }
+    if (rc != ZUH_ERR_TLS || !strstr(e.message, "9113")) {
+        printf("FAIL h2reneg: code %d, not the renegotiation refusal: %s\n", rc, e.message);
+        return 1;
+    }
+    printf("h2reneg: refused as expected (%s)\n", e.message);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     zuh_get_opts o;
     zuh_result r;
@@ -288,6 +313,7 @@ int main(int argc, char **argv) {
     if (argc == 5 && strcmp(argv[1], "stale") == 0) return stale(argv[2], argv[3], argv[4]);
     if (argc == 4 && strcmp(argv[1], "one") == 0) return one(argv[2], argv[3]);
     if (argc == 4 && strcmp(argv[1], "refused") == 0) return refused(argv[2], argv[3]);
+    if (argc == 4 && strcmp(argv[1], "h2reneg") == 0) return h2reneg(argv[2], argv[3]);
     if (argc == 4 && strcmp(argv[1], "hostname") == 0) return hostname(argv[2], argv[3]);
 #ifndef _WIN32
     if (argc == 4 && strcmp(argv[1], "fork") == 0) return forkcase(argv[2], argv[3]);
