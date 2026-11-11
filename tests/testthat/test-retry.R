@@ -848,3 +848,10 @@ test_that("a streamed response that will not be retried comes back readable (#21
     expect_identical(rawToChar(zu_resp_read(r)), "sorry")
   })
 })
+
+test_that("an Idempotency-Key of NA does not make a POST replay-safe", {
+  # NA is the instruction to erase the key (§31.9): nothing is sent.
+  post <- zu_request("POST", "https://x.test")
+  expect_false(zu_req_replay_safe(zu_headers(post, "Idempotency-Key" = NA)))
+  expect_true(zu_req_replay_safe(zu_headers(post, "Idempotency-Key" = "k1")))
+})

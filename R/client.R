@@ -168,7 +168,7 @@ zu_client <- function(
 ) {
   structure(
     list(
-      base_url = base_url,
+      base_url = check_base_url(base_url),
       headers = as_header_vec(headers),
       query = as_query_list(query),
       timeout = timeout,
@@ -239,14 +239,22 @@ zu_client_update <- function(client, ...) {
   }
   # Derived headers merge with the parent's, which is what makes the
   # base -> authenticated -> admin chain in §31.10 work.
+  # `[<-` with list(): the merge is NULL once every inherited value is
+  # erased, and `$<-` with NULL deleted the change itself, so a client's only
+  # header, an Authorization included, could not be removed.
+  if ("base_url" %in% names(changes)) {
+    changes["base_url"] <- list(check_base_url(changes$base_url))
+  }
   if (!is.null(changes$headers)) {
-    changes$headers <- merge_headers(
+    changes["headers"] <- list(merge_headers(
       client$headers,
       as_header_vec(changes$headers)
-    )
+    ))
   }
   if (!is.null(changes$query)) {
-    changes$query <- merge_query(client$query, as_query_list(changes$query))
+    changes["query"] <- list(
+      merge_query(client$query, as_query_list(changes$query))
+    )
   }
   # §26.5: a child that changes the pool settings gets a pool of its own.
   # Sharing one slot made parent and child each rebuild the pool the other
@@ -260,6 +268,18 @@ zu_client_update <- function(client, ...) {
     client[nm] <- list(changes[[nm]])
   }
   client
+}
+
+# One URL or none. NA built "NA/users", and a length-2 value died in a raw
+# coercion error far from the call that set it.
+check_base_url <- function(x) {
+  if (is.null(x)) {
+    return(NULL)
+  }
+  if (!is.character(x) || length(x) != 1L || is.na(x) || !nzchar(x)) {
+    stop("`base_url` must be a single URL, or NULL", call. = FALSE)
+  }
+  x
 }
 
 as_header_vec <- function(h, request = TRUE) {
@@ -308,7 +328,10 @@ header_atom <- function(v) {
   if (length(v) == 1L && is.na(v)) {
     return(NA_character_)
   }
-  if (is.factor(v)) {
+  if (inherits(v, "POSIXt")) {
+    return(utc_stamp(v))
+  }
+  if (is.factor(v) || is.object(v)) {
     v <- as.character(v)
   }
   if (is.double(v)) {
@@ -428,7 +451,8 @@ zu_set_default_client <- function(client) {
 print.zu_client <- function(x, ...) {
   cat("<zu_client>\n")
   if (!is.null(x$base_url)) {
-    cat("  base_url:  ", x$base_url, "\n", sep = "")
+    # §42.2: printing is an egress; userinfo and secret query values too.
+    cat("  base_url:  ", zu_redact_url(x$base_url), "\n", sep = "")
   }
   # §42.2: printing is an egress, so values are redacted for display.
   h <- zu_redact_headers_for_display(x$headers)

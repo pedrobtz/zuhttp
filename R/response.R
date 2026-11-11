@@ -544,6 +544,14 @@ zu_resp_text <- function(
         response = resp
       )
     }
+    # An R string cannot hold NUL, which is valid in every charset, so
+    # iconv() failed on it even in substitute mode; it becomes "<00>", as
+    # sub = "byte" writes any other byte it cannot keep. Only for encodings
+    # where one zero byte is one NUL, not the zero half of a UTF-16 unit.
+    if (!grepl("^(UTF-16|UTF-32|UCS)", toupper(enc)) && any(b == as.raw(0))) {
+      nul <- charToRaw("<00>")
+      b <- unlist(lapply(b, function(x) if (x == as.raw(0)) nul else x))
+    }
     out <- try_iconv(b, enc, sub = "byte")
   }
   if (is.na(out)) {

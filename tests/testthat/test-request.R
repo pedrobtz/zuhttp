@@ -426,3 +426,42 @@ test_that("header values: one per name, numbers in full", {
   )
   expect_match(seen, "\r\nX-N: 100000\r\n", fixed = TRUE)
 })
+
+# --- the bug hunt's R-layer slice --------------------------------------------
+
+test_that("session options do not change what is sent", {
+  withr::local_options(OutDec = ",", digits = 3)
+  expect_identical(
+    zuhttp:::build_query(list(a = 0.25, b = 1 / 3)),
+    "a=0.25&b=0.3333333333333333"
+  )
+})
+
+test_that("an instant is sent as UTC, POSIXlt or POSIXct, with its fraction", {
+  lt <- as.POSIXlt("2024-07-02 03:04:05", tz = "Europe/Berlin")
+  ct <- as.POSIXct("2024-07-02 03:04:05.25", tz = "Europe/Berlin")
+  # Differential: one instant, two classes, one stamp. POSIXlt was formatted
+  # in its own zone and stamped Z, two hours out.
+  expect_identical(
+    zuhttp:::build_query(list(t = lt)),
+    zuhttp:::build_query(list(t = as.POSIXct(lt)))
+  )
+  expect_identical(
+    zuhttp:::build_query(list(t = lt)),
+    "t=2024-07-02T01%3A04%3A05Z"
+  )
+  expect_identical(
+    zuhttp:::build_query(list(t = ct)),
+    "t=2024-07-02T01%3A04%3A05.25Z"
+  )
+})
+
+test_that("a classed value is sent as its text, in a query or a header", {
+  d <- as.Date("2024-01-02")
+  expect_identical(zuhttp:::build_query(list(d = d)), "d=2024-01-02")
+  req <- zu_headers(
+    zu_request("GET", "https://x.test"),
+    list(d = d, a = factor("x"))
+  )
+  expect_identical(unname(req$headers[c("d", "a")]), c("2024-01-02", "x"))
+})

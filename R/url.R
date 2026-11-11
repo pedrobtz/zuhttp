@@ -117,9 +117,14 @@ query_atom <- function(v) {
     return(ifelse(v, "true", "false"))
   }
   if (inherits(v, "POSIXt")) {
-    return(format(v, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))
+    return(utc_stamp(v))
   }
   if (is.factor(v)) {
+    v <- as.character(v)
+  }
+  # A classed number (a Date, a difftime) means its own text, not the
+  # double underneath it: "2024-01-02", never 19724.
+  if (is.object(v)) {
     v <- as.character(v)
   }
   if (is.character(v)) {
@@ -129,6 +134,19 @@ query_atom <- function(v) {
     return(vapply(v, num_atom, ""))
   }
   as.character(v)
+}
+
+# An instant as UTC ISO 8601, with its fraction of a second when it has one.
+# A POSIXlt was formatted in its own zone and stamped Z (Berlin 03:04 sent as
+# 03:04Z, two hours out); as.POSIXct() first makes the instant the value.
+utc_stamp <- function(v) {
+  ct <- as.POSIXct(v)
+  out <- format(ct, "%Y-%m-%dT%H:%M:%S", tz = "UTC")
+  frac <- round(unclass(ct) %% 1, 6)
+  has <- !is.na(frac) & frac > 0
+  out[has] <- paste0(out[has], sub("^0", "", sprintf("%.6f", frac[has])))
+  out[has] <- sub("0+$", "", out[has])
+  paste0(out, "Z")
 }
 
 num_atom <- function(x) {

@@ -161,7 +161,10 @@ timeout_ms <- function(seconds) {
   if (!is.finite(ms) || ms > .Machine$integer.max) {
     .Machine$integer.max
   } else {
-    as.integer(ms)
+    # Up, never down: as.integer() truncated 1.001 s to 1000 ms and a
+    # positive 0.0005 s to 0, which timed out at once (and 0 is not a
+    # budget). A positive timeout is at least 1 ms.
+    max(1L, as.integer(ceiling(round(ms, 6))))
   }
 }
 
@@ -288,6 +291,14 @@ resolve_request <- function(req, client) {
       !policy$http2 %in% c("auto", "required", "off")
   ) {
     stop('`http2` must be "auto", "required" or "off"', call. = FALSE)
+  }
+  # Named, as every other policy field is: retry = 3 or TRUE failed later
+  # with "$ operator is invalid for atomic vectors".
+  if (!is.null(policy$retry) && !inherits(policy$retry, "zu_retry_policy")) {
+    stop(
+      "`retry` must come from zu_retry(), e.g. zu_retry(attempts = 3)",
+      call. = FALSE
+    )
   }
   if (!isTRUE(policy$verify)) {
     # Not a message that can be switched off: turning verification off is the

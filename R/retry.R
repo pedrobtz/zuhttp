@@ -262,8 +262,11 @@ zu_req_replay_safe <- function(req) {
   if (isTRUE(req$replay_safe)) {
     return(TRUE)
   }
-  nms <- tolower(names(req$headers) %||% character())
-  if ("idempotency-key" %in% nms) {
+  # A key with a value: NA is the instruction to erase one (§31.9), and no
+  # header is sent for it, so it cannot make a POST safe to replay.
+  h <- req$headers %||% character()
+  key <- h[tolower(names(h)) == "idempotency-key"]
+  if (length(key) && !is.na(key[[length(key)]]) && nzchar(key[[length(key)]])) {
     return(TRUE)
   }
   # RFC 9110 §9.2.2's idempotent methods. POST is deliberately absent.
