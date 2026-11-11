@@ -36,13 +36,20 @@ jobs:
   # is r-actions' changes.yml, as in fuzz.yaml; assurance.yml reports a job
   # that is not wired to it.
   changes:
+    # Labels are decided here, without a runner (ci.md, Labels).
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:c-core'))
     uses: pedrobtz/r-actions/.github/workflows/changes.yml@v1
     with:
       name: c-core
 
   ctest:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ${{ matrix.os }}
     name: C core (${{ matrix.os }})
     strategy:
@@ -151,7 +158,7 @@ jobs:
   # suite under valgrind where it is cheap to do so.
   valgrind:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: C core (valgrind)
     steps:

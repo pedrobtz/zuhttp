@@ -53,6 +53,13 @@ jobs:
   #     they exit: the tests pass mc.cleanup = FALSE so the parent does not
   #     SIGTERM them while they do.
   coverage:
+    # Labels are decided here, without a runner (ci.md, Labels).
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:coverage'))
     # A commit, not the floating tag: this job holds `contents: write`, so a
     # moved tag in another repository could commit to this one. The same
     # commit every family repo pins coverage.yml to.

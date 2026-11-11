@@ -39,11 +39,23 @@ jobs:
   # is r-actions' changes.yml, as in fuzz.yaml; assurance.yml reports a job
   # that is not wired to it.
   changes:
+    # Labels are decided here, without a runner (ci.md, Labels).
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:r-cmd-check'))
     uses: pedrobtz/r-actions/.github/workflows/changes.yml@v1
     with:
       name: r-cmd-check
 
   R-CMD-check:
+    # Labels are decided here, without a runner (ci.md, Labels).
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:r-cmd-check'))
     uses: pedrobtz/r-actions/.github/workflows/r-cmd-check.yml@v1
     with:
       # Quick on each push to a pull request, full after merge. The `full-ci`
@@ -83,7 +95,7 @@ jobs:
   # checkout and so cannot see it.
   source-package-hygiene:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: Source package hygiene
     steps:

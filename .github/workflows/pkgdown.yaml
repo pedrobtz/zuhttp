@@ -14,6 +14,12 @@ permissions: read-all
 
 jobs:
   pkgdown:
+    # Labels are decided here, without a runner (ci.md, Labels).
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:pkgdown'))
     runs-on: ubuntu-latest
     # Only restrict concurrency for non-PR jobs
     concurrency:
