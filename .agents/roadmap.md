@@ -445,7 +445,9 @@ D-62, §14.5. **Estimate:** 2 days, medium.
       and under valgrind.
 - [ ] Manual measurement in Rterm, Rgui and RStudio on Windows and macOS,
       recorded in design §25.4; `R_ProcessEvents()` added if a GUI needs it.
-- [ ] README's "Ctrl-C timing unverified" row removed or replaced by a number.
+- [ ] The "Ctrl-C timing unverified" row of the known-limitations table, in
+      `articles/trust-and-limits` since the README moved it there, removed or
+      replaced by a number.
 
 ### W12 — Documentation
 
@@ -458,8 +460,10 @@ timeout documents.
 
 - [ ] A shipped vignette on TLS, trust and refusals (#8), built from the
       capability table in design §14.7.
-- [ ] Articles: getting started (#10), testing code that makes requests (#9),
-      retries/timeouts/cancellation (#11).
+- [x] Article: testing code that makes requests (#9): `articles/testing`.
+- [ ] Articles: getting started (#10); retries/timeouts/cancellation (#11),
+      whose timeouts and retries `articles/failures` already covers, leaving
+      cancellation (W11) and the phase timeouts (W7).
 - [ ] Every limitation in design edition 2 marked Partial appears in
       user-facing help (edition 1 S20 criterion 2).
 - [ ] M2: three R users new to the package each write a GET and a JSON POST
