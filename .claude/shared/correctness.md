@@ -86,6 +86,38 @@ each shape names a test the suite did not have. Write that test first.
   message) comes from a scripted loopback counterpart, since no real
   counterpart does it on demand.
 
+## The R layer is not the safe part
+
+A hunt over the same package on 2026-11-11 found more live bugs in `R/`
+than in the C core, because every earlier review had looked at the C.
+R code that turns a user's value into text, bytes or a native call is a
+boundary like any other:
+
+- **`format()`, `as.character()`, `paste()` and `unlist()` change
+  values.** They pad a character vector to a common width, round to
+  `getOption("digits")`, switch to scientific notation, follow `OutDec`,
+  escape non-ASCII outside a UTF-8 locale, and rename the elements of a
+  list. Convert element by element, with the format stated.
+- **Test the value matrix.** Vectors of unequal width, a factor, a
+  number past 7 digits, a repeated name, a non-ASCII string, a date:
+  what arrives is what was given.
+- **Test under a hostile session.** The same calls under `LC_ALL=C` and
+  `options(OutDec = ",", scipen = -5, digits = 3)` give the same result.
+  A comparison test that only runs in a UTF-8 locale proves it there.
+- **Two routes, one value.** Where a value can be sent two ways (a
+  query and a form, a form and JSON), it arrives the same by both.
+- **`x[[name]]` returns the first match.** Iterate by position over
+  anything a caller may give repeated names.
+
+## See each test fail
+
+A test that has never been red may be checking something else. New code
+gets that from writing the test first. A test added to code that already
+exists is shown to fail by breaking what it guards once: flip the
+comparison, move the constant by one, delete the call. A sequence test
+asserts the state the documentation promises afterwards (after an abort,
+nothing more is readable), not that no error was raised.
+
 ## Reviews
 
 A code-reading review is not an adversarial one. A stage that touches a
@@ -93,4 +125,6 @@ boundary or a lifetime is reviewed by running a byte-scripted counterpart
 against it, not only by reading the diff. `pkg-critical-review`'s behaviour
 pass does this for the whole package at the Review stage; a stage pull
 request does it for what the stage added. "The tests pass" is where the
-review starts, not what it finds.
+review starts, not what it finds. `pkg-bug-hunt` is the same exercise as
+its own skill, for any package at any time; measured against the 16
+bugs above, on the commit that carried them, it found 15.
