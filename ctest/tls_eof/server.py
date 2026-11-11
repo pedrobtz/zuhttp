@@ -13,6 +13,7 @@
 #             stays open while another connection's handshake fails.
 #   resume    keepalive, at most TLS 1.2 (where sessions resume), with a
 #             line per connection saying whether it was resumed (#307).
+#   bulk      keepalive, answering with a 16 MiB body, for nwrx (#311).
 #   fork      keepalive with a 200 KB body at /big and a line per accept,
 #             request and close, for fork.sh to read (#249).
 #
@@ -50,7 +51,12 @@ def keepalive(raw):
                 if not d:
                     return
                 req += d
-            s.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+            if mode == "bulk":
+                n = 16 * 1024 * 1024
+                s.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n" % n)
+                s.sendall(b"x" * n)
+            else:
+                s.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
     except (ssl.SSLError, OSError):
         return          # the failing handshake is this mode's whole point
     finally:
@@ -98,7 +104,7 @@ if mode == "fork":
     time.sleep(5)
     sys.exit(0)
 
-if mode in ("keepalive", "resume"):
+if mode in ("keepalive", "resume", "bulk"):
     import threading
     for _ in range(3):
         raw, _ = ls.accept()

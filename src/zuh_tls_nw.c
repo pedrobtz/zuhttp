@@ -343,9 +343,16 @@ static void drain(nw_shared *sh) {
     while (read(sh->pipe_r, buf, sizeof buf) > 0) {}
 }
 
-/* Append under the lock; plain realloc, see the file comment. */
+/* Append under the lock; plain realloc, see the file comment. The unread
+ * bytes move to the front before the buffer grows: it was reset only once
+ * drained, so with any byte unread it kept everything since (#311). */
 static int rx_append(nw_shared *sh, const void *data, size_t n) {
     if (sh->rx_off && sh->rx_off == sh->rx_len) sh->rx_off = sh->rx_len = 0;
+    if (sh->rx_off && sh->rx_len + n > sh->rx_cap) {
+        memmove(sh->rx, sh->rx + sh->rx_off, sh->rx_len - sh->rx_off);
+        sh->rx_len -= sh->rx_off;
+        sh->rx_off = 0;
+    }
     if (sh->rx_len + n > sh->rx_cap) {
         size_t cap = sh->rx_cap ? sh->rx_cap : NW_RX_CHUNK;
         unsigned char *p;
@@ -423,6 +430,12 @@ static int pred_report(const nw_shared *sh) { return sh->report_done; }
 static void arm_receive_locked(nw_impl *m) {
     nw_shared *sh = m->sh;
     if (sh->rx_pending || sh->rx_eof || sh->rx_failed || sh->state != NW_READY) return;
+    /* Backpressure (#311): another 64 KiB receive only once the backlog is
+     * under one chunk. Every read() used to arm one whatever was buffered,
+     * and the engine reads 16 KiB at a time, so a reader slower than the
+     * network buffered the whole response. Buffered bytes already make the
+     * connection readable (§26.2), so the idle-pool probe loses nothing. */
+    if (sh->rx_len - sh->rx_off >= NW_RX_CHUNK) return;
     sh->rx_pending = 1;
     sh->refs++;
     nw_connection_receive(m->conn, 1, NW_RX_CHUNK,
