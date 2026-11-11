@@ -1,8 +1,10 @@
 # Rules this package sets itself, which no R CMD check flavor enforces
 # (roadmap W1, #18). Each job is cheap and runs on every pull request.
 on:
-  push:
-    branches: [main]
+  # No `push:`: a pull request already checks its merge with main,
+  # and the schedule checks main (r-actions README, "Pushes to main").
+  schedule:
+    - cron: "6 6 * * 0"
   pull_request:
   workflow_dispatch:
 

@@ -8,8 +8,10 @@
 # S8 `R_FindNamespace` PROTECT bug in it was found by reading. These jobs run
 # the package as R loads it.
 on:
-  push:
-    branches: [main]
+  # No `push:`: a pull request already checks its merge with main,
+  # and the schedule checks main (r-actions README, "Pushes to main").
+  schedule:
+    - cron: "31 6 * * 0"
   pull_request:
     types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:

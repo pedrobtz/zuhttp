@@ -3,8 +3,10 @@
 # change, because the file it checks is Markdown the docs gate would skip.
 on:
   pull_request:
-  push:
-    branches: [main]
+  # No `push:`: a pull request already checks its merge with main,
+  # and the schedule checks main (r-actions README, "Pushes to main").
+  schedule:
+    - cron: "56 5 * * 0"
   workflow_dispatch:
 
 name: assurance

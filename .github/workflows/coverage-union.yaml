@@ -13,12 +13,12 @@
 # Runs on every pull request, as every workflow here does since W1.
 
 on:
-  push:
-    branches: [main]
+  # No `push:`: a pull request already checks its merge with main,
+  # and the schedule checks main (r-actions README, "Pushes to main").
   pull_request:
   workflow_dispatch:
   schedule:
-    - cron: "23 5 * * 1"    # the full profile: the macOS leg
+    - cron: "11 6 * * 0"    # the full profile: the macOS leg
 
 name: coverage-union.yaml
 
