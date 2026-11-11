@@ -35,6 +35,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ci.md: a documentation-only pull request skips the jobs below. The gate
+  # is r-actions' changes.yml, as in fuzz.yaml; assurance.yml reports a job
+  # that is not wired to it.
+  changes:
+    uses: pedrobtz/r-actions/.github/workflows/changes.yml@v1
+    with:
+      name: r-cmd-check
+
   R-CMD-check:
     uses: pedrobtz/r-actions/.github/workflows/r-cmd-check.yml@v1
     with:
@@ -74,6 +82,8 @@ jobs:
   # build, then assert the tarball is clean. r-actions builds from a clean
   # checkout and so cannot see it.
   source-package-hygiene:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: Source package hygiene
     steps:

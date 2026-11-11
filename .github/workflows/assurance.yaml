@@ -15,3 +15,6 @@ permissions:
 jobs:
   assurance:
     uses: pedrobtz/r-actions/.github/workflows/assurance.yml@v1
+    # Every job here is gated (ci.md); fail keeps it so.
+    with:
+      ungated-jobs: fail

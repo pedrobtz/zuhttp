@@ -452,3 +452,61 @@ test_that("a revocation failure is ABOUT revocation (S9 criterion 4)", {
     class = "zu_tls_certificate_error"
   )
 })
+
+# --- what the OpenSSL mutation run found untested (the TLS backend pass) --
+
+test_that("min_version = 13 is refused by a TLS 1.2-only server", {
+  skip_unless_local_tls()
+  skip_unless_tls_supports("tls13")
+  fx <- tls_fixture()
+  # Mutating the 13 into a 1.2 floor survived: nothing asked a 1.2 server
+  # for 1.3. Refused in the handshake, never quietly served at 1.2 (D-56).
+  with_tls_server(
+    "good",
+    function(url) {
+      tls <- zu_tls(ca_file = fx$ca, min_version = 13)
+      e <- tryCatch(zu_get(url, tls = tls, timeout = 10), error = function(e) e)
+      expect_s3_class(e, "zu_tls_handshake_error")
+      r <- zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10)
+      expect_identical(zu_resp_connection(r)$tls_protocol, "TLSv1.2")
+    },
+    args = "-tls1_2"
+  )
+})
+
+test_that("SNI names the host, so a virtual-hosting server picks its certificate", {
+  skip_unless_local_tls()
+  fx <- tls_fixture()
+  # s_server answers SNI "localhost" with `good` and anything else, no SNI
+  # included, with `wronghost`. Swapping when SNI is sent (names vs IP
+  # literals) survived the mutation run: no server here depended on it.
+  with_tls_server(
+    "wronghost",
+    function(url) {
+      r <- zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10)
+      expect_identical(zu_resp_status(r), 200L)
+    },
+    args = sprintf(
+      "-servername localhost -cert2 %s -key2 %s",
+      fx$cert("good"),
+      fx$key("good")
+    )
+  )
+})
+
+test_that("connection metadata is real on a local TLS connection (§35.2)", {
+  skip_unless_local_tls()
+  fx <- tls_fixture()
+  # test-info.R checks this against example.com, which only the network
+  # suite reaches; dropping the cipher or trust-backend fields survived.
+  with_tls_server("good", function(url) {
+    r <- zu_get(url, tls = zu_tls(ca_file = fx$ca), timeout = 10)
+    cn <- zu_resp_connection(r)
+    expect_match(cn$tls_protocol, "^TLSv1\\.[23]$")
+    expect_true(cn$trust_backend %in% c("sectrust", "schannel", "openssl"))
+    expect_true(nzchar(cn$tls_cipher))
+    expect_false(grepl("^0x", cn$tls_cipher))
+    expect_match(cn$tls_cipher, "[A-Z]")
+    expect_true(cn$remote_ip %in% c("127.0.0.1", "::1"))
+  })
+})

@@ -32,6 +32,14 @@ concurrency:
 # that rule was written against.
 
 jobs:
+  # ci.md: a documentation-only pull request skips the jobs below. The gate
+  # is r-actions' changes.yml, as in fuzz.yaml; assurance.yml reports a job
+  # that is not wired to it.
+  changes:
+    uses: pedrobtz/r-actions/.github/workflows/changes.yml@v1
+    with:
+      name: network
+
   # ---------------------------------------------------------------
   # S0 — macOS: OpenSSL engine + SecTrustEvaluateWithError (Keychain)
   # ---------------------------------------------------------------
@@ -101,6 +109,8 @@ jobs:
   #      c-core.yaml: that suite must stay deterministic and offline.
   # ---------------------------------------------------------------
   tls-engine:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ${{ matrix.os }}
     name: S7 TLS engine (${{ matrix.os }})
     strategy:
@@ -137,6 +147,8 @@ jobs:
   #      The Linux engine does not exist yet; this checks its premise.
   # ---------------------------------------------------------------
   linux-preflight:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: S7 preflight Linux (system OpenSSL + zlib)
     steps:
@@ -183,6 +195,8 @@ jobs:
   # The parts of the C core that need a resolver or a peer, kept OUT of
   # c-core.yaml so that suite stays deterministic and offline.
   net-online:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ${{ matrix.os }}
     name: C core, network-dependent (${{ matrix.os }})
     strategy:
@@ -202,6 +216,8 @@ jobs:
   # than in R-CMD-check.yaml, which must stay deterministic — the same split
   # as c-core.yaml vs the net-online job above.
   slice-r:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ${{ matrix.os }}
     name: 63.2 slice from R (${{ matrix.os }})
     strategy:
@@ -291,6 +307,8 @@ jobs:
 
   # The same slice at the C level, without R in the picture at all (§11).
   slice-c:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ${{ matrix.os }}
     name: 63.2 slice in C (${{ matrix.os }})
     strategy:

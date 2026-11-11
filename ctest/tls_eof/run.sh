@@ -85,6 +85,23 @@ for mode in optcert badmac; do
   kill $srv 2>/dev/null || true; wait $srv 2>/dev/null || true
 done
 
+# A response that stops partway must time out, not end (the OpenSSL
+# mutation run: a deadline in tls_read() read as end of stream survived),
+# and an upload into a reset must fail as a write error, not a timeout.
+port=$(free_port)
+python3 "$here/server.py" stall "$port" "$tmp/cert.pem" "$tmp/key.pem" >"$tmp/srv.log" 2>&1 &
+srv=$!
+wait_ready
+"$drive" stall "https://localhost:$port/close" "$tmp/cert.pem" || status=1
+"$drive" stall "https://localhost:$port/length" "$tmp/cert.pem" || status=1
+kill $srv 2>/dev/null || true; wait $srv 2>/dev/null || true
+port=$(free_port)
+python3 "$here/server.py" reset "$port" "$tmp/cert.pem" "$tmp/key.pem" >"$tmp/srv.log" 2>&1 &
+srv=$!
+wait_ready
+"$drive" upload "https://localhost:$port/" "$tmp/cert.pem" || status=1
+kill $srv 2>/dev/null || true; wait $srv 2>/dev/null || true
+
 # #215: a renegotiation runs the verify callback after the dial returned.
 port=$(free_port)
 OPENSSL="$openssl" python3 "$here/reneg.py" "$port" "$tmp/cert.pem" "$tmp/key.pem" >"$tmp/srv.log" 2>&1 &
