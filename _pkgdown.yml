@@ -17,6 +17,7 @@ articles:
   - articles/streaming
   - articles/tls
   - articles/proxies
+  - articles/trust-and-limits
 - title: Testing and debugging
   contents:
   - articles/testing
