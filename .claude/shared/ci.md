@@ -43,7 +43,8 @@ a live-network slice, follows three rules.
   `profile` outputs, never with a `paths-ignore` list. Every job a pull
   request starts has `needs: changes` and an `if:` beginning
   `${{ !cancelled() && needs.changes.outputs.docs-only != 'true'`, unless it
-  calls an r-actions workflow or only runs on other events. A job that must
+  calls an r-actions workflow or only runs on other events; see Labels for
+  the label test that comes before it. A job that must
   run on every change says why, with `# ungated: <reason>` on the line above
   its key. r-actions' `assurance.yml` reports any other job (`ungated-jobs:
   warn`, or `fail` once the package is clean).
@@ -65,17 +66,53 @@ A label on a pull request can ask for more checking, or for less:
 
 | Label | Effect on that pull request's runs |
 |---|---|
-| `full-ci` | the full profile; overrides the two labels below |
+| `full-ci` | the full profile; overrides the three labels below |
+| `ci:docs` | nothing gated runs, R CMD check included; only the pkgdown site builds |
 | `ci:minimal` | one quick R CMD check, every other gated job skipped |
 | `skip-ci:<workflow>` | that workflow's jobs skipped, for example `skip-ci:fuzz` or `skip-ci:valgrind` |
 
-Labels change pull request runs only. The push to the default branch after
-merge carries none, so whatever a label skipped still runs there, at the
-quick profile. Apply a
-label at creation (`gh pr create --label ci:minimal`) for it to count from the
-first run; one added later starts a new run. Use `ci:minimal` or a `skip-ci`
-label for a change the checks cannot see, such as CI configuration or
-repository housekeeping, never to get code past a failing check.
+**Choose the label from what the diff can reach**, whoever opens the pull
+request, a skill or not:
+
+| The pull request changes | Label |
+|---|---|
+| only prose: top-level Markdown, Markdown under a dot directory, articles, `_pkgdown.yml`, housekeeping | `ci:docs` |
+| CI configuration or repository housekeeping, or files no check reads | `ci:minimal` |
+| `R/`, `src/`, `tests/`, `DESCRIPTION`, `README.Rmd` or anything else a check reads | none |
+| the last pull request of a milestone, or a `full` stage | `full-ci` |
+
+**Label the pull request at creation.** `gh pr create --label ci:docs` puts
+the label in the first run; one added later starts a new run. Use
+`ci:docs` for a change only to prose (README, NEWS, articles, comments in
+Markdown), `ci:minimal` for one the checks cannot see, such as CI
+configuration or repository housekeeping, and never either to get code past
+a failing check. Labels change pull request runs only. The push to the
+default branch after merge carries none, so whatever a label skipped still
+runs there, at the quick profile.
+
+**A label skips without a runner.** The `changes` gate is a job, so on its
+own it takes one runner per workflow to decide that nothing runs: twelve for
+a README edit in zuhttp, queued behind every other package's work. GitHub
+evaluates a job's `if:` without a runner, and the labels are in the event,
+so every job a pull request can start tests them first. On a call to an
+r-actions workflow and on a package's own `changes` job:
+
+```yaml
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:<name>'))
+```
+
+The R CMD check caller leaves out `ci:minimal`, which still runs it, and
+pkgdown tests only `ci:minimal` and its own `skip-ci`. A job that needs a
+label-gated `changes` adds `needs.changes.result != 'skipped' &&` to its
+`if:`: a skipped `changes` has empty outputs, so `docs-only != 'true'`
+alone would run it on exactly the pull requests the label skipped. r-actions'
+`assurance.yml` fails a job that leaves it out. A pull request with no label
+is still classified by its files, which takes the gate's runners.
 
 ## Quick by default, full by exception
 

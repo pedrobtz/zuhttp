@@ -92,6 +92,11 @@ user-visible outcome and the rationale, links related issues, lists the checks
 that were run and the tests that were skipped, and flags platform-sensitive or
 vendored changes. Performance claims need evidence.
 
+Open a pull request with its CI label, chosen from the table in `ci.md`
+(Labels): `gh pr create --label ci:docs` for a prose-only change. An
+unlabelled documentation pull request takes one runner per workflow to
+learn that nothing runs.
+
 Never commit or push to the default branch. Work on a branch, open a pull
 request, and leave it for review. Do not merge a pull request unless you are
 told to.
