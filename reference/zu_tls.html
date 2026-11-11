@@ -77,7 +77,8 @@ enterprise case — a corporate root alongside the public ones.</p></dd>
 <dt id="arg-pins">pins<a class="anchor" aria-label="anchor" href="#arg-pins"></a></dt>
 <dd><p>Public-key pins as <code>"sha256//&lt;base64&gt;"</code> strings. Checked <strong>in
 addition to</strong> chain and hostname verification, never instead of it
-(§14.4). A connection must satisfy both.</p></dd>
+(§14.4). A connection must satisfy both, so <code>pins</code> with <code>verify = FALSE</code>
+raises <code>zu_tls_unsupported_error</code> before any connection is made.</p></dd>
 
 
 <dt id="arg-revocation">revocation<a class="anchor" aria-label="anchor" href="#arg-revocation"></a></dt>

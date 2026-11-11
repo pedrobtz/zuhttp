@@ -32,7 +32,8 @@ zu_tls(
 
   Public-key pins as `"sha256//<base64>"` strings. Checked **in addition
   to** chain and hostname verification, never instead of it (§14.4). A
-  connection must satisfy both.
+  connection must satisfy both, so `pins` with `verify = FALSE` raises
+  `zu_tls_unsupported_error` before any connection is made.
 
 - revocation:
 
