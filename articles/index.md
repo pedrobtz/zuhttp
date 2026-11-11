@@ -12,6 +12,8 @@
   trust](https://pedrobtz.github.io/zuhttp/articles/tls.md):
 - [Working through a
   proxy](https://pedrobtz.github.io/zuhttp/articles/proxies.md):
+- [Trust, scope and
+  limits](https://pedrobtz.github.io/zuhttp/articles/trust-and-limits.md):
 
 ### Testing and debugging
 

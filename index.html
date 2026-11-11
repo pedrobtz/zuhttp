@@ -40,6 +40,7 @@
     <li><a class="dropdown-item" href="articles/streaming.html">Large responses: downloads, streaming and limits</a></li>
     <li><a class="dropdown-item" href="articles/tls.html">TLS, certificates and trust</a></li>
     <li><a class="dropdown-item" href="articles/proxies.html">Working through a proxy</a></li>
+    <li><a class="dropdown-item" href="articles/trust-and-limits.html">Trust, scope and limits</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><a class="dropdown-item" href="articles/index.html">More articles...</a></li>
   </ul>
@@ -131,130 +132,26 @@
 <span><span class="co">#&gt; [1] 404</span></span></code></pre></div>
 <p>JSON goes through <a href="https://github.com/pedrobtz/zujson" class="external-link">zujson</a>, written for zuhttp, and <code><a href="reference/zu_set_json_backend.html">zu_set_json_backend()</a></code> swaps in another implementation. <code><a href="reference/zu_resp_json.html">zu_resp_xml()</a></code> and <code><a href="reference/zu_resp_json.html">zu_resp_html()</a></code> parse with <a href="https://github.com/pedrobtz/zuxml" class="external-link">zuxml</a> and <a href="https://github.com/pedrobtz/zuhtml" class="external-link">zuhtml</a> when they are installed, honouring the response’s charset.</p>
 <div class="section level2">
-<h2 id="native-trust-versus-a-static-ca-bundle">Native trust versus a static CA bundle<a class="anchor" aria-label="anchor" href="#native-trust-versus-a-static-ca-bundle"></a>
+<h2 id="learn-more">Learn more<a class="anchor" aria-label="anchor" href="#learn-more"></a>
 </h2>
-<p>When a certificate authority is compromised, what protects you depends on where your HTTP client gets its trust from. A <strong>native</strong> trust store is the operating system’s own: its trust evaluator receives emergency blocks through ordinary OS updates, and can distrust a single intermediate certificate while the root above it stays trusted. A <strong>static</strong> trust store is a file of root certificates, a CA bundle such as <code>/etc/ssl/cert.pem</code> or <code>cacert.pem</code>. It changes only when someone ships a new file, and it can only add or remove whole roots.</p>
-<p>zuhttp asks the native evaluator wherever the platform has one: <code>SecTrust</code> on macOS and the Windows certificate store through Schannel. A certificate the operating system has blocked is refused with no configuration, and an enterprise MDM root or a corporate proxy CA already installed on the machine simply works. There is no CA bundle to go stale and no vendored TLS library to track for CVEs. The package is small enough to audit, and its behaviour under malformed input is fuzzed rather than assumed.</p>
-<p>The <a href="https://emudhra.we-have-a-problem.com/" class="external-link">eMudhra incident</a> of October 2026 shows the difference. Eight intermediate CA certificates had private keys anyone could recover, and they sit under roots that stay trusted, so a CA bundle has no way to exclude them; only a trust evaluator can. Apple blocked them on 22 October. On a Mac that had received that update (macOS 15.7, 30 October), zuhttp refused every test host. A client that reads a static bundle did not: R’s <code>curl</code> package, which on macOS uses LibreSSL and the bundle at <code>/etc/ssl/cert.pem</code>, connected to every one. That is a property of the bundle, not a flaw in <code>curl</code>; any client built on the same file behaves the same way.</p>
-<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">u</span> <span class="op">&lt;-</span> <span class="st">"https://dv-g3b-emudhra.we-have-a-problem.com/"</span></span>
-<span><span class="kw"><a href="https://rdrr.io/r/base/conditions.html" class="external-link">tryCatch</a></span><span class="op">(</span><span class="fu"><a href="reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="va">u</span><span class="op">)</span>, zu_tls_certificate_error <span class="op">=</span> <span class="va">conditionMessage</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] "certificate verification failed for 'dv-g3b-emudhra.we-have-a-problem.com': “dv-g3b-emudhra.we-have-a-problem.com” certificate is blocked"</span></span>
-<span><span class="fu">curl</span><span class="fu">::</span><span class="fu"><a href="https://jeroen.r-universe.dev/curl/reference/curl_fetch.html" class="external-link">curl_fetch_memory</a></span><span class="op">(</span><span class="va">u</span><span class="op">)</span><span class="op">$</span><span class="va">status_code</span></span>
-<span><span class="co">#&gt; [1] 200</span></span></code></pre></div>
-<p>On a Mac that had not yet received it, zuhttp still refused the two hosts whose certificates were never logged for Certificate Transparency, which Apple’s evaluator requires; <code>curl</code> connected to those as well.</p>
-<p>The difference is the platform’s, and it is not the same everywhere. On Linux zuhttp reads the distribution’s bundle, a file like any other. On Ubuntu 24.04 both clients refused these hosts, but only because the bundle lacks their issuer, not because of a block. On a GitHub Windows runner, which had not received Microsoft’s block, both connected. The <a href="https://pedrobtz.github.io/zuhttp/articles/tls.html#when-the-platform-blocks-a-certificate">TLS article</a> has the table for each platform, and <code>tools/check-trust-blocks.R</code> in the repository repeats the measurement.</p>
-</div>
-<div class="section level2">
-<h2 id="when-curl-is-the-better-choice">When <code>curl</code> is the better choice<a class="anchor" aria-label="anchor" href="#when-curl-is-the-better-choice"></a>
-</h2>
-<p>zuhttp does one thing; <code>curl</code> does a great deal more, and is the right choice for:</p>
 <ul>
-<li>Anything needing HTTP/2, HTTP/3, or a non-HTTP protocol.</li>
-<li>Anything needing NTLM, Kerberos, or cloud-provider request signing.</li>
-<li>Anything relying on libcurl’s decade of workarounds for badly behaved servers.</li>
 <li>
-<strong>Any project that cannot accept a single-maintainer dependency for security-critical code.</strong> <code>curl</code> inherits libcurl’s security response; <code>zuhttp</code> has none to inherit. See <a href="#security">Security</a>.</li>
-<li>Forked parallelism with HTTPS on macOS — see below.</li>
+<a href="https://pedrobtz.github.io/zuhttp/articles/trust-and-limits.html">Trust, scope and limits</a>: why zuhttp uses the platform’s trust store, when <code>curl</code> is the better choice, the known limitations, and what 0.1.0 promises.</li>
+<li>
+<a href="https://pedrobtz.github.io/zuhttp/articles/tls.html">TLS, certificates and trust</a>, <a href="https://pedrobtz.github.io/zuhttp/articles/clients.html">clients</a>, <a href="https://pedrobtz.github.io/zuhttp/articles/failures.html">failures</a>, <a href="https://pedrobtz.github.io/zuhttp/articles/streaming.html">streaming</a>, <a href="https://pedrobtz.github.io/zuhttp/articles/proxies.html">proxies</a>, <a href="https://pedrobtz.github.io/zuhttp/articles/testing.html">testing</a> and <a href="https://pedrobtz.github.io/zuhttp/articles/debugging.html">debugging</a>.</li>
+<li>The <a href="https://pedrobtz.github.io/zuhttp/reference/">function reference</a>.</li>
 </ul>
-<p>Choosing <code>curl</code> after reading that list is a reasonable decision.</p>
-</div>
-<div class="section level2">
-<h2 id="known-limitations">Known limitations<a class="anchor" aria-label="anchor" href="#known-limitations"></a>
-</h2>
-<p>These are documented limits, not open defects. Most are a consequence of using the platform’s TLS stack instead of shipping one. <code><a href="reference/zu_info.html">zu_info()</a></code> reports which <code><a href="reference/zu_tls.html">zu_tls()</a></code> settings this build supports; a setting it cannot honour raises before any connection is made, never downgrades.</p>
-<table class="table">
-<colgroup>
-<col width="33%">
-<col width="33%">
-<col width="33%">
-</colgroup>
-<thead><tr>
-<th>Limitation</th>
-<th>Where</th>
-<th>Detail</th>
-</tr></thead>
-<tbody>
-<tr>
-<td>TLS 1.2 maximum</td>
-<td>Windows</td>
-<td>The Schannel build in Rtools lacks <code>SCH_CREDENTIALS</code>. <code>zu_tls(min_version = 13)</code> <strong>raises</strong> rather than silently giving you 1.2. <code><a href="reference/zuhttp_tls.html">?zuhttp_tls</a></code>
-</td>
-</tr>
-<tr>
-<td>HTTPS through a proxy needs macOS 14</td>
-<td>macOS 11–13</td>
-<td>Network.framework runs the proxy’s <code>CONNECT</code> itself, and its API for that starts with macOS 14. Earlier, a proxied HTTPS request <strong>raises</strong> <code>zu_proxy_error</code> rather than going direct. Plain HTTP through a proxy works everywhere. <code><a href="reference/zuhttp_tls.html">?zuhttp_tls</a></code>
-</td>
-</tr>
-<tr>
-<td>No certificate pinning</td>
-<td>macOS, Windows</td>
-<td>Pinning needs the leaf’s SubjectPublicKeyInfo, which neither platform yields without hand-parsing DER, and that parser is not written yet. <code>zu_tls(pins = )</code> <strong>raises</strong> <code>zu_tls_unsupported_error</code> rather than connecting unpinned. OpenSSL pins.</td>
-</tr>
-<tr>
-<td>No custom CA</td>
-<td>Windows</td>
-<td>Neither <code>ca_file</code> (replace) nor <code>ca_extra</code> (add) is implemented on Schannel yet. Both <strong>raise</strong> rather than falling back to the Windows store. They work on macOS and OpenSSL.</td>
-</tr>
-<tr>
-<td>HTTPS in a forked child fails</td>
-<td>macOS</td>
-<td>The system TLS engine does not survive <code>fork()</code>. Raises <code>zu_fork_error</code> instead of killing the worker. Use a <code>PSOCK</code> cluster or <code>future::plan("multisession")</code>. <code><a href="reference/zuhttp_fork.html">?zuhttp_fork</a></code>
-</td>
-</tr>
-<tr>
-<td>Revocation off by default, and opting in is backend-dependent</td>
-<td>all</td>
-<td>zuhttp asks for no revocation check by default; macOS may check Apple’s own revocation data anyway, run by run, and OpenSSL and Schannel check nothing. <code>zu_tls(revocation = TRUE)</code> opts in on macOS and Windows; macOS also rejects valid certificates from CAs that no longer answer revocation queries. On OpenSSL, which has no CRL or OCSP source, it <strong>raises</strong> rather than failing every chain. <code><a href="reference/zuhttp_tls.html">?zuhttp_tls</a></code>
-</td>
-</tr>
-<tr>
-<td>Trust freshness on Linux</td>
-<td>Linux</td>
-<td>Trust comes from the distribution’s <code>ca-certificates</code> bundle through OpenSSL’s default verify paths, a file updated at the distribution’s pace. A bundle can drop a root but cannot block an intermediate beneath one, which is how Apple blocked the eMudhra intermediates (see above).</td>
-</tr>
-<tr>
-<td>No parallel or async requests</td>
-<td>all</td>
-<td>One request at a time. Parallelism is the caller’s, via a non-forking plan.</td>
-</tr>
-<tr>
-<td>Only a total timeout</td>
-<td>all</td>
-<td>
-<code>timeout</code> bounds the whole request, redirects and retries included. There are no separate connect, first-byte or inactivity timeouts yet.</td>
-</tr>
-<tr>
-<td>DNS ignores <code>timeout</code> and Ctrl-C</td>
-<td>Linux, Windows; macOS for <code>http://</code>
-</td>
-<td>Name resolution calls the system resolver synchronously (<code>getaddrinfo</code>), so a stalled resolver can hold R until it gives up. Every later phase is bounded. HTTPS on macOS is bounded throughout: Network.framework resolves the name itself. <code><a href="reference/zuhttp_tls.html">?zuhttp_tls</a></code>
-</td>
-</tr>
-<tr>
-<td>Ctrl-C timing unverified</td>
-<td>all</td>
-<td>Cancellation works once a request is past DNS; the 200 ms bound is not yet measured on every front-end.</td>
-</tr>
-</tbody>
-</table>
-</div>
-<div class="section level2">
-<h2 id="status">Status<a class="anchor" aria-label="anchor" href="#status"></a>
-</h2>
-<p><strong>v0.1.0 — a first release, not a 1.0.</strong> The request functions, response accessors and conditions are the stable API: from 0.1.0 on, an export is removed only after a deprecation release (§53). The testing tools (<code><a href="reference/zu_transport.html">zu_mock_transport()</a></code>, <code><a href="reference/zu_stub.html">zu_stub()</a></code>, <code><a href="reference/zu_response.html">zu_response()</a></code>, the cassettes) are experimental and may still change. It has not been through the external security review that 1.0 requires. Suitable for use.</p>
 </div>
 <div class="section level2">
 <h2 id="security">Security<a class="anchor" aria-label="anchor" href="#security"></a>
 </h2>
-<p><code>zuhttp</code> has a single maintainer and no inherited security-response process. That is a real risk for security-critical code and is stated here rather than buried: if your project cannot accept it, use <code>curl</code>.</p>
+<p>zuhttp has a single maintainer and no inherited security-response process. That is a real risk for security-critical code: if your project cannot accept it, use <code>curl</code>.</p>
 <p>To report a vulnerability, open a private security advisory through GitHub, or email the maintainer listed in <code>DESCRIPTION</code>. There is no patch SLA yet; one is a 1.0 requirement.</p>
 </div>
 <div class="section level2">
 <h2 id="license">License<a class="anchor" aria-label="anchor" href="#license"></a>
 </h2>
-<p>MIT. Vendored components — picohttpparser and a subset of uriparser — retain their own licences; see <code>inst/COPYRIGHTS</code>.</p>
+<p>MIT. Vendored components (picohttpparser, a subset of uriparser, and nghttp2’s library) keep their own licences; see <code>inst/COPYRIGHTS</code>.</p>
 </div>
 </div>
   </main><aside class="col-md-3"><div class="links">
