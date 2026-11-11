@@ -268,6 +268,20 @@ resolve_request <- function(req, client) {
   if (!is_absolute_url(url)) {
     url <- join_url(client$base_url, url)
   }
+  # #331, D-110: refused here as well as in the engine, so a mock or a
+  # cassette refuses what the network would; the engine's check also holds
+  # a redirect's Location to it. The credentials are never repeated.
+  if (grepl("^[A-Za-z][A-Za-z0-9+.-]*://[^/?#]*@", url)) {
+    zu_stop(
+      "zu_url_error",
+      paste0(
+        "the URL carries credentials (user:password@), which are never ",
+        "sent; give them as a header instead, e.g. ",
+        "headers = c(Authorization = ...)"
+      ),
+      url = zu_redact_url(url)
+    )
+  }
 
   # An explicit NA Content-Type is checked before the merge drops it: it
   # means "send none", and the body's implied type was added regardless.

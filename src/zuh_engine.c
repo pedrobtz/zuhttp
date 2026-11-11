@@ -631,6 +631,21 @@ zuh_code zuh_engine_get(zuh_result *out, const char *url,
 #define ZUH_MAX_HOST_LEN 253
 static zuh_code check_host(const zuh_uri *u, zuh_error *err) {
     size_t n = u->host ? strlen(u->host) : 0;
+    /* #331, D-110: credentials in a request URL are refused, never sent and
+     * never silently dropped (they were dropped, and the request went out
+     * unauthenticated with no sign why). RFC 9110 §4.2.4 forbids a client to
+     * send userinfo in an http(s) target, and a URL is where credentials
+     * leak: logs, traces, history. A redirect's Location is held to the
+     * same rule. A proxy URL is not checked here: its userinfo is how proxy
+     * credentials are given (§20.4). The message never repeats them. */
+    if (u->userinfo) {
+        zuh_error_set(err, ZUH_ERR_URL, ZUH_PHASE_NONE,
+                     "the URL for %s carries credentials (user:password@), which are "
+                     "never sent; give them as a header instead, e.g. "
+                     "headers = c(Authorization = ...)",
+                     u->host ? u->host : "this request");
+        return ZUH_ERR_URL;
+    }
     if (n <= ZUH_MAX_HOST_LEN) return ZUH_OK;
     zuh_error_set(err, ZUH_ERR_URL, ZUH_PHASE_NONE,
                  "host name too long (%lu characters; the limit is %u)",

@@ -465,3 +465,47 @@ test_that("a classed value is sent as its text, in a query or a header", {
   )
   expect_identical(unname(req$headers[c("d", "a")]), c("2024-01-02", "x"))
 })
+
+test_that("credentials in a request URL are refused, and nothing is sent (#331)", {
+  # They were dropped silently, so the request went out unauthenticated.
+  # Refused before any connection: the raw server records no request, and
+  # the message never repeats the password.
+  seen <- with_raw_server(
+    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n",
+    function(url) {
+      bad <- sub("http://", "http://user:s3cret@", url)
+      e <- tryCatch(
+        zu_get(paste0(bad, "/x"), timeout = 5),
+        error = function(e) e
+      )
+      expect_s3_class(e, "zu_url_error")
+      expect_false(grepl("s3cret", conditionMessage(e), fixed = TRUE))
+      api <- zu_client(base_url = bad)
+      expect_error(
+        zu_get("/x", client = api, timeout = 5),
+        class = "zu_url_error"
+      )
+    }
+  )
+  expect_null(seen)
+  # A mock refuses what the network would.
+  m <- zu_client(
+    transport = zu_mock_transport(zu_stub(response = zu_response(200L)))
+  )
+  expect_error(
+    zu_get("https://u:p@m.test/", client = m),
+    class = "zu_url_error"
+  )
+})
+
+test_that("a redirect to a URL with credentials is refused (#331)", {
+  with_raw_server(
+    "HTTP/1.1 302 Found\r\nLocation: http://u:p@127.0.0.1:9/next\r\nContent-Length: 0\r\n\r\n",
+    function(url) {
+      expect_error(
+        zu_get(paste0(url, "/start"), timeout = 5),
+        class = "zu_url_error"
+      )
+    }
+  )
+})
