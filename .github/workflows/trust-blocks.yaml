@@ -2,7 +2,7 @@
 # emergency certificate blocks, measured against the eMudhra test hosts
 # (tools/check-trust-blocks.R). It contacts a third-party site, so it never
 # runs on a schedule or on ordinary pull requests: on demand, and when the
-# measurement itself changes. The README's and the TLS article's eMudhra
+# measurement itself changes. The trust-and-limits and TLS articles' eMudhra
 # claims cite its results.
 on:
   workflow_dispatch:

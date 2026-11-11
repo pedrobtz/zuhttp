@@ -36,6 +36,13 @@ jobs:
   # is r-actions' changes.yml, as in fuzz.yaml; assurance.yml reports a job
   # that is not wired to it.
   changes:
+    # Labels are decided here, without a runner (ci.md, Labels).
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:network'))
     uses: pedrobtz/r-actions/.github/workflows/changes.yml@v1
     with:
       name: network
@@ -110,7 +117,7 @@ jobs:
   # ---------------------------------------------------------------
   tls-engine:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ${{ matrix.os }}
     name: S7 TLS engine (${{ matrix.os }})
     strategy:
@@ -148,7 +155,7 @@ jobs:
   # ---------------------------------------------------------------
   linux-preflight:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: S7 preflight Linux (system OpenSSL + zlib)
     steps:
@@ -196,7 +203,7 @@ jobs:
   # c-core.yaml so that suite stays deterministic and offline.
   net-online:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ${{ matrix.os }}
     name: C core, network-dependent (${{ matrix.os }})
     strategy:
@@ -217,7 +224,7 @@ jobs:
   # as c-core.yaml vs the net-online job above.
   slice-r:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ${{ matrix.os }}
     name: 63.2 slice from R (${{ matrix.os }})
     strategy:
@@ -308,7 +315,7 @@ jobs:
   # The same slice at the C level, without R in the picture at all (§11).
   slice-c:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ${{ matrix.os }}
     name: 63.2 slice in C (${{ matrix.os }})
     strategy:

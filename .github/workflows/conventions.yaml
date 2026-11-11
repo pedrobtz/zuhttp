@@ -19,6 +19,13 @@ jobs:
   # is r-actions' changes.yml, as in fuzz.yaml; assurance.yml reports a job
   # that is not wired to it.
   changes:
+    # Labels are decided here, without a runner (ci.md, Labels).
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:conventions'))
     uses: pedrobtz/r-actions/.github/workflows/changes.yml@v1
     with:
       name: conventions
@@ -29,7 +36,7 @@ jobs:
   # two stay one dialect.
   shell-syntax:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: configure scripts parse under dash
     steps:
@@ -47,7 +54,7 @@ jobs:
   # fails here rather than turning up as noise in the next contributor's diff.
   air-format:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: R code is air-formatted
     steps:
@@ -59,7 +66,7 @@ jobs:
   # R-4 is read before a work package lands rather than after.
   code-lines:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: project-owned C within budget
     steps:
@@ -70,7 +77,7 @@ jobs:
   # Success criterion §61.13: attaching zuhttp after httr2 masks nothing.
   httr2-masking:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: no masking message beside httr2
     steps:
@@ -89,7 +96,7 @@ jobs:
   # the point of it, by compiling zuhttp's headers beside zukomp's.
   c-prefix:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: internal C prefix is zuh_
     steps:
@@ -103,7 +110,7 @@ jobs:
   # and nothing else exercises it (W16).
   configure-without-openssl:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: configure names the missing OpenSSL package
     steps:

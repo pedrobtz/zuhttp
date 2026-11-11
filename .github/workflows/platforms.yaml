@@ -24,6 +24,13 @@ permissions:
 
 jobs:
   platforms:
+    # Labels are decided here, without a runner (ci.md, Labels).
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:platforms'))
     uses: pedrobtz/r-actions/.github/workflows/platforms.yml@v1.35.0
     with:
       profile: auto

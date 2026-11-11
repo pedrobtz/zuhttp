@@ -45,6 +45,13 @@ concurrency:
 
 jobs:
   changes:
+    # Labels are decided here, without a runner (ci.md, Labels).
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:fuzz'))
     uses: pedrobtz/r-actions/.github/workflows/changes.yml@v1.35.0
     with:
       name: fuzz
@@ -54,7 +61,7 @@ jobs:
   # platforms.yaml can replay it under Rtools on Windows too.
   replay:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ${{ matrix.os }}
     name: Corpus replay (${{ matrix.os }})
     strategy:
@@ -95,7 +102,7 @@ jobs:
 
   smoke:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: libFuzzer smoke (${{ needs.changes.outputs.profile == 'quick' && '5' || '60' }}s per target)
     steps:

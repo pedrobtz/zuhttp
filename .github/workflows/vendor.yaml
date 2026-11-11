@@ -24,6 +24,13 @@ jobs:
   # is r-actions' changes.yml, as in fuzz.yaml; assurance.yml reports a job
   # that is not wired to it.
   changes:
+    # Labels are decided here, without a runner (ci.md, Labels).
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:vendor'))
     uses: pedrobtz/r-actions/.github/workflows/changes.yml@v1
     with:
       name: vendor
@@ -35,6 +42,13 @@ jobs:
   # re-vendoring. The checksums still cover them; `verify` still fails until
   # they are re-recorded. Found on W2, which renamed the files they cite.
   vendor:
+    # Labels are decided here, without a runner (ci.md, Labels).
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'full-ci')
+      || !(contains(github.event.pull_request.labels.*.name, 'ci:docs')
+        || contains(github.event.pull_request.labels.*.name, 'ci:minimal')
+        || contains(github.event.pull_request.labels.*.name, 'skip-ci:vendor'))
     uses: pedrobtz/r-actions/.github/workflows/vendor.yml@v1
     with:
       paths: |
@@ -57,7 +71,7 @@ jobs:
   # included, must come out identical.
   nghttp2-reproducible:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     name: nghttp2 rebuilt from upstream matches the tree
     steps:
