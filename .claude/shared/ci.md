@@ -40,7 +40,13 @@ A workflow a package writes for itself, an ABI probe, a fuzz-corpus replay or
 a live-network slice, follows three rules.
 
 - **Gate it** by calling `changes.yml` and testing its `docs-only` and
-  `profile` outputs, never with a `paths-ignore` list.
+  `profile` outputs, never with a `paths-ignore` list. Every job a pull
+  request starts has `needs: changes` and an `if:` beginning
+  `${{ !cancelled() && needs.changes.outputs.docs-only != 'true'`, unless it
+  calls an r-actions workflow or only runs on other events. A job that must
+  run on every change says why, with `# ungated: <reason>` on the line above
+  its key. r-actions' `assurance.yml` reports any other job (`ungated-jobs:
+  warn`, or `fail` once the package is clean).
 - **One job per OS.** Per-OS checks are steps of r-actions' `platforms.yml`,
   which runs the package's `tools/ci/platform.sh <os>` once on each runner. A
   pull request runs at most one macOS job and one Windows job beyond
