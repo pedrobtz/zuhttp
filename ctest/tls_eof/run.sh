@@ -82,6 +82,14 @@ wait_ready
 "$drive" one "https://localhost:$port/" "$tmp/cert.pem" || status=1
 kill $srv 2>/dev/null || true; wait $srv 2>/dev/null || true
 
+# #315: the same renegotiation on an HTTP/2 connection is refused.
+port=$(free_port)
+RENEG_ALPN=h2 OPENSSL="$openssl" python3 "$here/reneg.py" "$port" "$tmp/cert.pem" "$tmp/key.pem" >"$tmp/srv.log" 2>&1 &
+srv=$!
+wait_ready
+"$drive" h2reneg "https://localhost:$port/" "$tmp/cert.pem" || status=1
+kill $srv 2>/dev/null || true; wait $srv 2>/dev/null || true
+
 # #249: connections a forked child inherited, dropped without a byte.
 OPENSSL="$openssl" DRIVE="$drive" "$here/fork.sh" || status=1
 exit $status
