@@ -334,3 +334,23 @@ test_that("a DER certificate file is named as such, with the fix", {
     "`ca_file` has no PEM certificate"
   )
 })
+
+test_that("pins with verify = FALSE are refused before any connection (#310)", {
+  # §14.4: a pin is checked in addition to verification, never instead.
+  # Every backend skipped its pin check with verification off, so the pin
+  # was silently ignored. The port is closed: reaching the network would be
+  # zu_connect_error, so the TLS class proves the refusal came first.
+  port <- free_port()
+  url <- sprintf("https://127.0.0.1:%d/", port)
+  tls <- zu_tls(pins = "sha256//YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg=")
+  expect_error(
+    suppressWarnings(zu_get(url, verify = FALSE, tls = tls, timeout = 5)),
+    class = "zu_tls_unsupported_error"
+  )
+  # The same pin with verification on is not refused for this reason: it
+  # gets as far as the closed port, or the backend's own pin refusal.
+  e <- tryCatch(zu_get(url, tls = tls, timeout = 5), error = function(e) e)
+  if (tls_supports("pins")) {
+    expect_s3_class(e, "zu_connect_error")
+  }
+})

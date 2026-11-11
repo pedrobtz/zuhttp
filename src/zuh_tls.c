@@ -36,6 +36,18 @@ zuh_code zuh_tls_config_check(const zuh_tls_config *cfg, unsigned caps,
     if (!cfg) return ZUH_OK;
     if (!backend) backend = "this";
 
+    /* #310: §14.4 checks a pin in addition to verification, never instead
+     * of it, and every backend installs its pin check with the verifier, so
+     * with verification off the pin was silently ignored. No backend can
+     * honour the combination; refused before any I/O (D-56, D-104). */
+    if (cfg->n_pins > 0 && !cfg->verify_peer) {
+        zuh_error_set(err, ZUH_ERR_TLS_UNSUPPORTED, ZUH_PHASE_TLS,
+                     "`pins` with verify = FALSE is refused: a pin is checked in "
+                     "addition to certificate verification, never instead of it "
+                     "(see ?zuhttp_tls)");
+        return ZUH_ERR_TLS_UNSUPPORTED;
+    }
+
     if (cfg->n_pins > 0 && !(caps & ZUH_TLS_CAP_PINS)) {
         what = "public-key pinning (`pins`)";
         why  = "; pinning needs the leaf SubjectPublicKeyInfo, which this "

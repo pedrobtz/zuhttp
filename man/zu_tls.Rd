@@ -23,7 +23,8 @@ enterprise case — a corporate root alongside the public ones.}
 
 \item{pins}{Public-key pins as \code{"sha256//<base64>"} strings. Checked \strong{in
 addition to} chain and hostname verification, never instead of it
-(§14.4). A connection must satisfy both.}
+(§14.4). A connection must satisfy both, so \code{pins} with \code{verify = FALSE}
+raises \code{zu_tls_unsupported_error} before any connection is made.}
 
 \item{revocation}{Check certificate revocation. \strong{Off by default}, and the
 default is deliberate — see below.}

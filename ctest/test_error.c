@@ -105,6 +105,24 @@ void suite_error(void) {
         }
     }
 
+    ZUH_CASE("#310: pins with verification off are refused, whatever the backend can do");
+    {
+        const char *pin1[1] = { "sha256//AAAA" };
+        zuh_tls_config c;
+        zuh_tls_config_init(&c);
+        c.pins = pin1; c.n_pins = 1; c.verify_peer = 0;
+        zuh_error_clear(&e);
+        ZUH_CHECK_EQ_INT(zuh_tls_config_check(&c, ~0u, "testbe", &e), ZUH_ERR_TLS_UNSUPPORTED);
+        ZUH_CHECK_EQ_INT(e.code, ZUH_ERR_TLS_UNSUPPORTED);
+        ZUH_CHECK(strstr(e.message, "verify = FALSE") != NULL);
+        /* Verification off with no pins is the caller's choice (§14.1), and
+         * pins with verification on are §14.4: both pass. */
+        c.n_pins = 0;
+        ZUH_CHECK_EQ_INT(zuh_tls_config_check(&c, ~0u, "testbe", &e), ZUH_OK);
+        c.n_pins = 1; c.verify_peer = 1;
+        ZUH_CHECK_EQ_INT(zuh_tls_config_check(&c, ~0u, "testbe", &e), ZUH_OK);
+    }
+
     ZUH_CASE("D-56: the default configuration needs no capability at all");
     {
         zuh_tls_config c;
