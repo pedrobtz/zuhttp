@@ -128,6 +128,19 @@ for (i in 1:3) {
     "an error before the engine runs"
   )
 }
+# A download whose commit fails after the engine succeeded: the target is a
+# directory, so the final rename fails. init.c raised with the engine's
+# result still owning its headers and strings, which valgrind reports as
+# definitely lost through zuhttp (the bug hunt's ownership slice).
+target <- file.path(tempdir(), "zu-valgrind-target")
+dir.create(target, showWarnings = FALSE)
+for (k in 1:3) {
+  e <- tryCatch(
+    zu_get("get", path = target, client = api),
+    error = function(e) e
+  )
+  check(inherits(e, "zu_io_error"), "a download whose commit fails")
+}
 invisible(gc())
 check(
   zu_resp_status(zu_get("get", client = api)) == 200L,

@@ -841,6 +841,9 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
     u = Rf_translateCharUTF8(STRING_ELT(url, 0));
 
     memset(&spec, 0, sizeof spec);
+    /* Zeroed, so the error path below may free it whether or not the engine
+     * ever wrote to it (zuh_result_free() of a zeroed result is a no-op). */
+    memset(&r, 0, sizeof r);
     if (Rf_isString(method) && Rf_length(method) == 1)
         spec.method = Rf_translateCharUTF8(STRING_ELT(method, 0));
 
@@ -1090,8 +1093,13 @@ static SEXP C_zu_perform(SEXP method, SEXP url, SEXP header_names,
             raise_zu_error(&err2, u);
             UNPROTECT(2); return R_NilValue;   /* not reached */
         }
-        /* No C resources are live here: zuh_engine_get frees everything it
-         * owns before returning non-OK, which is what makes it safe to raise
+        /* The engine frees what it owns before returning non-OK, but a
+         * download whose commit failed (a flush error, a rename onto a
+         * directory) arrives here with the engine's SUCCESS still owning
+         * headers, trailers, the final URL and the TLS strings, and the
+         * longjmp below leaked them (the bug hunt's ownership slice). */
+        zuh_result_free(&r);
+        /* Now no C resources are live, which is what makes it safe to raise
          * an R condition (and longjmp) from this point.
          *
          * The return code is the authority. A path that returned an error

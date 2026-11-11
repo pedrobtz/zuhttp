@@ -1270,7 +1270,9 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
             rc = zuh_request_add_defaults(&rq, o->user_agent);
             if (rc == ZUH_OK && body_len > 0) {
                 char cl[32];
-                snprintf(cl, sizeof cl, "%lu", (unsigned long)body_len);
+                /* Not unsigned long: 32 bits on Windows, so a 4 GiB body's
+                 * Content-Length was its size mod 2^32 (the ownership slice). */
+                snprintf(cl, sizeof cl, "%llu", (unsigned long long)body_len);
                 rc = zuh_headers_add_str(&rq.headers, "Content-Length", cl);
             }
             if (rc != ZUH_OK) {
@@ -1332,7 +1334,9 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
                 char hex[24];
                 rc = src->next(src->ctx, &d, &l, total, err);
                 if (rc != ZUH_OK) break;
-                snprintf(hex, sizeof hex, "%lx\r\n", (unsigned long)l);
+                /* unsigned long is 32 bits on Windows: a 4 GiB piece's size
+                 * line would be its length mod 2^32, every byte following. */
+                snprintf(hex, sizeof hex, "%llx\r\n", (unsigned long long)l);
                 if (!zuh_stream_write_all(s, hex, strlen(hex), total, err) ||
                     (l && !zuh_stream_write_all(s, d, l, total, err)) ||
                     !zuh_stream_write_all(s, "\r\n", 2, total, err)) {
