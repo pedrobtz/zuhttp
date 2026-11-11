@@ -794,11 +794,13 @@ static int tls_from_r(SEXP tls, zuh_tls_config *cfg) {
  * before DNS or TCP. The engine makes the same check again inside
  * zuh_tls_connect(), so a caller that bypasses the R layer is still refused;
  * this copy exists so the refusal costs no network round trip. */
-static SEXP C_zu_tls_check(SEXP tls) {
+static SEXP C_zu_tls_check(SEXP tls, SEXP verify) {
     zuh_tls_config cfg;
     zuh_error e;
     zuh_error_clear(&e);
     if (!tls_from_r(tls, &cfg)) return R_NilValue;
+    /* The request's merged verify, as tls_cfg_for() will set it (#310). */
+    cfg.verify_peer = cfg.verify_hostname = Rf_asLogical(verify) == TRUE;
     if (zuh_tls_config_check(&cfg, zuh_tls_backend_caps(), zuh_tls_backend_name(),
                             &e) != ZUH_OK)
         raise_zu_error(&e, NULL);
@@ -1467,7 +1469,7 @@ static const R_CallMethodDef call_methods[] = {
     {"C_zu_pool_config",       (DL_FUNC) &C_zu_pool_config,       1},
     {"C_zu_pool_clear",        (DL_FUNC) &C_zu_pool_clear,        1},
     {"C_zu_tls_backend",       (DL_FUNC) &C_zu_tls_backend,       0},
-    {"C_zu_tls_check",         (DL_FUNC) &C_zu_tls_check,         1},
+    {"C_zu_tls_check",         (DL_FUNC) &C_zu_tls_check,         2},
     {"C_zu_build_info",        (DL_FUNC) &C_zu_build_info,        0},
     {NULL, NULL, 0}
 };

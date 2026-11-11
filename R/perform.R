@@ -117,7 +117,7 @@ zu_transport_perform.zu_native_transport <- function(transport, req) {
     req$path,
     req$callback,
     p$proxy,
-    check_tls(p$tls),
+    check_tls(p$tls, p$verify),
     isTRUE(req$trace),
     # §42.1's configurable names. Parameters for the URLs the engine
     # traces and puts in messages, which it redacts itself (§42.2)
