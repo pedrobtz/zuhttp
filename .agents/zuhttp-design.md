@@ -156,6 +156,7 @@ accepted when that work package's PR merges.
 | D-102 | **No backend resumes a TLS session.** Each connection is a full handshake whose certificate is evaluated against that request's trust settings. Network.framework resumed from a process-wide cache by default, and a resumed handshake skipped the verify block, so a request after a `verify = FALSE` one to the same server was accepted unverified (#307); it now calls `sec_protocol_options_set_tls_resumption_enabled(false)`. OpenSSL builds an `SSL_CTX` per connection and keeps no cache; Schannel verifies the remote certificate after every handshake, resumed or not. Resumption, if §62 Q19 ever adopts it, must key the cache on the whole trust configuration and re-evaluate trust on resume | Accepted 2026-11-11 (#307) | 51.1, 13, 14 | review |
 | D-103 | **A certificate names a host only in its subjectAltName, and every chain fault is `zu_tls_certificate_error`.** No backend falls back to the subject CN (RFC 9110 §4.3.4). OpenSSL did, and now sets `X509_CHECK_FLAG_NEVER_CHECK_SUBJECT`; Schannel's SSL policy did too, and now a DNS host needs a dNSName SAN, after which the policy matches SANs only (#308). A server certificate is one valid for serverAuth: Schannel requested no usage of its chain and accepted a clientAuth-only leaf, and now requests `szOID_PKIX_KP_SERVER_AUTH` (#309). Any verification failure other than a name mismatch or a pin is the certificate class, whatever the backend's code says: issuer, validity, EKU, key size, chain length (OpenSSL listed six codes and sent the rest to `zu_tls_handshake_error`, #309). The handshake class is for a handshake that failed with verification passing or not reached | Accepted 2026-11-11 (#308, #309) | 14.6, 34.1 | review |
 | D-104 | **`pins` with `verify = FALSE` is refused** with `zu_tls_unsupported_error`, before DNS or TCP (`zuh_tls_config_check()`, called from R with the request's merged `verify` and again inside each backend's connect). §14.4 makes a pin additive to verification, and every backend installs its pin check with its verifier, so with verification off the pin was silently ignored (#310). Pinning without verification, as curl's `--pinnedpubkey` with `-k` does, would be a new feature, not this one | Accepted 2026-11-11 (#310) | 14.4, 14.1 | review |
+| D-105 | **The decompression ratio is output over input consumed so far**, checked as inflate runs, so the verdict is the same however the bytes arrive. Input was counted when offered, before inflating: a body fed whole had its incompressible tail credited while its zeros were still decoding and passed, and the same body in pieces was refused (#327). A body whose overall ratio is under the cap but whose prefix decodes past it, such as a long run of zeros before random bytes, is now refused at every split: a streaming decoder cannot know what follows | Accepted 2026-11-11 (#327) | 21.4, 40 | review |
 
 ---
 
@@ -991,8 +992,8 @@ zlib-wrapped first, raw DEFLATE on a header error.
 #### 21.4 Decompression limits
 
 Enforced during inflation, not after: `max_body` caps decoded output
-(16 MiB by default), and `max_decompression_ratio` caps output ÷ input once
-32 input bytes have been seen: 1000 (D-69, `ZUH_MAX_DECOMPRESSION_RATIO`),
+(16 MiB by default), and `max_decompression_ratio` caps output ÷ the input
+inflate has consumed so far, once 32 input bytes have been consumed (D-105): 1000 (D-69, `ZUH_MAX_DECOMPRESSION_RATIO`),
 just under deflate's ceiling of about 1030:1. Either raises
 `zu_body_limit_error`, naming the cap that was binding, and closes the
 connection. The absolute cap bounds a bomb in megabytes; the ratio makes it

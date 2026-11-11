@@ -19,3 +19,7 @@
 ^pkgdown$
 ^vignettes/articles$
 ^air\.toml$
+^CRAN-SUBMISSION$
+^AGENTS\.md$
+^\.superpowers$
+^\.worktrees$
