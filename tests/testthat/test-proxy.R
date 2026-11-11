@@ -124,7 +124,7 @@ test_that("the request line never carries proxy credentials or origin userinfo",
   seen <- with_fake_proxy("ok", function(px) {
     auth_px <- sub("^http://", "http://user:secret@", px)
     invisible(zu_get(
-      "http://u:pw@target.example/x",
+      "http://target.example/x",
       proxy = auth_px,
       timeout = 15,
       check = FALSE
@@ -133,11 +133,21 @@ test_that("the request line never carries proxy credentials or origin userinfo",
   skip_if(is.null(seen), "the helper proxy recorded nothing")
 
   line <- strsplit(seen, "\r\n")[[1]][1]
-  # §20.3: absolute-form "never includes userinfo" — neither the origin's nor
-  # the proxy's. An '@' in the request line would mean one of them leaked.
+  # §20.3: absolute-form "never includes userinfo". The proxy's credentials
+  # are how it authenticates, never part of the target.
   expect_false(grepl("@", line, fixed = TRUE))
   expect_false(grepl("secret", seen, fixed = TRUE))
-  expect_false(grepl("pw", line, fixed = TRUE))
+
+  # Origin userinfo is refused before anything is sent (#331, D-110), so the
+  # proxy is never reached with it at all.
+  seen2 <- with_fake_proxy("ok", function(px) {
+    e <- tryCatch(
+      zu_get("http://u:pw@target.example/x", proxy = px, timeout = 15),
+      error = function(e) e
+    )
+    expect_s3_class(e, "zu_url_error")
+  })
+  expect_null(seen2)
 })
 
 # --- §20.3 CONNECT failures ----------------------------------------------

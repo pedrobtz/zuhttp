@@ -168,7 +168,7 @@ zu_client <- function(
 ) {
   structure(
     list(
-      base_url = base_url,
+      base_url = check_base_url(base_url),
       headers = as_header_vec(headers),
       query = as_query_list(query),
       timeout = timeout,
@@ -239,14 +239,22 @@ zu_client_update <- function(client, ...) {
   }
   # Derived headers merge with the parent's, which is what makes the
   # base -> authenticated -> admin chain in §31.10 work.
+  # `[<-` with list(): the merge is NULL once every inherited value is
+  # erased, and `$<-` with NULL deleted the change itself, so a client's only
+  # header, an Authorization included, could not be removed.
+  if ("base_url" %in% names(changes)) {
+    changes["base_url"] <- list(check_base_url(changes$base_url))
+  }
   if (!is.null(changes$headers)) {
-    changes$headers <- merge_headers(
+    changes["headers"] <- list(merge_headers(
       client$headers,
       as_header_vec(changes$headers)
-    )
+    ))
   }
   if (!is.null(changes$query)) {
-    changes$query <- merge_query(client$query, as_query_list(changes$query))
+    changes["query"] <- list(
+      merge_query(client$query, as_query_list(changes$query))
+    )
   }
   # §26.5: a child that changes the pool settings gets a pool of its own.
   # Sharing one slot made parent and child each rebuild the pool the other
@@ -262,12 +270,21 @@ zu_client_update <- function(client, ...) {
   client
 }
 
-as_header_vec <- function(h) {
-  if (is.null(h) || !length(h)) {
+# One URL or none. NA built "NA/users", and a length-2 value died in a raw
+# coercion error far from the call that set it.
+check_base_url <- function(x) {
+  if (is.null(x)) {
     return(NULL)
   }
-  if (is.list(h)) {
-    h <- unlist(h)
+  if (!is.character(x) || length(x) != 1L || is.na(x) || !nzchar(x)) {
+    stop("`base_url` must be a single URL, or NULL", call. = FALSE)
+  }
+  x
+}
+
+as_header_vec <- function(h, request = TRUE) {
+  if (is.null(h) || !length(h)) {
+    return(NULL)
   }
   if (is.null(names(h)) || any(is.na(names(h))) || any(!nzchar(names(h)))) {
     stop(
@@ -275,8 +292,52 @@ as_header_vec <- function(h) {
       call. = FALSE
     )
   }
-  # NA is meaningful (it erases), so it survives as.character() here.
-  structure(as.character(h), names = names(h))
+  # One value per name. unlist() turned "X-V" = c("a", "b") into X-V1 and
+  # X-V2, headers nobody asked for, and a name given twice kept only the
+  # first; both are refused rather than guessed at (D-56 in spirit).
+  if (is.list(h)) {
+    long <- names(h)[lengths(h) != 1L]
+    if (length(long)) {
+      stop(
+        "header `",
+        long[[1]],
+        "` must be a single value; join a list-valued ",
+        "field yourself, e.g. paste(x, collapse = \", \")",
+        call. = FALSE
+      )
+    }
+    h <- vapply(h, header_atom, "", USE.NAMES = TRUE)
+  } else {
+    h <- structure(
+      vapply(seq_along(h), function(i) header_atom(h[[i]]), ""),
+      names = names(h)
+    )
+  }
+  # A request header is set once. A response may repeat one (Set-Cookie), so
+  # zu_response() and the mock transport pass request = FALSE.
+  dup <- names(h)[duplicated(tolower(names(h)))]
+  if (request && length(dup)) {
+    stop("header `", dup[[1]], "` is given twice; give it once", call. = FALSE)
+  }
+  h
+}
+
+# NA is meaningful (it erases), so it survives. A number is written in full,
+# never as R's 1e+05.
+header_atom <- function(v) {
+  if (length(v) == 1L && is.na(v)) {
+    return(NA_character_)
+  }
+  if (inherits(v, "POSIXt")) {
+    return(utc_stamp(v))
+  }
+  if (is.factor(v) || is.object(v)) {
+    v <- as.character(v)
+  }
+  if (is.double(v)) {
+    return(num_atom(v))
+  }
+  to_utf8(v)
 }
 
 as_query_list <- function(q) {
@@ -293,8 +354,16 @@ as_query_list <- function(q) {
   # NULL and NA both mean "erase" (§31.9), and they have to mean the same
   # thing here: list(a = NULL) is a perfectly ordinary way to write it, but a
   # NULL cannot survive being carried through a list, so it becomes NA now.
-  for (nm in names(q)) {
-    if (is.null(q[[nm]])) q[[nm]] <- NA
+  for (i in seq_along(q)) {
+    if (is.null(q[[i]])) q[i] <- list(NA)
+  }
+  # A name given twice is one parameter with both values, in order:
+  # list(a = "1", a = "2") is "a=1&a=2", not the first value twice.
+  nms <- names(q)
+  if (anyDuplicated(nms)) {
+    q <- lapply(split(q, factor(nms, levels = unique(nms))), function(v) {
+      do.call(c, unname(v))
+    })
   }
   q
 }
@@ -382,7 +451,8 @@ zu_set_default_client <- function(client) {
 print.zu_client <- function(x, ...) {
   cat("<zu_client>\n")
   if (!is.null(x$base_url)) {
-    cat("  base_url:  ", x$base_url, "\n", sep = "")
+    # §42.2: printing is an egress; userinfo and secret query values too.
+    cat("  base_url:  ", zu_redact_url(x$base_url), "\n", sep = "")
   }
   # §42.2: printing is an egress, so values are redacted for display.
   h <- zu_redact_headers_for_display(x$headers)

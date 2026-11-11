@@ -72,7 +72,7 @@ zu_stub <- function(
       method = if (!is.null(method)) toupper(method),
       url = url,
       regex = regex,
-      headers = as_header_vec(headers),
+      headers = as_header_vec(headers, request = FALSE),
       body = body,
       times = times,
       matched = 0L

@@ -81,6 +81,8 @@ one_shot <- function(
 #' client default (§31.9). Omitting it inherits the client's.
 #'
 #' @param url An absolute URL, or a path joined to the client's `base_url`.
+#'   A URL carrying credentials (`user:password@`) is refused with
+#'   `zu_url_error`; send them as a header instead.
 #' @param query Named list of query parameters. Merged with the client's.
 #' @param headers Named character vector. Merged with the client's; `NA`
 #'   removes an inherited header.

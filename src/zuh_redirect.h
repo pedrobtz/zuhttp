@@ -53,6 +53,12 @@ zuh_code zuh_redirect_decide(const zuh_redirect_policy *p, int status,
  * so it filters with this while adding them rather than stripping after. */
 int zuh_redirect_is_credential_header(const zuh_redact_policy *p, const char *name);
 
+/* Nonzero if `name` describes the request body: the Fetch standard's
+ * request-body headers (Content-Type, -Encoding, -Language, -Location) and
+ * the body's digests. A redirect that drops the body drops these with it
+ * (RFC 9110 §15.4). Content-Length is the engine's own, never the caller's. */
+int zuh_redirect_is_body_header(const char *name);
+
 /* Loop detection (§19.4): has this (method, absolute URL) pair been seen? */
 typedef struct {
     char **seen;      /* "METHOD scheme://host:port/path" */

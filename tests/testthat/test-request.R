@@ -342,3 +342,170 @@ test_that("a form body round-trips through Python's form decoder (#243)", {
   want <- lapply(forms, function(x) lapply(x, enc2utf8))
   expect_identical(got, want)
 })
+
+# --- what the bug hunt's emit slice found: values as the server receives them
+
+test_that("query values reach the server one by one, unpadded and in full", {
+  # format() over the whole vector padded "a" to "a  ", rounded doubles to 7
+  # digits and gave 1 its neighbour's "1.0". The recording server is the
+  # oracle: what arrived, not what the request object holds.
+  seen <- with_raw_server(
+    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n",
+    function(url) {
+      zu_get(
+        paste0(url, "/q"),
+        query = list(
+          tag = c("a", "bbb"),
+          fac = factor(c("x", "yy")),
+          n = c(1, 2.5),
+          big = 1234567.891,
+          id = 12345678.5,
+          third = 1 / 3,
+          neg = -0
+        ),
+        timeout = 5
+      )
+    }
+  )
+  line <- sub("\r\n.*", "", seen)
+  expect_identical(
+    line,
+    paste0(
+      "GET /q?tag=a&tag=bbb&fac=x&fac=yy&n=1&n=2.5&big=1234567.891",
+      "&id=12345678.5&third=0.3333333333333333&neg=0 HTTP/1.1"
+    )
+  )
+})
+
+test_that("a query number is the number zu_body_json() would send", {
+  # Differential: the same double, two encodings of one request.
+  for (x in c(1 / 3, 0.1 + 0.2, 1234567.891, 2^53 + 2, 1e-7, 123456789012)) {
+    q <- zuhttp:::build_query(list(x = x))
+    expect_identical(as.numeric(sub("^x=", "", q)), x)
+    expect_identical(as.numeric(zujson::json_parse(zujson::json_write(x))), x)
+  }
+})
+
+test_that("a repeated query name keeps both values, in order", {
+  expect_identical(zuhttp:::build_query(list(a = "1", a = "2")), "a=1&a=2")
+  req <- zu_query(zu_request("GET", "https://example.com"), a = "1", a = "2")
+  expect_identical(zuhttp:::build_query(req$query), "a=1&a=2")
+  expect_identical(
+    rawToChar(
+      zu_body_form(
+        zu_request("POST", "https://x.test"),
+        list(a = 1, a = 2)
+      )$body
+    ),
+    "a=1&a=2"
+  )
+})
+
+test_that("non-ASCII is sent as UTF-8 in a C locale too", {
+  # A script read in a C locale gives "café" Encoding "unknown", and
+  # enc2utf8() then escaped it to "caf<c3><a9>". Built from bytes, since a
+  # literal in this UTF-8 file would be marked UTF-8 and pass regardless.
+  withr::local_locale(c(LC_CTYPE = "C"))
+  s <- rawToChar(as.raw(c(0x63, 0x61, 0x66, 0xc3, 0xa9)))
+  expect_identical(Encoding(s), "unknown")
+  expect_identical(zuhttp:::build_query(list(s = s)), "s=caf%C3%A9")
+  latin <- iconv("café", "UTF-8", "latin1")
+  expect_identical(zuhttp:::build_query(list(s = latin)), "s=caf%C3%A9")
+})
+
+test_that("header values: one per name, numbers in full", {
+  req <- zu_request("GET", "https://example.com")
+  # unlist() turned a vector into X-V1 and X-V2; a repeated name kept one.
+  expect_error(zu_headers(req, "X-V" = c("a", "b")), "single value")
+  expect_error(zu_headers(req, c("X-A" = "1", "x-a" = "2")), "given twice")
+  seen <- with_raw_server(
+    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n",
+    function(url) {
+      zu_get(paste0(url, "/h"), headers = c("X-N" = 100000), timeout = 5)
+    }
+  )
+  expect_match(seen, "\r\nX-N: 100000\r\n", fixed = TRUE)
+})
+
+# --- the bug hunt's R-layer slice --------------------------------------------
+
+test_that("session options do not change what is sent", {
+  withr::local_options(OutDec = ",", digits = 3)
+  expect_identical(
+    zuhttp:::build_query(list(a = 0.25, b = 1 / 3)),
+    "a=0.25&b=0.3333333333333333"
+  )
+})
+
+test_that("an instant is sent as UTC, POSIXlt or POSIXct, with its fraction", {
+  lt <- as.POSIXlt("2024-07-02 03:04:05", tz = "Europe/Berlin")
+  ct <- as.POSIXct("2024-07-02 03:04:05.25", tz = "Europe/Berlin")
+  # Differential: one instant, two classes, one stamp. POSIXlt was formatted
+  # in its own zone and stamped Z, two hours out.
+  expect_identical(
+    zuhttp:::build_query(list(t = lt)),
+    zuhttp:::build_query(list(t = as.POSIXct(lt)))
+  )
+  expect_identical(
+    zuhttp:::build_query(list(t = lt)),
+    "t=2024-07-02T01%3A04%3A05Z"
+  )
+  expect_identical(
+    zuhttp:::build_query(list(t = ct)),
+    "t=2024-07-02T01%3A04%3A05.25Z"
+  )
+})
+
+test_that("a classed value is sent as its text, in a query or a header", {
+  d <- as.Date("2024-01-02")
+  expect_identical(zuhttp:::build_query(list(d = d)), "d=2024-01-02")
+  req <- zu_headers(
+    zu_request("GET", "https://x.test"),
+    list(d = d, a = factor("x"))
+  )
+  expect_identical(unname(req$headers[c("d", "a")]), c("2024-01-02", "x"))
+})
+
+test_that("credentials in a request URL are refused, and nothing is sent (#331)", {
+  # They were dropped silently, so the request went out unauthenticated.
+  # Refused before any connection: the raw server records no request, and
+  # the message never repeats the password.
+  seen <- with_raw_server(
+    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n",
+    function(url) {
+      bad <- sub("http://", "http://user:s3cret@", url)
+      e <- tryCatch(
+        zu_get(paste0(bad, "/x"), timeout = 5),
+        error = function(e) e
+      )
+      expect_s3_class(e, "zu_url_error")
+      expect_false(grepl("s3cret", conditionMessage(e), fixed = TRUE))
+      api <- zu_client(base_url = bad)
+      expect_error(
+        zu_get("/x", client = api, timeout = 5),
+        class = "zu_url_error"
+      )
+    }
+  )
+  expect_null(seen)
+  # A mock refuses what the network would.
+  m <- zu_client(
+    transport = zu_mock_transport(zu_stub(response = zu_response(200L)))
+  )
+  expect_error(
+    zu_get("https://u:p@m.test/", client = m),
+    class = "zu_url_error"
+  )
+})
+
+test_that("a redirect to a URL with credentials is refused (#331)", {
+  with_raw_server(
+    "HTTP/1.1 302 Found\r\nLocation: http://u:p@127.0.0.1:9/next\r\nContent-Length: 0\r\n\r\n",
+    function(url) {
+      expect_error(
+        zu_get(paste0(url, "/start"), timeout = 5),
+        class = "zu_url_error"
+      )
+    }
+  )
+})

@@ -46,6 +46,35 @@ static int make_gzip_of_zeros(zuh_buffer *out, size_t n) {
     return ok;
 }
 
+/* #255/#327: inflate `n` zeros, gzipped, fed whole (step 0) or `step`
+ * bytes at a time, at the shipped ratio. 1 when it decodes completely, 0
+ * on the ratio error, -1 otherwise; checks the output bound on the way. */
+static int ratio_verdict(const unsigned char *zeros, size_t n, unsigned char *comp,
+                         size_t cap, size_t step, size_t *outp) {
+    zuh_inflate z; zuh_buffer out; zuh_error e;
+    zuh_code rc = ZUH_ERR_WOULDBLOCK;
+    size_t off = 0, clen = compress_with(15 + 16, zeros, n, comp, cap, 9);
+    int v;
+    if (!clen) return -1;
+    if (!step) step = clen;
+    zuh_error_clear(&e);
+    if (!zuh_buf_init(&out, 0, 0)) return -1;
+    zuh_inflate_init(&z, ZUH_ENC_GZIP, 0, ZUH_MAX_DECOMPRESSION_RATIO);
+    while (off < clen && (rc == ZUH_ERR_WOULDBLOCK || rc == ZUH_OK)) {
+        size_t m = clen - off < step ? clen - off : step;
+        rc = zuh_inflate_run(&z, comp + off, m, &out, &e);
+        off += m;
+        ZUH_CHECK(z.in_total < 32 || z.out_total <= z.in_total * 1000 + 1);
+    }
+    if (rc == ZUH_OK || rc == ZUH_ERR_WOULDBLOCK)
+        rc = zuh_inflate_run(&z, NULL, 0, &out, &e);
+    v = rc == ZUH_OK ? (out.len == n ? 1 : -1)
+      : (rc == ZUH_ERR_BODY_LIMIT && strstr(e.message, "ratio")) ? 0 : -1;
+    if (outp) *outp = out.len;
+    zuh_inflate_free(&z); zuh_buf_free(&out);
+    return v;
+}
+
 void suite_inflate(void) {
     ZUH_CASE("Content-Encoding mapping");
     ZUH_CHECK_EQ_INT(zuh_encoding_parse(NULL), ZUH_ENC_IDENTITY);
@@ -353,50 +382,39 @@ void suite_inflate(void) {
         zuh_buf_free(&out); zuh_buf_free(&src); zuh_inflate_free(&z);
     }
 
-    /* #255: the ratio at its edge, at the shipped 1000:1. The cap is
-     * out <= 1000 x compressed bytes seen, so for a stream of c bytes the
-     * search finds a c for which 1000c - 1, 1000c and 1000c + 1 zeros all
-     * gzip to c bytes; fed whole, the first two pass and the third is the
-     * bomb error. zlib's output for zeros is near 1030:1 only past 1 MB. */
-    ZUH_CASE("limits: a gzip stream at 999.999, 1000 and 1000.001 to 1 against the default ratio (#255)");
+    /* #255, restated by #327: the ratio at its edge, at the shipped 1000:1.
+     * The cap is out <= 1000 x compressed bytes inflate has consumed so
+     * far, judged as it decodes. That is the only verdict that does not
+     * depend on how the bytes arrive (#327), and it is not "1000 x the
+     * whole stream": the last output appears before zlib reads the 8-byte
+     * gzip trailer. So the edge is searched for, not computed: the largest
+     * run of zeros n that passes. n - 1 and n pass and n + 1 is the bomb
+     * error, fed whole and in 100-byte pieces alike, and no output byte
+     * ever exceeds 1000 x consumed + 1 (the one byte of headroom). */
+    ZUH_CASE("limits: a gzip stream of zeros at the ratio's edge, n - 1, n and n + 1, whole and split (#255, #327)");
     {
-        unsigned char *zeros = (unsigned char *)zuh_calloc(1, 2u << 20);
-        unsigned char *comp = (unsigned char *)zuh_alloc(1u << 16);
-        size_t c, found = 0, lens[3];
+        size_t cap = 1u << 16, lo = 200000, hi = 1100000, n, d;
+        unsigned char *zeros = (unsigned char *)zuh_calloc(1, hi + 2);
+        unsigned char *comp = (unsigned char *)zuh_alloc(cap);
+        /* 1: passed, 0: the ratio error, -1: anything else. */
+        #define RATIO_VERDICT(len, step, outp) ratio_verdict(zeros, (len), comp, cap, (step), (outp))
         ZUH_CHECK(zeros && comp);
-        for (c = 1000; zeros && comp && c < 2000 && !found; c++) {
-            int d;
-            for (d = 0; d < 3; d++) {
-                lens[d] = compress_with(15 + 16, zeros, 1000 * c - 1 + (size_t)d, comp, 1u << 16, 9);
-                if (lens[d] != c) break;
+        if (zeros && comp) {
+            ZUH_CHECK_EQ_INT(RATIO_VERDICT(lo, 0, NULL), 1);
+            ZUH_CHECK_EQ_INT(RATIO_VERDICT(hi, 0, NULL), 0);
+            while (hi - lo > 1) {            /* lo passes, hi fails */
+                size_t mid = lo + (hi - lo) / 2;
+                if (RATIO_VERDICT(mid, 0, NULL) == 1) lo = mid; else hi = mid;
             }
-            if (d == 3) found = c;
-        }
-        ZUH_CHECK(found > 0);
-        if (found) {
-            int d;
-            for (d = 0; d < 3; d++) {
-                size_t n = 1000 * found - 1 + (size_t)d, clen;
-                zuh_inflate z; zuh_buffer out; zuh_error e;
-                zuh_code rc;
-                clen = compress_with(15 + 16, zeros, n, comp, 1u << 16, 9);
-                ZUH_CHECK_EQ_INT(clen, found);
-                zuh_error_clear(&e);
-                ZUH_CHECK(zuh_buf_init(&out, 0, 0));
-                zuh_inflate_init(&z, ZUH_ENC_GZIP, 0, ZUH_MAX_DECOMPRESSION_RATIO);
-                rc = zuh_inflate_run(&z, comp, clen, &out, &e);
-                ZUH_CHECK_EQ_INT(rc, d < 2 ? ZUH_OK : ZUH_ERR_BODY_LIMIT);
-                ZUH_CHECK(out.len <= 1000 * found);
-                if (d < 2) {
-                    ZUH_CHECK_EQ_INT(out.len, n);
-                    ZUH_CHECK_EQ_INT(zuh_inflate_run(&z, NULL, 0, &out, &e), ZUH_OK);
-                } else {
-                    ZUH_CHECK_EQ_INT(e.code, ZUH_ERR_BODY_LIMIT);
-                    ZUH_CHECK(strstr(e.message, "ratio") != NULL);
-                }
-                zuh_inflate_free(&z); zuh_buf_free(&out);
+            n = lo;
+            for (d = 0; d < 2; d++) {
+                size_t step = d ? 100 : 0;
+                ZUH_CHECK_EQ_INT(RATIO_VERDICT(n - 1, step, NULL), 1);
+                ZUH_CHECK_EQ_INT(RATIO_VERDICT(n, step, NULL), 1);
+                ZUH_CHECK_EQ_INT(RATIO_VERDICT(n + 1, step, NULL), 0);
             }
         }
+        #undef RATIO_VERDICT
         zuh_free(zeros); zuh_free(comp);
     }
 
@@ -430,6 +448,45 @@ void suite_inflate(void) {
             }
             zuh_inflate_free(&z); zuh_buf_free(&out);
         }
+    }
+
+    /* #327: the ratio verdict may not depend on how the bytes arrive. It
+     * counted input OFFERED to inflate rather than consumed, so a body fed
+     * whole had its incompressible tail counted while its zeros still
+     * decoded, and passed; fed in pieces it was judged on the prefix, and
+     * failed. 4,000,000 zeros then 700 random bytes, about 843:1 overall,
+     * whose zero run decodes past 1000:1 before the tail arrives: refused
+     * whole and at every split. The 1 MB-zeros-at-999:1 control passes at
+     * every split too. */
+    ZUH_CASE("limits: the ratio verdict is the same whole and split at 1, 100, 500, 2000 and 4096 bytes (#327)");
+    {
+        size_t nz = 4000000, nr = 700, n = nz + nr, clen, cap = 1u << 16;
+        unsigned char *src = (unsigned char *)zuh_calloc(1, n);
+        unsigned char *comp = (unsigned char *)zuh_alloc(cap);
+        static const size_t splits[] = { 0, 1, 100, 500, 2000, 4096 };
+        unsigned seed = 327u;
+        size_t i, k;
+        ZUH_CHECK(src && comp);
+        for (i = nz; src && i < n; i++) { seed = seed * 1103515245u + 12345u; src[i] = (unsigned char)(seed >> 16); }
+        clen = (src && comp) ? compress_with(15 + 16, src, n, comp, cap, 9) : 0;
+        ZUH_CHECK(clen > 0 && n / clen < 1000);    /* under the cap overall */
+        for (k = 0; clen && k < sizeof splits / sizeof splits[0]; k++) {
+            zuh_inflate z; zuh_buffer out; zuh_error e;
+            zuh_code rc = ZUH_ERR_WOULDBLOCK;
+            size_t off = 0, step = splits[k] ? splits[k] : clen;
+            zuh_error_clear(&e);
+            ZUH_CHECK(zuh_buf_init(&out, 0, 0));
+            zuh_inflate_init(&z, ZUH_ENC_GZIP, 0, ZUH_MAX_DECOMPRESSION_RATIO);
+            while (off < clen && (rc == ZUH_ERR_WOULDBLOCK || rc == ZUH_OK)) {
+                size_t m = clen - off < step ? clen - off : step;
+                rc = zuh_inflate_run(&z, comp + off, m, &out, &e);
+                off += m;
+            }
+            ZUH_CHECK_EQ_INT(rc, ZUH_ERR_BODY_LIMIT);
+            ZUH_CHECK(strstr(e.message, "ratio") != NULL);
+            zuh_inflate_free(&z); zuh_buf_free(&out);
+        }
+        zuh_free(src); zuh_free(comp);
     }
 
     ZUH_CASE("no leaks across the suite");

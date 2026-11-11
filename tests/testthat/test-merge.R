@@ -226,3 +226,79 @@ test_that("a printed client shows policy objects as readable lines", {
     fixed = TRUE
   )
 })
+
+test_that("zu_client_update() can erase a client's only header or parameter", {
+  # The merge was NULL once nothing was left, and `$<-` with NULL dropped
+  # the change, so a lone Authorization header could not be removed.
+  c1 <- zu_client(headers = c(Authorization = "Bearer s"))
+  expect_null(zu_client_update(c1, headers = c(Authorization = NA))$headers)
+  c2 <- zu_client(query = list(token = "x"))
+  expect_null(zu_client_update(c2, query = list(token = NA))$query)
+  c3 <- zu_client(headers = c(Authorization = "Bearer s", Accept = "a/b"))
+  expect_identical(
+    names(zu_client_update(c3, headers = c(Authorization = NA))$headers),
+    "Accept"
+  )
+})
+
+test_that("client settings are refused by name, not by a raw R error", {
+  expect_error(zu_client(base_url = NA_character_), "base_url")
+  expect_error(zu_client(base_url = c("a", "b")), "base_url")
+  expect_error(
+    zu_client_update(zu_client(), base_url = NA_character_),
+    "base_url"
+  )
+  m <- zu_mock_transport(zu_stub(response = zu_response(200L, body = "x")))
+  expect_error(
+    zu_get("https://x.test", retry = 3, client = zu_client(transport = m)),
+    "zu_retry"
+  )
+  expect_error(
+    zu_get("https://x.test", retry = TRUE, client = zu_client(transport = m)),
+    "zu_retry"
+  )
+})
+
+test_that("a client prints its base_url redacted (§42.2)", {
+  out <- capture.output(print(zu_client(
+    base_url = "http://u:pw@h.test/?token=x"
+  )))
+  line <- grep("base_url", out, value = TRUE)
+  expect_false(grepl("pw", line, fixed = TRUE))
+  expect_false(grepl("token=x", line, fixed = TRUE))
+})
+
+test_that("timeouts round up to whole milliseconds, never down to none", {
+  expect_identical(zuhttp:::timeout_ms(1.001), 1001L)
+  expect_identical(zuhttp:::timeout_ms(0.3), 300L)
+  expect_identical(zuhttp:::timeout_ms(0.0005), 1L)
+  expect_identical(zuhttp:::timeout_ms(30), 30000L)
+})
+
+test_that("user_agent and zu_retry() flags are refused unless they say what they mean", {
+  m <- zu_mock_transport(zu_stub(response = zu_response(200L, body = "x")))
+  cl <- zu_client(transport = m)
+  for (ua in list(NA_character_, c("a", "b"), 5)) {
+    expect_error(
+      zu_get("https://x.test", user_agent = ua, client = cl),
+      "user_agent"
+    )
+  }
+  expect_error(zu_retry(jitter = 1), "jitter")
+  expect_error(zu_retry(retry_after = "yes"), "retry_after")
+  expect_error(
+    zu_req_retry(zu_request("POST", "https://x.test"), replay_safe = "yes"),
+    "replay_safe"
+  )
+})
+
+test_that("an explicit Content-Type of NA sends none, even for a JSON body", {
+  seen <- with_raw_server(
+    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n",
+    function(url) {
+      req <- zu_body_json(zu_request("POST", paste0(url, "/j")), list(a = 1))
+      zu_perform(zu_headers(req, "Content-Type" = NA))
+    }
+  )
+  expect_false(grepl("Content-Type", seen, ignore.case = TRUE))
+})

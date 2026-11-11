@@ -156,6 +156,12 @@ accepted when that work package's PR merges.
 | D-102 | **No backend resumes a TLS session.** Each connection is a full handshake whose certificate is evaluated against that request's trust settings. Network.framework resumed from a process-wide cache by default, and a resumed handshake skipped the verify block, so a request after a `verify = FALSE` one to the same server was accepted unverified (#307); it now calls `sec_protocol_options_set_tls_resumption_enabled(false)`. OpenSSL builds an `SSL_CTX` per connection and keeps no cache; Schannel verifies the remote certificate after every handshake, resumed or not. Resumption, if §62 Q19 ever adopts it, must key the cache on the whole trust configuration and re-evaluate trust on resume | Accepted 2026-11-11 (#307) | 51.1, 13, 14 | review |
 | D-103 | **A certificate names a host only in its subjectAltName, and every chain fault is `zu_tls_certificate_error`.** No backend falls back to the subject CN (RFC 9110 §4.3.4). OpenSSL did, and now sets `X509_CHECK_FLAG_NEVER_CHECK_SUBJECT`; Schannel's SSL policy did too, and now a DNS host needs a dNSName SAN, after which the policy matches SANs only (#308). A server certificate is one valid for serverAuth: Schannel requested no usage of its chain and accepted a clientAuth-only leaf, and now requests `szOID_PKIX_KP_SERVER_AUTH` (#309). Any verification failure other than a name mismatch or a pin is the certificate class, whatever the backend's code says: issuer, validity, EKU, key size, chain length (OpenSSL listed six codes and sent the rest to `zu_tls_handshake_error`, #309). The handshake class is for a handshake that failed with verification passing or not reached | Accepted 2026-11-11 (#308, #309) | 14.6, 34.1 | review |
 | D-104 | **`pins` with `verify = FALSE` is refused** with `zu_tls_unsupported_error`, before DNS or TCP (`zuh_tls_config_check()`, called from R with the request's merged `verify` and again inside each backend's connect). §14.4 makes a pin additive to verification, and every backend installs its pin check with its verifier, so with verification off the pin was silently ignored (#310). Pinning without verification, as curl's `--pinnedpubkey` with `-k` does, would be a new feature, not this one | Accepted 2026-11-11 (#310) | 14.4, 14.1 | review |
+| D-105 | **The decompression ratio is output over input consumed so far**, checked as inflate runs, so the verdict is the same however the bytes arrive. Input was counted when offered, before inflating: a body fed whole had its incompressible tail credited while its zeros were still decoding and passed, and the same body in pieces was refused (#327). A body whose overall ratio is under the cap but whose prefix decodes past it, such as a long run of zeros before random bytes, is now refused at every split: a streaming decoder cannot know what follows | Accepted 2026-11-11 (#327) | 21.4, 40 | review |
+| D-106 | **Query, form and header values are formatted one value at a time, as the server should read them.** A character value is sent as its UTF-8 bytes, unpadded; a factor as its labels; a double as the shortest decimal that reads back as the same number (what `zu_body_json()` sends), never rounded to 7 digits or written as `1e+05`; a repeated query name keeps every value in order. A request header has one value per name: a vector value or a name given twice is an error rather than a guess (`unlist()` had invented `X-V1`/`X-V2` and dropped the second of a repeated name). Text marked `unknown` in a C locale is taken as UTF-8 bytes, not escaped. Found by a bug hunt's emit slice | Accepted 2026-11-11 | 17, 31.9 | review |
+| D-107 | **A redirect that drops the body drops the headers that describe it** on every later hop: the Fetch standard's request-body headers and the body digests (§28.3). A 303 turned a POST into a GET and the GET still carried the POST's `Content-Type`, `Content-Encoding` and `Content-MD5` (the bug hunt's emit slice). Other caller headers stay, `Idempotency-Key` included; a 307 or 308 resends the body and keeps them all | Accepted 2026-11-11 | 19.1, 28.3 | review |
+| D-108 | **A connection closed before any response byte is an I/O failure, and a stale pooled one is retried once inside the engine.** EOF with nothing read was `zu_http_parse_error`, which no policy retries, so a keep-alive connection the server dropped between the pool's liveness probe and the request failed the call (the lifecycle slice). It is `zu_io_error` now, retryable by `zu_retry()`; and on a reused HTTP/1.1 connection the engine retries once on a fresh one, uncounted, for any method when the write failed and for an idempotent method (RFC 9110 §9.2.2) when the server closed after reading. A streamed body is never resent. Bytes of a head followed by EOF stay `zu_http_parse_error` | Accepted 2026-11-11 | 33.2, 26 | review |
+| D-109 | **R-layer values and settings are read as written or refused by name** (the bug hunt's R-layer slice). Instants go out in UTC whatever their class, with their fraction of a second; a classed value (a Date, a factor) is its text, in a query or a header; session options (`OutDec`, `digits`) never reach the wire. `zu_client_update()` can erase a client's last header or query parameter, an `Authorization` included. `base_url` is one URL or `NULL`, and `retry` a `zu_retry()` policy, each refused by name otherwise. A printed client redacts its `base_url` (§42.2). An `Idempotency-Key` of `NA` is an erase, so it does not make a POST replay-safe. Timeouts round up to whole milliseconds, never down to none. `on_invalid = "substitute"` writes a NUL byte as `<00>`. `user_agent` is one string or `NULL`, `zu_retry()`'s flags and `replay_safe` are `TRUE` or `FALSE`, each refused by name; an explicit `Content-Type = NA` sends none even for a JSON or form body; a quoted media-type parameter may hold a `;`; `zu_resp_check()` redacts the URL it names. A mock or cassette body reaches a `callback` as one chunk, as a native one does (a `path` is still not written by a mock); a cassette in `auto` mode records a retry instead of replaying the attempt it retries | Accepted 2026-11-11 | 31.9, 42.2, 33.1, 24 | review |
+| D-110 | **Credentials in a request URL are refused** with `zu_url_error`, before anything is sent, and so is a redirect to such a URL; the message never repeats them. They were dropped silently, so the request went out unauthenticated with no sign why (#331). RFC 9110 §4.2.4 forbids a client to send userinfo in an http(s) target, and URLs are where credentials leak. A proxy URL keeps its userinfo, which is how proxy credentials are given (§20.4). Accepting them as Basic credentials could be added later without breaking anyone; the reverse could not | Accepted 2026-11-11 (maintainer, #331) | 8.2, 20.4, 42 | review |
 
 ---
 
@@ -357,7 +363,7 @@ covers the parser. `src/zuh_uriparser.h` is the only includer of uriparser.
 The policy layer rejects what RFC 3986 accepts but a client must not:
 ports above 65535, empty DNS labels, IPvFuture hosts, non-HTTP schemes and
 embedded NUL; it strips a root dot, drops fragments and moves userinfo out of
-the URL (§20.4). Supplied paths are preserved verbatim, never normalised.
+the URL (§20.4); a request URL that has userinfo is then refused (D-110). Supplied paths are preserved verbatim, never normalised.
 `zu_query()` encodes values from UTF-8, space as `%20`, everything outside
 `unreserved` percent-encoded. The boundary is the flat `zuh_uri` struct.
 
@@ -991,8 +997,8 @@ zlib-wrapped first, raw DEFLATE on a header error.
 #### 21.4 Decompression limits
 
 Enforced during inflation, not after: `max_body` caps decoded output
-(16 MiB by default), and `max_decompression_ratio` caps output ÷ input once
-32 input bytes have been seen: 1000 (D-69, `ZUH_MAX_DECOMPRESSION_RATIO`),
+(16 MiB by default), and `max_decompression_ratio` caps output ÷ the input
+inflate has consumed so far, once 32 input bytes have been consumed (D-105): 1000 (D-69, `ZUH_MAX_DECOMPRESSION_RATIO`),
 just under deflate's ceiling of about 1030:1. Either raises
 `zu_body_limit_error`, naming the cap that was binding, and closes the
 connection. The absolute cap bounds a bomb in megabytes; the ratio makes it
@@ -1291,8 +1297,13 @@ Known sizes send `Content-Length`, including a stat-ed file.
 #### 28.3 Body and content type
 
 `zu_body_json()` sets `application/json`, `zu_body_form()` sets
-`application/x-www-form-urlencoded`; file and raw bodies set nothing. An
-explicit header always wins.
+`application/x-www-form-urlencoded`, `zu_body_file()` and `zu_body_stream()`
+default to `application/octet-stream`, and `zu_body_raw()` sets nothing
+unless given `type`. An explicit header always wins. A redirect that drops the
+body (a 301, 302 or 303 that rewrites the method to GET, §19.1) drops the
+headers that describe it too: `Content-Type`, `Content-Encoding`,
+`Content-Language`, `Content-Location` and the body digests (`Content-MD5`,
+`Content-Digest`, `Repr-Digest`, `Digest`), as RFC 9110 §15.4 asks (D-107).
 
 ### 29. Threading and Process Model
 
@@ -1498,7 +1509,7 @@ outcome is the caller's, whatever its status.
 | Condition | Retry |
 |---|---|
 | DNS, connect, I/O failure before any response byte | yes |
-| stale pooled connection on first write | yes, not counted |
+| stale pooled connection, nothing of a response received | yes, once, on a fresh connection, not counted: any method when the write failed, an idempotent one when the server closed after reading (D-108) |
 | timeout | only if `total` budget remains |
 | 408, 429, 500, 502, 503, 504 | yes |
 | TLS failure of any kind, including unsupported settings | no |

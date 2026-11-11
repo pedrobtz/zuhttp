@@ -147,7 +147,9 @@ zu_delete(
 )
 }
 \arguments{
-\item{url}{An absolute URL, or a path joined to the client's \code{base_url}.}
+\item{url}{An absolute URL, or a path joined to the client's \code{base_url}.
+A URL carrying credentials (\verb{user:password@}) is refused with
+\code{zu_url_error}; send them as a header instead.}
 
 \item{query}{Named list of query parameters. Merged with the client's.}
 

@@ -45,7 +45,7 @@ zu_response <- function(
   structure(
     list(
       status = check_whole(status, "status", min = 100, max = 599),
-      headers = as_header_vec(headers),
+      headers = as_header_vec(headers, request = FALSE),
       body = body,
       url = url,
       tls_version = tls_version,
@@ -53,7 +53,11 @@ zu_response <- function(
       method = NULL,
       timings = c(total = NA_real_),
       request = NULL,
-      trailers = if (is.null(trailers)) NULL else as_header_vec(trailers)
+      trailers = if (is.null(trailers)) {
+        NULL
+      } else {
+        as_header_vec(trailers, request = FALSE)
+      }
     ),
     class = "zu_response"
   )
@@ -208,8 +212,21 @@ zu_resp_read <- function(resp, n = 65536, timeout = NULL) {
     )
   }
   body <- resp$body %||% raw()
+  # Whole bytes: a cursor that kept n = 1.5 lost every third byte to
+  # body[from:to] truncating, where the native stream reads them all.
+  n <- floor(n)
+  # max_body bounds a held body as it bounds a native one (§40): delivered
+  # up to the cap, then refused on the read that would pass it.
+  cap <- st$max_body %||% Inf
+  if (st$pos >= cap && st$pos < length(body)) {
+    zu_stop(
+      "zu_body_limit_error",
+      sprintf("the response body exceeds max_body (%s bytes)", format(cap)),
+      url = resp$url
+    )
+  }
   from <- st$pos + 1
-  to <- min(length(body), st$pos + n)
+  to <- min(length(body), st$pos + n, cap)
   if (from > to) {
     st$ended <- TRUE # the trailers are known from here (D-98)
     return(raw())
@@ -527,6 +544,14 @@ zu_resp_text <- function(
         response = resp
       )
     }
+    # An R string cannot hold NUL, which is valid in every charset, so
+    # iconv() failed on it even in substitute mode; it becomes "<00>", as
+    # sub = "byte" writes any other byte it cannot keep. Only for encodings
+    # where one zero byte is one NUL, not the zero half of a UTF-16 unit.
+    if (!grepl("^(UTF-16|UTF-32|UCS)", toupper(enc)) && any(b == as.raw(0))) {
+      nul <- charToRaw("<00>")
+      b <- unlist(lapply(b, function(x) if (x == as.raw(0)) nul else x))
+    }
     out <- try_iconv(b, enc, sub = "byte")
   }
   if (is.na(out)) {
@@ -781,7 +806,9 @@ zu_resp_check <- function(resp) {
   }
   msg <- paste0(
     if (!is.null(resp$method)) paste0(resp$method, " ") else "",
-    resp$url %||% "request",
+    # Redacted here too: a zu_response() built by hand holds its URL as given
+    # (§42.2), and the message is an egress.
+    if (is.null(resp$url)) "request" else zu_redact_url(resp$url),
     " failed: HTTP ",
     resp$status,
     if (nzchar(status_text(resp$status))) {
@@ -938,12 +965,40 @@ status_hint <- function(s) {
 # --- Content-Type ----------------------------------------------------------
 # Enough of RFC 9110 5.6.6 to read a charset out of a real header, including
 # the quoted form that servers do send: text/plain; charset="utf-8".
+split_unquoted <- function(s, sep) {
+  ch <- strsplit(s, "", fixed = TRUE)[[1]]
+  out <- character()
+  cur <- character()
+  inq <- FALSE
+  esc <- FALSE
+  for (c in ch) {
+    if (esc) {
+      cur <- c(cur, c)
+      esc <- FALSE
+    } else if (inq && c == "\\") {
+      cur <- c(cur, c)
+      esc <- TRUE
+    } else if (c == "\"") {
+      cur <- c(cur, c)
+      inq <- !inq
+    } else if (!inq && c == sep) {
+      out <- c(out, paste(cur, collapse = ""))
+      cur <- character()
+    } else {
+      cur <- c(cur, c)
+    }
+  }
+  c(out, paste(cur, collapse = ""))
+}
+
 parse_content_type <- function(v) {
   if (is.null(v) || !length(v) || is.na(v[[1]]) || !nzchar(v[[1]])) {
     return(list(type = NULL, params = list()))
   }
   v <- v[[1]]
-  parts <- strsplit(v, ";", fixed = TRUE)[[1]]
+  # Split on the ; that are outside a quoted-string (RFC 9110 §5.6.4):
+  # a="x;y" is one parameter, not a = "x and a stray y.
+  parts <- split_unquoted(v, ";")
   type <- tolower(trimws(parts[[1]]))
   params <- list()
   for (p in parts[-1]) {

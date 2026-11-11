@@ -181,6 +181,7 @@ zuh_code zuh_inflate_run(zuh_inflate *z, const void *in, size_t in_len,
     const unsigned char *p = (const unsigned char *)in;
     unsigned char chunk[16384];
     zuh_code rc0;
+    uint64_t base;
 
     if (!z || !out) return ZUH_ERR_PARSE;
 
@@ -256,7 +257,12 @@ zuh_code zuh_inflate_run(zuh_inflate *z, const void *in, size_t in_len,
     s = (z_stream *)z->strm;
     s->next_in = (Bytef *)(uintptr_t)p;
     s->avail_in = (uInt)in_len;
-    z->in_total += in_len;
+    /* #327: the ratio's input is what inflate has CONSUMED, counted after
+     * each call. Adding in_len here, before inflating, counted bytes merely
+     * offered: a body that arrived whole had its incompressible tail
+     * credited while its zeros were still decoding and passed, and the same
+     * body in pieces was judged on its prefix and failed. */
+    base = z->in_total;
 
     for (;;) {
         int ret;
@@ -264,6 +270,7 @@ zuh_code zuh_inflate_run(zuh_inflate *z, const void *in, size_t in_len,
         s->next_out = chunk;
         s->avail_out = out_window(z, sizeof chunk);
         ret = inflate(s, Z_NO_FLUSH);
+        z->in_total = base + (uint64_t)(in_len - (size_t)s->avail_in);
 
         if (ret != Z_OK && ret != Z_STREAM_END && ret != Z_BUF_ERROR) {
             zuh_error_set(err, ZUH_ERR_BODY_DECODE, ZUH_PHASE_DECODE,

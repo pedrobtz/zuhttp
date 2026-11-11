@@ -145,6 +145,20 @@ zu_transport_perform.zu_native_transport <- function(transport, req) {
   structure(raw, class = "zu_response")
 }
 
+# §27 for a body a mock or a cassette holds whole: the native transport
+# hands the body to `callback` and leaves the response body empty, and a mock
+# never called it, so a test of a callback against a mock exercised nothing
+# (the bug hunt's R-layer slice). One chunk, then the same empty body. A
+# `path` is not written: a mock reports no path, by design (test-download.R).
+deliver_held_body <- function(resp, r) {
+  b <- resp$body %||% raw()
+  if (length(b)) {
+    r$callback(b)
+  }
+  resp$body <- raw()
+  resp
+}
+
 # §17.2 `zuhttp/<version>`, from DESCRIPTION, so the version on the wire has
 # one definition. Resolved here, in the transport that sends it, so a request
 # and its response still record `user_agent = NULL` for "the default".
@@ -161,7 +175,10 @@ timeout_ms <- function(seconds) {
   if (!is.finite(ms) || ms > .Machine$integer.max) {
     .Machine$integer.max
   } else {
-    as.integer(ms)
+    # Up, never down: as.integer() truncated 1.001 s to 1000 ms and a
+    # positive 0.0005 s to 0, which timed out at once (and 0 is not a
+    # budget). A positive timeout is at least 1 ms.
+    max(1L, as.integer(ceiling(round(ms, 6))))
   }
 }
 
@@ -251,13 +268,33 @@ resolve_request <- function(req, client) {
   if (!is_absolute_url(url)) {
     url <- join_url(client$base_url, url)
   }
+  # #331, D-110: refused here as well as in the engine, so a mock or a
+  # cassette refuses what the network would; the engine's check also holds
+  # a redirect's Location to it. The credentials are never repeated.
+  if (grepl("^[A-Za-z][A-Za-z0-9+.-]*://[^/?#]*@", url)) {
+    zu_stop(
+      "zu_url_error",
+      paste0(
+        "the URL carries credentials (user:password@), which are never ",
+        "sent; give them as a header instead, e.g. ",
+        "headers = c(Authorization = ...)"
+      ),
+      url = zu_redact_url(url)
+    )
+  }
 
+  # An explicit NA Content-Type is checked before the merge drops it: it
+  # means "send none", and the body's implied type was added regardless.
+  ct_erased <- any(
+    tolower(names(req$headers)) == "content-type" & is.na(req$headers)
+  )
   headers <- merge_headers(client$headers, req$headers)
   # The content type implied by the body is a default, so it loses to any
   # header that survived the merge (§31.6: a semantic body sets its content
   # type unless one is set; §28.3).
   if (
     !is.null(req$content_type) &&
+      !ct_erased &&
       !any(tolower(names(headers)) == "content-type")
   ) {
     headers <- c(headers, structure(req$content_type, names = "Content-Type"))
@@ -288,6 +325,19 @@ resolve_request <- function(req, client) {
       !policy$http2 %in% c("auto", "required", "off")
   ) {
     stop('`http2` must be "auto", "required" or "off"', call. = FALSE)
+  }
+  # Named, as every other policy field is: retry = 3 or TRUE failed later
+  # with "$ operator is invalid for atomic vectors".
+  if (!is.null(policy$retry) && !inherits(policy$retry, "zu_retry_policy")) {
+    stop(
+      "`retry` must come from zu_retry(), e.g. zu_retry(attempts = 3)",
+      call. = FALSE
+    )
+  }
+  # NA sent "User-Agent: NA"; c("a", "b") or 5 sent the default instead.
+  ua <- policy$user_agent
+  if (!is.null(ua) && (!is.character(ua) || length(ua) != 1L || is.na(ua))) {
+    stop("`user_agent` must be a single string, or NULL", call. = FALSE)
   }
   if (!isTRUE(policy$verify)) {
     # Not a message that can be switched off: turning verification off is the
@@ -441,9 +491,33 @@ zu_perform <- function(req, client = zu_default_client(), stream = FALSE) {
   resp$method <- resp$method %||% r$method
   # §65.4: a transport that did not stream (a mock, a cassette) holds the
   # whole body; zu_resp_read() serves it in pieces from this cursor.
+  if (
+    !inherits(client$transport, "zu_native_transport") &&
+      is.null(resp$stream) &&
+      !isTRUE(r$stream) &&
+      !is.null(r$callback)
+  ) {
+    resp <- deliver_held_body(resp, r)
+  }
   if (isTRUE(r$stream) && is.null(resp$stream)) {
     resp$read_state <- new.env(parent = emptyenv())
     resp$read_state$pos <- 0
+    resp$read_state$max_body <- r$resolved$max_body
+  } else if (
+    is.null(resp$stream) &&
+      length(resp$body) > (r$resolved$max_body %||% Inf)
+  ) {
+    # A mock or cassette body is held whole, so §40's cap is checked here;
+    # it was ignored, and a test of a caller's max_body passed against a
+    # mock that the network would have refused.
+    zu_stop(
+      "zu_body_limit_error",
+      sprintf(
+        "the response body exceeds max_body (%s bytes)",
+        format(r$resolved$max_body)
+      ),
+      url = zu_redact_url(r$url)
+    )
   }
   if (is.null(resp$url)) {
     resp$url <- zu_redact_url(r$url)
@@ -502,6 +576,9 @@ attempt_with_retries <- function(r, client, hooks, deadline_at) {
     cnd <- NULL
     ar <- attempt_request(r, policy, deadline_at)
     delivered <- watch_delivery(ar)
+    # The attempt travels with the request: a cassette in auto mode must
+    # record a retry rather than replay the attempt it is retrying.
+    delivered$request$attempt <- attempt
     resp <- tryCatch(
       zu_transport_perform(client$transport, delivered$request),
       zu_error = function(e) {
