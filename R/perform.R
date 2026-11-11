@@ -444,6 +444,22 @@ zu_perform <- function(req, client = zu_default_client(), stream = FALSE) {
   if (isTRUE(r$stream) && is.null(resp$stream)) {
     resp$read_state <- new.env(parent = emptyenv())
     resp$read_state$pos <- 0
+    resp$read_state$max_body <- r$resolved$max_body
+  } else if (
+    is.null(resp$stream) &&
+      length(resp$body) > (r$resolved$max_body %||% Inf)
+  ) {
+    # A mock or cassette body is held whole, so §40's cap is checked here;
+    # it was ignored, and a test of a caller's max_body passed against a
+    # mock that the network would have refused.
+    zu_stop(
+      "zu_body_limit_error",
+      sprintf(
+        "the response body exceeds max_body (%s bytes)",
+        format(r$resolved$max_body)
+      ),
+      url = zu_redact_url(r$url)
+    )
   }
   if (is.null(resp$url)) {
     resp$url <- zu_redact_url(r$url)

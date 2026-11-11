@@ -1130,6 +1130,54 @@ void suite_engine_mock(void) {
         zuh_result_free(&r); dialer_free(&d);
     }
 
+    /* §33.2 (the lifecycle slice): a pooled connection the server closed
+     * after the probe said it was alive. Nothing of a response arrives, so
+     * an idempotent request is retried once on a fresh connection, not
+     * counted; a POST is not, and fails as a retryable I/O error; and a
+     * fresh connection that closes with nothing is that I/O error too, no
+     * longer zu_http_parse_error. */
+    ZUH_CASE("engine: a stale pooled connection is retried once on a new one; nothing-then-EOF is I/O (§33.2)");
+    {
+        zuh_pool *pool = zuh_pool_new(NULL);
+        zuh_req_spec post;
+        conn_script sc[] = {
+            { "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok", 0, 0, 1, "" },
+            { "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nnew", 0, 0, 0, NULL } };
+        conn_script empty[] = { { "", 0, 0, 0, NULL } };
+
+        dialer_init(&d, sc, 2); opts_for(&o, &d); o.pool = pool;
+        ZUH_CHECK_EQ_INT(zuh_engine_get(&r, "http://example.test/a", &o, &e), ZUH_OK);
+        zuh_result_free(&r);
+        rc = zuh_engine_get(&r, "http://example.test/b", &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_OK);
+        ZUH_CHECK_EQ_INT(r.status, 200);
+        ZUH_CHECK(r.body.len == 3 && memcmp(r.body.data, "new", 3) == 0);
+        ZUH_CHECK_EQ_INT(d.next, 2);                      /* a second connection */
+        ZUH_CHECK_EQ_INT(r.reused_connection, 0);         /* the answer came on it */
+        ZUH_CHECK(has(sent(&d, 1), "GET /b"));
+        zuh_result_free(&r); dialer_free(&d); zuh_pool_free(pool);
+
+        pool = zuh_pool_new(NULL);
+        memset(&post, 0, sizeof post);
+        post.method = "POST"; post.body = "x"; post.body_len = 1;
+        dialer_init(&d, sc, 2); opts_for(&o, &d); o.pool = pool;
+        ZUH_CHECK_EQ_INT(zuh_engine_get(&r, "http://example.test/a", &o, &e), ZUH_OK);
+        zuh_result_free(&r);
+        zuh_error_clear(&e);
+        rc = zuh_engine_perform(&r, "http://example.test/b", &post, &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_ERR_IO);                 /* the server may have acted */
+        ZUH_CHECK_EQ_INT(d.next, 1);                      /* and it was not resent */
+        ZUH_CHECK(zuh_code_retryable(rc));
+        zuh_result_free(&r); dialer_free(&d); zuh_pool_free(pool);
+
+        dialer_init(&d, empty, 1); opts_for(&o, &d);
+        zuh_error_clear(&e);
+        rc = zuh_engine_get(&r, "http://example.test/", &o, &e);
+        ZUH_CHECK_EQ_INT(rc, ZUH_ERR_IO);
+        ZUH_CHECK_EQ_INT(d.next, 1);                      /* fresh: the R retry policy decides */
+        zuh_result_free(&r); dialer_free(&d);
+    }
+
     ZUH_CASE("engine: 1xx responses are skipped; HEAD and 204 have no body and stay poolable");
     {
         zuh_pool *pool = zuh_pool_new(NULL);

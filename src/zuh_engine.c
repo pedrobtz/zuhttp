@@ -425,9 +425,27 @@ static zuh_code open_dialled(zuh_stream **out, const zuh_uri *u,
     return ZUH_OK;
 }
 
+/* RFC 9110 §9.2.2. */
+static int is_idempotent(const char *m) {
+    static const char *const k[] = { "GET", "HEAD", "OPTIONS", "TRACE", "PUT", "DELETE" };
+    size_t i;
+    for (i = 0; i < sizeof k / sizeof k[0]; i++)
+        if (strcmp(m, k[i]) == 0) return 1;
+    return 0;
+}
+
+/* Whether a failed hop on a pooled connection gets its one fresh retry. */
+static int stale_retry(int reused, int use_h2, int src, int *done, zuh_code rc) {
+    if (!reused || use_h2 || src || *done) return 0;
+    if (rc != ZUH_ERR_IO && rc != ZUH_ERR_CLOSED) return 0;
+    *done = 1;
+    return 1;
+}
+
 static zuh_code open_stream(zuh_stream **out, const zuh_uri *u,
                            const zuh_get_opts *o, const zuh_proxy *px,
-                           zuh_deadline dl, zuh_result *res, zuh_error *err) {
+                           zuh_deadline dl, int no_reuse, zuh_result *res,
+                           zuh_error *err) {
     zuh_net_opts nopts;
     zuh_stream *tcp = NULL;
     zuh_code rc;
@@ -438,7 +456,7 @@ static zuh_code open_stream(zuh_stream **out, const zuh_uri *u,
      * pool has already run the fork guard, the idle-timeout check and the
      * §26.2 liveness probe by the time it answers, so a non-NULL return is
      * usable as-is. */
-    if (o->pool) {
+    if (o->pool && !no_reuse) {
         zuh_pool_key key;
         zuh_stream *reused = NULL;
         if (!zuh_engine_pool_key(&key, u, o, px)) return ZUH_ERR_NOMEM;
@@ -577,6 +595,16 @@ static zuh_code read_headers(zuh_stream *s, zuh_buffer *raw, zuh_response *resp,
         }
         n = zuh_stream_read(s, chunk, sizeof chunk, dl, err);
         if (n < 0) return err->code;
+        if (n == 0 && raw->len == 0) {
+            /* §33.2: nothing of a response arrived, so this is the I/O
+             * failure "before any response byte" the retry table retries,
+             * not a malformed head. A server that read the request and
+             * closed, or a pooled connection it had already dropped, was
+             * zu_http_parse_error and never retried (the lifecycle slice). */
+            zuh_error_set(err, ZUH_ERR_IO, ZUH_PHASE_READ,
+                         "the server closed the connection without sending a response");
+            return ZUH_ERR_IO;
+        }
         if (n == 0) {
             zuh_error_set(err, ZUH_ERR_PARSE, ZUH_PHASE_READ,
                          "connection closed before the response headers ended");
@@ -1054,8 +1082,17 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
     zuh_sink_memory_init(&mem_sink, &out->body);
     body_sink = o->sink ? o->sink : &mem_sink;
 
+    /* §33.2 "stale pooled connection: yes, not counted". A connection the
+     * pool vouched for can still have been closed by the server between the
+     * liveness probe and the write. One retry, on a fresh connection, when
+     * nothing of a response arrived: for any method when the write failed,
+     * for an idempotent one when the server read the request and closed. A
+     * streamed body has been consumed, so it is never resent (§28.2). */
+    int fresh_only = 0, stale_retried = 0;
+
     for (;;) {
         zuh_stream *s = NULL;
+        int hop_reused = 0, hop_src = 0, head_empty = 0;
         zuh_request rq;
         zuh_response resp;
         size_t hi;
@@ -1089,7 +1126,10 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
                               o->proxy, o->proxy_set, err);
         if (rc != ZUH_OK) { zuh_proxy_free(&px); zuh_uri_free(&cur); zuh_result_free(out); return rc; }
 
-        rc = open_stream(&s, &cur, o, &px, total, out, err);
+        rc = open_stream(&s, &cur, o, &px, total, fresh_only, out, err);
+        fresh_only = 0;
+        hop_reused = rc == ZUH_OK && out->reused_connection;
+        hop_src = src_live;
         if (rc == ZUH_OK) rc = choose_protocol(&s, &cur, o, &px, &use_h2, err);
         if (rc != ZUH_OK) {
             zuh_proxy_free(&px); zuh_uri_free(&cur); zuh_result_free(out);
@@ -1309,6 +1349,12 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
             zuh_buf_free(&wire);
             if (have_absform) { zuh_buf_free(&absform); have_absform = 0; }
             zuh_request_free(&rq);
+            if (rc != ZUH_OK && stale_retry(hop_reused, use_h2, hop_src, &stale_retried, rc)) {
+                drop_stream(s); zuh_proxy_free(&px);
+                zuh_error_clear(err); fresh_only = 1;
+                zuh_trace_add(o->trace, ZUH_EV_CONNECTION_REUSED, "stale; retrying on a new connection", 0);
+                continue;
+            }
             if (rc != ZUH_OK) {
                 drop_stream(s); zuh_uri_free(&cur); zuh_result_free(out); zuh_proxy_free(&px);
                 return rc;
@@ -1354,6 +1400,7 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
             }
         } else {
             rc = read_headers(s, &raw, &resp, &consumed, total, err);
+            head_empty = rc == ZUH_ERR_IO && raw.len == 0;
             /* §18: skip 1xx and parse the real response behind it. */
             while (rc == ZUH_OK && zuh_response_is_informational(&resp)) {
                 zuh_buf_consume(&raw, consumed);
@@ -1504,6 +1551,13 @@ static zuh_code perform_hops(zuh_result *out, const char *url,
             done_with_stream(o, &cur, &px, s, reason);
         }
 
+        if (rc != ZUH_OK && head_empty && is_idempotent(method) &&
+            stale_retry(hop_reused, use_h2, hop_src, &stale_retried, rc)) {
+            zuh_response_free(&resp); zuh_proxy_free(&px);
+            zuh_error_clear(err); fresh_only = 1;
+            zuh_trace_add(o->trace, ZUH_EV_CONNECTION_REUSED, "stale; retrying on a new connection", 0);
+            continue;
+        }
         if (rc != ZUH_OK) {
             zuh_response_free(&resp); zuh_uri_free(&cur); zuh_result_free(out);
             zuh_proxy_free(&px);

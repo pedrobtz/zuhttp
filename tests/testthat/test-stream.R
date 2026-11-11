@@ -210,3 +210,90 @@ test_that("a callback may not request on the same client, but may on another (§
   ))
   expect_identical(inner, 200L)
 })
+
+# --- the bug hunt's lifecycle slice ------------------------------------------
+
+test_that("a fractional n reads the same bytes from a mock as from the network", {
+  # Differential: one 26-byte body, native and mock, read 1.5 bytes at a
+  # time. The mock's cursor kept the fraction and lost every third byte.
+  body <- paste(letters, collapse = "")
+  read_all <- function(r) {
+    out <- raw()
+    repeat {
+      b <- zu_resp_read(r, 1.5)
+      if (!length(b)) {
+        break
+      }
+      out <- c(out, b)
+    }
+    rawToChar(out)
+  }
+  native <- NULL
+  with_raw_server(
+    paste0("HTTP/1.1 200 OK\r\nContent-Length: 26\r\n\r\n", body),
+    function(url) {
+      native <<- read_all(zu_perform(
+        zu_request("GET", paste0(url, "/s")),
+        stream = TRUE
+      ))
+    }
+  )
+  cl <- zu_client(
+    transport = zu_mock_transport(zu_stub(
+      response = zu_response(200L, body = charToRaw(body))
+    ))
+  )
+  mock <- read_all(zu_perform(
+    zu_request("GET", "https://m.test/"),
+    client = cl,
+    stream = TRUE
+  ))
+  expect_identical(native, body)
+  expect_identical(mock, native)
+})
+
+test_that("max_body bounds a mock response, buffered and streamed", {
+  body <- charToRaw(paste(letters, collapse = ""))
+  cl <- zu_client(
+    max_body = 5,
+    transport = zu_mock_transport(zu_stub(
+      response = zu_response(200L, body = body)
+    ))
+  )
+  expect_error(
+    zu_get("https://m.test/", client = cl),
+    class = "zu_body_limit_error"
+  )
+  r <- zu_perform(
+    zu_request("GET", "https://m.test/"),
+    client = cl,
+    stream = TRUE
+  )
+  expect_identical(zu_resp_read(r, 10), body[1:5]) # up to the cap
+  expect_error(zu_resp_read(r, 10), class = "zu_body_limit_error")
+  ok <- zu_client(
+    max_body = 26,
+    transport = zu_mock_transport(zu_stub(
+      response = zu_response(200L, body = body)
+    ))
+  )
+  expect_identical(zu_resp_raw(zu_get("https://m.test/", client = ok)), body)
+})
+
+test_that("a server that closes before any response byte is retried (§33.2)", {
+  # It was zu_http_parse_error, which no policy retries: one request sent.
+  with_raw_server_seq(
+    list(raw(0), "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"),
+    function(srv) {
+      r <- zu_get(
+        paste0(srv$url, "/x"),
+        retry = zu_retry(attempts = 3, base = 0.01),
+        timeout = 10
+      )
+      expect_identical(zu_resp_status(r), 200L)
+    }
+  )
+  with_raw_server(raw(0), function(url) {
+    expect_error(zu_get(paste0(url, "/x"), timeout = 5), class = "zu_io_error")
+  })
+})

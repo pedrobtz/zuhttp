@@ -212,8 +212,21 @@ zu_resp_read <- function(resp, n = 65536, timeout = NULL) {
     )
   }
   body <- resp$body %||% raw()
+  # Whole bytes: a cursor that kept n = 1.5 lost every third byte to
+  # body[from:to] truncating, where the native stream reads them all.
+  n <- floor(n)
+  # max_body bounds a held body as it bounds a native one (§40): delivered
+  # up to the cap, then refused on the read that would pass it.
+  cap <- st$max_body %||% Inf
+  if (st$pos >= cap && st$pos < length(body)) {
+    zu_stop(
+      "zu_body_limit_error",
+      sprintf("the response body exceeds max_body (%s bytes)", format(cap)),
+      url = resp$url
+    )
+  }
   from <- st$pos + 1
-  to <- min(length(body), st$pos + n)
+  to <- min(length(body), st$pos + n, cap)
   if (from > to) {
     st$ended <- TRUE # the trailers are known from here (D-98)
     return(raw())
