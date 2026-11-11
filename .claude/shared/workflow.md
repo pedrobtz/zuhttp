@@ -113,34 +113,44 @@ for it rather than only working around it.
 ## Working with skills
 
 The portfolio's workflow skills live in `pedrobtz/r-skills` (`pkg-init`,
-`pkg-roadmap`, `pkg-implement`, `pkg-critical-review`, `pkg-cran-review`,
-`pkg-post-cran`, `pkg-readme`); the general process skills are
-[Superpowers](https://github.com/obra/superpowers). `building-a-package.md`
-in `pedrobtz/packages` walks through them in order. Both sets defer to these
-files where they overlap, so the settlements are recorded here.
+`pkg-roadmap`, `pkg-implement`, `pkg-assurance`, `pkg-bug-hunt`,
+`pkg-critical-review`, `pkg-cran-review`, `pkg-post-cran`, `pkg-readme`); the
+general process skills are [Superpowers](https://github.com/obra/superpowers).
+`building-a-package.md` in `pedrobtz/packages` walks through them in order.
+Both sets defer to these files where they overlap, so the settlements are
+recorded here.
 
 - **One design.** The specification is `.agents/design.md`, adopted from the
   package's RFC in `pedrobtz/packages/rfcs`. A package with an adopted design
   is past `brainstorming`; a design change goes through the RFC, not a new
   spec. Superpowers' default `docs/superpowers/specs/` is not used.
 - **Plans at two levels.** `.agents/roadmap.md` holds the stages, one
-  mergeable pull request each, with exit criteria and a CI tier
-  (`pkg-roadmap`). Inside a stage, `writing-plans` breaks the work into
-  tasks of one test cycle each, saved as `.agents/plans/stage-<n>.md`. The
-  roadmap stays authoritative; a plan is scratch and is not kept in sync.
+  mergeable pull request each, with exit criteria, a CI tier and a
+  `**Tests.**` list: each behaviour the stage adds, the oracle that knows its
+  answer and the test file (`pkg-roadmap`). Inside a stage, `writing-plans`
+  breaks the work into tasks of one test cycle each, saved as
+  `.agents/plans/stage-<n>.md`. The roadmap stays authoritative; a plan is
+  scratch and is not kept in sync.
 - **Build and merge.** `pkg-implement` runs the stage loop: branch
   `stage-<n>-<slug>` from the stage issue, implement the plan with
   `test-driven-development` (`Rscript -e 'devtools::test(filter = "<name>")'`
   is the red/green command), open the pull request, merge on green at the
-  stage's CI tier. The confirmation the user gives at the start of that
-  loop is the "told to merge" that Commits and pull requests requires, so
-  the `finishing-a-development-branch` menu is not presented for stage
-  pull requests. Any other pull request still waits for review.
+  stage's CI tier. The pull request body carries a `Tests` table, one row per
+  behaviour added: the test, its oracle, and how it was seen to fail. A row
+  with an empty cell does not merge. The confirmation the user gives at the
+  start of that loop is the "told to merge" that Commits and pull requests
+  requires, so the `finishing-a-development-branch` menu is not presented for
+  stage pull requests. Any other pull request still waits for review.
 - **Failures and claims.** A failing check or test goes through
   `systematic-debugging` before a fix. "Green", "done" and "ready for CRAN"
   are claimed only after `verification-before-completion`: run the command,
   read the output.
 - **Review.** `requesting-code-review` gates tasks inside a stage.
   `pkg-critical-review` reviews the whole package once the roadmap is
-  implemented, with Posit's reviewers, and files issues. CRAN's reviewer
+  implemented, with Posit's reviewers, and files issues; its tests pass
+  audits the test framework too (skips, CI legs, helpers, vacuous
+  checks). `pkg-bug-hunt` attacks a package at any point in its life,
+  released or not: independent hunters run it against counterparts they
+  script, the R layer first, and every claim is re-run before it is
+  filed. CRAN's reviewer
   email and GitHub review threads go through `receiving-code-review`.
