@@ -9,8 +9,10 @@
 # connections, which CRAN checks must never do.
 
 on:
-  push:
-    branches: [main]
+  # No `push:`: a pull request already checks its merge with main,
+  # and the schedule checks main (r-actions README, "Pushes to main").
+  schedule:
+    - cron: "36 6 * * 0"
   pull_request:
   workflow_dispatch:
 

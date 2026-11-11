@@ -6,12 +6,12 @@
 # jobs in c-core, network and fuzz.yaml, and four open pull requests queued
 # behind each other for macOS runners. Linux keeps its jobs in those files.
 on:
-  push:
-    branches: [main]
+  # No `push:`: a pull request already checks its merge with main,
+  # and the schedule checks main (r-actions README, "Pushes to main").
   pull_request:
   workflow_dispatch:
   schedule:
-    - cron: "41 4 * * 1"    # the full profile: corpus replays on macOS and Windows
+    - cron: "41 6 * * 0"    # the full profile: corpus replays on macOS and Windows
 
 name: platforms.yaml
 

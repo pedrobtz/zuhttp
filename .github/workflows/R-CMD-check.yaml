@@ -17,8 +17,10 @@
 # repository. Until W1 every job here skipped same-repository pull requests,
 # so merges went unchecked (roadmap, "Where 0.1.0 left things").
 on:
-  push:
-    branches: [main]
+  # No `push:`: a pull request already checks its merge with main,
+  # and the schedule checks main (r-actions README, "Pushes to main").
+  schedule:
+    - cron: "46 5 * * 0"
   # `labeled` so that adding `full-ci` to a pull request reruns it in full.
   pull_request:
     types: [opened, synchronize, reopened, labeled]

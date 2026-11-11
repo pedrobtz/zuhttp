@@ -6,8 +6,10 @@
 # come with a manifest and checksums change, which is the only way the tree
 # is reproducible from upstream (§48: no local modifications).
 on:
-  push:
-    branches: [main]
+  # No `push:`: a pull request already checks its merge with main,
+  # and the schedule checks main (r-actions README, "Pushes to main").
+  schedule:
+    - cron: "46 6 * * 0"
   pull_request:
   workflow_dispatch:
 
