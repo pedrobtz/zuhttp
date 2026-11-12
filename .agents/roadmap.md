@@ -3,7 +3,7 @@
 **Edition:** 2 — from v0.1.0 to 1.0, written 2026-09-25; M4 (1.1.0, HTTP/2) added 2026-11-03 and folded into M0 2026-11-04 (D-96)
 **Companion:** [zuhttp-design.md](zuhttp-design.md), edition 2 — every work package cites the sections and decisions it implements
 **History:** [history/roadmap-v1.md](history/roadmap-v1.md) — edition 1 verbatim: stages S0–S21 and U1–U6, how each landed, the 2026-09-22 review and the amends merged with it
-**Status:** M0 reopened 2026-11-04 for HTTP/2 (W20–W22, D-96); the 0.1.0 submission (#40) waits on them. 0.1.0 is the first CRAN submission (D-82); nothing is tagged until CRAN accepts
+**Status:** M0 reopened 2026-11-04 for HTTP/2 (W20–W22, D-96); the 0.1.0 submission (#40) waits on them. 0.1.0 is the first CRAN submission (D-82); each submission is tagged when `CRAN-SUBMISSION` is committed (D-111)
 
 ---
 
@@ -76,7 +76,7 @@ graph LR
 
 | Milestone | Version | Theme | Work packages | Gate |
 |---|---|---|---|---|
-| M0 | 0.1.0 | on CRAN, with HTTP/2 | W1, W2, W3, W6, W13, W16, W20, W21, W22 | `zugrpc`'s Stage 4 live test passes against zuhttp; accepted on CRAN; then, and only then, tagged |
+| M0 | 0.1.0 | on CRAN, with HTTP/2 | W1, W2, W3, W6, W13, W16, W20, W21, W22 | `zugrpc`'s Stage 4 live test passes against zuhttp; accepted on CRAN; tagged at submission (D-111) |
 | M1 | 0.2.0 | the design's promises, tested | W4, W7–W12 | every `zu_tls()` setting works on every backend except TLS 1.3 on Windows; phase timeouts |
 | M2 | 0.3.0 | parity, measured | W14, W15, W18 | §61.4 and §61.5 measured; TLS 1.3 on Windows or scope cut 1 taken |
 | M3 | 1.0 | others may depend on it | W17, W19 | all 14 §61 criteria; external review; `SECURITY.md` |
@@ -86,9 +86,10 @@ D-55 holds from the first CRAN acceptance on: 0.x.y patch releases carry
 fixes only; features wait for the next minor. Before it, 0.1.0 is unreleased
 and takes the M0 work packages (D-82).
 
-**Versions are tagged only after CRAN accepts them** (D-82). A tag and a
-GitHub release are the post-acceptance close-out, never a step before the
-submission.
+**Versions are tagged at submission** (D-111, superseding D-82's tagging
+clause). Committing `CRAN-SUBMISSION` runs `cran-release.yaml`: it tags the
+submitted commit with the bare version, publishes the GitHub release and opens
+the `.9000` bump, which merges once CRAN accepts. A resubmission moves the tag.
 
 ### M0 — v0.1.0: first CRAN submission
 
@@ -153,8 +154,9 @@ feature and not a defect.
       (`0706937`, all ten workflows; #89's full run: 0 notes on every leg).
 - [x] NEWS lists every user-visible change since the 0.1.0 entry was first
       written, including D-65's removals, D-68 and D-69.
-- [ ] Submitted (#40); accepted. Then the maintainer tags `v0.1.0` and
-      publishes the release.
+- [ ] Submitted (#40); accepted. `cran-release.yaml` tags `0.1.0` and
+      publishes the release when `CRAN-SUBMISSION` is committed (D-111);
+      the `.9000` bump merges after acceptance.
 
 ### M1 — v0.2.0: complete the core
 
@@ -348,7 +350,7 @@ groups A–D). **Implements:** §50.4, §50.6. **Estimate:** 3 days, medium.
       the 100,000:1 of "1 KB → 100 MB", its ceiling is about 1030:1.
 - [x] Both in NEWS: as what 0.1.0 does, since neither shipped a release.
 
-(W5 is retired: it was "tag v0.1.0", which is now the close-out after CRAN accepts M0, D-82.)
+(W5 is retired: it was "tag v0.1.0", which `cran-release.yaml` now does at submission, D-111.)
 
 ### W7 — Phase timeouts
 
