@@ -10,7 +10,8 @@ articles:
   articles/testing: testing.html
   articles/tls: tls.html
   articles/trust-and-limits: trust-and-limits.html
-last_built: 2026-11-12T10:15Z
+  articles/zuhttp: zuhttp.html
+last_built: 2026-11-12T14:08Z
 urls:
   reference: https://pedrobtz.github.io/zuhttp/reference
   article: https://pedrobtz.github.io/zuhttp/articles

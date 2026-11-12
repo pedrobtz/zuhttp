@@ -31,6 +31,7 @@
 
     <div id="navbar" class="collapse navbar-collapse ms-3">
       <ul class="navbar-nav me-auto">
+<li class="nav-item"><a class="nav-link" href="articles/zuhttp.html">Get started</a></li>
 <li class="nav-item"><a class="nav-link" href="reference/index.html">Reference</a></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
@@ -98,43 +99,12 @@
 <span><span class="co">#&gt; List of 2</span></span>
 <span><span class="co">#&gt;  $ name  : chr "Alice"</span></span>
 <span><span class="co">#&gt;  $ active: logi TRUE</span></span></code></pre></div>
-<p>Straight to disk: the body never passes through memory, and the file appears at its destination only once it has arrived whole.</p>
-<div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">r</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="st">"https://raw.githubusercontent.com/pedrobtz/zuhttp/main/README.md"</span>,</span>
-<span>            path <span class="op">=</span> <span class="st">"README-copy.md"</span><span class="op">)</span></span>
-<span><span class="fu"><a href="reference/zu_resp.html">zu_resp_path</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] "README-copy.md"</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="fu"><a href="reference/zu_resp_raw.html">zu_resp_raw</a></span><span class="op">(</span><span class="va">r</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] 0   # it went to the file, not through memory</span></span></code></pre></div>
-<p>A client carries defaults; a request overrides them. Connections are reused across requests to the same origin.</p>
-<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">gh</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/zu_client.html">zu_client</a></span><span class="op">(</span></span>
-<span>  base_url <span class="op">=</span> <span class="st">"https://api.github.com"</span>,</span>
-<span>  headers  <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span></span>
-<span>    Accept <span class="op">=</span> <span class="st">"application/vnd.github+json"</span></span>
-<span>    <span class="co"># , Authorization = paste("Bearer", Sys.getenv("GITHUB_PAT"))</span></span>
-<span>  <span class="op">)</span>,</span>
-<span>  retry    <span class="op">=</span> <span class="fu"><a href="reference/zu_retry.html">zu_retry</a></span><span class="op">(</span><span class="fl">3</span><span class="op">)</span></span>
-<span><span class="op">)</span></span>
-<span></span>
-<span><span class="fu"><a href="reference/zu_resp_json.html">zu_resp_json</a></span><span class="op">(</span><span class="fu"><a href="reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="st">"/repos/pedrobtz/zuhttp"</span>, client <span class="op">=</span> <span class="va">gh</span><span class="op">)</span><span class="op">)</span><span class="op">$</span><span class="va">language</span></span>
-<span><span class="co">#&gt; [1] "C"</span></span>
-<span></span>
-<span><span class="fu"><a href="reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="st">"/repos/pedrobtz/zuhttp"</span>, client <span class="op">=</span> <span class="va">gh</span><span class="op">)</span>      <span class="co"># second request, same origin</span></span>
-<span><span class="fu"><a href="reference/zu_pool_stats.html">zu_pool_stats</a></span><span class="op">(</span><span class="va">gh</span><span class="op">)</span><span class="op">[[</span><span class="st">"hits"</span><span class="op">]</span><span class="op">]</span></span>
-<span><span class="co">#&gt; [1] 1</span></span></code></pre></div>
-<p>A failed request raises, and what it raises is a condition you match by class rather than by parsing a message.</p>
-<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/conditions.html" class="external-link">tryCatch</a></span><span class="op">(</span></span>
-<span>  <span class="fu"><a href="reference/zu_methods.html">zu_get</a></span><span class="op">(</span><span class="st">"/repos/pedrobtz/no-such-repo"</span>, client <span class="op">=</span> <span class="va">gh</span><span class="op">)</span>,</span>
-<span>  zu_http_client_error <span class="op">=</span> <span class="kw">function</span><span class="op">(</span><span class="va">e</span><span class="op">)</span> <span class="fu"><a href="reference/zu_resp.html">zu_resp_status</a></span><span class="op">(</span><span class="va">e</span><span class="op">$</span><span class="va">response</span><span class="op">)</span></span>
-<span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] 404</span></span></code></pre></div>
-<p>JSON goes through <a href="https://github.com/pedrobtz/zujson" class="external-link">zujson</a>, written for zuhttp, and <code><a href="reference/zu_set_json_backend.html">zu_set_json_backend()</a></code> swaps in another implementation. <code><a href="reference/zu_resp_json.html">zu_resp_xml()</a></code> and <code><a href="reference/zu_resp_json.html">zu_resp_html()</a></code> parse with <a href="https://github.com/pedrobtz/zuxml" class="external-link">zuxml</a> and <a href="https://github.com/pedrobtz/zuhtml" class="external-link">zuhtml</a> when they are installed, honouring the response’s charset.</p>
 <div class="section level2">
 <h2 id="learn-more">Learn more<a class="anchor" aria-label="anchor" href="#learn-more"></a>
 </h2>
 <ul>
+<li>
+<a href="https://pedrobtz.github.io/zuhttp/articles/zuhttp.html">Get started</a>: making requests, reading responses, and sending JSON and forms.</li>
 <li>
 <a href="https://pedrobtz.github.io/zuhttp/articles/trust-and-limits.html">Trust, scope and limits</a>: why zuhttp uses the platform’s trust store, when <code>curl</code> is the better choice, the known limitations, and what 0.1.0 promises.</li>
 <li>
