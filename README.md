@@ -5,7 +5,7 @@
 [![c-core](https://github.com/pedrobtz/zuhttp/actions/workflows/c-core.yaml/badge.svg)](https://github.com/pedrobtz/zuhttp/actions/workflows/c-core.yaml)
 [![fuzz](https://github.com/pedrobtz/zuhttp/actions/workflows/fuzz.yaml/badge.svg)](https://github.com/pedrobtz/zuhttp/actions/workflows/fuzz.yaml)
 [![network](https://github.com/pedrobtz/zuhttp/actions/workflows/network.yaml/badge.svg)](https://github.com/pedrobtz/zuhttp/actions/workflows/network.yaml)
-![coverage](https://raw.githubusercontent.com/pedrobtz/zuhttp/main/.github/badges/coverage.svg)
+![coverage](https://raw.githubusercontent.com/pedrobtz/zuhttp/gh-pages/badges/coverage.svg)
 <!-- badges: end -->
 
 A minimal HTTP/1.1 and HTTP/2 client for R that uses **each platform's own TLS stack and
