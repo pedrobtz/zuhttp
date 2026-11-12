@@ -57,59 +57,10 @@ str(zu_resp_json(r)$data)
 #>  $ active: logi TRUE
 ```
 
-Straight to disk: the body never passes through memory, and the file appears at
-its destination only once it has arrived whole.
-
-```r
-r <- zu_get("https://raw.githubusercontent.com/pedrobtz/zuhttp/main/README.md",
-            path = "README-copy.md")
-zu_resp_path(r)
-#> [1] "README-copy.md"
-length(zu_resp_raw(r))
-#> [1] 0   # it went to the file, not through memory
-```
-
-A client carries defaults; a request overrides them. Connections are reused
-across requests to the same origin.
-
-```r
-gh <- zu_client(
-  base_url = "https://api.github.com",
-  headers  = c(
-    Accept = "application/vnd.github+json"
-    # , Authorization = paste("Bearer", Sys.getenv("GITHUB_PAT"))
-  ),
-  retry    = zu_retry(3)
-)
-
-zu_resp_json(zu_get("/repos/pedrobtz/zuhttp", client = gh))$language
-#> [1] "C"
-
-zu_get("/repos/pedrobtz/zuhttp", client = gh)      # second request, same origin
-zu_pool_stats(gh)[["hits"]]
-#> [1] 1
-```
-
-A failed request raises, and what it raises is a condition you match by class
-rather than by parsing a message.
-
-```r
-tryCatch(
-  zu_get("/repos/pedrobtz/no-such-repo", client = gh),
-  zu_http_client_error = function(e) zu_resp_status(e$response)
-)
-#> [1] 404
-```
-
-JSON goes through [zujson](https://github.com/pedrobtz/zujson), written for
-zuhttp, and `zu_set_json_backend()` swaps in another implementation.
-`zu_resp_xml()` and `zu_resp_html()` parse with
-[zuxml](https://github.com/pedrobtz/zuxml) and
-[zuhtml](https://github.com/pedrobtz/zuhtml) when they are installed, honouring
-the response's charset.
-
 ## Learn more
 
+- [Get started](https://pedrobtz.github.io/zuhttp/articles/zuhttp.html):
+  making requests, reading responses, and sending JSON and forms.
 - [Trust, scope and limits](https://pedrobtz.github.io/zuhttp/articles/trust-and-limits.html):
   why zuhttp uses the platform's trust store, when `curl` is the better
   choice, the known limitations, and what 0.1.0 promises.
