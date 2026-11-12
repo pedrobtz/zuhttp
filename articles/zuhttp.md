@@ -25,12 +25,12 @@ r
 #> access-control-allow-credentials: true
 #> access-control-allow-origin: *
 #> access-control-expose-headers: Retry-After, RateLimit, RateLimit-Policy, WWW-Authenticate
-#> content-length: 289
+#> content-length: 285
 #> content-type: application/json
 #> x-content-type-options: nosniff
-#> date: Thu, 12 Nov 2026 14:08:59 GMT
-#> Body: 289 B in memory
-#> Total: 75 ms
+#> date: Thu, 12 Nov 2026 14:45:25 GMT
+#> Body: 285 B in memory
+#> Total: 205 ms
 #> TLS: TLSv1.3
 ```
 
