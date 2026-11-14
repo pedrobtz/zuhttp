@@ -19,7 +19,7 @@ on:
   # and the schedule checks main (r-actions README, "Pushes to main").
   pull_request:
   schedule:
-    - cron: '21 6 * * 0'      # Sundays, for the soak
+    - cron: '21 6 * * 0'  # weekly, Sundays for the soak
   workflow_dispatch:
     inputs:
       soak_seconds:
