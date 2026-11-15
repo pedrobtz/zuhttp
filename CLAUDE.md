@@ -8,16 +8,14 @@ Suggests.
 
 ## Shared conventions
 
-The portfolio's shared rules are synced into `.claude/shared/` from
-`pedrobtz/packages:claude/shared/`. Never edit them here. Where this file and
-a shared file disagree, this file wins for this package.
+<!-- r-skills: shared-rules -->
 
-@.claude/shared/workflow.md
-@.claude/shared/r-package.md
-@.claude/shared/ci.md
-@.claude/shared/native-code.md
-@.claude/shared/correctness.md
-@.claude/shared/assurance.md
+The portfolio's shared rules (`workflow`, `r-package`, `ci`, `native-code`,
+`correctness`, `assurance`) come from the
+[r-skills](https://github.com/pedrobtz/r-skills) plugin's `rules/`, loaded at
+session start because of the marker above. Never copy them here. Where this
+file and a shared rule disagree, this file wins for this package. Cloud
+sessions do not load the plugin and run without them.
 
 ## The two documents that govern this repo
 
@@ -191,7 +189,7 @@ tools/          update-uriparser, update-picohttpparser, update-nghttp2,
 ## What the 2026-11-09 reviews found here
 
 The four bug families and the tests they call for are portfolio rules now
-(`.claude/shared/correctness.md`); they were written from this package. Three
+(the shared `correctness.md` rules); they were written from this package. Three
 outside reviews (`.agents/reviews/2026-11-09-fable.md` consolidates them)
 found 16 valid bugs, #208–#223, in code that passed 2,526 C checks, the full
 R suite and 33,000 sanitised fuzz inputs. What is specific to zuhttp:
